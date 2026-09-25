@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::value::Value;
 
+pub const MAX_DEPTH: usize = 64;
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Row {
     pub schema_version: u32,
@@ -24,6 +26,8 @@ pub enum CodecError {
     BadUtf8,
     #[error("varint overflow")]
     VarintOverflow,
+    #[error("value nested deeper than 64 levels")]
+    TooDeep,
 }
 
 const T_NULL: u8 = 0;
@@ -107,6 +111,13 @@ fn put_value(out: &mut Vec<u8>, v: &Value) {
 }
 
 fn get_value(input: &mut &[u8]) -> Result<Value, CodecError> {
+    get_value_at(input, 0)
+}
+
+fn get_value_at(input: &mut &[u8], depth: usize) -> Result<Value, CodecError> {
+    if depth > MAX_DEPTH {
+        return Err(CodecError::TooDeep);
+    }
     let (&tag, rest) = input.split_first().ok_or(CodecError::Truncated)?;
     *input = rest;
     Ok(match tag {
@@ -130,7 +141,7 @@ fn get_value(input: &mut &[u8]) -> Result<Value, CodecError> {
             let n = get_varint(input)?;
             let mut items = Vec::new();
             for _ in 0..n {
-                items.push(get_value(input)?);
+                items.push(get_value_at(input, depth + 1)?);
             }
             Value::List(items)
         }
@@ -139,7 +150,7 @@ fn get_value(input: &mut &[u8]) -> Result<Value, CodecError> {
             let mut map = BTreeMap::new();
             for _ in 0..n {
                 let k = get_str(input)?;
-                map.insert(k, get_value(input)?);
+                map.insert(k, get_value_at(input, depth + 1)?);
             }
             Value::Map(map)
         }
@@ -233,6 +244,96 @@ mod tests {
             decode_row(&bytes[..bytes.len() - 2]),
             Err(CodecError::Truncated)
         );
+    }
+
+    #[test]
+    fn max_depth_64_nested_lists_round_trip() {
+        // Build a row with 64 nested single-element lists ending in Null.
+        let mut value = Value::Null;
+        for _ in 0..MAX_DEPTH {
+            value = Value::List(vec![value]);
+        }
+        let mut row = Row::default();
+        row.columns.insert(0, value);
+        let encoded = encode_row(&row);
+        let decoded = decode_row(&encoded);
+        assert!(decoded.is_ok(), "64-level nesting should succeed");
+        assert_eq!(decoded.unwrap(), row);
+    }
+
+    #[test]
+    fn depth_65_returns_too_deep() {
+        // Build a row with 65 nested single-element lists ending in Null.
+        let mut value = Value::Null;
+        for _ in 0..=MAX_DEPTH {
+            value = Value::List(vec![value]);
+        }
+        let mut row = Row::default();
+        row.columns.insert(0, value);
+        let encoded = encode_row(&row);
+        let decoded = decode_row(&encoded);
+        assert_eq!(decoded, Err(CodecError::TooDeep));
+    }
+
+    #[test]
+    fn extreme_nesting_100k_levels_does_not_crash() {
+        // Build bytes for a row with 100,000 nested single-element lists.
+        // Manually construct: schema_version=1, acl_set=0, 1 column (id=0),
+        // then 100,000 nested single-element lists all containing Null.
+        // Each list: tag(1 byte) + count(1 byte, value 1) + element.
+        // We don't recursively construct the Value; we craft the bytes directly.
+        let mut bytes = Vec::new();
+        put_varint(&mut bytes, 1u64); // schema_version = 1
+        put_varint(&mut bytes, 0u64); // acl_set = 0
+        put_varint(&mut bytes, 1u64); // 1 column
+        put_varint(&mut bytes, 0u64); // column id = 0
+
+        // Manually write 100,000 nested list tags + counts
+        for _ in 0..100_000 {
+            bytes.push(6u8); // T_LIST tag
+            bytes.push(1u8); // list has 1 element (encoded as varint = 0x01)
+        }
+        bytes.push(0u8); // T_NULL (innermost value)
+        put_varint(&mut bytes, 0u64); // 0 extra fields
+
+        let result = decode_row(&bytes);
+        // Must not panic; must return TooDeep, never stack overflow crash.
+        assert_eq!(result, Err(CodecError::TooDeep));
+    }
+
+    #[test]
+    fn invalid_utf8_in_string_returns_bad_utf8() {
+        // Manually construct a row with a string containing invalid UTF-8.
+        // Tag 5 (T_STR), varint length 2, then 0xFF 0xFE (invalid UTF-8).
+        let mut bytes = Vec::new();
+        put_varint(&mut bytes, 1u64); // schema_version = 1
+        put_varint(&mut bytes, 0u64); // acl_set = 0
+        put_varint(&mut bytes, 1u64); // 1 column
+        put_varint(&mut bytes, 0u64); // column id = 0
+        bytes.push(5u8); // T_STR tag
+        put_varint(&mut bytes, 2u64); // string length = 2
+        bytes.extend_from_slice(&[0xFF, 0xFE]); // invalid UTF-8
+        put_varint(&mut bytes, 0u64); // 0 extra fields
+
+        let result = decode_row(&bytes);
+        assert_eq!(result, Err(CodecError::BadUtf8));
+    }
+
+    #[test]
+    fn varint_11_continuation_bytes_returns_overflow() {
+        // Manually construct a row with an 11-byte varint (overflow).
+        // Tag 3 (T_INT), then 11 continuation bytes (0x80 repeated, then 0x01).
+        let mut bytes = Vec::new();
+        put_varint(&mut bytes, 1u64); // schema_version = 1
+        put_varint(&mut bytes, 0u64); // acl_set = 0
+        put_varint(&mut bytes, 1u64); // 1 column
+        put_varint(&mut bytes, 0u64); // column id = 0
+        bytes.push(3u8); // T_INT tag
+        bytes.extend_from_slice(&[0x80u8; 11]); // 11 continuation bytes
+        put_varint(&mut bytes, 0u64); // 0 extra fields
+
+        let result = decode_row(&bytes);
+        assert_eq!(result, Err(CodecError::VarintOverflow));
     }
 
     proptest! {
