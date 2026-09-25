@@ -62,11 +62,11 @@ impl NodeId {
         self.0 & ((1 << NODE_SEQ_BITS) - 1)
     }
 
-    /// Inclusive bounds of every id of one type in one partition.
-    pub fn type_range(partition: u16, ty: TypeId) -> (NodeId, NodeId) {
-        let lo = NodeId::new(partition, ty, 0).expect("valid bounds");
-        let hi = NodeId::new(partition, ty, (1 << NODE_SEQ_BITS) - 1).expect("valid bounds");
-        (lo, hi)
+    /// Returns the inclusive id interval of one type in one partition.
+    pub fn type_range(partition: u16, ty: TypeId) -> Result<(NodeId, NodeId), IdError> {
+        let lo = NodeId::new(partition, ty, 0)?;
+        let hi = NodeId::new(partition, ty, (1 << NODE_SEQ_BITS) - 1)?;
+        Ok((lo, hi))
     }
 
     pub fn element_id(self) -> String {
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn a_label_scan_is_one_contiguous_range() {
-        let (lo, hi) = NodeId::type_range(0, TypeId(7));
+        let (lo, hi) = NodeId::type_range(0, TypeId(7)).unwrap();
         let inside = NodeId::new(0, TypeId(7), 99).unwrap();
         let other = NodeId::new(0, TypeId(8), 0).unwrap();
         assert!(lo.0 <= inside.0 && inside.0 <= hi.0);
@@ -187,6 +187,22 @@ mod tests {
         assert_eq!(
             NodeId::parse_element_id("n:not-a-number"),
             Err(IdError::BadElementId)
+        );
+    }
+
+    #[test]
+    fn type_range_invalid_type_id() {
+        assert_eq!(
+            NodeId::type_range(0, TypeId(4096)),
+            Err(IdError::TypeOutOfRange)
+        );
+    }
+
+    #[test]
+    fn type_range_invalid_partition() {
+        assert_eq!(
+            NodeId::type_range(1024, TypeId(1)),
+            Err(IdError::PartitionOutOfRange)
         );
     }
 }
