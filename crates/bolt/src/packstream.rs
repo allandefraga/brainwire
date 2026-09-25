@@ -1,5 +1,10 @@
 //! PackStream v1, the value encoding of Bolt.
 
+/// Maximum nesting depth `unpack` will follow before returning
+/// [`PackError::TooDeep`]. Bounds the recursion so adversarial input (e.g. a
+/// long run of tiny-list headers) cannot overflow the stack.
+pub const MAX_DEPTH: usize = 64;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PackValue {
     Null,
@@ -32,6 +37,8 @@ pub enum PackError {
     BadUtf8,
     #[error("map key is not a string")]
     BadMapKey,
+    #[error("value nested deeper than 64 levels")]
+    TooDeep,
 }
 
 fn pack_size(out: &mut Vec<u8>, len: usize, tiny: u8, m8: Option<u8>, m16: u8, m32: u8) {
@@ -135,39 +142,46 @@ fn string_of(input: &mut &[u8], len: usize) -> Result<String, PackError> {
     String::from_utf8(take(input, len)?.to_vec()).map_err(|_| PackError::BadUtf8)
 }
 
-fn list_of(input: &mut &[u8], len: usize) -> Result<PackValue, PackError> {
+fn list_of(input: &mut &[u8], len: usize, depth: usize) -> Result<PackValue, PackError> {
     let mut items = Vec::with_capacity(len.min(1024));
     for _ in 0..len {
-        items.push(unpack(input)?);
+        items.push(unpack_at(input, depth + 1)?);
     }
     Ok(PackValue::List(items))
 }
 
-fn map_of(input: &mut &[u8], len: usize) -> Result<PackValue, PackError> {
+fn map_of(input: &mut &[u8], len: usize, depth: usize) -> Result<PackValue, PackError> {
     let mut entries = Vec::with_capacity(len.min(1024));
     for _ in 0..len {
-        let key = match unpack(input)? {
+        let key = match unpack_at(input, depth + 1)? {
             PackValue::String(s) => s,
             _ => return Err(PackError::BadMapKey),
         };
-        entries.push((key, unpack(input)?));
+        entries.push((key, unpack_at(input, depth + 1)?));
     }
     Ok(PackValue::Map(entries))
 }
 
 pub fn unpack(input: &mut &[u8]) -> Result<PackValue, PackError> {
+    unpack_at(input, 0)
+}
+
+fn unpack_at(input: &mut &[u8], depth: usize) -> Result<PackValue, PackError> {
+    if depth > MAX_DEPTH {
+        return Err(PackError::TooDeep);
+    }
     let marker = take(input, 1)?[0];
     Ok(match marker {
         0x00..=0x7F => PackValue::Int(marker as i64),
         0xF0..=0xFF => PackValue::Int(marker as i8 as i64),
         0x80..=0x8F => PackValue::String(string_of(input, (marker & 0x0F) as usize)?),
-        0x90..=0x9F => list_of(input, (marker & 0x0F) as usize)?,
-        0xA0..=0xAF => map_of(input, (marker & 0x0F) as usize)?,
+        0x90..=0x9F => list_of(input, (marker & 0x0F) as usize, depth)?,
+        0xA0..=0xAF => map_of(input, (marker & 0x0F) as usize, depth)?,
         0xB0..=0xBF => {
             let tag = take(input, 1)?[0];
             let mut fields = Vec::new();
             for _ in 0..(marker & 0x0F) {
-                fields.push(unpack(input)?);
+                fields.push(unpack_at(input, depth + 1)?);
             }
             PackValue::Struct { tag, fields }
         }
@@ -198,11 +212,11 @@ pub fn unpack(input: &mut &[u8]) -> Result<PackValue, PackError> {
         }
         0xD4..=0xD6 => {
             let len = be_len(input, 1 << (marker - 0xD4))?;
-            list_of(input, len)?
+            list_of(input, len, depth)?
         }
         0xD8..=0xDA => {
             let len = be_len(input, 1 << (marker - 0xD8))?;
-            map_of(input, len)?
+            map_of(input, len, depth)?
         }
         other => return Err(PackError::UnknownMarker(other)),
     })
@@ -289,5 +303,28 @@ mod tests {
         let m = PackValue::Map(vec![("a".into(), PackValue::Int(1))]);
         assert_eq!(m.get("a"), Some(&PackValue::Int(1)));
         assert_eq!(m.get("b"), None);
+    }
+
+    #[test]
+    fn max_depth_nesting_decodes() {
+        let mut bytes = vec![0x91u8; MAX_DEPTH];
+        bytes.push(0x01);
+        let mut input = bytes.as_slice();
+        assert!(unpack(&mut input).is_ok());
+    }
+
+    #[test]
+    fn depth_past_max_is_too_deep() {
+        let mut bytes = vec![0x91u8; MAX_DEPTH + 1];
+        bytes.push(0x01);
+        let mut input = bytes.as_slice();
+        assert_eq!(unpack(&mut input), Err(PackError::TooDeep));
+    }
+
+    #[test]
+    fn deeply_nested_adversarial_input_returns_too_deep() {
+        let bytes = vec![0x91u8; 100_000];
+        let mut input = bytes.as_slice();
+        assert_eq!(unpack(&mut input), Err(PackError::TooDeep));
     }
 }
