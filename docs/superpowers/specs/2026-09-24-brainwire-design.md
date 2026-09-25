@@ -51,7 +51,9 @@ Consequences of the layout:
   a label (`(e {entity_id: $id})`, seven memory-api reads, see
   [research/cypher-corpus.md](../../../research/cypher-corpus.md)). With a label
   it is a get; without one, a short range over the same `entity_id`. The
-  `entity_id` is length-prefixed, so `user:7` does not match `user:70`.
+  `entity_id` is encoded with an escaped terminator (0x00 becomes 0x00 0xFF,
+  and the value ends with 0x00 0x01), which keeps byte order and makes the
+  encoding prefix-free, so `user:7` does not match `user:70`.
 - A node's edges are contiguous in `out` and in `in`. Expanding a node, with or
   without a type, is a range read, and so is `DETACH DELETE`.
 - Parallel edges exist, because openCypher requires them: `CREATE` always
@@ -83,8 +85,9 @@ The Bolt 5 `elementId` is a string that describes the position: `n:<id>` for a
 node and `e:<source>:<type>:<target>:<id>` for an edge. Finding an element by
 `elementId` needs no extra index.
 
-Ids are allocated in blocks by the committer (1.4), and the counter goes in the
-same WriteBatch as the transaction, so a crash never reuses an id.
+Ids are allocated in blocks: the end of a block is committed to `meta` before
+any id in it is handed out, so a crash skips the rest of the block and never
+reuses an id.
 
 ### 1.4 Transactions
 

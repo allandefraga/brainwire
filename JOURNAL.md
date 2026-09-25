@@ -37,6 +37,34 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-25, 11:48 (session)
+
+- **Done:** the spec moved to English and was completed
+  ([spec](docs/superpowers/specs/2026-09-24-brainwire-design.md)); Allan
+  approved sections 1 to 4 one by one; implementation plan 1, the storage
+  foundation, written in 11 tasks with tests first
+  ([plan 1](docs/superpowers/plans/2026-09-25-brainwire-storage-foundation.md));
+  the docs committed to the local branch `feat/brainwire` (commit `d1c50cfab`,
+  no push), written without switching branches, so the PII branch was not
+  touched. The three research notes are still in Portuguese: two rounds of
+  translation agents stalled without writing anything, and the files are
+  intact.
+- **Decided by Allan:** an event inherits the visibility of its owning entity
+  unless it comes with its own ACL; "see comments" in the CLI means people's
+  annotations on nodes and types.
+- **Decided under Allan's go-ahead to proceed without asking (to review):**
+  section 5 of the spec (cluster, operations, tests) as written; each RBAC user
+  has one role and a list of databases, set with `ALTER USER ... SET
+  DATABASES`; a `reader` can add notes; the `pk` encoding uses an escaped
+  terminator instead of a length prefix; ids come in blocks whose end is
+  committed before use; one implementation plan per gate (plan 1 storage,
+  plan 2 Bolt, plan 3 Cypher and ACL).
+- **Next step:** Allan reviews the go-ahead decisions above and plan 1. Then
+  execute plan 1 with `superpowers:subagent-driven-development`, starting with
+  its Task 0 (a worktree of `feat/brainwire`, which needs Allan's consent).
+  Translate the research notes in small chunks.
+- **Blockers:** consent for the worktree.
+
 ### 2026-09-24, 22:00 (wrap-up)
 
 - **Done:** rhythm corrected; scope and date confirmed; internal documents moved
