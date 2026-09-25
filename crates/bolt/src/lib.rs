@@ -4,3 +4,4 @@ pub mod chunk;
 pub mod handshake;
 pub mod message;
 pub mod packstream;
+pub mod session;
