@@ -47,10 +47,10 @@ No line of code before the end of phase 2.
   implementation plan 2, the minimal Bolt server, written in 6 tasks
   ([plan 2](docs/superpowers/plans/2026-09-25-brainwire-bolt-minimal.md)); the
   docs committed to the local branch `feat/brainwire` (no push), written without
-  switching branches, so the PII branch was not touched. `research/cypher-corpus.md`
-  is now in English. `bolt.md` and `rocksdb.md` are being translated in parts
-  under `research/.parts/` after two earlier rounds of translation agents stalled
-  without writing anything; the originals are intact.
+  switching branches, so the PII branch was not touched. All three research notes
+  are now in English (translated in parts after two earlier rounds of
+  translation agents stalled; headings and line counts checked against the
+  originals).
 - **Decided by Allan:** an event inherits the visibility of its owning entity
   unless it comes with its own ACL; "see comments" in the CLI means people's
   annotations on nodes and types.
@@ -63,9 +63,7 @@ No line of code before the end of phase 2.
   plan 2 Bolt, plan 3 Cypher and ACL).
 - **Next step:** Allan reviews the go-ahead decisions above and plans 1 and 2.
   Then execute plan 1 and plan 2 with `superpowers:subagent-driven-development`,
-  starting with Task 0 of plan 1. If `research/.parts/` holds finished parts,
-  join them into `bolt.md` and `rocksdb.md` (part1 + part2 + part3) and delete
-  the folder.
+  starting with Task 0 of plan 1.
 - **Blockers:** the Rust toolchain is not installed on this machine, and
   installing it (rustup from the official source) is a download that needs
   Allan's permission; consent for the worktree of `feat/brainwire`; the Python

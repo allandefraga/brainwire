@@ -1,360 +1,360 @@
-# Bolt: o que o servidor do Brainwire precisa falar
+# Bolt: what the Brainwire server needs to speak
 
-Pesquisa de 24/09/2026 para o servidor Bolt do Brainwire (Rust). Alvo: o driver
-oficial Python da Neo4j, pacote `neo4j` 5.x (hoje 5.28.6), com `bolt://`
-(instância única) e `neo4j://` (roteamento em cluster).
+Research from 2026-09-24 for the Brainwire Bolt server (Rust). Target: the official
+Neo4j Python driver, package `neo4j` 5.x (currently 5.28.6), with `bolt://`
+(single instance) and `neo4j://` (cluster routing).
 
-**Como foi feita.** A especificação vem de https://neo4j.com/docs/bolt/current/,
-lida nos arquivos AsciiDoc do repositório `neo4j-drivers/docs-bolt`, que é o que
-o site publica (páginas soltas do site foram conferidas e batem). O comportamento
-do driver vem do código das tags `5.28.6` e `6.3.1` de
-`neo4j/neo4j-python-driver`, lido pela API do GitHub, sem clone e sem download.
-Tudo que diz "o driver faz X" foi lido no código da 5.28.6, salvo menção
-contrária. Onde a doc e o código divergem, o texto diz. Onde não achei algo, está
-escrito "não achei". Recomendações para o Brainwire estão marcadas como
-**recomendação** e são inferência minha, não fato documentado.
+**How it was done.** The specification comes from https://neo4j.com/docs/bolt/current/,
+read in the AsciiDoc files of the `neo4j-drivers/docs-bolt` repository, which is what
+the site publishes (individual pages of the site were checked and match). The behavior
+of the driver comes from the code at the `5.28.6` and `6.3.1` tags of
+`neo4j/neo4j-python-driver`, read through the GitHub API, with no clone and no download.
+Everything that says "the driver does X" was read in the 5.28.6 code, unless stated
+otherwise. Where the docs and the code diverge, the text says so. Where something was
+not found, it says "not found". Recommendations for Brainwire are marked as
+**recommendation** and are my inference, not documented fact.
 
-**Versões do driver.** O PyPI lista 6.3.1 como a versão mais recente (upload em
-15/09/2026, exige Python 3.10+). A linha 5.x continua mantida: 5.28.6 saiu no
-mesmo dia. A plataforma trava `neo4j>=5.0,<6` em `client-core/pyproject.toml`
-(medido na 5.28.6), então o alvo real é o 5.28.x. O comentário da trava diz que
-o 6.x removeu `Node.id` e `Relationship.id`. No código do 6.3.1, `Entity.id`
-ainda existe, deprecado, e a docstring avisa que ele pode vir vazio conforme a
-versão do servidor. A causa exata da quebra não foi confirmada aqui. O 6.x
-aparece neste texto só onde muda algo para o servidor.
+**Driver versions.** PyPI lists 6.3.1 as the most recent version (uploaded on
+2026-09-15, requires Python 3.10+). The 5.x line is still maintained: 5.28.6 came out
+on the same day. The platform pins `neo4j>=5.0,<6` in `client-core/pyproject.toml`
+(measured at 5.28.6), so the real target is 5.28.x. The comment on the pin says that
+6.x removed `Node.id` and `Relationship.id`. In the 6.3.1 code, `Entity.id`
+still exists, deprecated, and the docstring warns that it may come back empty depending
+on the server version. The exact cause of the breakage was not confirmed here. 6.x
+appears in this text only where it changes something for the server.
 
 ---
 
-## Resumo
+## Summary
 
-### Mínimo para `bolt://` com RUN/PULL (driver 5.28.6)
+### Minimum for `bolt://` with RUN/PULL (driver 5.28.6)
 
-1. TCP na 7687. Ler `60 60 B0 17` e mais 16 bytes (quatro propostas). O driver
-   manda `00 00 01 FF | 00 08 08 05 | 00 02 04 04 | 00 00 00 03`: manifest v1,
-   faixa 5.8 a 5.0, faixa 4.4 a 4.2, e 3.0. Um servidor sem manifest ignora a
-   primeira proposta e responde 4 bytes com uma versão exata, por exemplo
-   `00 00 04 05` para 5.4. Nunca oferecer 5.5.
-2. Chunking nos dois sentidos (cabeçalho u16 big-endian, fim de mensagem
-   `00 00`) e PackStream v1 completo para ler (todos os marcadores) e escrever.
-3. HELLO devolve `SUCCESS {"server": "Neo4j/<versão>", "connection_id": ...}`.
-   **O driver 5.x recusa qualquer `server` que não comece com `Neo4j/`**
-   (`UnsupportedServerProduct`). Em 5.1+ vem LOGON logo atrás, em pipeline:
-   aceitar `{"scheme": "basic", ...}` e também `{}` (é o que o driver manda com
+1. TCP on 7687. Read `60 60 B0 17` plus 16 more bytes (four proposals). The driver
+   sends `00 00 01 FF | 00 08 08 05 | 00 02 04 04 | 00 00 00 03`: manifest v1,
+   range 5.8 to 5.0, range 4.4 to 4.2, and 3.0. A server without manifest ignores the
+   first proposal and replies with 4 bytes holding an exact version, for example
+   `00 00 04 05` for 5.4. Never offer 5.5.
+2. Chunking in both directions (u16 big-endian header, end of message
+   `00 00`) and complete PackStream v1 for reading (all markers) and writing.
+3. HELLO returns `SUCCESS {"server": "Neo4j/<version>", "connection_id": ...}`.
+   **The 5.x driver rejects any `server` that does not start with `Neo4j/`**
+   (`UnsupportedServerProduct`). In 5.1+ LOGON comes right after, pipelined:
+   accept `{"scheme": "basic", ...}` and also `{}` (it is what the driver sends with
    `auth=None`).
-4. RUN devolve `SUCCESS {"fields": [...]}` (`fields` é obrigatório na prática: o
-   driver monta os registros com ele). O driver manda PULL `{"n": 1000}` junto;
-   o servidor responde RECORDs e `SUCCESS {"has_more": true}` ou o sumário final
-   (`bookmark`, `type` em `r`/`w`/`rw`/`s`, `t_last`, `db`, `stats`). DISCARD
-   `{"n": -1}` também é usado.
-5. BEGIN, RUN em transação (com `qid`), COMMIT (`{"bookmark": ...}`) e ROLLBACK.
-   Não são opcionais: `driver.execute_query`, que o adaptador da plataforma usa,
-   abre transação gerenciada com BEGIN+RUN+PULL em pipeline e depois COMMIT.
-6. FAILURE seguido de IGNORED para tudo o que estiver na fila até chegar RESET.
-   RESET sempre responde `SUCCESS {}`, aborta a transação aberta e volta a
-   READY. O driver manda RESET depois de toda FAILURE e ao devolver conexão
-   "suja" ao pool. GOODBYE fecha o socket sem resposta.
-7. Node, Relationship, UnboundRelationship e Path no formato do Bolt 5, com
-   `element_id` (o adaptador da plataforma usa `element_id` como `.id`).
-8. Formato de erro certo para a versão: até 5.6, `{"code", "message"}`; de 5.7
-   em diante, `neo4j_code`, `gql_status`, `description` e `message` juntos, ou o
-   driver perde o código e a mensagem.
+4. RUN returns `SUCCESS {"fields": [...]}` (`fields` is mandatory in practice: the
+   driver builds the records with it). The driver sends PULL `{"n": 1000}` along with it;
+   the server replies with RECORDs and `SUCCESS {"has_more": true}` or the final summary
+   (`bookmark`, `type` in `r`/`w`/`rw`/`s`, `t_last`, `db`, `stats`). DISCARD
+   `{"n": -1}` is also used.
+5. BEGIN, RUN inside a transaction (with `qid`), COMMIT (`{"bookmark": ...}`) and ROLLBACK.
+   They are not optional: `driver.execute_query`, which the platform adapter uses,
+   opens a managed transaction with BEGIN+RUN+PULL pipelined and then COMMIT.
+6. FAILURE followed by IGNORED for everything in the queue until RESET arrives.
+   RESET always replies `SUCCESS {}`, aborts the open transaction and returns to
+   READY. The driver sends RESET after every FAILURE and when returning a
+   "dirty" connection to the pool. GOODBYE closes the socket without a reply.
+7. Node, Relationship, UnboundRelationship and Path in the Bolt 5 format, with
+   `element_id` (the platform adapter uses `element_id` as `.id`).
+8. The right error format for the version: up to 5.6, `{"code", "message"}`; from 5.7
+   onward, `neo4j_code`, `gql_status`, `description` and `message` together, or the
+   driver loses the code and the message.
 
-### Mínimo extra para `neo4j://`
+### Extra minimum for `neo4j://`
 
-1. Aceitar `routing` no HELLO (o driver manda `{"address": "<host:porta da URI>",
-   ...parâmetros da query string}`).
-2. ROUTE (tag `66`, Bolt 4.3+; formato 4.4+ com `extra {db, imp_user}`),
-   respondendo `SUCCESS {"rt": {"ttl": <segundos>, "db": <database resolvido>,
+1. Accept `routing` in HELLO (the driver sends `{"address": "<host:port from the URI>",
+   ...query string parameters}`).
+2. ROUTE (tag `66`, Bolt 4.3+; 4.4+ format with `extra {db, imp_user}`),
+   replying `SUCCESS {"rt": {"ttl": <seconds>, "db": <resolved database>,
    "servers": [{"addresses": [...], "role": "ROUTE"}, {..."READ"}, {..."WRITE"}]}}`.
-   O driver descarta a tabela se não houver pelo menos um ROUTE e um READ.
-   WRITE vazio é tolerado (eleição de líder).
-3. Quando ROUTE vem sem `db`, resolver o home database do usuário (ou o padrão
-   do servidor) e devolvê-lo em `rt.db`: o driver fixa esse nome e passa a
-   mandar `db` em BEGIN/RUN.
-4. Endereços anunciados que o cliente alcança, e `mode: "r"` respeitado.
-5. Em cluster: seguidor recusa escrita com `Neo.ClientError.Cluster.NotALeader`
-   (o driver tira o endereço dos escritores e tenta de novo); leitura com
-   bookmark espera o estado chegar no bookmark ou falha com
+   The driver discards the table if there is not at least one ROUTE and one READ.
+   An empty WRITE is tolerated (leader election).
+3. When ROUTE comes without `db`, resolve the user's home database (or the server's
+   default) and return it in `rt.db`: the driver pins that name and starts
+   sending `db` in BEGIN/RUN.
+4. Advertised addresses that the client can reach, and `mode: "r"` honored.
+5. In a cluster: a follower rejects writes with `Neo.ClientError.Cluster.NotALeader`
+   (the driver removes the address from the writers and tries again); a read with a
+   bookmark waits for the state to reach the bookmark or fails with
    `Neo.TransientError.Transaction.BookmarkTimeout`.
 
 ---
 
-## 1. Handshake e negociação de versão
+## 1. Handshake and version negotiation
 
-### 1.1 Transporte
+### 1.1 Transport
 
-- TCP, porta padrão 7687. A doc cita WebSocket como transporte possível; o
-  driver Python usa socket TCP.
-- Tudo que depende de ordem de bytes é big-endian.
-- Não existe encerramento formal: qualquer lado pode fechar o TCP a qualquer
-  momento.
-- TLS fica fora do Bolt: com `bolt+s`/`neo4j+s` (certificado de CA) ou
-  `bolt+ssc`/`neo4j+ssc` (aceita autoassinado), o driver abre TLS e faz o
-  handshake Bolt por dentro.
+- TCP, default port 7687. The docs mention WebSocket as a possible transport; the
+  Python driver uses a TCP socket.
+- Everything that depends on byte order is big-endian.
+- There is no formal shutdown: either side can close the TCP connection at any
+  time.
+- TLS stays outside Bolt: with `bolt+s`/`neo4j+s` (CA certificate) or
+  `bolt+ssc`/`neo4j+ssc` (accepts self-signed), the driver opens TLS and does the
+  Bolt handshake inside it.
 
-### 1.2 Identificação e propostas
+### 1.2 Identification and proposals
 
-1. O cliente manda `60 60 B0 17` logo após conectar. Não há resposta.
-2. Em seguida manda exatamente quatro propostas de versão, cada uma um u32
-   big-endian (16 bytes no total), em ordem de preferência. `00 00 00 00` é
-   "nenhuma versão" e serve de enchimento.
-3. O servidor responde 4 bytes com a versão escolhida. Se nenhuma servir,
-   responde `00 00 00 00` e fecha a conexão.
-4. Se mais de uma proposta servir, vale a primeira na ordem do cliente.
+1. The client sends `60 60 B0 17` right after connecting. There is no reply.
+2. Then it sends exactly four version proposals, each one a u32
+   big-endian (16 bytes in total), in order of preference. `00 00 00 00` is
+   "no version" and serves as padding.
+3. The server replies with 4 bytes holding the chosen version. If none fits,
+   it replies `00 00 00 00` and closes the connection.
+4. If more than one proposal fits, the first one in the client's order wins.
 
-Formatos da proposta:
+Proposal formats:
 
-| Formato | Layout dos 4 bytes | Exemplo |
+| Format | Layout of the 4 bytes | Example |
 |---|---|---|
-| Bolt 1 a 3 | o inteiro é a versão | `00 00 00 03` = 3 |
-| Bolt 4.0+ | 2 bytes reservados, minor, major | `00 00 01 04` = 4.1 |
-| Bolt 4.3+ (faixa) | 1 byte reservado, quantas minors abaixo também valem, minor, major | `00 02 03 04` = 4.3, 4.2 e 4.1 |
+| Bolt 1 to 3 | the integer is the version | `00 00 00 03` = 3 |
+| Bolt 4.0+ | 2 reserved bytes, minor, major | `00 00 01 04` = 4.1 |
+| Bolt 4.3+ (range) | 1 reserved byte, how many minors below are also valid, minor, major | `00 02 03 04` = 4.3, 4.2 and 4.1 |
 
-- A faixa não atravessa major.
-- A resposta do servidor é sempre uma versão exata no formato 4.0, sem faixa.
-- A doc recomenda que o cliente liste explicitamente as versões anteriores à
-  4.3, porque servidor antigo não entende faixa.
+- The range does not cross a major.
+- The server's reply is always an exact version in the 4.0 format, with no range.
+- The docs recommend that the client explicitly list the versions before
+  4.3, because an old server does not understand ranges.
 
-### 1.3 Handshake manifest v1 (novo no Bolt 5.7)
+### 1.3 Handshake manifest v1 (new in Bolt 5.7)
 
-- O cliente troca uma das quatro propostas por `00 00 01 FF`: dois bytes
-  reservados, o byte da versão do manifest (1) e `FF`, que marca "manifest".
-- O servidor que aceita responde, nesta ordem:
+- The client replaces one of the four proposals with `00 00 01 FF`: two
+  reserved bytes, the manifest version byte (1) and `FF`, which marks "manifest".
+- A server that accepts it replies with, in this order:
   1. `00 00 01 FF`;
-  2. um VarInt `N`;
-  3. `N` versões de 4 bytes no formato 4.3 (com faixa);
-  4. um VarInt `CAPABILITIES`, bitmask reservada para emendas de fornecedor ao
-     protocolo.
-- O cliente responde a versão escolhida (4 bytes, formato 4.0, sem faixa) e um
-  VarInt com o subconjunto de capabilities que aceitou. O servidor não responde
-  a isso, então o cliente pode mandar a primeira mensagem Bolt no mesmo envio.
-- VarInt: grupos de 7 bits, o grupo menos significativo primeiro, bit alto de
-  cada byte como continuação; até u64. `01` = 1, `7F` = 127,
+  2. a VarInt `N`;
+  3. `N` 4-byte versions in the 4.3 format (with range);
+  4. a VarInt `CAPABILITIES`, a bitmask reserved for vendor amendments to the
+     protocol.
+- The client replies with the chosen version (4 bytes, 4.0 format, no range) and a
+  VarInt with the subset of capabilities it accepted. The server does not reply
+  to that, so the client can send the first Bolt message in the same transmission.
+- VarInt: 7-bit groups, least significant group first, the high bit of
+  each byte as continuation; up to u64. `01` = 1, `7F` = 127,
   `FF 82 71` = 1851775.
-- Exemplo da doc: cliente `00 00 01 FF 00 00 04 04 00 00 00 03 00 00 00 02`;
-  servidor `00 00 01 FF`, `02`, `00 02 08 05` (5.8 a 5.6), `00 04 04 04`
-  (4.4 a 4.0), `09` (bits 0 e 3); cliente `00 00 07 05` (5.7) e `08`.
-- Com manifest, o SUCCESS do HELLO ganha `protocol_version` (ex.: `"5.7"`). O
-  driver 5.28.6 não lê esse campo.
+- Example from the docs: client `00 00 01 FF 00 00 04 04 00 00 00 03 00 00 00 02`;
+  server `00 00 01 FF`, `02`, `00 02 08 05` (5.8 to 5.6), `00 04 04 04`
+  (4.4 to 4.0), `09` (bits 0 and 3); client `00 00 07 05` (5.7) and `08`.
+- With the manifest, the HELLO SUCCESS gains `protocol_version` (e.g. `"5.7"`). The
+  5.28.6 driver does not read this field.
 
-### 1.4 O que o driver Python faz no handshake
+### 1.4 What the Python driver does in the handshake
 
-Driver 5.28.6 (`_async/io/_bolt.py` e `_async/io/_bolt_socket.py`):
+Driver 5.28.6 (`_async/io/_bolt.py` and `_async/io/_bolt_socket.py`):
 
-- Manda sempre `60 60 B0 17` e depois
-  `00 00 01 FF  00 08 08 05  00 02 04 04  00 00 00 03`: manifest v1, 5.8 a 5.0,
-  4.4 a 4.2, 3.0.
-- Versões com implementação registrada: 3.0, 4.2, 4.3, 4.4 e 5.0 a 5.8. As
-  classes 4.0 e 4.1 existem mas não se registram (`SKIP_REGISTRATION`).
-- Resposta clássica: o driver lê só os dois últimos bytes (minor, major) e
-  ignora os dois primeiros.
-- Resposta com manifest: lê `N`, as faixas e as capabilities; escolhe a **maior**
-  versão que conhece dentro de qualquer faixa oferecida; manda essa versão e
+- Always sends `60 60 B0 17` and then
+  `00 00 01 FF  00 08 08 05  00 02 04 04  00 00 00 03`: manifest v1, 5.8 to 5.0,
+  4.4 to 4.2, 3.0.
+- Versions with a registered implementation: 3.0, 4.2, 4.3, 4.4 and 5.0 to 5.8. The
+  4.0 and 4.1 classes exist but do not register (`SKIP_REGISTRATION`).
+- Classic reply: the driver reads only the last two bytes (minor, major) and
+  ignores the first two.
+- Manifest reply: reads `N`, the ranges and the capabilities; picks the **highest**
+  version it knows within any offered range; sends that version and
   capabilities `00`.
-- Se a resposta for `HTTP`, acusa porta errada (`ServiceUnavailable`). Se for
-  manifest de versão diferente de 1, `BoltProtocolError`. Se a versão acordada
-  não tiver implementação (inclusive `00 00 00 00`), fecha e levanta
+- If the reply is `HTTP`, it reports a wrong port (`ServiceUnavailable`). If it is a
+  manifest with a version other than 1, `BoltProtocolError`. If the agreed version
+  has no implementation (including `00 00 00 00`), it closes and raises
   `BoltHandshakeError`.
 
-Driver 6.3.1: manda os mesmos 16 bytes. Sabe falar 6.0 e 6.1, mas essas versões
-só aparecem por manifest, porque não estão nas propostas clássicas. Sem versão
-em comum, levanta `UnsupportedServerProduct`, que no 6.x virou subclasse de
+Driver 6.3.1: sends the same 16 bytes. It can speak 6.0 and 6.1, but those versions
+only show up via the manifest, because they are not in the classic proposals. With no
+version in common, it raises `UnsupportedServerProduct`, which in 6.x became a subclass of
 `ConfigurationError`.
 
-### 1.5 Neo4j x Bolt (tabela da doc)
+### 1.5 Neo4j vs Bolt (table from the docs)
 
-| Neo4j | Bolt 5.x negociado |
+| Neo4j | Negotiated Bolt 5.x |
 |---|---|
-| 5.0 a 5.4 | 5.0 |
-| 5.5 a 5.6 | 5.0 e 5.1 |
-| 5.7 a 5.8 | 5.0 a 5.2 |
-| 5.9 a 5.12 | 5.0 a 5.3 |
-| 5.13 a 5.22 | 5.0 a 5.4 |
-| 5.23 a 5.25 | 5.0 a 5.4 e 5.6 |
-| 5.26 em diante | 5.0 a 5.4 e 5.6 a 5.8 |
-| 2025.10 em diante | também Bolt 6.0 |
+| 5.0 to 5.4 | 5.0 |
+| 5.5 to 5.6 | 5.0 and 5.1 |
+| 5.7 to 5.8 | 5.0 to 5.2 |
+| 5.9 to 5.12 | 5.0 to 5.3 |
+| 5.13 to 5.22 | 5.0 to 5.4 |
+| 5.23 to 5.25 | 5.0 to 5.4 and 5.6 |
+| 5.26 onward | 5.0 to 5.4 and 5.6 to 5.8 |
+| 2025.10 onward | also Bolt 6.0 |
 
-- **Bolt 5.5 existiu em alguns drivers, tem desenho falho e nenhum servidor
-  Neo4j o negocia.** O driver Python tem a classe 5.5, então um servidor que
-  ofereça 5.5 pode acabar nela.
-- Neo4j 4.4 em diante fala 4.0 a 4.4 (as anteriores marcadas como removíveis).
+- **Bolt 5.5 existed in some drivers, has a flawed design and no
+  Neo4j server negotiates it.** The Python driver has the 5.5 class, so a server that
+  offers 5.5 may end up in it.
+- Neo4j 4.4 onward speaks 4.0 to 4.4 (the earlier ones marked as removable).
 
-### 1.6 O que mudou em cada versão 5.x
+### 1.6 What changed in each 5.x version
 
-| Versão | Mudança |
+| Version | Change |
 |---|---|
-| 5.0 | `element_id` em Node, Relationship e UnboundRelationship; DateTime (`49`) e DateTimeZoneId (`69`) novos, com segundos em UTC, substituem os legados (`46`/`66`). Mensagens iguais às da 4.4. |
-| 5.1 | HELLO deixa de carregar autenticação; entram LOGON e LOGOFF e o estado AUTHENTICATION. O estado CONNECTED vira NEGOTIATION. |
-| 5.2 | HELLO, BEGIN e RUN aceitam `notifications_minimum_severity` e `notifications_disabled_categories`. |
-| 5.3 | `bolt_agent` no HELLO. |
-| 5.4 | Mensagem TELEMETRY e hint `telemetry.enabled`. |
-| 5.5 | Não usada. |
-| 5.6 | `statuses` substitui `notifications` no SUCCESS de PULL/DISCARD; `notifications_disabled_categories` vira `notifications_disabled_classifications`. |
-| 5.7 | Handshake manifest v1; `protocol_version` no SUCCESS do HELLO; FAILURE ganha `gql_status`, `description`, `diagnostic_record` e `cause`, e `code` passa a se chamar `neo4j_code`. |
-| 5.8 | Hint `ssr.enabled`; `advertised_address` no SUCCESS do LOGON; SUCCESS de BEGIN e de RUN autocommit traz em `db` o home database resolvido. |
-| 6.0 | Estruturas Vector (`56`) e UnsupportedType (`3F`); o texto de `message` na FAILURE deixa de ter formato estável. |
+| 5.0 | `element_id` in Node, Relationship and UnboundRelationship; new DateTime (`49`) and DateTimeZoneId (`69`), with seconds in UTC, replace the legacy ones (`46`/`66`). Messages identical to those of 4.4. |
+| 5.1 | HELLO no longer carries authentication; LOGON, LOGOFF and the AUTHENTICATION state are introduced. The CONNECTED state becomes NEGOTIATION. |
+| 5.2 | HELLO, BEGIN and RUN accept `notifications_minimum_severity` and `notifications_disabled_categories`. |
+| 5.3 | `bolt_agent` in HELLO. |
+| 5.4 | TELEMETRY message and `telemetry.enabled` hint. |
+| 5.5 | Not used. |
+| 5.6 | `statuses` replaces `notifications` in the PULL/DISCARD SUCCESS; `notifications_disabled_categories` becomes `notifications_disabled_classifications`. |
+| 5.7 | Handshake manifest v1; `protocol_version` in the HELLO SUCCESS; FAILURE gains `gql_status`, `description`, `diagnostic_record` and `cause`, and `code` is renamed `neo4j_code`. |
+| 5.8 | `ssr.enabled` hint; `advertised_address` in the LOGON SUCCESS; the SUCCESS of BEGIN and of autocommit RUN carries the resolved home database in `db`. |
+| 6.0 | Vector (`56`) and UnsupportedType (`3F`) structures; the `message` text in FAILURE no longer has a stable format. |
 
-Achado fora da doc: no driver 6.3.1, a classe Bolt 6.1 troca o codec para
-PackStream v2, que acrescenta um tipo UUID com marcador `E0`. Não achei 6.1 nem
-PackStream v2 na doc oficial.
+Finding outside the docs: in the 6.3.1 driver, the Bolt 6.1 class switches the codec to
+PackStream v2, which adds a UUID type with marker `E0`. 6.1 and
+PackStream v2: not found in the official docs.
 
-### 1.7 Versão mínima para o driver 5.x conectar
+### 1.7 Minimum version for the 5.x driver to connect
 
-- Tecnicamente, 3.0 conecta: o 5.28.6 ainda oferece 3.0 e 4.2 a 4.4.
-- Com Bolt 3 não há `db` (o driver recusa `database=` com `ConfigurationError`)
-  e o roteamento usa a procedure `dbms.cluster.routing.getRoutingTable`.
-- De 4.0 a 4.2 o roteamento é pela procedure
-  `dbms.routing.getRoutingTable($context, $database)`; ROUTE só existe a partir
-  da 4.3, e `rt.db` (resolução do home database) a partir da 4.4.
-- `element_id` nativo exige 5.0. Com Bolt 4.x o driver 5.x fabrica
+- Technically, 3.0 connects: 5.28.6 still offers 3.0 and 4.2 to 4.4.
+- With Bolt 3 there is no `db` (the driver rejects `database=` with `ConfigurationError`)
+  and routing uses the procedure `dbms.cluster.routing.getRoutingTable`.
+- From 4.0 to 4.2 routing goes through the procedure
+  `dbms.routing.getRoutingTable($context, $database)`; ROUTE only exists from
+  4.3 onward, and `rt.db` (home database resolution) from 4.4 onward.
+- Native `element_id` requires 5.0. With Bolt 4.x the 5.x driver fabricates
   `element_id = str(id)`.
-- **Recomendação:** implementar primeiro a faixa 5.1 a 5.4 com handshake
-  clássico. É onde entram LOGON (previsto no plano) e TELEMETRY, e os erros
-  continuam no formato simples. Aceitar também 5.0 se sair barato (autenticação
-  dentro do HELLO). 5.6 a 5.8 e o manifest ficam para quando o formato GQL de
-  erro existir. Como o driver 6.x manda as mesmas propostas clássicas, um
-  servidor 5.x sem manifest atende também o 6.x.
+- **Recommendation:** implement the 5.1 to 5.4 range first, with the classic
+  handshake. That is where LOGON (provided for in the plan) and TELEMETRY come in, and
+  errors stay in the simple format. Also accept 5.0 if it comes cheap (authentication
+  inside HELLO). 5.6 to 5.8 and the manifest are left for when the GQL error
+  format exists. Since the 6.x driver sends the same classic proposals, a
+  5.x server without manifest also serves 6.x.
 
 ---
 
-## 2. PackStream (versão 1)
+## 2. PackStream (version 1)
 
-### 2.1 Tipos e marcadores
+### 2.1 Types and markers
 
-| Tipo | Marcadores | Observação |
+| Type | Markers | Note |
 |---|---|---|
 | Null | `C0` | |
 | Boolean | `C2` false, `C3` true | |
-| Integer | `00`..`7F` (0 a 127), `F0`..`FF` (-16 a -1), `C8`+i8, `C9`+i16, `CA`+i32, `CB`+i64 | sempre com sinal, 64 bits no máximo; a doc recomenda a forma mais curta |
-| Float | `C1` + 8 bytes IEEE 754 double | não há float de 32 bits nem inteiro sem sinal |
-| Bytes | `CC`+u8, `CD`+u16, `CE`+u32 | sem forma curta; máximo 2^31-1 |
-| String | `80`..`8F` (0 a 15 bytes), `D0`+u8, `D1`+u16, `D2`+u32 | tamanho em bytes do UTF-8, não em caracteres |
-| List | `90`..`9F` (0 a 15 itens), `D4`+u8, `D5`+u16, `D6`+u32 | heterogênea; tamanho em itens |
-| Dictionary | `A0`..`AF` (0 a 15 pares), `D8`+u8, `D9`+u16, `DA`+u32 | chave sempre String; chave repetida: vale a última |
-| Structure | `B0`..`BF` (0 a 15 campos) + tag byte (0 a 127) | a semântica vem da versão do Bolt |
+| Integer | `00`..`7F` (0 to 127), `F0`..`FF` (-16 to -1), `C8`+i8, `C9`+i16, `CA`+i32, `CB`+i64 | always signed, 64 bits at most; the docs recommend the shortest form |
+| Float | `C1` + 8 bytes IEEE 754 double | there is no 32-bit float and no unsigned integer |
+| Bytes | `CC`+u8, `CD`+u16, `CE`+u32 | no short form; maximum 2^31-1 |
+| String | `80`..`8F` (0 to 15 bytes), `D0`+u8, `D1`+u16, `D2`+u32 | size in UTF-8 bytes, not in characters |
+| List | `90`..`9F` (0 to 15 items), `D4`+u8, `D5`+u16, `D6`+u32 | heterogeneous; size in items |
+| Dictionary | `A0`..`AF` (0 to 15 pairs), `D8`+u8, `D9`+u16, `DA`+u32 | key always String; repeated key: the last one wins |
+| Structure | `B0`..`BF` (0 to 15 fields) + tag byte (0 to 127) | the semantics come from the Bolt version |
 
-- Os tamanhos são u8, u16 ou u32 sem sinal, mas o teto vale 2^31-1 em bytes,
-  itens ou pares.
-- A doc diz que marcadores reservados não devem ser usados e que recebê-los é
-  erro. Pela tabela sobram `C4`..`C7`, `CF`, `D3`, `D7`, `DB`..`DF` e
-  `E0`..`EF` (lista derivada por mim; a doc não enumera). O `E0` é o UUID do
-  PackStream v2 (Bolt 6.1, só no driver 6.x).
-- Exemplos da doc: 42 = `2A`; 1.23 = `C1 3F F3 AE 14 7A E1 47 AE`;
+- Sizes are unsigned u8, u16 or u32, but the ceiling is 2^31-1 in bytes,
+  items or pairs.
+- The docs say that reserved markers must not be used and that receiving them is an
+  error. From the table, what is left is `C4`..`C7`, `CF`, `D3`, `D7`, `DB`..`DF` and
+  `E0`..`EF` (list derived by me; the docs do not enumerate them). `E0` is the UUID of
+  PackStream v2 (Bolt 6.1, only in the 6.x driver).
+- Examples from the docs: 42 = `2A`; 1.23 = `C1 3F F3 AE 14 7A E1 47 AE`;
   `"A"` = `81 41`; `{}` = `A0`; `[1, 2, 3]` = `93 01 02 03`.
-- Tag de mensagem e tag de valor são espaços separados: a estrutura de topo do
-  chunk é mensagem, as aninhadas são valores. TELEMETRY (`54`) e Time (`54`),
-  ROUTE (`66`) e Legacy DateTimeZoneId (`66`), PULL (`3F`) e UnsupportedType
-  (`3F`) têm o mesmo byte.
+- Message tags and value tags are separate spaces: the top-level structure of the
+  chunk is a message, the nested ones are values. TELEMETRY (`54`) and Time (`54`),
+  ROUTE (`66`) and Legacy DateTimeZoneId (`66`), PULL (`3F`) and UnsupportedType
+  (`3F`) have the same byte.
 
-### 2.2 Chunking (camada do Bolt, logo abaixo das mensagens)
+### 2.2 Chunking (Bolt layer, right below the messages)
 
-- Cada mensagem vai em um ou mais chunks: cabeçalho u16 big-endian com o
-  tamanho (até 65535), depois os dados.
-- A mensagem termina com `00 00`. Um chunk nunca carrega duas mensagens.
-- Desde a 4.1, um chunk vazio (NOOP) serve de keep-alive; desde a 4.3 pode ir
-  em qualquer estado enquanto o servidor processa.
-- O driver 5.28.6 corta em chunks de 16 KiB e pula NOOPs.
-- Exemplos calculados: `SUCCESS {}` = `00 03 B1 70 A0 00 00`;
+- Each message goes in one or more chunks: a u16 big-endian header with the
+  size (up to 65535), then the data.
+- The message ends with `00 00`. A chunk never carries two messages.
+- Since 4.1, an empty chunk (NOOP) serves as a keep-alive; since 4.3 it can be sent
+  in any state while the server is processing.
+- The 5.28.6 driver splits into 16 KiB chunks and skips NOOPs.
+- Computed examples: `SUCCESS {}` = `00 03 B1 70 A0 00 00`;
   `RECORD [1]` = `00 04 B1 71 91 01 00 00`;
   `SUCCESS {"server": "Neo4j/5.26.0"}` =
   `00 17 B1 70 A1 86 73 65 72 76 65 72 8C 4E 65 6F 34 6A 2F 35 2E 32 36 2E 30 00 00`.
 
-### 2.3 Estruturas de valor (Bolt 5.x)
+### 2.3 Value structures (Bolt 5.x)
 
-| Estrutura | Tag | Campos | Observação |
+| Structure | Tag | Fields | Note |
 |---|---|---|---|
-| Node | `4E` (`B4 4E`) | `id` Integer, `labels` List<String>, `properties` Dict, `element_id` String | 3 campos antes da 5.0 |
-| Relationship | `52` (`B8 52`) | `id`, `startNodeId`, `endNodeId` (Integer), `type` String, `properties` Dict, `element_id`, `start_node_element_id`, `end_node_element_id` (String) | 5 campos antes da 5.0 |
-| UnboundRelationship | `72` (`B4 72`) | `id`, `type`, `properties`, `element_id` | sem pontas; usada dentro de Path; 3 campos antes da 5.0 |
-| Path | `50` (`B3 50`) | `nodes` List<Node>, `rels` List<UnboundRelationship>, `indices` List<Integer> | regra dos índices abaixo |
-| Date | `44` (`B1 44`) | `days` | dias desde 1970-01-01 |
-| Time | `54` (`B2 54`) | `nanoseconds`, `tz_offset_seconds` | nanossegundos desde a meia-noite local |
+| Node | `4E` (`B4 4E`) | `id` Integer, `labels` List<String>, `properties` Dict, `element_id` String | 3 fields before 5.0 |
+| Relationship | `52` (`B8 52`) | `id`, `startNodeId`, `endNodeId` (Integer), `type` String, `properties` Dict, `element_id`, `start_node_element_id`, `end_node_element_id` (String) | 5 fields before 5.0 |
+| UnboundRelationship | `72` (`B4 72`) | `id`, `type`, `properties`, `element_id` | no endpoints; used inside Path; 3 fields before 5.0 |
+| Path | `50` (`B3 50`) | `nodes` List<Node>, `rels` List<UnboundRelationship>, `indices` List<Integer> | index rule below |
+| Date | `44` (`B1 44`) | `days` | days since 1970-01-01 |
+| Time | `54` (`B2 54`) | `nanoseconds`, `tz_offset_seconds` | nanoseconds since local midnight |
 | LocalTime | `74` (`B1 74`) | `nanoseconds` | |
-| DateTime | `49` (`B3 49`) | `seconds`, `nanoseconds`, `tz_offset_seconds` | `seconds` = epoch em UTC |
-| DateTimeZoneId | `69` (`B3 69`) | `seconds`, `nanoseconds`, `tz_id` | `seconds` = epoch em UTC; `tz_id` do tz database |
-| LocalDateTime | `64` (`B2 64`) | `seconds`, `nanoseconds` | relógio local contado desde a epoch |
-| Duration | `45` (`B4 45`) | `months`, `days`, `seconds`, `nanoseconds` | pode ser negativa |
+| DateTime | `49` (`B3 49`) | `seconds`, `nanoseconds`, `tz_offset_seconds` | `seconds` = epoch in UTC |
+| DateTimeZoneId | `69` (`B3 69`) | `seconds`, `nanoseconds`, `tz_id` | `seconds` = epoch in UTC; `tz_id` from the tz database |
+| LocalDateTime | `64` (`B2 64`) | `seconds`, `nanoseconds` | local clock counted from the epoch |
+| Duration | `45` (`B4 45`) | `months`, `days`, `seconds`, `nanoseconds` | can be negative |
 | Point2D | `58` (`B3 58`) | `srid`, `x`, `y` (Float) | |
 | Point3D | `59` (`B4 59`) | `srid`, `x`, `y`, `z` | |
-| Legacy DateTime | `46` | `seconds` (UTC mais o offset), `nanoseconds`, `tz_offset_seconds` | só até 4.4; proibida em 5.x |
-| Legacy DateTimeZoneId | `66` | `seconds` (hora local), `nanoseconds`, `tz_id` | só até 4.4 |
+| Legacy DateTime | `46` | `seconds` (UTC plus the offset), `nanoseconds`, `tz_offset_seconds` | only up to 4.4; forbidden in 5.x |
+| Legacy DateTimeZoneId | `66` | `seconds` (local time), `nanoseconds`, `tz_id` | only up to 4.4 |
 | Vector | `56` (`B2 56`) | `type_marker` Bytes, `data` Bytes | 6.0 |
 | UnsupportedType | `3F` (`B4 3F`) | `name`, `minimum_protocol_major`, `minimum_protocol_minor`, `extra {message}` | 6.0 |
 
-- `nanoseconds` vai de 0 a 999.999.999.
-- Exemplo da diferença do DateTime: `1970-01-01T02:15:00.000000042+01:00` é
-  `seconds=4500, nanoseconds=42, tz_offset_seconds=3600` no Bolt 5. Na
-  estrutura legada seria `seconds=8100`, com o offset somado.
-- Path: o primeiro nó de `nodes` abre o caminho e não aparece em `indices`.
-  `indices` tem tamanho par. As posições 1ª, 3ª, 5ª... apontam para `rels`
-  começando em 1; valor negativo quer dizer relação percorrida ao contrário;
-  zero nunca aparece. As posições 2ª, 4ª... apontam para `nodes` começando em 0.
+- `nanoseconds` ranges from 0 to 999,999,999.
+- Example of the DateTime difference: `1970-01-01T02:15:00.000000042+01:00` is
+  `seconds=4500, nanoseconds=42, tz_offset_seconds=3600` in Bolt 5. In the
+  legacy structure it would be `seconds=8100`, with the offset added.
+- Path: the first node of `nodes` opens the path and does not appear in `indices`.
+  `indices` has an even length. The 1st, 3rd, 5th... positions point to `rels`
+  starting at 1; a negative value means a relationship traversed in reverse;
+  zero never appears. The 2nd, 4th... positions point to `nodes` starting at 0.
 
-### 2.4 `element_id` no Bolt 5
+### 2.4 `element_id` in Bolt 5
 
-- O que mudou: Node, Relationship e UnboundRelationship ganharam `element_id`
-  String, e Relationship ganhou `start_node_element_id` e
-  `end_node_element_id`. O campo `id` Integer continua na estrutura.
-- Semântica pelo Cypher Manual: `elementId()` devolve String única entre nós e
-  relações de todos os databases do DBMS, mas só dentro de uma transação; fora
-  dela não há garantia de mapeamento. `id()` está deprecado e é único só por
-  tipo e database. A Neo4j reaproveita IDs de elementos apagados.
-- O driver 5.28.6 guarda nós e relações do resultado pela chave `element_id`.
-  Se ele vier ausente (Bolt 4.x), usa `str(id)`. O `id` legado também é guardado.
-- O adaptador da plataforma (`client-core/.../repository/neo4j.py`) expõe
-  `element_id` como `.id` de `_Node` e `_Relationship`, e o memory-api deduplica
-  por esse valor. Então `element_id` precisa ser estável pelo menos dentro de um
-  resultado.
-- **Recomendação:** mandar também um `id` inteiro de verdade, porque a spec
-  define o campo como Integer.
+- What changed: Node, Relationship and UnboundRelationship gained an `element_id`
+  String, and Relationship gained `start_node_element_id` and
+  `end_node_element_id`. The `id` Integer field stays in the structure.
+- Semantics per the Cypher Manual: `elementId()` returns a String unique across nodes and
+  relationships of all databases in the DBMS, but only within a transaction; outside
+  of it there is no mapping guarantee. `id()` is deprecated and is unique only per
+  type and database. Neo4j reuses the IDs of deleted elements.
+- The 5.28.6 driver stores the result's nodes and relationships keyed by `element_id`.
+  If it is absent (Bolt 4.x), it uses `str(id)`. The legacy `id` is also stored.
+- The platform adapter (`client-core/.../repository/neo4j.py`) exposes
+  `element_id` as `.id` of `_Node` and `_Relationship`, and memory-api deduplicates
+  by that value. So `element_id` needs to be stable at least within a
+  result.
+- **Recommendation:** also send a real integer `id`, because the spec
+  defines the field as Integer.
 
-### 2.5 Parâmetros que o driver 5.28.6 manda
+### 2.5 Parameters that the 5.28.6 driver sends
 
-- `date` vira Date. `time` sem fuso vira LocalTime; com fuso, Time.
-- `datetime` sem fuso vira LocalDateTime (`64`); com fuso nomeado (pytz ou
-  zoneinfo), DateTimeZoneId (`69`); com offset fixo, DateTime (`49`).
-- `timedelta` e `Duration` viram Duration.
-- Pontos viram Point2D/Point3D com SRID 7203/9157 (cartesiano) ou 4326/4979
+- `date` becomes Date. `time` without a time zone becomes LocalTime; with a time zone, Time.
+- `datetime` without a time zone becomes LocalDateTime (`64`); with a named time zone (pytz or
+  zoneinfo), DateTimeZoneId (`69`); with a fixed offset, DateTime (`49`).
+- `timedelta` and `Duration` become Duration.
+- Points become Point2D/Point3D with SRID 7203/9157 (Cartesian) or 4326/4979
   (WGS-84).
-- `bytes` viram Bytes; `list`/`tuple`, List; `dict`, Dictionary.
+- `bytes` becomes Bytes; `list`/`tuple`, List; `dict`, Dictionary.
 
 ---
 
-## 3. Máquina de estados e mensagens
+## 3. State machine and messages
 
-### 3.1 Regras gerais
+### 3.1 General rules
 
-- Cada requisição recebe zero ou mais mensagens de detalhe (só RECORD) e
-  exatamente uma de sumário (SUCCESS, IGNORED ou FAILURE).
-- O cliente pode mandar várias requisições em pipeline. Depois de uma FAILURE,
-  o servidor responde IGNORED a tudo até o cliente reconhecer a falha com RESET.
-- Mensagem inesperada para o estado é erro de protocolo, fatal: o servidor vai
-  para DEFUNCT e fecha a conexão.
-- Sinais: `<INTERRUPT>` fura a fila (o RESET dispara), e `<DISCONNECT>` vem do
+- Each request gets zero or more detail messages (RECORD only) and
+  exactly one summary message (SUCCESS, IGNORED or FAILURE).
+- The client can send several requests in a pipeline. After a FAILURE,
+  the server answers IGNORED to everything until the client acknowledges the failure with RESET.
+- A message that is unexpected for the state is a protocol error, fatal: the server goes
+  to DEFUNCT and closes the connection.
+- Signals: `<INTERRUPT>` jumps the queue (RESET triggers it), and `<DISCONNECT>` comes from
   GOODBYE.
-- **Recomendação:** sempre mandar SUCCESS com dicionário, mesmo vazio
-  (`B1 70 A0`). A doc mostra `SUCCESS` sem metadata no ROLLBACK, mas a mensagem
-  é definida com um campo Dictionary. O driver aceita as duas formas.
+- **Recommendation:** always send SUCCESS with a dictionary, even an empty one
+  (`B1 70 A0`). The docs show `SUCCESS` without metadata for ROLLBACK, but the message
+  is defined with a Dictionary field. The driver accepts both forms.
 
-### 3.2 Estados (5.1+)
+### 3.2 States (5.1+)
 
-| Estado | Significado |
+| State | Meaning |
 |---|---|
-| NEGOTIATION | handshake concluído; só aceita HELLO (chamava CONNECTED até 5.0) |
-| AUTHENTICATION | depois de HELLO ou LOGOFF; só aceita LOGON |
-| READY | aceita RUN, BEGIN, ROUTE, TELEMETRY, LOGOFF, RESET, GOODBYE |
-| STREAMING | autocommit com resultado aberto |
-| TX_READY | transação explícita aberta, sem resultado pendente |
-| TX_STREAMING | transação explícita com um ou mais resultados abertos |
-| FAILED | falha pendente de RESET |
-| INTERRUPTED | entre a chegada do `<INTERRUPT>` e o processamento do RESET |
-| DEFUNCT | conexão morta (terminal) |
+| NEGOTIATION | handshake completed; accepts only HELLO (was called CONNECTED up to 5.0) |
+| AUTHENTICATION | after HELLO or LOGOFF; accepts only LOGON |
+| READY | accepts RUN, BEGIN, ROUTE, TELEMETRY, LOGOFF, RESET, GOODBYE |
+| STREAMING | autocommit with an open result |
+| TX_READY | explicit transaction open, no pending result |
+| TX_STREAMING | explicit transaction with one or more open results |
+| FAILED | failure awaiting RESET |
+| INTERRUPTED | between the arrival of `<INTERRUPT>` and the processing of RESET |
+| DEFUNCT | dead connection (terminal) |
 
-Até 5.0, o HELLO leva a autenticação e vai direto de CONNECTED para READY.
+Up to 5.0, HELLO carries the authentication and goes straight from CONNECTED to READY.
 
-### 3.3 Transições (apêndice "version 5.1+")
+### 3.3 Transitions (appendix "version 5.1+")
 
-| Estado | Mensagem | Resposta | Novo estado |
+| State | Message | Response | New state |
 |---|---|---|---|
 | NEGOTIATION | HELLO | SUCCESS / FAILURE | AUTHENTICATION / DEFUNCT |
 | AUTHENTICATION | LOGON | SUCCESS / FAILURE | READY / DEFUNCT |
@@ -362,248 +362,248 @@ Até 5.0, o HELLO leva a autenticação e vai direto de CONNECTED para READY.
 | READY | BEGIN | SUCCESS / FAILURE | TX_READY / FAILED |
 | READY | ROUTE | SUCCESS / FAILURE | READY / FAILED |
 | READY | TELEMETRY (5.4+) | SUCCESS / FAILURE | READY / FAILED |
-| READY | LOGOFF | SUCCESS / FAILURE | AUTHENTICATION / FAILED (ver nota) |
-| STREAMING | PULL ou DISCARD | SUCCESS `has_more: true` | STREAMING |
-| STREAMING | PULL ou DISCARD | SUCCESS `has_more: false` ou `{}` | READY |
-| STREAMING | PULL ou DISCARD | FAILURE | FAILED |
+| READY | LOGOFF | SUCCESS / FAILURE | AUTHENTICATION / FAILED (see note) |
+| STREAMING | PULL or DISCARD | SUCCESS `has_more: true` | STREAMING |
+| STREAMING | PULL or DISCARD | SUCCESS `has_more: false` or `{}` | READY |
+| STREAMING | PULL or DISCARD | FAILURE | FAILED |
 | TX_READY | RUN | SUCCESS `{qid}` / FAILURE | TX_STREAMING / FAILED |
-| TX_READY | COMMIT ou ROLLBACK | SUCCESS / FAILURE | READY / FAILED |
+| TX_READY | COMMIT or ROLLBACK | SUCCESS / FAILURE | READY / FAILED |
 | TX_STREAMING | RUN | SUCCESS `{qid}` / FAILURE | TX_STREAMING / FAILED |
-| TX_STREAMING | PULL ou DISCARD | `has_more: true` | TX_STREAMING |
-| TX_STREAMING | PULL ou DISCARD | `has_more: false` | TX_READY, ou TX_STREAMING se ainda houver resultado aberto |
+| TX_STREAMING | PULL or DISCARD | `has_more: true` | TX_STREAMING |
+| TX_STREAMING | PULL or DISCARD | `has_more: false` | TX_READY, or TX_STREAMING if there is still an open result |
 | FAILED | RUN, PULL, DISCARD, BEGIN, COMMIT, ROLLBACK, ROUTE, LOGOFF | IGNORED | FAILED |
-| INTERRUPTED | qualquer uma menos RESET | IGNORED | INTERRUPTED |
-| READY, STREAMING, TX_READY, TX_STREAMING, FAILED ou INTERRUPTED | RESET | (`<INTERRUPT>`) | INTERRUPTED; ao processar o RESET, SUCCESS e READY (ou FAILURE e DEFUNCT) |
-| qualquer | GOODBYE | nenhuma | DEFUNCT |
+| INTERRUPTED | any except RESET | IGNORED | INTERRUPTED |
+| READY, STREAMING, TX_READY, TX_STREAMING, FAILED or INTERRUPTED | RESET | (`<INTERRUPT>`) | INTERRUPTED; when RESET is processed, SUCCESS and READY (or FAILURE and DEFUNCT) |
+| any | GOODBYE | none | DEFUNCT |
 
-- COMMIT não é aceito em TX_STREAMING. O driver descarta os resultados
-  pendentes (DISCARD) antes de COMMIT e ROLLBACK.
-- Nota: sobre FAILURE no LOGOFF a doc diverge. A tabela do apêndice leva a
-  FAILED; o texto da mensagem manda FAILURE e fechar a conexão, e o cliente
-  deve tratá-la como DEFUNCT.
+- COMMIT is not accepted in TX_STREAMING. The driver discards the pending
+  results (DISCARD) before COMMIT and ROLLBACK.
+- Note: on FAILURE for LOGOFF the docs are inconsistent. The appendix table leads to
+  FAILED; the message text calls for FAILURE and closing the connection, and the client
+  must treat it as DEFUNCT.
 
 ### 3.4 Tags
 
-| Mensagem | Sentido | Tag | Cabeçalho | Campos | Desde |
+| Message | Direction | Tag | Header | Fields | Since |
 |---|---|---|---|---|---|
-| HELLO | C para S | `01` | `B1 01` | `extra` Dict | 3 |
-| LOGON | C para S | `6A` | `B1 6A` | `auth` Dict | 5.1 |
-| LOGOFF | C para S | `6B` | `B0 6B` | nenhum | 5.1 |
-| TELEMETRY | C para S | `54` | `B1 54` | `api` Integer | 5.4 |
-| GOODBYE | C para S | `02` | `B0 02` | nenhum | 3 |
-| RESET | C para S | `0F` | `B0 0F` | nenhum | 1 |
-| RUN | C para S | `10` | `B3 10` | `query` String, `parameters` Dict, `extra` Dict | 1 (`extra` desde 3) |
-| DISCARD | C para S | `2F` | `B1 2F` | `extra` Dict (`n`, `qid`) | campos desde 4.0 |
-| PULL | C para S | `3F` | `B1 3F` | `extra` Dict (`n`, `qid`) | campos desde 4.0 |
-| BEGIN | C para S | `11` | `B1 11` | `extra` Dict | 3 |
-| COMMIT | C para S | `12` | `B0 12` | nenhum | 3 |
-| ROLLBACK | C para S | `13` | `B0 13` | nenhum | 3 |
-| ROUTE | C para S | `66` | `B3 66` | `routing` Dict, `bookmarks` List<String>, `extra` Dict | 4.3 (`extra` desde 4.4) |
-| SUCCESS | S para C | `70` | `B1 70` | `metadata` Dict | |
-| RECORD | S para C | `71` | `B1 71` | `data` List | |
-| IGNORED | S para C | `7E` | `B0 7E` | nenhum | |
-| FAILURE | S para C | `7F` | `B1 7F` | `metadata` Dict | |
+| HELLO | C to S | `01` | `B1 01` | `extra` Dict | 3 |
+| LOGON | C to S | `6A` | `B1 6A` | `auth` Dict | 5.1 |
+| LOGOFF | C to S | `6B` | `B0 6B` | none | 5.1 |
+| TELEMETRY | C to S | `54` | `B1 54` | `api` Integer | 5.4 |
+| GOODBYE | C to S | `02` | `B0 02` | none | 3 |
+| RESET | C to S | `0F` | `B0 0F` | none | 1 |
+| RUN | C to S | `10` | `B3 10` | `query` String, `parameters` Dict, `extra` Dict | 1 (`extra` since 3) |
+| DISCARD | C to S | `2F` | `B1 2F` | `extra` Dict (`n`, `qid`) | fields since 4.0 |
+| PULL | C to S | `3F` | `B1 3F` | `extra` Dict (`n`, `qid`) | fields since 4.0 |
+| BEGIN | C to S | `11` | `B1 11` | `extra` Dict | 3 |
+| COMMIT | C to S | `12` | `B0 12` | none | 3 |
+| ROLLBACK | C to S | `13` | `B0 13` | none | 3 |
+| ROUTE | C to S | `66` | `B3 66` | `routing` Dict, `bookmarks` List<String>, `extra` Dict | 4.3 (`extra` since 4.4) |
+| SUCCESS | S to C | `70` | `B1 70` | `metadata` Dict | |
+| RECORD | S to C | `71` | `B1 71` | `data` List | |
+| IGNORED | S to C | `7E` | `B0 7E` | none | |
+| FAILURE | S to C | `7F` | `B1 7F` | `metadata` Dict | |
 
-INIT, ACK_FAILURE, PULL_ALL e DISCARD_ALL são de versões antigas e não aparecem
-em 5.x.
+INIT, ACK_FAILURE, PULL_ALL and DISCARD_ALL are from old versions and do not appear
+in 5.x.
 
-### 3.5 Mensagem por mensagem
+### 3.5 Message by message
 
-Legenda: "spec" é o que a doc define; "driver" é o que o 5.28.6 manda ou lê.
+Legend: "spec" is what the docs define; "driver" is what 5.28.6 sends or reads.
 
 #### HELLO (`01`)
 
-- **Estado:** só em NEGOTIATION. Em outro estado é violação e fecha a conexão.
-- **Campos de `extra` (spec):**
-  - `user_agent` String, no formato "Nome/Versão".
-  - Até 5.0, também `scheme`, `principal`, `credentials` e demais campos de
-    autenticação.
-  - `routing` Dict (4.1+). Ausente ou `null`: sem roteamento. `{}`: rotear.
-    Com conteúdo: rotear com esse contexto (as chaves da query string da URI
-    mais `address`).
-  - `patch_bolt` List (só 4.3 e 4.4, patch `"utc"`).
-  - `notifications_minimum_severity` String (5.2+; `"OFF"` desliga tudo).
-  - `notifications_disabled_categories` List (5.2 a 5.4).
+- **State:** only in NEGOTIATION. In any other state it is a violation and closes the connection.
+- **`extra` fields (spec):**
+  - `user_agent` String, in the format "Name/Version".
+  - Up to 5.0, also `scheme`, `principal`, `credentials` and the other
+    authentication fields.
+  - `routing` Dict (4.1+). Absent or `null`: no routing. `{}`: route.
+    With content: route with that context (the keys of the URI query string
+    plus `address`).
+  - `patch_bolt` List (4.3 and 4.4 only, patch `"utc"`).
+  - `notifications_minimum_severity` String (5.2+; `"OFF"` turns everything off).
+  - `notifications_disabled_categories` List (5.2 to 5.4).
   - `notifications_disabled_classifications` List (5.6+).
-  - `bolt_agent` Dict (5.3+, obrigatório pela spec): `product` obrigatório;
-    `platform`, `language` e `language_details` opcionais.
-- **Driver:** sempre manda `user_agent`, no formato
-  `neo4j-python/5.28.6 Python/<versão> (<plataforma>)`. Manda `routing` só com
-  `neo4j://`, com `address` e os parâmetros da URI. `bolt_agent` vai a partir de
-  5.3, com `product` `neo4j-python/5.28.6`. Os campos de notificação só vão se o
-  usuário configurar. Em 5.1+ manda LOGON logo atrás, no mesmo envio, e só então
-  lê as duas respostas.
+  - `bolt_agent` Dict (5.3+, required by the spec): `product` required;
+    `platform`, `language` and `language_details` optional.
+- **Driver:** always sends `user_agent`, in the format
+  `neo4j-python/5.28.6 Python/<version> (<platform>)`. Sends `routing` only with
+  `neo4j://`, with `address` and the URI parameters. `bolt_agent` is sent from
+  5.3 on, with `product` `neo4j-python/5.28.6`. The notification fields are only sent if the
+  user configures them. In 5.1+ it sends LOGON right after it, in the same write, and only then
+  reads the two responses.
 - **SUCCESS (spec):**
-  - `server` String, ex.: `"Neo4j/5.26.0"`.
-  - `connection_id` String, ex.: `"bolt-61"`.
+  - `server` String, e.g. `"Neo4j/5.26.0"`.
+  - `connection_id` String, e.g. `"bolt-61"`.
   - `hints` Dict (4.3+).
-  - `protocol_version` String (5.7+, só com manifest).
-  - `patch_bolt` (4.3 e 4.4).
-- **Hints definidos:**
-  - `connection.recv_timeout_seconds` Integer (4.3+): o driver passa a usá-lo
-    como timeout de leitura do socket. Quem anunciar precisa mandar NOOP em
-    query longa, ou o driver derruba a conexão.
-  - `telemetry.enabled` Boolean (5.4+): sem ele, o driver não manda TELEMETRY.
+  - `protocol_version` String (5.7+, only with manifest).
+  - `patch_bolt` (4.3 and 4.4).
+- **Defined hints:**
+  - `connection.recv_timeout_seconds` Integer (4.3+): the driver starts using it
+    as the socket read timeout. Whoever advertises it must send NOOP during a
+    long query, or the driver drops the connection.
+  - `telemetry.enabled` Boolean (5.4+): without it, the driver does not send TELEMETRY.
   - `ssr.enabled` Boolean (5.8+).
-- **Driver lê:** `hints`; guarda o resto em `server_info`; exige `server`
-  começando com `Neo4j/` (seção 6.5). `connection_id` é opcional (vira
-  `"<unknown id>"` nos logs).
-- **FAILURE:** o servidor pode mandar metadata e deve fechar a conexão em
-  seguida. O driver mata a conexão.
+- **Driver reads:** `hints`; stores the rest in `server_info`; requires `server`
+  starting with `Neo4j/` (section 6.5). `connection_id` is optional (it becomes
+  `"<unknown id>"` in the logs).
+- **FAILURE:** the server may send metadata and must close the connection
+  right after. The driver kills the connection.
 
 #### LOGON (`6A`, 5.1+)
 
-- **Estado:** AUTHENTICATION.
-- **Campos (spec):** `auth` Dict com `scheme` (`none`, `basic`, `bearer`,
-  `kerberos`, conforme o servidor) e os campos do esquema: `basic` usa
-  `principal` e `credentials`; `bearer`, só `credentials`.
-- **Driver:** manda o dicionário do objeto `Auth`: `scheme`, `principal`,
-  `credentials` e, se existirem, `realm` e `parameters`. Com `auth=None` manda
-  `{}`, sem `scheme`.
+- **State:** AUTHENTICATION.
+- **Fields (spec):** `auth` Dict with `scheme` (`none`, `basic`, `bearer`,
+  `kerberos`, depending on the server) and the scheme fields: `basic` uses
+  `principal` and `credentials`; `bearer`, only `credentials`.
+- **Driver:** sends the dictionary of the `Auth` object: `scheme`, `principal`,
+  `credentials` and, if present, `realm` and `parameters`. With `auth=None` it sends
+  `{}`, without `scheme`.
 - **SUCCESS (spec):** `{}`; `advertised_address` (5.8+); `credentials_expired`
-  Boolean (ausente conta como false). O driver 5.28.6 não lê nenhum dos dois.
-- **FAILURE:** o servidor fecha a conexão. O driver mata a conexão e levanta o
-  erro, por exemplo `AuthError` para `Neo.ClientError.Security.Unauthorized`.
+  Boolean (absent counts as false). Driver 5.28.6 reads neither of them.
+- **FAILURE:** the server closes the connection. The driver kills the connection and raises the
+  error, for example `AuthError` for `Neo.ClientError.Security.Unauthorized`.
 
 #### LOGOFF (`6B`, 5.1+)
 
-- **Estado:** só em READY. Sem campos.
-- **Resposta:** SUCCESS leva a AUTHENTICATION. Fora de READY, FAILURE e fecha
-  (ver nota em 3.3).
-- **Driver:** usa quando precisa trocar de credencial na mesma conexão (auth
-  por sessão, rotação de token). Manda LOGOFF e LOGON em pipeline. Com
-  `bolt://` e credencial fixa, não aparece.
+- **State:** only in READY. No fields.
+- **Response:** SUCCESS leads to AUTHENTICATION. Outside READY, FAILURE and close
+  (see note in 3.3).
+- **Driver:** uses it when it needs to switch credentials on the same connection
+  (per-session auth, token rotation). Sends LOGOFF and LOGON in a pipeline. With
+  `bolt://` and a fixed credential, it does not appear.
 
 #### TELEMETRY (`54`, 5.4+)
 
-- **Estado:** só em READY.
-- **Campo:** `api` Integer: 0 transação gerenciada, 1 explícita, 2 implícita,
-  3 `execute_query()`. A informação vai para as métricas do servidor.
-- **Resposta:** SUCCESS e o estado não muda. Valor inválido ou estado errado dá
-  FAILURE e FAILED.
-- **Driver:** só manda se o hint `telemetry.enabled` for true e o usuário não
-  tiver desligado. Vai em pipeline antes de BEGIN ou RUN. A spec diz que o
-  servidor deve aceitar TELEMETRY mesmo se o cliente ignorar o hint.
+- **State:** only in READY.
+- **Field:** `api` Integer: 0 managed transaction, 1 explicit, 2 implicit,
+  3 `execute_query()`. The information goes to the server metrics.
+- **Response:** SUCCESS and the state does not change. An invalid value or the wrong state gives
+  FAILURE and FAILED.
+- **Driver:** only sends it if the `telemetry.enabled` hint is true and the user has not
+  turned it off. It goes in a pipeline before BEGIN or RUN. The spec says the
+  server must accept TELEMETRY even if the client ignores the hint.
 
 #### RUN (`10`)
 
-- **Estado:** READY (autocommit) ou TX_READY/TX_STREAMING (transação). Em FAILED
-  ou INTERRUPTED, IGNORED.
-- **Campos:** `query` String e `parameters` Dict.
-- **`extra` no autocommit** (em transação explícita vem vazio; quem carrega é o
+- **State:** READY (autocommit) or TX_READY/TX_STREAMING (transaction). In FAILED
+  or INTERRUPTED, IGNORED.
+- **Fields:** `query` String and `parameters` Dict.
+- **`extra` in autocommit** (in an explicit transaction it comes empty; the one that carries it is
   BEGIN):
 
-  | Campo | Tipo | Padrão (spec) | Desde |
+  | Field | Type | Default (spec) | Since |
   |---|---|---|---|
   | `bookmarks` | List<String> | `[]` | 3 |
-  | `tx_timeout` | Integer (ms) | timeout configurado no servidor | 3 |
+  | `tx_timeout` | Integer (ms) | timeout configured on the server | 3 |
   | `tx_metadata` | Dict | null | 3 |
-  | `mode` | `"r"` ou `"w"` | `"w"` | 3 |
-  | `db` | String | null; null e `""` significam o database padrão configurado no servidor | 4.0 |
-  | `imp_user` | String | null (sem impersonação) | 4.4 |
-  | `notifications_minimum_severity` | String | null (usa o do HELLO) | 5.2 |
+  | `mode` | `"r"` or `"w"` | `"w"` | 3 |
+  | `db` | String | null; null and `""` mean the default database configured on the server | 4.0 |
+  | `imp_user` | String | null (no impersonation) | 4.4 |
+  | `notifications_minimum_severity` | String | null (uses the one from HELLO) | 5.2 |
   | `notifications_disabled_classifications` | List<String> | null | 5.6 |
-  | `notifications_disabled_categories` | List<String> | null | 5.2 a 5.4 |
+  | `notifications_disabled_categories` | List<String> | null | 5.2 to 5.4 |
 
-- **Driver:** manda `mode: "r"` só em leitura (ausente é escrita). Manda `db`
-  só se o database estiver definido, `bookmarks` só se a lista não for vazia, e
-  `tx_metadata`, `tx_timeout` (convertido para ms) e `imp_user` só se
-  configurados. Manda PULL `{"n": <fetch_size>}` (padrão 1000) no mesmo envio.
+- **Driver:** sends `mode: "r"` only for reads (absent means write). Sends `db`
+  only if the database is set, `bookmarks` only if the list is not empty, and
+  `tx_metadata`, `tx_timeout` (converted to ms) and `imp_user` only if
+  configured. Sends PULL `{"n": <fetch_size>}` (default 1000) in the same write.
 - **SUCCESS (spec):**
   - `fields` List<String>.
-  - `t_first` Integer (ms até o primeiro registro).
-  - `qid` Integer (4.0+, só em transação explícita).
-  - `db` String (5.8+, só quando o cliente não mandou `db`: é o home database
-    resolvido do usuário).
-- **Driver lê:** `fields`, que é obrigatório na prática (as chaves do
-  `Record`); `qid`; `db`, que informa o database resolvido.
+  - `t_first` Integer (ms until the first record).
+  - `qid` Integer (4.0+, only in an explicit transaction).
+  - `db` String (5.8+, only when the client did not send `db`: it is the user's
+    resolved home database).
+- **Driver reads:** `fields`, which is required in practice (the keys of the
+  `Record`); `qid`; `db`, which reports the resolved database.
 
-#### PULL (`3F`) e DISCARD (`2F`)
+#### PULL (`3F`) and DISCARD (`2F`)
 
-- **Campos:** `extra` com `n` Integer (obrigatório, sem padrão; `-1` = todos) e
-  `qid` Integer (só em transação; `-1` = o último resultado aberto; padrão -1).
-- **Detalhe:** PULL devolve zero ou mais `RECORD [valores]`; DISCARD não
-  devolve nada.
-- **SUCCESS com mais registros:** `{"has_more": true}`. Ausente conta como
+- **Fields:** `extra` with `n` Integer (required, no default; `-1` = all) and
+  `qid` Integer (only in a transaction; `-1` = the last open result; default -1).
+- **Detail:** PULL returns zero or more `RECORD [values]`; DISCARD returns
+  nothing.
+- **SUCCESS with more records:** `{"has_more": true}`. Absent counts as
   false.
-- **SUCCESS no fim do resultado:**
+- **SUCCESS at the end of the result:**
 
-  | Campo | Tipo | Nota |
+  | Field | Type | Note |
   |---|---|---|
-  | `bookmark` | String | só em autocommit |
-  | `db` | String | database onde rodou (4.0+) |
-  | `type` | String | `"r"`, `"w"`, `"rw"` ou `"s"` (schema) |
-  | `t_last` | Integer | ms até consumir o último registro |
-  | `t_first` | Integer | listado também aqui pela doc |
-  | `stats` | Dict | contadores |
+  | `bookmark` | String | only in autocommit |
+  | `db` | String | database where it ran (4.0+) |
+  | `type` | String | `"r"`, `"w"`, `"rw"` or `"s"` (schema) |
+  | `t_last` | Integer | ms until the last record is consumed |
+  | `t_first` | Integer | also listed here by the docs |
+  | `stats` | Dict | counters |
   | `plan`, `profile` | Dict | EXPLAIN/PROFILE |
-  | `notifications` | List<Dict> | até 5.4 |
-  | `statuses` | List<Dict> | 5.6+, objetos de status GQL |
+  | `notifications` | List<Dict> | up to 5.4 |
+  | `statuses` | List<Dict> | 5.6+, GQL status objects |
 
-- **Driver:** manda PULL `{"n": 1000}` e repete enquanto vier
-  `has_more: true`. No `consume()`, manda DISCARD `{"n": -1}`. Só manda `qid`
-  quando o resultado não é o último aberto na transação.
-- **Driver lê:** se `type` vier com valor fora de `r`/`w`/`rw`/`s`, levanta
-  `BoltProtocolError`. Lê `stats` pelas chaves `nodes-created`,
+- **Driver:** sends PULL `{"n": 1000}` and repeats while it gets
+  `has_more: true`. On `consume()`, sends DISCARD `{"n": -1}`. Only sends `qid`
+  when the result is not the last one opened in the transaction.
+- **Driver reads:** if `type` comes with a value outside `r`/`w`/`rw`/`s`, it raises
+  `BoltProtocolError`. Reads `stats` through the keys `nodes-created`,
   `nodes-deleted`, `relationships-created`, `relationships-deleted`,
   `properties-set`, `labels-added`, `labels-removed`, `indexes-added`,
   `indexes-removed`, `constraints-added`, `constraints-removed`,
-  `system-updates`, `contains-updates` e `contains-system-updates`. Sem
-  `statuses` nem `notifications`, o driver sintetiza o status.
-- **Transação com vários resultados:** a partir do Bolt 4.0 o driver não
-  esgota o resultado anterior antes do próximo RUN. O servidor precisa então
-  manter vários resultados abertos na mesma transação, cada um com seu `qid`, e
-  atender PULL/DISCARD por `qid`. Sem `qid` no SUCCESS do RUN, o driver usa -1
-  para todos e puxa do resultado errado.
+  `system-updates`, `contains-updates` and `contains-system-updates`. Without
+  `statuses` or `notifications`, the driver synthesizes the status.
+- **Transaction with several results:** from Bolt 4.0 on, the driver does not
+  exhaust the previous result before the next RUN. The server then needs to
+  keep several results open in the same transaction, each with its own `qid`, and
+  serve PULL/DISCARD by `qid`. Without `qid` in the RUN SUCCESS, the driver uses -1
+  for all of them and pulls from the wrong result.
 
 #### BEGIN (`11`)
 
-- **Estado:** READY.
-- **Campos de `extra`:** os mesmos do RUN autocommit (`bookmarks`, `tx_timeout`,
-  `tx_metadata`, `mode`, `db`, `imp_user` e os de notificação), com os mesmos
-  padrões.
-- **SUCCESS:** `{}`; a partir de 5.8, `db` quando o cliente não mandou `db`.
-- **Driver:** mesma política de campos do RUN. Em `execute_query` manda BEGIN,
-  RUN e PULL no mesmo envio (BEGIN em pipeline). Se o BEGIN falhar, o servidor
-  precisa responder IGNORED ao RUN e ao PULL.
+- **State:** READY.
+- **`extra` fields:** the same as the autocommit RUN (`bookmarks`, `tx_timeout`,
+  `tx_metadata`, `mode`, `db`, `imp_user` and the notification ones), with the same
+  defaults.
+- **SUCCESS:** `{}`; from 5.8 on, `db` when the client did not send `db`.
+- **Driver:** same field policy as RUN. In `execute_query` it sends BEGIN,
+  RUN and PULL in the same write (pipelined BEGIN). If BEGIN fails, the server
+  must answer IGNORED to the RUN and the PULL.
 
-#### COMMIT (`12`) e ROLLBACK (`13`)
+#### COMMIT (`12`) and ROLLBACK (`13`)
 
-- **Estado:** TX_READY. Sem campos.
-- **SUCCESS do COMMIT:** `bookmark` String.
-- **SUCCESS do ROLLBACK:** `{}`.
-- **Driver:** lê `bookmark` e `db` do SUCCESS do COMMIT. Não manda ROLLBACK se a
-  conexão já foi resetada, porque o RESET já desfez a transação.
+- **State:** TX_READY. No fields.
+- **SUCCESS for COMMIT:** `bookmark` String.
+- **SUCCESS for ROLLBACK:** `{}`.
+- **Driver:** reads `bookmark` and `db` from the COMMIT SUCCESS. Does not send ROLLBACK if the
+  connection has already been reset, because RESET already undid the transaction.
 
 #### RESET (`0F`)
 
-- **Semântica:** fura a fila, interrompe o trabalho em curso, faz o que estava
-  na fila à frente dele receber IGNORED, e deixa a conexão como logo após
-  HELLO+LOGON bem-sucedidos. Na prática, aborta a transação aberta.
-- **Resposta:** `SUCCESS {}` e READY. FAILURE só se a conexão ainda não chegou a
-  READY, e então o servidor fecha.
-- **Driver:** manda RESET dentro do tratamento de toda FAILURE comum, antes de
-  levantar a exceção, e ao devolver ao pool uma conexão que não esteja limpa.
-  Se o RESET receber FAILURE, IGNORED ou RECORD, o driver descarta a conexão.
+- **Semantics:** jumps the queue, interrupts the work in progress, makes whatever was
+  in the queue ahead of it receive IGNORED, and leaves the connection as it was right after
+  a successful HELLO+LOGON. In practice, it aborts the open transaction.
+- **Response:** `SUCCESS {}` and READY. FAILURE only if the connection has not reached
+  READY yet, and then the server closes it.
+- **Driver:** sends RESET inside the handling of every ordinary FAILURE, before
+  raising the exception, and when returning to the pool a connection that is not clean.
+  If RESET gets FAILURE, IGNORED or RECORD, the driver discards the connection.
 
 #### GOODBYE (`02`)
 
-- Sem campos e sem resposta. O servidor fecha o socket e interrompe o que
-  estiver rodando. O driver manda ao fechar conexões.
+- No fields and no response. The server closes the socket and interrupts whatever
+  is running. The driver sends it when closing connections.
 
 #### ROUTE (`66`, 4.3+)
 
-- Detalhes na seção 4. Só depois da autenticação e fora de transação (READY).
-  O estado não muda.
+- Details in section 4. Only after authentication and outside a transaction (READY).
+  The state does not change.
 
-#### FAILURE (`7F`) e IGNORED (`7E`)
+#### FAILURE (`7F`) and IGNORED (`7E`)
 
-- Formato e códigos na seção 6. IGNORED não tem campos.
+- Format and codes in section 6. IGNORED has no fields.
 
-### 3.6 Sequências que o driver 5.28.6 gera
+### 3.6 Sequences that driver 5.28.6 generates
 
 ```
-# conexão (bolt://, Bolt 5.4, servidor sem manifest)
+# connection (bolt://, Bolt 5.4, server without manifest)
 C: 60 60 B0 17  00 00 01 FF  00 08 08 05  00 02 04 04  00 00 00 03
 S: 00 00 04 05
 C: HELLO {"user_agent": "neo4j-python/5.28.6 ...", "bolt_agent": {...}}
@@ -611,17 +611,17 @@ C: LOGON {"scheme": "basic", "principal": "neo4j", "credentials": "..."}
 S: SUCCESS {"server": "Neo4j/5.26.0", "connection_id": "bolt-1"}
 S: SUCCESS {}
 
-# session.run (autocommit, sessão aberta com database="neo4j")
+# session.run (autocommit, session opened with database="neo4j")
 C: RUN "MATCH (n) RETURN n" {} {"db": "neo4j"}
 C: PULL {"n": 1000}
 S: SUCCESS {"fields": ["n"], "t_first": 1}
-S: RECORD [...]  (até 1000)
+S: RECORD [...]  (up to 1000)
 S: SUCCESS {"has_more": true}
 C: PULL {"n": 1000}
 S: RECORD [...]
 S: SUCCESS {"bookmark": "...", "type": "r", "t_last": 3, "db": "neo4j"}
 
-# execute_query (transação gerenciada)
+# execute_query (managed transaction)
 C: BEGIN {"db": "neo4j", "bookmarks": ["..."]}
 C: RUN "CREATE (n:X) RETURN n" {} {}
 C: PULL {"n": 1000}
@@ -632,7 +632,7 @@ S: SUCCESS {"type": "w", "t_last": 2, "db": "neo4j"}
 C: COMMIT
 S: SUCCESS {"bookmark": "..."}
 
-# falha (Bolt 5.4, formato de erro anterior à 5.7)
+# failure (Bolt 5.4, error format prior to 5.7)
 C: RUN "RETRUN 1" {} {}
 C: PULL {"n": 1000}
 S: FAILURE {"code": "Neo.ClientError.Statement.SyntaxError", "message": "..."}
@@ -640,380 +640,380 @@ S: IGNORED
 C: RESET
 S: SUCCESS {}
 
-# encerramento
+# closing
 C: GOODBYE
 ```
 
-Com Bolt 5.4 e o hint `telemetry.enabled`, entra `TELEMETRY <api>` antes de RUN
-ou BEGIN.
+With Bolt 5.4 and the `telemetry.enabled` hint, `TELEMETRY <api>` goes in before RUN
+or BEGIN.
 
 ---
 
-## 4. Roteamento
+## 4. Routing
 
-### 4.1 `bolt://` e `neo4j://` no driver
+### 4.1 `bolt://` and `neo4j://` in the driver
 
-- **`bolt://`, `bolt+s://`, `bolt+ssc://`:** driver direto, com pool de um
-  endereço só. O HELLO vai sem `routing` e não existe ROUTE. Parâmetros na
-  query string da URI geram aviso de depreciação e são ignorados. Sem
-  `database=`, nenhum `db` é enviado e o servidor usa o padrão.
-- **`neo4j://`, `neo4j+s://`, `neo4j+ssc://`:** driver de roteamento. O
-  contexto de roteamento é a query string da URI (cada chave uma vez só, valor
-  não vazio) mais `address` com o host:porta da URI. A chave `address` é
-  reservada. Esse contexto vai no HELLO (`routing`) e no ROUTE.
-- A doc do driver 5 diz que com `neo4j://` o driver recebe tabela de roteamento
-  mesmo sem cluster; quem quer uma máquina específica usa `bolt://`.
+- **`bolt://`, `bolt+s://`, `bolt+ssc://`:** direct driver, with a pool of a
+  single address. HELLO goes without `routing` and there is no ROUTE. Parameters in the
+  URI query string produce a deprecation warning and are ignored. Without
+  `database=`, no `db` is sent and the server uses the default.
+- **`neo4j://`, `neo4j+s://`, `neo4j+ssc://`:** routing driver. The
+  routing context is the URI query string (each key only once, non-empty
+  value) plus `address` with the host:port of the URI. The `address` key is
+  reserved. This context goes in HELLO (`routing`) and in ROUTE.
+- The driver 5 docs say that with `neo4j://` the driver gets a routing table
+  even without a cluster; whoever wants a specific machine uses `bolt://`.
 
-### 4.2 Quando o driver pede a tabela
+### 4.2 When the driver asks for the table
 
-- Há uma tabela por database. A primeira nasce com o endereço da URI como único
-  roteador.
-- Ao adquirir conexão para um modo (leitura ou escrita), a tabela precisa estar
-  "fresca": não expirada (atualizada há menos de `ttl` segundos), com pelo menos
-  um roteador e com pelo menos um servidor no papel pedido (READ para leitura,
-  WRITE para escrita). Senão o driver atualiza.
-- Ordem de tentativa: se a última tabela veio sem escritor (ou não existe),
-  primeiro o endereço inicial da URI, depois os roteadores conhecidos. Caso
-  contrário, os roteadores conhecidos primeiro e o endereço inicial por último.
-  Cada roteador é resolvido por DNS e todos os IPs são tentados.
-- Se nenhum roteador der tabela válida, levanta `ServiceUnavailable("Unable to
+- There is one table per database. The first one starts out with the URI address as the only
+  router.
+- When acquiring a connection for a mode (read or write), the table must be
+  "fresh": not expired (updated less than `ttl` seconds ago), with at least
+  one router and with at least one server in the requested role (READ for reads,
+  WRITE for writes). Otherwise the driver refreshes it.
+- Attempt order: if the last table came without a writer (or does not exist),
+  first the initial URI address, then the known routers.
+  Otherwise, the known routers first and the initial address last.
+  Each router is resolved through DNS and all IPs are tried.
+- If no router gives a valid table, it raises `ServiceUnavailable("Unable to
   retrieve routing information")`.
-- Tabela sem uso é apagada depois de `ttl` + 30 s.
-- Sessão sem `database=`: antes da primeira transação o driver manda ROUTE sem
-  `db`. O `rt.db` da resposta vira o database fixado da sessão, que passa a ir
-  em `db` nos BEGIN/RUN. Sem `rt.db`, pelo código a tabela fica guardada sob a
-  chave nula e as transações seguem sem `db`, sem resolução de nome.
-- Bolt 5.8: se todas as conexões do pool anunciarem `ssr.enabled: true`, o
-  driver pode pular esse ROUTE e usar o home database guardado em cache,
-  confiando no `db` do SUCCESS de BEGIN/RUN e no roteamento do lado do servidor.
-  **Recomendação:** não anunciar `ssr.enabled` sem ter roteamento do lado do
-  servidor.
+- An unused table is deleted after `ttl` + 30 s.
+- Session without `database=`: before the first transaction the driver sends ROUTE without
+  `db`. The `rt.db` of the response becomes the session's pinned database, which from then on goes
+  in `db` on BEGIN/RUN. Without `rt.db`, according to the code the table is stored under the
+  null key and the transactions proceed without `db`, with no name resolution.
+- Bolt 5.8: if all the connections in the pool advertise `ssr.enabled: true`, the
+  driver may skip this ROUTE and use the cached home database,
+  relying on the `db` in the BEGIN/RUN SUCCESS and on server-side routing.
+  **Recommendation:** do not advertise `ssr.enabled` without having server-side
+  routing.
 
-### 4.3 ROUTE: pedido e resposta
+### 4.3 ROUTE: request and response
 
-- **Campos (4.4+):**
-  - `routing` Dict: o contexto, com `address`.
+- **Fields (4.4+):**
+  - `routing` Dict: the context, with `address`.
   - `bookmarks` List<String>.
-  - `extra` Dict: `db` (null = database padrão configurado no servidor) e
-    `imp_user` (usuário impersonado, para resolver o home database dele).
-- **Na 4.3** o terceiro campo era `db` String em vez de `extra`.
-- **Driver:** manda o contexto de roteamento (ou `{}`), a lista de bookmarks da
-  sessão e um `extra` com `db`/`imp_user` só quando definidos.
+  - `extra` Dict: `db` (null = default database configured on the server) and
+    `imp_user` (impersonated user, to resolve that user's home database).
+- **In 4.3** the third field was `db` String instead of `extra`.
+- **Driver:** sends the routing context (or `{}`), the session's bookmark list
+  and an `extra` with `db`/`imp_user` only when set.
 - **SUCCESS:**
   `{"rt": {"ttl": Integer, "db": String, "servers": [{"addresses": [String], "role": "ROUTE" | "READ" | "WRITE"}, ...]}}`
-  - `ttl` em segundos.
-  - `db` (4.4+) é o database a que a tabela se refere.
-  - A doc diz que `servers` tem três entradas, uma por papel.
-- **Driver lê:** `rt.servers`, `rt.ttl` e `rt.db`.
-  - `rt` ou `servers`/`ttl` ausentes quebram o parsing.
-  - Endereço é `host:porta` (porta padrão 7687).
-  - O mesmo endereço pode aparecer em mais de um papel.
-  - Tabela com zero ROUTE ou zero READ é descartada como falha daquele
-    roteador. Zero WRITE é aceito, e a escrita espera o próximo refresh.
-- **Exemplo da doc:** ttl 1000, db `"foo"`, um ROUTE, dois READ, dois WRITE.
+  - `ttl` in seconds.
+  - `db` (4.4+) is the database the table refers to.
+  - The docs say that `servers` has three entries, one per role.
+- **Driver reads:** `rt.servers`, `rt.ttl` and `rt.db`.
+  - Missing `rt` or `servers`/`ttl` break the parsing.
+  - An address is `host:port` (default port 7687).
+  - The same address can appear in more than one role.
+  - A table with zero ROUTE or zero READ is discarded as a failure of that
+    router. Zero WRITE is accepted, and writes wait for the next refresh.
+- **Example from the docs:** ttl 1000, db `"foo"`, one ROUTE, two READ, two WRITE.
 
-### 4.4 Escolha do servidor e reação a falhas
+### 4.4 Server selection and reaction to failures
 
-- **Leitura** (`execute_read`, `routing_=READ`) vai para um READ. **Escrita**
-  (padrão de `session.run` e de `execute_query`) vai para um WRITE.
-- Entre os candidatos, o driver pega o de menos conexões em uso; empate é
-  sorteado.
-- **Falha de conexão** (ServiceUnavailable ou SessionExpired) desativa o
-  endereço: sai de todas as tabelas e as conexões ociosas para ele fecham.
-  Depois de atualizar a tabela, o driver fecha conexões de servidores que não
-  aparecem mais em nenhuma tabela.
-- **`Neo.ClientError.Cluster.NotALeader` e
-  `Neo.ClientError.General.ForbiddenOnReadOnlyDatabase`:** o endereço sai só da
-  lista WRITE daquele database, e o erro é retentável.
-- **`Neo.TransientError.General.DatabaseUnavailable`:** desativa o endereço
-  inteiro, e o erro é retentável.
+- **Reads** (`execute_read`, `routing_=READ`) go to a READ. **Writes**
+  (the default for `session.run` and `execute_query`) go to a WRITE.
+- Among the candidates, the driver picks the one with the fewest connections in use; a tie is
+  broken at random.
+- **Connection failure** (ServiceUnavailable or SessionExpired) deactivates the
+  address: it is removed from all tables and the idle connections to it are closed.
+  After refreshing the table, the driver closes connections to servers that no
+  longer appear in any table.
+- **`Neo.ClientError.Cluster.NotALeader` and
+  `Neo.ClientError.General.ForbiddenOnReadOnlyDatabase`:** the address is removed only from the
+  WRITE list of that database, and the error is retryable.
+- **`Neo.TransientError.General.DatabaseUnavailable`:** deactivates the whole
+  address, and the error is retryable.
 
-### 4.5 Operação na Neo4j (referência)
+### 4.5 Operation in Neo4j (reference)
 
-- `dbms.routing_ttl` define quanto tempo o chamador guarda a tabela (padrão
-  5 min, mínimo 1 s).
-- Normalmente há um escritor por database. Os demais servidores são leitores, e
-  todos os que hospedam o database aparecem como roteadores.
-- Roteamento do lado do servidor (`dbms.routing.enabled`, padrão true)
-  redireciona internamente a escrita que caiu num membro que não é líder. Só
-  funciona com `neo4j://`.
-- O endereço que vai na tabela é o anunciado (`server.bolt.advertised_address`).
+- `dbms.routing_ttl` defines how long the caller keeps the table (default
+  5 min, minimum 1 s).
+- Normally there is one writer per database. The other servers are readers, and
+  all the ones hosting the database appear as routers.
+- Server-side routing (`dbms.routing.enabled`, default true)
+  internally redirects a write that landed on a member that is not the leader. It only
+  works with `neo4j://`.
+- The address that goes in the table is the advertised one (`server.bolt.advertised_address`).
 
-**Recomendação para o Brainwire:**
+**Recommendation for Brainwire:**
 
-- **Instância única com `neo4j://`:** o próprio endereço anunciado nos três
-  papéis, com `ttl` de 300 s e o home database do usuário em `rt.db`.
-- **Cluster Raft:** o líder em WRITE, os seguidores (e opcionalmente o líder) em
-  READ, todos em ROUTE.
-- **Seguidor que recebe escrita:** FAILURE `Neo.ClientError.Cluster.NotALeader`.
+- **Single instance with `neo4j://`:** its own advertised address in all three
+  roles, with a `ttl` of 300 s and the user's home database in `rt.db`.
+- **Raft cluster:** the leader in WRITE, the followers (and optionally the leader) in
+  READ, all of them in ROUTE.
+- **Follower that receives a write:** FAILURE `Neo.ClientError.Cluster.NotALeader`.
 
 ---
 
 ## 5. Bookmarks
 
-### 5.1 O que a doc diz
+### 5.1 What the docs say
 
-- Bookmark é um token que representa um estado do banco. Com bookmarks no
-  pedido, o servidor não executa a transação antes de esses estados existirem.
-- Dentro de uma sessão o encadeamento é automático.
-- Para encadear sessões diferentes: juntar os `last_bookmarks()` num objeto
-  `Bookmarks` e passar na criação da nova sessão, ou compartilhar um bookmark
+- A bookmark is a token that represents a database state. With bookmarks in the
+  request, the server does not run the transaction before those states exist.
+- Within a session the chaining is automatic.
+- To chain different sessions: gather the `last_bookmarks()` into a
+  `Bookmarks` object and pass it when creating the new session, or share a bookmark
   manager.
-- `execute_query` usa por padrão o `driver.execute_query_bookmark_manager`, e
-  queries seguidas enxergam as anteriores.
-- Custo: a query espera o estado se propagar no cluster, então a doc recomenda
-  bookmark só quando consistência causal for necessária.
-- Na Neo4j, só servidor que já processou a transação marcada roda a próxima
-  transação do cliente.
+- `execute_query` uses `driver.execute_query_bookmark_manager` by default, and
+  consecutive queries see the previous ones.
+- Cost: the query waits for the state to propagate in the cluster, so the docs
+  recommend bookmarks only when causal consistency is needed.
+- In Neo4j, only a server that has already processed the marked transaction runs
+  the client's next transaction.
 
-### 5.2 Como o driver 5.28.6 propaga
+### 5.2 How the 5.28.6 driver propagates them
 
-- **Formato:** bookmark é String opaca. O driver nunca interpreta.
-- **Onde vai:**
-  - em `bookmarks` do BEGIN (transação explícita ou gerenciada);
-  - no RUN de autocommit;
-  - no ROUTE.
-  Nos três casos, só se a lista não for vazia.
-- **De onde vem:**
-  - `bookmark` do SUCCESS do COMMIT;
-  - `bookmark` do último SUCCESS (`has_more` false) de PULL/DISCARD no
+- **Format:** a bookmark is an opaque String. The driver never interprets it.
+- **Where it goes:**
+  - in `bookmarks` of BEGIN (explicit or managed transaction);
+  - in the autocommit RUN;
+  - in ROUTE.
+  In all three cases, only if the list is not empty.
+- **Where it comes from:**
+  - `bookmark` of the COMMIT SUCCESS;
+  - `bookmark` of the last SUCCESS (`has_more` false) of PULL/DISCARD in
     autocommit.
-- **Na sessão:** o bookmark novo substitui os anteriores, e a sessão passa a
-  mandar só ele. Se o servidor não devolver bookmark, a sessão mantém o que
-  tinha.
-- **No bookmark manager:** a cada atualização ele remove os bookmarks que a
-  transação usou e acrescenta os novos. Desde o driver 5.3 o manager não separa
-  bookmarks por database, então uma lista pode misturar bookmarks de databases
-  diferentes.
-- **No ROUTE:** um comentário no código do driver explica que os bookmarks
-  garantem que um database recém-criado já exista antes de pedir a tabela dele.
+- **In the session:** the new bookmark replaces the previous ones, and the session
+  then sends only that one. If the server does not return a bookmark, the session
+  keeps what it had.
+- **In the bookmark manager:** on each update it removes the bookmarks that the
+  transaction used and adds the new ones. Since driver 5.3 the manager does not
+  separate bookmarks by database, so a list can mix bookmarks from different
+  databases.
+- **In ROUTE:** a comment in the driver code explains that the bookmarks
+  ensure that a newly created database already exists before asking for its table.
 
-### 5.3 O que o servidor deve fazer
+### 5.3 What the server must do
 
-- **Antes de começar a transação**, garantir que o estado local inclua tudo que
-  cada bookmark representa. Se não chegar lá a tempo, responder
-  `Neo.TransientError.Transaction.BookmarkTimeout`: é transiente, então a
-  transação gerenciada do driver tenta de novo.
-- **Bookmark que não se consegue interpretar:**
+- **Before starting the transaction**, ensure that the local state includes everything
+  each bookmark represents. If it does not get there in time, respond with
+  `Neo.TransientError.Transaction.BookmarkTimeout`: it is transient, so the
+  driver's managed transaction tries again.
+- **Bookmark that cannot be interpreted:**
   `Neo.ClientError.Transaction.InvalidBookmark`.
-- **Mistura de databases:** a descrição de
-  `Neo.ClientError.Transaction.InvalidBookmarkMixture` diz que misturar
-  bookmarks gerados por databases diferentes é proibido. Como o bookmark
-  manager do driver mistura (seção 5.2), **não achei** doc oficial explicando como a
-  Neo4j 5 trata essa mistura na prática.
-- **Resposta:** devolver bookmark novo em todo COMMIT e no fim de todo
+- **Mixing databases:** the description of
+  `Neo.ClientError.Transaction.InvalidBookmarkMixture` says that mixing
+  bookmarks generated by different databases is forbidden. Since the driver's
+  bookmark manager mixes them (section 5.2), official docs explaining how
+  Neo4j 5 handles this mixing in practice were **not found**.
+- **Response:** return a new bookmark on every COMMIT and at the end of every
   autocommit.
-- **Timeout:** a Neo4j tem a configuração dinâmica
-  `db.transaction.bookmark_ready_timeout`. **Não achei** a descrição nem o
-  padrão nas páginas consultadas.
+- **Timeout:** Neo4j has the dynamic setting
+  `db.transaction.bookmark_ready_timeout`. Its description and default value were
+  **not found** in the pages consulted.
 
-**Recomendação para o Brainwire (coerente com o PLANO.md):**
+**Recommendation for Brainwire (consistent with PLAN.md):**
 
-- **Conteúdo do bookmark:** identifica o database e o índice do log Raft
-  aplicado no commit.
-- **Instância única:** todo bookmark válido já está satisfeito ao chegar.
-- **Seguidor:** espera o índice aplicado alcançar o do bookmark, com timeout.
-- **Lista com vários databases:** aceitar e esperar por cada um. Recusar
-  quebraria `execute_query` entre databases.
+- **Bookmark content:** identifies the database and the Raft log index
+  applied at the commit.
+- **Single instance:** every valid bookmark is already satisfied on arrival.
+- **Follower:** waits for the applied index to reach the bookmark's, with a timeout.
+- **List with several databases:** accept it and wait for each one. Refusing
+  would break `execute_query` across databases.
 
 ---
 
-## 6. Erros
+## 6. Errors
 
-### 6.1 Formato da FAILURE
+### 6.1 FAILURE format
 
-- **Bolt 1 a 5.6:** `{"code": "Neo.<Classificação>.<Categoria>.<Título>",
+- **Bolt 1 to 5.6:** `{"code": "Neo.<Classification>.<Category>.<Title>",
   "message": "..."}`.
 - **Bolt 5.7+:**
-  - `neo4j_code` String (o antigo `code`);
+  - `neo4j_code` String (the old `code`);
   - `message` String;
-  - `gql_status` String (o marcador estável, preferido ao `neo4j_code`);
-  - `description` String (descreve o `gql_status`);
-  - `diagnostic_record` Dict, com `OPERATION` (padrão `""`), `OPERATION_CODE`
-    (padrão `"0"`), `CURRENT_SCHEMA` (padrão `"/"`) e `_classification` (ex.:
-    `"CLIENT_ERROR"`), omitido quando é o padrão e podendo ter entradas extras;
-  - `cause` Dict opcional, com a mesma forma e aninhável.
-- **Bolt 6.0:** o texto de `message` não é mais estável; o marcador estável é
+  - `gql_status` String (the stable marker, preferred over `neo4j_code`);
+  - `description` String (describes the `gql_status`);
+  - `diagnostic_record` Dict, with `OPERATION` (default `""`), `OPERATION_CODE`
+    (default `"0"`), `CURRENT_SCHEMA` (default `"/"`) and `_classification` (e.g.
+    `"CLIENT_ERROR"`), omitted when it is the default, and it may have extra entries;
+  - `cause` optional Dict, with the same shape and nestable.
+- **Bolt 6.0:** the text of `message` is no longer stable; the stable marker is
   `gql_status`.
-- **Classificações do driver:** `CLIENT_ERROR`, `DATABASE_ERROR`,
-  `TRANSIENT_ERROR` e `UNKNOWN`.
+- **Driver classifications:** `CLIENT_ERROR`, `DATABASE_ERROR`,
+  `TRANSIENT_ERROR` and `UNKNOWN`.
 
-### 6.2 Como o driver 5.28.6 lê a FAILURE
+### 6.2 How the 5.28.6 driver reads the FAILURE
 
-- **Até 5.6:** lê `code` e `message`. Sem `code`, usa
+- **Up to 5.6:** reads `code` and `message`. Without `code`, it uses
   `Neo.DatabaseError.General.UnknownError`.
-- **5.7 em diante:**
-  - lê `neo4j_code`, não `code`;
-  - exige `gql_status`, `description` e `message` juntos, e se faltar um,
-    troca os três por valores genéricos (status `50N42` e a mensagem "An
+- **5.7 onward:**
+  - reads `neo4j_code`, not `code`;
+  - requires `gql_status`, `description` and `message` together, and if one is missing,
+    replaces all three with generic values (status `50N42` and the message "An
     unknown error occurred");
-  - sem `neo4j_code`, o erro vira `Neo.DatabaseError.General.UnknownError`.
-  Um servidor que negocie 5.7+ e mande o formato antigo faz todo erro virar
-  DatabaseError desconhecido, não retentável e sem mensagem.
-- **A classe vem do código:** o driver quebra o código em quatro partes por
-  ponto. A segunda parte (`ClientError`, `TransientError`, `DatabaseError`)
-  escolhe a classe; código com outro formato vira DatabaseError.
-- **Mesmo em 5.7+, a classificação e a retentativa saem do `neo4j_code`**, não
-  do `gql_status` nem do `_classification`.
-- **Efeito na plataforma:** o adaptador da Neo4j decide o fallback de
-  `CALL { ... } IN TRANSACTIONS` procurando marcadores como `syntaxerror` no
-  código e na mensagem. Código e mensagem fiéis aos da Neo4j não são
-  cosméticos.
+  - without `neo4j_code`, the error becomes `Neo.DatabaseError.General.UnknownError`.
+  A server that negotiates 5.7+ and sends the old format turns every error into
+  an unknown DatabaseError, not retryable and without a message.
+- **The class comes from the code:** the driver splits the code into four parts at
+  the dots. The second part (`ClientError`, `TransientError`, `DatabaseError`)
+  picks the class; a code in another format becomes DatabaseError.
+- **Even in 5.7+, classification and retry come from `neo4j_code`**, not
+  from `gql_status` or from `_classification`.
+- **Effect on the platform:** the Neo4j adapter decides the fallback of
+  `CALL { ... } IN TRANSACTIONS` by looking for markers like `syntaxerror` in the
+  code and in the message. Codes and messages faithful to Neo4j's are not
+  cosmetic.
 
-### 6.3 Retentativa e roteamento
+### 6.3 Retry and routing
 
-A transação gerenciada (`execute_read`, `execute_write`, `execute_query`) tenta
-de novo quando `is_retryable()` é verdadeiro, com backoff exponencial, até
-`max_transaction_retry_time` (padrão 30 s). Autocommit (`session.run`) nunca é
-retentado.
+The managed transaction (`execute_read`, `execute_write`, `execute_query`) tries
+again when `is_retryable()` is true, with exponential backoff, up to
+`max_transaction_retry_time` (default 30 s). Autocommit (`session.run`) is never
+retried.
 
-| Código ou situação | Classe no driver | Retenta? | Efeito no roteamento |
+| Code or situation | Class in the driver | Retries? | Effect on routing |
 |---|---|---|---|
-| `Neo.TransientError.*` (regra geral) | TransientError | sim | nenhum |
-| `Neo.TransientError.General.DatabaseUnavailable` | DatabaseUnavailable | sim | desativa o endereço |
-| `Neo.ClientError.Cluster.NotALeader` | NotALeader (subclasse de TransientError) | sim | tira o endereço dos WRITE daquele database |
-| `Neo.ClientError.General.ForbiddenOnReadOnlyDatabase` | ForbiddenOnReadOnlyDatabase (subclasse de TransientError) | sim | tira o endereço dos WRITE |
-| `Neo.ClientError.Security.AuthorizationExpired` | reclassificado como TransientError | sim | marca todas as conexões daquele endereço para reautenticar |
-| `Neo.TransientError.Transaction.Terminated` e `...LockClientStopped` | reescritos como `Neo.ClientError.Transaction.*` | não | nenhum |
-| `Neo.ClientError.Security.*` tratado pelo auth manager (`AuthManagers.basic`: `Unauthorized`; `AuthManagers.bearer`: `TokenExpired` e `Unauthorized`; credencial fixa não trata nada) | AuthError/TokenExpired | sim, se o manager tratar | nenhum |
-| demais `Neo.ClientError.*` (sintaxe, constraint, tipo...) | ClientError e subclasses | não | nenhum |
-| `Neo.DatabaseError.*` | DatabaseError | não | nenhum |
-| queda de conexão, sem servidor para o modo | ServiceUnavailable, SessionExpired | sim | desativa o endereço |
-| queda durante o COMMIT | IncompleteCommit | não | nenhum |
+| `Neo.TransientError.*` (general rule) | TransientError | yes | none |
+| `Neo.TransientError.General.DatabaseUnavailable` | DatabaseUnavailable | yes | deactivates the address |
+| `Neo.ClientError.Cluster.NotALeader` | NotALeader (subclass of TransientError) | yes | removes the address from WRITE for that database |
+| `Neo.ClientError.General.ForbiddenOnReadOnlyDatabase` | ForbiddenOnReadOnlyDatabase (subclass of TransientError) | yes | removes the address from WRITE |
+| `Neo.ClientError.Security.AuthorizationExpired` | reclassified as TransientError | yes | marks all connections to that address for re-authentication |
+| `Neo.TransientError.Transaction.Terminated` and `...LockClientStopped` | rewritten as `Neo.ClientError.Transaction.*` | no | none |
+| `Neo.ClientError.Security.*` handled by the auth manager (`AuthManagers.basic`: `Unauthorized`; `AuthManagers.bearer`: `TokenExpired` and `Unauthorized`; a fixed credential handles nothing) | AuthError/TokenExpired | yes, if the manager handles it | none |
+| other `Neo.ClientError.*` (syntax, constraint, type...) | ClientError and subclasses | no | none |
+| `Neo.DatabaseError.*` | DatabaseError | no | none |
+| connection drop, no server for the mode | ServiceUnavailable, SessionExpired | yes | deactivates the address |
+| drop during COMMIT | IncompleteCommit | no | none |
 
-Subclasses de ClientError mapeadas por código:
+ClientError subclasses mapped by code:
 
 - `CypherSyntaxError`: `Statement.SyntaxError`, `Statement.InvalidSyntax`.
 - `CypherTypeError`: `Statement.TypeError`, `Statement.InvalidType`,
   `Procedure.TypeError`.
 - `ConstraintError`: `Schema.ConstraintValidationFailed`,
-  `Schema.ConstraintViolation` e as equivalentes de `Statement`.
-- `Forbidden`: `Security.Forbidden`, `General.ReadOnly` e outras.
+  `Schema.ConstraintViolation` and the `Statement` equivalents.
+- `Forbidden`: `Security.Forbidden`, `General.ReadOnly` and others.
 - `AuthError`: `Security.Unauthorized`, `Security.AuthorizationFailed`.
 - `TokenExpired`: `Security.TokenExpired`.
 
-### 6.4 Erros durante a descoberta (ROUTE)
+### 6.4 Errors during discovery (ROUTE)
 
-- **Falham na hora,** sem tentar outro roteador:
+- **Fail immediately,** without trying another router:
   - `Neo.ClientError.Database.DatabaseNotFound`;
   - `Neo.ClientError.Transaction.InvalidBookmark`;
   - `Neo.ClientError.Transaction.InvalidBookmarkMixture`;
   - `Neo.ClientError.Statement.TypeError`;
   - `Neo.ClientError.Statement.ArgumentError`;
   - `Neo.ClientError.Request.Invalid`;
-  - qualquer `Neo.ClientError.Security.*`, menos `AuthorizationExpired`.
-- **Qualquer outro Neo4jError,** ServiceUnavailable ou SessionExpired no ROUTE:
-  o driver passa ao próximo roteador.
-- A lista de códigos da Neo4j também tem `Neo.ClientError.Cluster.Routing`
-  (não conseguiu rotear o pedido). O driver 5.28.6 não trata esse código de
-  forma especial.
+  - any `Neo.ClientError.Security.*`, except `AuthorizationExpired`.
+- **Any other Neo4jError,** ServiceUnavailable or SessionExpired in ROUTE:
+  the driver moves on to the next router.
+- The Neo4j code list also has `Neo.ClientError.Cluster.Routing`
+  (could not route the request). The 5.28.6 driver does not handle this code in
+  any special way.
 
-### 6.5 `server` que não começa com "Neo4j/"
+### 6.5 `server` that does not start with "Neo4j/"
 
 - **Driver 5.x:**
-  - Ao fim do `hello()`, depois das respostas de HELLO e LOGON, o driver chama
-    `check_supported_server_product`, e o teste é
+  - At the end of `hello()`, after the HELLO and LOGON responses, the driver calls
+    `check_supported_server_product`, and the test is
     `if not agent.startswith("Neo4j/")`.
-  - Se falhar, levanta `neo4j.exceptions.UnsupportedServerProduct(agent)` e
-    mata a conexão.
-  - Na 5.28.6 a exceção herda direto de `Exception`, então a retentativa não a
-    pega, e `verify_connectivity`, sessões e `execute_query` falham todos.
-  - Sem o campo `server`, o driver compara a string `"None"` e falha igual.
-- **Driver 6.x:** a checagem saiu no PR #1208, que tira as restrições à string
-  do agente (merge em 12/06/2025, linha 6.0). No 6.x, `UnsupportedServerProduct`
-  passou a significar "nenhuma versão Bolt em comum".
-- **Prática de mercado:** o Memgraph manda por padrão
-  `Neo4j/v5.11.0 compatible graph database server - Memgraph` (seção 7).
-- **Recomendação para o Brainwire:** algo como
-  `Neo4j/5.26.0 compatible (Brainwire/0.1.0)`. O prefixo `Neo4j/` é o que
-  importa para o driver 5.x.
+  - If it fails, it raises `neo4j.exceptions.UnsupportedServerProduct(agent)` and
+    kills the connection.
+  - In 5.28.6 the exception inherits directly from `Exception`, so retries do not
+    catch it, and `verify_connectivity`, sessions and `execute_query` all fail.
+  - Without the `server` field, the driver compares the string `"None"` and fails the same way.
+- **Driver 6.x:** the check was removed in PR #1208, which lifts the restrictions on the
+  agent string (merged on 2025-06-12, 6.0 line). In 6.x, `UnsupportedServerProduct`
+  came to mean "no Bolt version in common".
+- **Market practice:** Memgraph sends by default
+  `Neo4j/v5.11.0 compatible graph database server - Memgraph` (section 7).
+- **Recommendation for Brainwire:** something like
+  `Neo4j/5.26.0 compatible (Brainwire/0.1.0)`. The `Neo4j/` prefix is what
+  matters to the 5.x driver.
 
-### 6.6 Outras falhas que derrubam conexão
+### 6.6 Other failures that drop the connection
 
-- **FAILURE no HELLO ou no LOGON:** o servidor fecha e o driver mata a conexão.
-- **FAILURE no RESET:** o driver descarta a conexão.
-- **Mensagem inesperada:** erro de protocolo e DEFUNCT.
-
----
-
-## 7. Memgraph e Amazon Neptune falando Bolt
-
-### 7.1 Memgraph (documentação pública)
-
-- **Versões do Bolt:** 1 (desde o Memgraph 0.8.0), 4.0 e 4.1 (desde 1.2.0), 4.3
-  (desde 2.1.0) e 5.2 (desde 2.9.0).
-- **Nome do servidor:** vem da flag `--bolt-server-name-for-init`. O padrão é
-  `Neo4j/v5.11.0 compatible graph database server - Memgraph`. A doc do cliente
-  Python manda, no Memgraph anterior a 2.11, trocar para `Neo4j/5.2.0` para o
-  driver da Neo4j funcionar.
-- **Roteamento (`neo4j://`):** só em alta disponibilidade (Enterprise), falando
-  com os coordenadores.
-  - O ROUTE vai a qualquer coordenador. A tabela traz writers = o MAIN atual,
-    readers = as réplicas (e opcionalmente o MAIN), routers = os coordenadores.
-  - O TTL é fixo em 5 minutos, e algumas mudanças de topologia ficam invisíveis
-    até ele vencer.
-  - Configurar o cluster exige `bolt://`, não `neo4j://`.
-  - Escrita numa réplica falha.
-- **Vários databases:** multi-tenant é Enterprise desde a 2.10. A doc recomenda
-  passar `database_="memgraph"` nas queries. Impersonação também é Enterprise.
-- **`element_id`:** devolve o ID interno do nó, que não é o ID definido pelo
-  usuário.
-- **Bookmarks:** **não achei** nada na doc do Memgraph.
-
-### 7.2 Amazon Neptune (documentação pública)
-
-- **Esquema e endpoints:** a doc manda conectar com o esquema `bolt` e não
-  menciona `neo4j://`. Com várias instâncias, a AWS recomenda dois drivers: um
-  para o escritor e um para as réplicas de leitura (ou um por endpoint
-  customizado).
-- **Transporte:** só TCP, sem WebSocket. Não dá para pôr Application Load
-  Balancer na frente. A porta é a do cluster (8182 nos exemplos), e os exemplos
-  usam criptografia (`encrypted=True`, `bolt+s`).
-- **Versão:** o servidor escolhe a maior versão Bolt adequada entre 1, 2, 3 e
-  4.0. **Inferência minha:** diante das propostas do driver Python 5.28.6, isso
-  resulta em Bolt 3.
-- **Conexões:**
-  - até 1000 conexões Bolt simultâneas (512 em t3.medium e t4g.medium);
-  - conexão ociosa por 20 minutos é fechada;
-  - com IAM, a conexão cai pouco mais de 10 dias depois de aberta.
-- **Autenticação:**
-  - sem IAM, as credenciais são ignoradas (dá para usar `AuthTokens.none()`);
-  - com IAM, o token é uma assinatura SigV4 posta em `credentials` do esquema
-    `basic`, com principal fictício e realm `realm`;
-  - a assinatura vence em cerca de 5 minutos, o que quebrava drivers sem
-    renovação de token.
-- **Transações e erros (desvios da spec do Bolt):**
-  - uma transação por conexão;
-  - query nova com resultado anterior não consumido é descartada, e para
-    descartar o anterior o cliente precisa mandar RESET;
-  - exceção dentro de transação faz o servidor desfazer a transação e fechar a
-    conexão.
-- **Bookmarks:** aparecem na lista de recursos da Neo4j ausentes no Neptune.
-  Para ler a própria escrita, a AWS manda ler pelo endpoint do cluster (réplicas
-  são eventualmente consistentes, em geral abaixo de 100 ms).
-- **Vários databases:** um grafo por cluster.
-- **IDs:** IDs de nó e relação são strings, e `id()` devolve string.
-- **Procedures:** não há `CALL`. **Inferência minha:** isso exclui o roteamento
-  por procedure dos Bolt 3 e 4.x.
+- **FAILURE on HELLO or LOGON:** the server closes and the driver kills the connection.
+- **FAILURE on RESET:** the driver discards the connection.
+- **Unexpected message:** protocol error and DEFUNCT.
 
 ---
 
-## Lacunas (o que não achei)
+## 7. Memgraph and Amazon Neptune speaking Bolt
 
-- Documentação oficial do Bolt 6.1 e do PackStream v2. Só existem no código do
-  driver 6.3.1.
-- Descrição e valor padrão de `db.transaction.bookmark_ready_timeout`.
-- Como a Neo4j 5 trata bookmarks de databases diferentes na mesma lista, que é
-  o que o bookmark manager do driver produz.
-- Formato dos bookmarks da Neo4j (a doc os trata como opacos).
-- O que Memgraph documenta sobre bookmarks.
-- A string `server` que o Neptune anuncia.
+### 7.1 Memgraph (public documentation)
+
+- **Bolt versions:** 1 (since Memgraph 0.8.0), 4.0 and 4.1 (since 1.2.0), 4.3
+  (since 2.1.0) and 5.2 (since 2.9.0).
+- **Server name:** comes from the `--bolt-server-name-for-init` flag. The default is
+  `Neo4j/v5.11.0 compatible graph database server - Memgraph`. The Python client
+  docs say that, on Memgraph before 2.11, it must be changed to `Neo4j/5.2.0` for the
+  Neo4j driver to work.
+- **Routing (`neo4j://`):** only in high availability (Enterprise), talking
+  to the coordinators.
+  - ROUTE goes to any coordinator. The table has writers = the current MAIN,
+    readers = the replicas (and optionally the MAIN), routers = the coordinators.
+  - The TTL is fixed at 5 minutes, and some topology changes stay invisible
+    until it expires.
+  - Configuring the cluster requires `bolt://`, not `neo4j://`.
+  - A write to a replica fails.
+- **Multiple databases:** multi-tenancy has been Enterprise since 2.10. The docs recommend
+  passing `database_="memgraph"` in queries. Impersonation is also Enterprise.
+- **`element_id`:** returns the node's internal ID, which is not the ID defined by the
+  user.
+- **Bookmarks:** **not found** in the Memgraph docs.
+
+### 7.2 Amazon Neptune (public documentation)
+
+- **Scheme and endpoints:** the docs say to connect with the `bolt` scheme and do not
+  mention `neo4j://`. With several instances, AWS recommends two drivers: one
+  for the writer and one for the read replicas (or one per custom
+  endpoint).
+- **Transport:** TCP only, no WebSocket. You cannot put an Application Load
+  Balancer in front. The port is the cluster's (8182 in the examples), and the examples
+  use encryption (`encrypted=True`, `bolt+s`).
+- **Version:** the server picks the highest suitable Bolt version among 1, 2, 3 and
+  4.0. **My inference:** given the proposals of the 5.28.6 Python driver, this
+  results in Bolt 3.
+- **Connections:**
+  - up to 1,000 simultaneous Bolt connections (512 on t3.medium and t4g.medium);
+  - a connection idle for 20 minutes is closed;
+  - with IAM, the connection drops a little over 10 days after it is opened.
+- **Authentication:**
+  - without IAM, credentials are ignored (you can use `AuthTokens.none()`);
+  - with IAM, the token is a SigV4 signature placed in `credentials` of the
+    `basic` scheme, with a dummy principal and realm `realm`;
+  - the signature expires in about 5 minutes, which used to break drivers without
+    token renewal.
+- **Transactions and errors (deviations from the Bolt spec):**
+  - one transaction per connection;
+  - a new query is discarded if the previous result was not consumed, and to
+    discard the previous one the client must send RESET;
+  - an exception inside a transaction makes the server roll back the transaction and close the
+    connection.
+- **Bookmarks:** they appear in the list of Neo4j features missing from Neptune.
+  To read your own write, AWS says to read through the cluster endpoint (replicas
+  are eventually consistent, usually under 100 ms).
+- **Multiple databases:** one graph per cluster.
+- **IDs:** node and relationship IDs are strings, and `id()` returns a string.
+- **Procedures:** there is no `CALL`. **My inference:** this rules out procedure-based
+  routing in Bolt 3 and 4.x.
 
 ---
 
-## 8. Fontes
+## Gaps (what was not found)
 
-Especificação do Bolt (site e fonte):
+- Official documentation for Bolt 6.1 and PackStream v2. They only exist in the
+  6.3.1 driver code.
+- Description and default value of `db.transaction.bookmark_ready_timeout`.
+- How Neo4j 5 handles bookmarks from different databases in the same list, which is
+  what the driver's bookmark manager produces.
+- Format of Neo4j bookmarks (the docs treat them as opaque).
+- What Memgraph documents about bookmarks.
+- The `server` string that Neptune announces.
+
+---
+
+## 8. Sources
+
+Bolt specification (site and source):
 
 - https://neo4j.com/docs/bolt/current/
 - https://neo4j.com/docs/bolt/current/bolt/
@@ -1026,9 +1026,9 @@ Especificação do Bolt (site e fonte):
 - https://neo4j.com/docs/bolt/current/appendix/version-5/
 - https://neo4j.com/docs/bolt/current/appendix/connection-hints/
 - https://neo4j.com/docs/bolt/current/appendix/message-exchange-examples/
-- https://github.com/neo4j-drivers/docs-bolt (fonte AsciiDoc em `modules/ROOT/pages/`)
+- https://github.com/neo4j-drivers/docs-bolt (AsciiDoc source in `modules/ROOT/pages/`)
 
-Driver Python (código lido na tag 5.28.6, salvo indicação):
+Python driver (code read at tag 5.28.6, unless otherwise noted):
 
 - https://github.com/neo4j/neo4j-python-driver/blob/5.28.6/src/neo4j/_async/io/_bolt.py
 - https://github.com/neo4j/neo4j-python-driver/blob/5.28.6/src/neo4j/_async/io/_bolt_socket.py
@@ -1061,7 +1061,7 @@ Driver Python (código lido na tag 5.28.6, salvo indicação):
 - https://github.com/neo4j/neo4j-python-driver/pull/1164
 - https://pypi.org/project/neo4j/
 
-Manuais da Neo4j:
+Neo4j manuals:
 
 - https://neo4j.com/docs/python-manual/5/bookmarks/
 - https://neo4j.com/docs/python-manual/5/connect-advanced/
@@ -1086,9 +1086,9 @@ Amazon Neptune:
 - https://docs.aws.amazon.com/neptune/latest/userguide/migration-compatibility.html
 - https://docs.aws.amazon.com/neptune/latest/userguide/feature-opencypher-compliance.html
 
-Neste repositório:
+In this repository:
 
 - `client-core/pyproject.toml` (extra `neo4j`: `neo4j>=5.0,<6`)
-- `client-core/src/client_core/repository/neo4j.py` (uso de `element_id`,
-  `execute_query` e do código de erro)
-- `client-brainwire/PLANO.md` (bookmark = índice do log Raft)
+- `client-core/src/client_core/repository/neo4j.py` (use of `element_id`,
+  `execute_query` and the error code)
+- `client-brainwire/PLAN.md` (bookmark = Raft log index)

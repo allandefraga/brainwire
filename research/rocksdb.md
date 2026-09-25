@@ -1,377 +1,377 @@
-# RocksDB no Brainwire: memória, recursos compartilhados, carga e purga
+# RocksDB in Brainwire: memory, shared resources, loading and purging
 
-Pesquisa de 24/09/2026 para a seção 1 (armazenamento) do spec do Brainwire:
-motor de grafo em Rust sobre RocksDB, 5 bilhões de elementos por grafo, processo
-limitado a 16 GB de RAM, dados em NVMe e um RocksDB por database na mesma
-instância.
+Research from 2026-09-24 for section 1 (storage) of the Brainwire spec:
+a graph engine in Rust on top of RocksDB, 5 billion elements per graph, a process
+limited to 16 GB of RAM, data on NVMe and one RocksDB per database in the same
+instance.
 
-**Como foi feita.** Tudo lido pela web, sem clone e sem download: a wiki do
-RocksDB, headers e alguns arquivos de código do branch `main` do
-`facebook/rocksdb` (pelo raw do GitHub), o `HISTORY.md`, posts do blog oficial,
-issues e PRs, a documentação do crate no docs.rs, o código do crate na tag
-`v0.25.0` e a API do crates.io. Os headers são os do `main`, que em 24/09 estava
-na 11.11.0; o crate empacota a 11.8.1, então algum comentário ou padrão pode
-diferir entre as duas. O texto das fontes está parafraseado em português, com a
-fonte ao lado. Onde a fonte não confirmou algo, está escrito "não achei". O que
-está marcado como **recomendação** é inferência minha. Conta sem fonte ao lado é
-minha, com as hipóteses escritas.
+**How it was done.** Everything was read over the web, with no clone and no download: the
+RocksDB wiki, headers and some code files from the `main` branch of
+`facebook/rocksdb` (through GitHub raw), the `HISTORY.md`, posts from the official blog,
+issues and PRs, the crate documentation on docs.rs, the crate code at tag
+`v0.25.0` and the crates.io API. The headers are the ones from `main`, which on 2026-09-24 was
+at 11.11.0; the crate bundles 11.8.1, so some comment or default may
+differ between the two. The text of the sources is paraphrased in English, with the
+source next to it. Where the source did not confirm something, it says "not found". What
+is marked as **recommendation** is my inference. A calculation with no source next to it is
+mine, with the assumptions written out.
 
-**Versões.** O crate `rocksdb` (repositório `rust-rocksdb/rust-rocksdb`) está na
-0.25.0, de 16/08/2026, sobre o `librocksdb-sys` 0.19.0+11.8.1, isto é, RocksDB
-11.8.1. A versão anterior, 0.24.0, saiu em 10/08/2025. Existe um fork publicado
-com outro nome, o crate `rust-rocksdb` (repositório `zaidoon1/rust-rocksdb`), na
-0.53.0 de 05/09/2026, também sobre a 11.8.1 (`rust-librocksdb-sys`
-0.48.1+11.8.1), com dez versões entre janeiro e setembro de 2026. Neste texto,
-"o crate" é o `rocksdb` 0.25.0; o fork aparece como alternativa quando o crate
-não expõe algo.
+**Versions.** The `rocksdb` crate (repository `rust-rocksdb/rust-rocksdb`) is at
+0.25.0, from 2026-08-16, on top of `librocksdb-sys` 0.19.0+11.8.1, that is, RocksDB
+11.8.1. The previous version, 0.24.0, came out on 2025-08-10. There is a fork published
+under another name, the `rust-rocksdb` crate (repository `zaidoon1/rust-rocksdb`), at
+0.53.0 from 2026-09-05, also on top of 11.8.1 (`rust-librocksdb-sys`
+0.48.1+11.8.1), with ten versions between January and September 2026. In this text,
+"the crate" is `rocksdb` 0.25.0; the fork appears as an alternative when the crate
+does not expose something.
 
 ---
 
-## Resumo
+## Summary
 
-Configuração recomendada, tudo a medir no gate de 5 bilhões:
+Recommended configuration, all of it to be measured at the 5 billion gate:
 
-1. Um único `Cache::new_hyper_clock_cache(capacidade, 0)` no processo, passado a
-   todas as famílias de todos os databases. Como o custo das memtables é cobrado
-   nele, a capacidade inclui as memtables: para ~9 GB de blocos e ~1 GB de
-   memtables, o cache é de 10 GB. A tabela 1.5 do spec soma os dois por fora.
-2. Um único `WriteBufferManager` de 1 GB, com custo no cache e
-   `allow_stall = false`, por causa de travamentos relatados com muitas famílias
-   e databases no mesmo gerenciador (seção 8.3).
-3. Índice e filtro particionados nas famílias grandes, com o topo fixado e as
-   partições no cache, e bloco de dados de 16 KB. O que precisa ficar residente
-   cai para dezenas de MB por grafo (seção 1.3).
-4. Filtro escolhido por família. Bloom de 10 bits em todas as 10 bilhões de
-   chaves custaria 12,5 GB. Com prefixo de 8 bytes em `out` e `in`,
-   `optimize_filters_for_hits` onde a busca quase sempre acha e filtro de chave
-   inteira só na `pk`, a conta fica entre 2,3 e 5,4 GB, que ficam no cache e não
-   precisam ser residentes.
-5. LZ4 em `compression_type` e ZSTD em `bottommost_compression`, com
-   `max_dict_bytes` de 16 KB e `zstd_max_train_bytes` de 100 vezes isso. Evitar
-   `compression_per_level`, cujas posições passam a contar a partir do nível
-   base com `level_compaction_dynamic_level_bytes`.
-6. Carga de 5 bilhões pelo caminho offline: SST escrito em ordem, faixas
-   disjuntas por família, ingerido num database vazio. Os arquivos vão direto
-   para o último nível e não pagam a amplificação de escrita da compactação
-   (33 vezes no exemplo do guia de tuning).
-7. Nada de `prepare_for_bulk_load()` no `bulk()` online: ele reduz o DB a 2
-   níveis e desliga a compactação automática.
-8. Para o commitador do spec, DB comum com validação própria. O
-   `OptimisticTransactionDB` está pronto no crate, mas recusa DeleteRange no
-   caminho da transação e segura histórico de memtables em memória (seção 5.6).
-9. Purga física com `compact_range_cf_opt` e `BottommostLevelCompaction::Force`
-   na faixa afetada, com `exclusive_manual_compaction = false`. O motor só
-   declara o dado apagado depois de conferir snapshots, arquivos obsoletos, WAL,
-   checkpoints e backups (seção 6.5).
-10. `max_open_files = -1` (padrão) e `ulimit -n` do container acima do total de
-    SSTs de todos os databases.
+1. A single `Cache::new_hyper_clock_cache(capacity, 0)` in the process, passed to
+   all families of all databases. Since the memtables' cost is charged
+   to it, the capacity includes the memtables: for ~9 GB of blocks and ~1 GB of
+   memtables, the cache is 10 GB. Table 1.5 of the spec adds the two up separately.
+2. A single 1 GB `WriteBufferManager`, with its cost charged to the cache and
+   `allow_stall = false`, because of reported hangs with many families
+   and databases on the same manager (section 8.3).
+3. Partitioned index and filter in the large families, with the top level pinned and the
+   partitions in the cache, and a 16 KB data block. What needs to stay resident
+   drops to tens of MB per graph (section 1.3).
+4. Filter chosen per family. A 10-bit Bloom on all 10 billion
+   keys would cost 12.5 GB. With an 8-byte prefix on `out` and `in`,
+   `optimize_filters_for_hits` where lookups almost always hit, and a whole-key
+   filter only on `pk`, the total comes to between 2.3 and 5.4 GB, which stay in the cache and do not
+   need to be resident.
+5. LZ4 in `compression_type` and ZSTD in `bottommost_compression`, with
+   `max_dict_bytes` of 16 KB and `zstd_max_train_bytes` of 100 times that. Avoid
+   `compression_per_level`, whose positions start counting from the base
+   level with `level_compaction_dynamic_level_bytes`.
+6. Loading 5 billion through the offline path: SSTs written in order, disjoint
+   ranges per family, ingested into an empty database. The files go straight
+   to the last level and do not pay the write amplification of compaction
+   (33 times in the tuning guide's example).
+7. No `prepare_for_bulk_load()` in the online `bulk()`: it reduces the DB to 2
+   levels and turns off automatic compaction.
+8. For the spec's committer, a plain DB with its own validation. The
+   `OptimisticTransactionDB` is ready in the crate, but it rejects DeleteRange on the
+   transaction path and holds memtable history in memory (section 5.6).
+9. Physical purge with `compact_range_cf_opt` and `BottommostLevelCompaction::Force`
+   on the affected range, with `exclusive_manual_compaction = false`. The engine only
+   declares the data deleted after checking snapshots, obsolete files, WAL,
+   checkpoints and backups (section 6.5).
+10. `max_open_files = -1` (default) and the container's `ulimit -n` above the total number of
+    SSTs across all databases.
 
-O que o crate não expõe e pesa aqui: `WriteBatchWithIndex`; as opções do
-`OptimisticTransactionDB` (política de validação e buckets de lock) e a política
-de escrita do `TransactionDB`; `SstFileManager`; `strict_capacity_limit` e
-`high_pri_pool_ratio` do LRU; `cache_usage_options`;
-`fail_if_not_bottommost_level`, `link_files` e `PrepareFileIngestion` na
-ingestão; `max_dict_buffer_bytes` e `use_zstd_dict_trainer`; ajustes do
-`BackupEngineOptions` além de threads e sync; `two_write_queues`;
-`auto_prefix_mode`. O fork cobre boa parte (seção 7). Com a feature `raw-ptr`, o
-crate entrega o ponteiro C do DB, do `Options` e do `Env` (trait `AsRawPtr`), e o
-`librocksdb-sys` traz o C API, então vários desses itens saem por FFI, com
+What the crate does not expose and matters here: `WriteBatchWithIndex`; the options of
+`OptimisticTransactionDB` (validation policy and lock buckets) and the write
+policy of `TransactionDB`; `SstFileManager`; `strict_capacity_limit` and
+`high_pri_pool_ratio` of the LRU; `cache_usage_options`;
+`fail_if_not_bottommost_level`, `link_files` and `PrepareFileIngestion` in
+ingestion; `max_dict_buffer_bytes` and `use_zstd_dict_trainer`; settings of
+`BackupEngineOptions` beyond threads and sync; `two_write_queues`;
+`auto_prefix_mode`. The fork covers a good part of it (section 7). With the `raw-ptr` feature, the
+crate hands out the C pointer of the DB, of `Options` and of `Env` (trait `AsRawPtr`), and
+`librocksdb-sys` ships the C API, so several of these items can be reached through FFI, with
 `unsafe`.
 
 ---
 
-## 1. Memória com bilhões de chaves
+## 1. Memory with billions of keys
 
-### 1.1 Índice e filtro particionados
+### 1.1 Partitioned index and filter
 
-Sem partição, cada SST tem um bloco de índice e um de filtro inteiros. A wiki de
-índice particionado dá a ordem de grandeza: num SST de 256 MB, é comum o índice
-ter 0,5 MB e o filtro 5 MB, contra blocos de dados de 4 a 32 KB. Com partição, o
-índice e o filtro viram blocos pequenos (as partições) com um índice de topo;
-só o topo precisa estar em memória, e as partições entram no block cache quando
-alguém precisa delas.
+Without partitioning, each SST has one whole index block and one whole filter block. The partitioned
+index wiki gives the order of magnitude: in a 256 MB SST, it is common for the index
+to be 0.5 MB and the filter 5 MB, against data blocks of 4 to 32 KB. With partitioning, the
+index and the filter become small blocks (the partitions) with a top-level index;
+only the top level needs to be in memory, and the partitions enter the block cache when
+someone needs them.
 
-| Opção no C++ | No crate | Efeito |
+| C++ option | In the crate | Effect |
 |---|---|---|
-| `index_type = kTwoLevelIndexSearch` | `BlockBasedOptions::set_index_type(BlockBasedIndexType::TwoLevelIndexSearch)` | índice em partições; elas usam o block cache mesmo com `cache_index_and_filter_blocks = false` (`table.h`) |
-| `partition_filters = true` | `set_partition_filters(true)` | filtro em partições; exige filtro "full", não o antigo por bloco |
-| `metadata_block_size = 4096` | `set_metadata_block_size(4096)` | tamanho alvo de cada partição |
-| `cache_index_and_filter_blocks = true` | `set_cache_index_and_filter_blocks(true)` | o topo também vai para o cache e conta na capacidade |
-| `cache_index_and_filter_blocks_with_high_priority` (padrão `true`) | `set_cache_index_and_filter_blocks_with_high_priority(true)` | índice, filtro e dicionário entram com prioridade alta |
-| `pin_top_level_index_and_filter` (padrão `true`) | `set_pin_top_level_index_and_filter(true)` | o table reader segura o topo, que só sai do cache quando o arquivo fecha |
-| `metadata_cache_options` | `set_top_level_index_pinning_tier`, `set_partition_pinning_tier`, `set_unpartitioned_pinning_tier`, com `BlockBasedTablePinningTier::{Fallback, None, FlushAndSimilar, All}` | fixação por tipo de bloco e por camada de arquivo |
-| `decouple_partitioned_filters` | não exposto | padrão `true` desde a 10.6.0, já marcado como deprecado |
+| `index_type = kTwoLevelIndexSearch` | `BlockBasedOptions::set_index_type(BlockBasedIndexType::TwoLevelIndexSearch)` | index in partitions; they use the block cache even with `cache_index_and_filter_blocks = false` (`table.h`) |
+| `partition_filters = true` | `set_partition_filters(true)` | filter in partitions; requires a "full" filter, not the old per-block one |
+| `metadata_block_size = 4096` | `set_metadata_block_size(4096)` | target size of each partition |
+| `cache_index_and_filter_blocks = true` | `set_cache_index_and_filter_blocks(true)` | the top level also goes into the cache and counts toward its capacity |
+| `cache_index_and_filter_blocks_with_high_priority` (default `true`) | `set_cache_index_and_filter_blocks_with_high_priority(true)` | index, filter and dictionary enter with high priority |
+| `pin_top_level_index_and_filter` (default `true`) | `set_pin_top_level_index_and_filter(true)` | the table reader holds the top level, which only leaves the cache when the file closes |
+| `metadata_cache_options` | `set_top_level_index_pinning_tier`, `set_partition_pinning_tier`, `set_unpartitioned_pinning_tier`, with `BlockBasedTablePinningTier::{Fallback, None, FlushAndSimilar, All}` | pinning per block type and per file tier |
+| `decouple_partitioned_filters` | not exposed | default `true` since 10.6.0, already marked as deprecated |
 
-Os dois `pin_*` estão marcados como deprecados no `table.h` atual em favor de
-`metadata_cache_options`, cujo padrão (`kFallback`) repete o comportamento
-antigo. O crate expõe as duas formas.
+The two `pin_*` are marked as deprecated in the current `table.h` in favor of
+`metadata_cache_options`, whose default (`kFallback`) repeats the old
+behavior. The crate exposes both forms.
 
-Custos, pela wiki: o topo ocupa de 0,1% a 1% do índice e do filtro; se ele não
-estiver no cache, a leitura faz uma I/O a mais; leitura aleatória frequente no
-mesmo SST carrega uma partição diferente a cada vez. A wiki também avisa que
-blocos fixados podem passar da capacidade do cache quando `strict_capacity_limit`
-está desligado, que é o padrão. No teste com Linkbench em SSD de 300 GB, reduzir
-a memória de 6 para 2 GB derrubou a vazão de 38 mil para 30 mil com partição e
-para 23 mil sem.
+Costs, according to the wiki: the top level takes 0.1% to 1% of the index and filter; if it is not
+in the cache, the read does one extra I/O; frequent random reads in the
+same SST load a different partition each time. The wiki also warns that
+pinned blocks can exceed the cache capacity when `strict_capacity_limit`
+is off, which is the default. In the Linkbench test on a 300 GB SSD, reducing
+memory from 6 to 2 GB dropped throughput from 38 thousand to 30 thousand with partitioning and
+to 23 thousand without.
 
-### 1.2 Bloom, Ribbon e custo por chave
+### 1.2 Bloom, Ribbon and cost per key
 
-Bloom, pela wiki do filtro:
+Bloom, according to the filter wiki:
 
-| Bits por chave | Falso positivo |
+| Bits per key | False positive |
 |---|---|
-| 1,5 | 50% |
-| 2,9 | 25% |
-| 4,9 | 10% |
-| 9,9 | 1% |
-| 15,5 | 0,1% |
+| 1.5 | 50% |
+| 2.9 | 25% |
+| 4.9 | 10% |
+| 9.9 | 1% |
+| 15.5 | 0.1% |
 
-O tamanho é linear: com 10 bits, o filtro ocupa número de chaves × 10 bits (wiki
-de uso de memória). O Bloom do `format_version = 5` em diante usa hash de 64 bits
-e, segundo a wiki, escala para muitos bilhões de chaves num filtro só; o formato
-antigo não descia de ~0,1% de falso positivo nem com 100 bits por chave.
+The size is linear: with 10 bits, the filter takes number of keys × 10 bits (memory
+usage wiki). Bloom from `format_version = 5` onward uses a 64-bit hash
+and, according to the wiki, scales to many billions of keys in a single filter; the old
+format did not go below ~0.1% false positives even with 100 bits per key.
 
-O Ribbon ocupa cerca de 30% menos que o Bloom para a mesma taxa, ao custo de 3 a
-4 vezes mais CPU na construção: `NewRibbonFilterPolicy(9.9)` dá 1% com ~7 bits por
-chave. O `filter_policy.h` avisa que construir um filtro muito grande usa memória
-temporária que ninguém contabiliza: ~3 GB para 100 milhões de chaves num único
-filtro, contra 1 GB no Bloom. Com filtro particionado, cada partição é finalizada
-quando é cortada (`CutAFilterBlock` chama `Finish`, em
-`partitioned_filter_block.cc`), então o pico fica por partição, não por arquivo.
-O modo híbrido (`bloom_before_level`) usa Bloom nos níveis de cima e Ribbon
-embaixo; o valor padrão 0 gera Bloom só nos flushes.
+Ribbon takes up about 30% less than Bloom for the same rate, at the cost of 3 to
+4 times more CPU during construction: `NewRibbonFilterPolicy(9.9)` gives 1% with ~7 bits per
+key. `filter_policy.h` warns that building a very large filter uses temporary
+memory that nobody accounts for: ~3 GB for 100 million keys in a single
+filter, against 1 GB for Bloom. With a partitioned filter, each partition is finalized
+when it is cut (`CutAFilterBlock` calls `Finish`, in
+`partitioned_filter_block.cc`), so the peak is per partition, not per file.
+The hybrid mode (`bloom_before_level`) uses Bloom in the upper levels and Ribbon
+below; the default value 0 produces Bloom only on flushes.
 
-Três opções mudam a conta:
+Three options change the math:
 
-- `optimize_filters_for_memory` (padrão `true` desde a 9.2.0) ajusta o tamanho de
-  cada filtro para reduzir a fragmentação do alocador, mantendo a taxa de falso
-  positivo agregada no alvo.
-- `optimize_filters_for_hits` (da família, padrão `false`) não grava filtro no
-  último nível, que tem a maior parte dos dados. Para busca que acha, esse filtro
-  não ajuda; os dos outros níveis continuam úteis, porque dizem se vale descer
-  naquele nível (`advanced_options.h`).
-- Com prefix extractor e `whole_key_filtering = false`, só o prefixo entra no
-  filtro, e prefixos repetidos em sequência viram uma entrada só: o
-  `filter_policy.cc` descarta hash igual ao anterior e comenta que, com prefixo,
-  a repetição é comum e sempre adjacente. Como as arestas de um nó são contíguas
-  em `out` e `in`, o filtro dessas famílias cresce com o número de nós distintos
-  por SST, não com o número de arestas.
+- `optimize_filters_for_memory` (default `true` since 9.2.0) adjusts the size of
+  each filter to reduce allocator fragmentation, keeping the aggregate false
+  positive rate on target.
+- `optimize_filters_for_hits` (family option, default `false`) does not write a filter in the
+  last level, which holds most of the data. For a lookup that hits, that filter
+  does not help; the ones in the other levels remain useful, because they tell whether it is worth going down
+  into that level (`advanced_options.h`).
+- With a prefix extractor and `whole_key_filtering = false`, only the prefix goes into the
+  filter, and prefixes repeated in sequence become a single entry:
+  `filter_policy.cc` discards a hash equal to the previous one and comments that, with a prefix,
+  repetition is common and always adjacent. Since the edges of a node are contiguous
+  in `out` and `in`, the filter of these families grows with the number of distinct nodes
+  per SST, not with the number of edges.
 
-### 1.3 A conta para 10 bilhões de entradas
+### 1.3 The math for 10 billion entries
 
-Hipóteses (minhas):
+Assumptions (mine):
 
-- 5 bilhões de elementos: 1,0 bilhão de nós, 3,5 bilhões de arestas e 0,5 bilhão
-  de eventos.
-- 10 bilhões de chaves: `node` 1,0; `pk` 1,0; `out` 3,5; `in` 3,5; `event` 0,5;
-  `lbl`, `idx` e `ident` juntas 0,5.
-- Em disco, de 175 GB (meta do README) a 350 GB (70 bytes por elemento, a régua
-  do Neo4j); descomprimido, ~500 GB.
-- Com `level_compaction_dynamic_level_bytes` (padrão desde a 8.4), a wiki de
-  compactação por nível garante ~90% dos dados no último nível e ~9% no
-  penúltimo.
+- 5 billion elements: 1.0 billion nodes, 3.5 billion edges and 0.5 billion
+  events.
+- 10 billion keys: `node` 1.0; `pk` 1.0; `out` 3.5; `in` 3.5; `event` 0.5;
+  `lbl`, `idx` and `ident` together 0.5.
+- On disk, from 175 GB (the README target) to 350 GB (70 bytes per element, the Neo4j
+  yardstick); uncompressed, ~500 GB.
+- With `level_compaction_dynamic_level_bytes` (default since 8.4), the leveled
+  compaction wiki guarantees ~90% of the data in the last level and ~9% in the
+  second-to-last.
 
-**Filtros.** 10 bits por chave são 1,25 byte por entrada.
+**Filters.** 10 bits per key are 1.25 bytes per entry.
 
-| Política | Entradas no filtro | Bloom, 10 bits | Ribbon, ~7 bits |
+| Policy | Entries in the filter | Bloom, 10 bits | Ribbon, ~7 bits |
 |---|---|---|---|
-| Chave inteira em todas as famílias e níveis | 10 bi | 12,5 GB | 8,75 GB |
-| Chave inteira, `optimize_filters_for_hits` em tudo | ~1 bi | 1,25 GB | 0,88 GB |
-| Plano P1 (abaixo) | até 4,3 bi | até 5,4 GB | até 3,8 GB |
-| Plano P2: P1 com `optimize_filters_for_hits` também em `out`, `in` e `event` | até 1,85 bi | até 2,3 GB | até 1,6 GB |
+| Whole key in all families and levels | 10 bn | 12.5 GB | 8.75 GB |
+| Whole key, `optimize_filters_for_hits` everywhere | ~1 bn | 1.25 GB | 0.88 GB |
+| Plan P1 (below) | up to 4.3 bn | up to 5.4 GB | up to 3.8 GB |
+| Plan P2: P1 with `optimize_filters_for_hits` also on `out`, `in` and `event` | up to 1.85 bn | up to 2.3 GB | up to 1.6 GB |
 
-Plano P1:
+Plan P1:
 
-| Família | Chaves | Filtro | Entradas | Bloom |
+| Family | Keys | Filter | Entries | Bloom |
 |---|---|---|---|---|
-| `node` | 1,0 bi | chave inteira e `optimize_filters_for_hits`: quem busca por id quase sempre acha | ~0,1 bi | ~0,13 GB |
-| `pk` | 1,0 bi | chave inteira em todos os níveis: o `MERGE` de entidade nova é busca que não acha | 1,0 bi | 1,25 GB |
-| `out` | 3,5 bi | prefixo de 8 bytes, sem chave inteira | até 1,0 bi no último nível (uma por nó com aresta) e até 0,35 bi nos outros | até 1,7 GB |
-| `in` | 3,5 bi | idem | até 1,35 bi | até 1,7 GB |
-| `event` | 0,5 bi | prefixo com stream e entidade | até 0,5 bi | até 0,63 GB |
-| `lbl`, `idx`, `ident` | 0,5 bi | nenhum: são lidas por faixa, e o filtro de chave inteira só serve a point lookup (wiki do filtro) | 0 | 0 |
+| `node` | 1.0 bn | whole key and `optimize_filters_for_hits`: a lookup by id almost always hits | ~0.1 bn | ~0.13 GB |
+| `pk` | 1.0 bn | whole key in all levels: the `MERGE` of a new entity is a lookup that misses | 1.0 bn | 1.25 GB |
+| `out` | 3.5 bn | 8-byte prefix, no whole key | up to 1.0 bn in the last level (one per node with an edge) and up to 0.35 bn in the others | up to 1.7 GB |
+| `in` | 3.5 bn | same | up to 1.35 bn | up to 1.7 GB |
+| `event` | 0.5 bn | prefix with stream and entity | up to 0.5 bn | up to 0.63 GB |
+| `lbl`, `idx`, `ident` | 0.5 bn | none: they are read by range, and the whole-key filter only serves point lookups (filter wiki) | 0 | 0 |
 
-Os "até" supõem que toda chave dos níveis de cima tem prefixo próprio e que todo
-nó tem aresta; na prática o número é menor.
+The "up to" figures assume that every key in the upper levels has its own prefix and that every
+node has an edge; in practice the number is lower.
 
-**Índice.** Cada entrada guarda um separador, que é a chave encurtada e sem
-número de sequência desde o `format_version = 3`, e a posição do bloco,
-codificada em delta desde o 4 (wiki do formato do índice). Supondo de 16 a 32
-bytes por entrada e 500 GB descomprimidos:
+**Index.** Each entry stores a separator, which is the shortened key without the
+sequence number since `format_version = 3`, and the block position,
+delta-encoded since 4 (index format wiki). Assuming 16 to 32
+bytes per entry and 500 GB uncompressed:
 
-| Bloco de dados | Blocos | Índice |
+| Data block | Blocks | Index |
 |---|---|---|
-| 4 KB (padrão) | 122 milhões | 2,0 a 3,9 GB |
-| 16 KB | 30,5 milhões | 0,5 a 1,0 GB |
-| 32 KB | 15,3 milhões | 0,24 a 0,5 GB |
+| 4 KB (default) | 122 million | 2.0 to 3.9 GB |
+| 16 KB | 30.5 million | 0.5 to 1.0 GB |
+| 32 KB | 15.3 million | 0.24 to 0.5 GB |
 
-Com 1 TB descomprimido, os números dobram. Duas medidas públicas batem com a
-linha de 16 KB: a proporção da wiki (0,5 MB de índice num SST de 256 MB, 0,2%) dá
-0,34 a 0,68 GB para 175 a 350 GB em disco, e o exemplo da wiki "Space Tuning"
-mostra 0,97 GB de índice e 1,16 GB de filtro para 624,57 GB de dados. A mesma
-página diz que `format_version = 5` com `index_block_restart_interval = 16` deixa
-o índice pelo menos 4 vezes menor; a wiki do formato do índice fala em metade só
-com o restart interval, pagando mais CPU.
+With 1 TB uncompressed, the numbers double. Two public measurements match the
+16 KB row: the wiki's ratio (0.5 MB of index in a 256 MB SST, 0.2%) gives
+0.34 to 0.68 GB for 175 to 350 GB on disk, and the "Space Tuning" wiki example
+shows 0.97 GB of index and 1.16 GB of filter for 624.57 GB of data. The same
+page says that `format_version = 5` with `index_block_restart_interval = 16` makes
+the index at least 4 times smaller; the index format wiki mentions half just
+from the restart interval, paying more CPU.
 
-**Topo fixado.** Uma entrada por partição de 4 KB, com ~25 bytes cada:
+**Pinned top level.** One entry per 4 KB partition, at ~25 bytes each:
 
-| Estrutura | Total | Partições | Topo |
+| Structure | Total | Partitions | Top level |
 |---|---|---|---|
-| Índice | 0,5 a 1,0 GB | 0,12 a 0,24 milhão | 3 a 6 MB |
-| Filtro P2 | 2,3 GB | 0,57 milhão | ~14 MB |
-| Filtro P1 | 5,4 GB | 1,3 milhão | ~33 MB |
-| Filtro em tudo | 12,5 GB | 3,05 milhões | ~76 MB |
+| Index | 0.5 to 1.0 GB | 0.12 to 0.24 million | 3 to 6 MB |
+| Filter P2 | 2.3 GB | 0.57 million | ~14 MB |
+| Filter P1 | 5.4 GB | 1.3 million | ~33 MB |
+| Filter everywhere | 12.5 GB | 3.05 million | ~76 MB |
 
-Fica dentro da faixa de 0,1% a 1% da wiki.
+This falls within the wiki's range of 0.1% to 1%.
 
-**Leitura fria.** Com o topo fixado e o índice inteiro (0,5 a 1 GB) no cache em
-prioridade alta, um get frio em `node` que chega ao último nível lê um bloco de
-dados do disco. Se a partição do índice também estiver fria, são duas leituras.
-Em 9 GB de blocos, o P2 deixa ~6 GB para dados; o P1, ~3 GB.
+**Cold read.** With the top level pinned and the whole index (0.5 to 1 GB) in the cache at
+high priority, a cold get on `node` that reaches the last level reads one data
+block from disk. If the index partition is also cold, it takes two reads.
+Out of 9 GB of blocks, P2 leaves ~6 GB for data; P1, ~3 GB.
 
-### 1.4 O que precisa ficar residente
+### 1.4 What needs to stay resident
 
-1. O topo do índice e do filtro de cada SST aberto: dezenas de MB por grafo.
-2. As memtables ativas e imutáveis, até o teto do `WriteBufferManager`.
-3. Os table readers de todos os SSTs abertos com `max_open_files = -1`. Essa
-   memória fica fora do cache por padrão; cobrá-la no cache é
-   `cache_usage_options`, que o crate não expõe. Não achei número oficial por
-   arquivo; a medida é `properties::ESTIMATE_TABLE_READERS_MEM`.
-4. Os blocos que iteradores abertos seguram: pela wiki, cerca de iteradores ×
-   tamanho do bloco × (níveis menos 1, mais arquivos no L0). Mil iteradores com
-   bloco de 16 KB, 7 níveis e 4 arquivos no L0 dão ~164 MB.
-5. Com `OptimisticTransactionDB` ou `TransactionDB`, o histórico de memtables já
-   descarregadas que a validação usa (seção 5.2).
+1. The top level of the index and filter of each open SST: tens of MB per graph.
+2. The active and immutable memtables, up to the `WriteBufferManager` ceiling.
+3. The table readers of all SSTs open with `max_open_files = -1`. That
+   memory stays outside the cache by default; charging it to the cache is
+   `cache_usage_options`, which the crate does not expose. Official number per
+   file: not found; the measure is `properties::ESTIMATE_TABLE_READERS_MEM`.
+4. The blocks that open iterators hold: according to the wiki, about iterators ×
+   block size × (levels minus 1, plus files in L0). A thousand iterators with
+   a 16 KB block, 7 levels and 4 files in L0 give ~164 MB.
+5. With `OptimisticTransactionDB` or `TransactionDB`, the history of already flushed
+   memtables that validation uses (section 5.2).
 
-Partições de índice e filtro, dicionários e blocos de dados só precisam caber no
-cache na parte quente.
+Index and filter partitions, dictionaries and data blocks only need to fit in the
+cache for the hot part.
 
-Um relato público mostra o desenho oposto: 302 milhões de chaves, 8,34 GiB em
-disco, bloco de 4 KB, Ribbon de 10 bits com prefixo e
-`cache_index_and_filter_blocks = false`, com 4,68 GB de índice e filtro em
-memória e subindo (issue 12942 do RocksDB, sem resposta de mantenedor quando li).
-As chaves eram URLs. O índice cresce com o tamanho da chave, e fora do cache ele
-não tem teto.
+A public report shows the opposite design: 302 million keys, 8.34 GiB on
+disk, 4 KB block, 10-bit Ribbon with prefix and
+`cache_index_and_filter_blocks = false`, with 4.68 GB of index and filter in
+memory and rising (RocksDB issue 12942, with no maintainer reply when I read it).
+The keys were URLs. The index grows with key size, and outside the cache it
+has no ceiling.
 
 ---
 
-## 2. Recursos compartilhados entre databases
+## 2. Resources shared between databases
 
-A FAQ do RocksDB aceita um DB por shard e diz que pool de threads, block cache e
-rate limiter podem ser compartilhados entre as instâncias. A documentação de
-memória do Kafka Streams (Confluent) dá a receita para vários RocksDB no mesmo
-processo: índice e filtro no block cache, memtables limitadas por um
-`WriteBufferManager` compartilhado e cobrado no cache, e o mesmo `Cache` em todas
-as instâncias.
+The RocksDB FAQ accepts one DB per shard and says that the thread pool, block cache and
+rate limiter can be shared between instances. The memory documentation
+of Kafka Streams (Confluent) gives the recipe for several RocksDB instances in the same
+process: index and filter in the block cache, memtables bounded by a
+shared `WriteBufferManager` charged to the cache, and the same `Cache` in all
+instances.
 
-### 2.1 Block cache único
+### 2.1 A single block cache
 
-- A wiki de ajuste básico manda usar o mesmo `Cache` nas opções de tabela de
-  todas as famílias de todos os DBs do processo, e sugere cerca de um terço do
-  orçamento de memória para ele.
-- Família sem cache configurado ganha um próprio, de 32 MB (`table.h`). Com 10
-  famílias por database, esquecer uma é criar um cache escondido.
-- LRU: dividido em até 64 shards de no mínimo 512 KB (wiki do block cache), com
-  `high_pri_pool_ratio = 0.5` e `strict_capacity_limit = false` por padrão
-  (`cache.h`). Com índice e filtro em prioridade alta, a lista do LRU se divide
-  em duas.
-- HyperClockCache (HCC): desde a 10.7.0, o HCC sem `estimated_entry_charge` é
-  dado como pronto para produção e preferido ao LRU, e virou a implementação
-  padrão quando nenhum cache é passado (`HISTORY.md` e notas da v10.7.5).
-  Limites, pelo `cache.h`: serve só como block cache (não como row cache nem blob
-  cache), a prioridade é aplicada com menos rigor que no LRU, e o modo automático
-  depende de mmap anônimo. O `estimated_entry_charge` fica difícil de prever
-  quando o `WriteBufferManager` cobra memtables no cache, então 0 é o valor certo
-  aqui. O post de 2025 do blog sobre rastreamento unificado de memória configura
-  justamente um HCC com o custo das memtables cobrado nele.
+- The basic tuning wiki says to use the same `Cache` in the table options of
+  all families of all DBs in the process, and suggests about one third of the
+  memory budget for it.
+- A family with no cache configured gets its own 32 MB cache (`table.h`). With 10
+  families per database, forgetting one means creating a hidden cache.
+- LRU: split into up to 64 shards of at least 512 KB (block cache wiki), with
+  `high_pri_pool_ratio = 0.5` and `strict_capacity_limit = false` by default
+  (`cache.h`). With index and filter at high priority, the LRU list splits
+  in two.
+- HyperClockCache (HCC): since 10.7.0, HCC without `estimated_entry_charge` is
+  considered production-ready and preferred over LRU, and it became the default
+  implementation when no cache is passed (`HISTORY.md` and the v10.7.5 notes).
+  Limits, according to `cache.h`: it only serves as a block cache (not as a row cache or blob
+  cache), priority is applied less strictly than in LRU, and the automatic mode
+  depends on anonymous mmap. `estimated_entry_charge` becomes hard to predict
+  when the `WriteBufferManager` charges memtables to the cache, so 0 is the right value
+  here. The 2025 blog post on unified memory tracking configures
+  exactly an HCC with the memtables' cost charged to it.
 
-No crate:
+In the crate:
 
-- `Cache::new_hyper_clock_cache(capacity, estimated_entry_charge)`. A doc do
-  crate também dá o HCC como recomendado e indica 0.
-- `Cache::new_lru_cache(capacity)` e `Cache::new_lru_cache_opts(&LruCacheOptions)`.
-  O `LruCacheOptions` tem só `set_capacity` e `set_num_shard_bits`: não há
-  `high_pri_pool_ratio`, `low_pri_pool_ratio` nem `strict_capacity_limit`. O
-  `librocksdb-sys` tem `rocksdb_cache_create_lru_with_strict_capacity_limit`.
-- `Cache` é `Clone` sobre um `Arc` do ponteiro C, e
-  `BlockBasedOptions::set_block_cache(&cache)` guarda um clone
-  (`src/db_options.rs`). Uso: `get_usage()`, `get_pinned_usage()`; ajuste:
+- `Cache::new_hyper_clock_cache(capacity, estimated_entry_charge)`. The crate
+  doc also presents HCC as recommended and indicates 0.
+- `Cache::new_lru_cache(capacity)` and `Cache::new_lru_cache_opts(&LruCacheOptions)`.
+  `LruCacheOptions` only has `set_capacity` and `set_num_shard_bits`: there is no
+  `high_pri_pool_ratio`, `low_pri_pool_ratio` or `strict_capacity_limit`. The
+  `librocksdb-sys` has `rocksdb_cache_create_lru_with_strict_capacity_limit`.
+- `Cache` is `Clone` over an `Arc` of the C pointer, and
+  `BlockBasedOptions::set_block_cache(&cache)` keeps a clone
+  (`src/db_options.rs`). Usage: `get_usage()`, `get_pinned_usage()`; adjustment:
   `set_capacity()`.
 
-### 2.2 WriteBufferManager compartilhado e cobrado no cache
+### 2.2 WriteBufferManager shared and charged to the cache
 
-Pela wiki e pelo `write_buffer_manager.h`:
+According to the wiki and `write_buffer_manager.h`:
 
-- um objeto só, passado às opções de todos os DBs, limita a soma das memtables
-  de todas as famílias;
-- o flush dispara numa família quando a memtable mutável passa de ~90% do limite,
-  ou quando o total passa do limite e a mutável já passou de 50%;
-- com cache, o WBM reserva no cache, em entradas vazias, o tamanho da memória que
-  as memtables alocaram, e o cache despeja blocos para abrir espaço;
-- com `allow_stall = true`, quando o uso passa do limite, todas as threads que
-  escrevem, em todos os DBs, param até o uso cair.
+- a single object, passed to the options of all DBs, bounds the sum of the memtables
+  of all families;
+- flush triggers in a family when the mutable memtable goes over ~90% of the limit,
+  or when the total goes over the limit and the mutable one is already over 50%;
+- with a cache, the WBM reserves in the cache, in empty entries, the size of the memory that
+  the memtables allocated, and the cache evicts blocks to make room;
+- with `allow_stall = true`, when usage goes over the limit, all threads that
+  write, in all DBs, stop until usage drops.
 
-Consequência para a tabela 1.5 do spec: com custo no cache, as memtables ficam
-dentro da capacidade do cache. Um cache de 9 GB com 1 GB de memtables deixa 8 GB
-para blocos.
+Consequence for table 1.5 of the spec: with the cost charged to the cache, the memtables stay
+within the cache capacity. A 9 GB cache with 1 GB of memtables leaves 8 GB
+for blocks.
 
-No crate: `WriteBufferManager::new_write_buffer_manager(buffer_size, allow_stall)`
-e `new_write_buffer_manager_with_cache(buffer_size, allow_stall, cache)`, ligados
-por `Options::set_write_buffer_manager(&wbm)`. O tipo é `Clone`, `Send` e `Sync`,
-com `get_usage()`, `get_buffer_size()`, `set_buffer_size()`, `enabled()` e
-`set_allow_stall()`. Qual memtable descarregar não é configurável, nem no C++
-(seção 8.3).
+In the crate: `WriteBufferManager::new_write_buffer_manager(buffer_size, allow_stall)`
+and `new_write_buffer_manager_with_cache(buffer_size, allow_stall, cache)`, attached
+via `Options::set_write_buffer_manager(&wbm)`. The type is `Clone`, `Send` and `Sync`,
+with `get_usage()`, `get_buffer_size()`, `set_buffer_size()`, `enabled()` and
+`set_allow_stall()`. Which memtable to flush is not configurable, not even in C++
+(section 8.3).
 
-### 2.3 Threads de flush e compactação
+### 2.3 Flush and compaction threads
 
-- O pool de threads pertence ao `Env` e é dividido por todos os DBs que usam o
-  mesmo `Env`. Flush vai para o pool HIGH e compactação para o LOW, e a wiki pede
-  pools separados e não vazios justamente quando vários DBs dividem o mesmo
-  `Env` (wiki do pool de threads).
-- `max_background_jobs` (padrão 2) é por DB. Com os limites antigos em -1, um
-  quarto dos jobs vai para flush e o resto para compactação (análise do blog
-  Small Datum, que mediu 8 contra 16 jobs).
-- Ao abrir, cada DB só aumenta o pool: chama `IncBackgroundThreadsIfNeeded` com o
-  seu limite de compactações no LOW e de flushes no HIGH (`db_impl_open.cc`). O
-  pool vai ao maior limite entre os DBs, não à soma, e dez DBs com 4 jobs cada
-  disputam as mesmas threads.
-- `IncreaseParallelism(n)` põe `max_background_jobs = n`, o LOW em `n` e o HIGH
-  em 1, direto no `Env` (`options.cc`). Chamado nas opções de cada DB, mexe no
-  pool de todos.
-- Pool BOTTOM: a nota da 5.8 diz que compactações universais que incluem o último
-  nível podem rodar num pool próprio, o que reduz o bloqueio da fila de
-  compactação, em especial com várias instâncias. Não achei na documentação se a
-  compactação por nível usa esse pool na versão atual.
+- The thread pool belongs to the `Env` and is shared by all DBs that use the
+  same `Env`. Flush goes to the HIGH pool and compaction to LOW, and the wiki asks for
+  separate, non-empty pools precisely when several DBs share the same
+  `Env` (thread pool wiki).
+- `max_background_jobs` (default 2) is per DB. With the old limits at -1, one
+  quarter of the jobs goes to flush and the rest to compaction (analysis on the
+  Small Datum blog, which measured 8 versus 16 jobs).
+- On open, each DB only grows the pool: it calls `IncBackgroundThreadsIfNeeded` with
+  its compaction limit on LOW and its flush limit on HIGH (`db_impl_open.cc`). The
+  pool goes to the largest limit among the DBs, not to the sum, and ten DBs with 4 jobs each
+  compete for the same threads.
+- `IncreaseParallelism(n)` sets `max_background_jobs = n`, LOW to `n` and HIGH
+  to 1, directly on the `Env` (`options.cc`). Called on the options of each DB, it changes the
+  pool for all of them.
+- BOTTOM pool: the 5.8 note says that universal compactions that include the last
+  level can run in their own pool, which reduces blocking of the compaction
+  queue, especially with several instances. Not found in the documentation: whether
+  leveled compaction uses this pool in the current version.
 
-No crate: `Env::new()`, cuja doc diz que devolve o `Env` padrão (ele chama
-`rocksdb_create_default_env`, que é o `Env::Default()` do C++);
+In the crate: `Env::new()`, whose doc says it returns the default `Env` (it calls
+`rocksdb_create_default_env`, which is the C++ `Env::Default()`);
 `set_background_threads` (LOW), `set_high_priority_background_threads`,
-`set_low_priority_background_threads` e `set_bottom_priority_background_threads`;
-`Options::set_env(&env)`, `set_max_background_jobs`, `set_max_subcompactions` e
-`increase_parallelism`. Não achei no crate um `Env` com pools próprios (só
-`Env::new()` e `Env::mem_env()`), então todos os DBs do processo dividem os
-mesmos pools.
+`set_low_priority_background_threads` and `set_bottom_priority_background_threads`;
+`Options::set_env(&env)`, `set_max_background_jobs`, `set_max_subcompactions` and
+`increase_parallelism`. Not found in the crate: an `Env` with its own pools (only
+`Env::new()` and `Env::mem_env()`), so all DBs in the process share the
+same pools.
 
-### 2.4 Rate limiter, SstFileManager e buckets de lock
+### 2.4 Rate limiter, SstFileManager and lock buckets
 
-- Rate limiter: `Options::set_ratelimiter` e `set_auto_tuned_ratelimiter` recebem
-  números, não um objeto, e criam um limitador a cada chamada. Como
-  `Options::clone()` chama `rocksdb_options_create_copy`, que copia o
-  `shared_ptr` do C++, derivar as opções de todos os DBs de um mesmo `Options`
-  base deve compartilhar o limitador. É inferência da semântica de cópia; não
-  testei.
-- `SstFileManager` (teto de espaço, taxa de remoção de arquivos, soma dos SSTs de
-  vários DBs): o crate não tem. O fork tem (módulo `sst_file_manager` e
-  `Options::set_sst_file_manager`, desde a 0.44.0).
-- Cada `OptimisticTransactionDB` cria `occ_lock_buckets = 1 << 20` buckets de lock
-  por padrão (`optimistic_transaction_db.h`). O C++ permite dividir um conjunto
-  entre DBs (`shared_lock_buckets`). O crate não expõe essas opções; o fork expõe
-  `set_occ_lock_buckets` e `set_shared_lock_buckets`. Não achei o custo de
-  memória por bucket.
+- Rate limiter: `Options::set_ratelimiter` and `set_auto_tuned_ratelimiter` take
+  numbers, not an object, and create a limiter on each call. Since
+  `Options::clone()` calls `rocksdb_options_create_copy`, which copies the
+  C++ `shared_ptr`, deriving the options of all DBs from the same base `Options`
+  should share the limiter. This is an inference from the copy semantics; I did not
+  test it.
+- `SstFileManager` (space ceiling, file deletion rate, sum of the SSTs of
+  several DBs): the crate does not have it. The fork does (module `sst_file_manager` and
+  `Options::set_sst_file_manager`, since 0.44.0).
+- Each `OptimisticTransactionDB` creates `occ_lock_buckets = 1 << 20` lock buckets
+  by default (`optimistic_transaction_db.h`). C++ allows sharing one set
+  between DBs (`shared_lock_buckets`). The crate does not expose these options; the fork exposes
+  `set_occ_lock_buckets` and `set_shared_lock_buckets`. Memory cost per
+  bucket: not found.
 
-### 2.5 Como fica no crate
+### 2.5 How it looks in the crate
 
-Assinaturas conferidas no docs.rs da 0.25.0:
+Signatures checked on docs.rs for 0.25.0:
 
 ```rust
 use rocksdb::{BlockBasedIndexType, BlockBasedOptions, BlockBasedTablePinningTier,
@@ -416,690 +416,690 @@ out.set_bottommost_zstd_max_train_bytes(100 * (16 << 10), true);
 
 ---
 
-## 3. Compressão e prefixo
+## 3. Compression and prefix
 
-### 3.1 LZ4 em cima, ZSTD embaixo
+### 3.1 LZ4 on top, ZSTD at the bottom
 
-- A wiki de ajuste básico recomenda LZ4 (ou Snappy) nos níveis em geral e ZSTD
-  (ou Zlib) no último; a wiki de espaço dá a mesma receita e sugere bloco de
+- The basic tuning wiki recommends LZ4 (or Snappy) for the levels in general and ZSTD
+  (or Zlib) for the last one; the space wiki gives the same recipe and suggests a block size of
   16 KB.
-- Com `level_compaction_dynamic_level_bytes = true`, `compression_per_level[0]`
-  continua valendo para o L0, mas as outras posições contam a partir do nível
-  base, o que recebe o L0, e mudam conforme o grafo cresce
-  (`advanced_options.h`). **Recomendação**: `compression_type` e
-  `bottommost_compression`, que não dependem do nível base.
-- Com compressão diferente por nível, o RocksDB deixa de fazer o "trivial move"
-  que violaria a regra de compressão (wiki de compressão).
-- Precedente: o TiKV não comprime L0 e L1, usa LZ4 do L2 ao L4 e ZSTD em L5 e L6,
-  com bloco de 32 KB, cache compartilhado de 45% da memória e bloom de 10 bits
-  (arquivo de configuração do TiKV). Sem compressão em cima, o flush gasta menos
+- With `level_compaction_dynamic_level_bytes = true`, `compression_per_level[0]`
+  still applies to L0, but the other positions count from the base
+  level, the one that receives L0, and change as the graph grows
+  (`advanced_options.h`). **Recommendation**: `compression_type` and
+  `bottommost_compression`, which do not depend on the base level.
+- With a different compression per level, RocksDB stops doing the "trivial move"
+  that would violate the compression rule (compression wiki).
+- Precedent: TiKV does not compress L0 and L1, uses LZ4 from L2 to L4 and ZSTD on L5 and L6,
+  with 32 KB blocks, a shared cache of 45% of memory and a 10-bit bloom
+  (TiKV configuration file). Without compression on top, the flush uses less
   CPU.
 
-No crate: `set_compression_type`, `set_compression_per_level`,
+In the crate: `set_compression_type`, `set_compression_per_level`,
 `set_bottommost_compression_type`, `set_compression_options(window_bits, level,
-strategy, max_dict_bytes)`, `set_bottommost_compression_options(..., enabled)` e
-`set_compression_options_parallel_threads`. `DBCompressionType` tem `None`,
-`Snappy`, `Zlib`, `Bz2`, `Lz4`, `Lz4hc` e `Zstd`; LZ4 e ZSTD são features padrão
-do crate.
+strategy, max_dict_bytes)`, `set_bottommost_compression_options(..., enabled)` and
+`set_compression_options_parallel_threads`. `DBCompressionType` has `None`,
+`Snappy`, `Zlib`, `Bz2`, `Lz4`, `Lz4hc` and `Zstd`; LZ4 and ZSTD are default features
+of the crate.
 
-### 3.2 ZSTD com dicionário
+### 3.2 ZSTD with a dictionary
 
-- O dicionário é por SST: treinar no próprio arquivo deu compressão bem melhor
-  que treinar num vizinho (post de 2021 do blog do RocksDB).
-- Na compactação, os blocos descomprimidos ficam em buffer, até o tamanho alvo do
-  arquivo, enquanto o dicionário não é treinado; desde a 6.25 essa memória é
-  cobrada no block cache (wiki de dicionário).
-- O dicionário vai num meta-block do SST. Com
-  `cache_index_and_filter_blocks = true`, vai para o cache com prioridade alta; a
-  forma usada na descompressão é maior que a gravada.
-- Valores de referência do post: `max_dict_bytes` de 16 KB e
-  `zstd_max_train_bytes` de 100 vezes o `max_dict_bytes`. O ganho aparece com
-  bloco de dados de até 16 KB.
+- The dictionary is per SST: training on the file itself gave much better compression
+  than training on a neighbor (2021 post on the RocksDB blog).
+- During compaction, the uncompressed blocks stay in a buffer, up to the target size of the
+  file, while the dictionary is not yet trained; since 6.25 this memory is
+  charged to the block cache (dictionary wiki).
+- The dictionary goes into a meta-block of the SST. With
+  `cache_index_and_filter_blocks = true`, it goes into the cache with high priority; the
+  form used for decompression is larger than the stored one.
+- Reference values from the post: `max_dict_bytes` of 16 KB and
+  `zstd_max_train_bytes` of 100 times `max_dict_bytes`. The gain shows up with
+  data blocks of up to 16 KB.
 
-O `SstFileWriter` usa as opções do último nível: com `bottommost_compression`
-definido, pega esse tipo e, se `enabled`, as `bottommost_compression_opts`
-(`sst_file_writer.cc`). O SST da carga offline já sai com ZSTD e dicionário. Mas o
-`SstFileWriter` passa tamanho alvo 0 ao construtor da tabela, e nesse caso o
-limite do buffer do dicionário é `max_dict_buffer_bytes`, cujo padrão 0 desliga o
-corte por tamanho (`block_based_table_builder.cc` só corta quando o limite é
-diferente de 0). Pela leitura do código, o arquivo inteiro fica descomprimido em
-memória até o `finish`. O outro gatilho que vi é a reserva no block cache, e não
-conferi quando ela falha. Como o crate não expõe `max_dict_buffer_bytes`, o que
-limita essa memória é o tamanho de cada SST gerado e o número de escritores em
-paralelo.
+The `SstFileWriter` uses the last level's options: with `bottommost_compression`
+set, it takes that type and, if `enabled`, the `bottommost_compression_opts`
+(`sst_file_writer.cc`). The SST from the offline load already comes out with ZSTD and a dictionary. But the
+`SstFileWriter` passes a target size of 0 to the table constructor, and in that case the
+dictionary buffer limit is `max_dict_buffer_bytes`, whose default of 0 turns off the
+size cutoff (`block_based_table_builder.cc` only cuts when the limit is
+nonzero). From reading the code, the whole file stays uncompressed in
+memory until `finish`. The other trigger I saw is the block cache reservation, and I did not
+check when it fails. Since the crate does not expose `max_dict_buffer_bytes`, what
+limits this memory is the size of each generated SST and the number of writers in
+parallel.
 
-No crate: `set_bottommost_compression_options(window_bits, level, strategy,
-max_dict_bytes, enabled)` e `set_bottommost_zstd_max_train_bytes(value, enabled)`.
-Faltam `max_dict_buffer_bytes` e `use_zstd_dict_trainer`. A busca pelo nome
-`rocksdb_options_set_bottommost_compression_options_max_dict_buffer_bytes` acha a
-doc do crate `ckb-rocksdb`, o que indica que a função existe no C API; não
-conferi no `librocksdb-sys` 0.19.0. Existindo, dá para chamá-la com o ponteiro do
-`Options` da feature `raw-ptr`.
+In the crate: `set_bottommost_compression_options(window_bits, level, strategy,
+max_dict_bytes, enabled)` and `set_bottommost_zstd_max_train_bytes(value, enabled)`.
+Missing: `max_dict_buffer_bytes` and `use_zstd_dict_trainer`. A search for the name
+`rocksdb_options_set_bottommost_compression_options_max_dict_buffer_bytes` finds the
+doc of the `ckb-rocksdb` crate, which indicates that the function exists in the C API; I did not
+check it in `librocksdb-sys` 0.19.0. If it exists, it can be called with the
+`Options` pointer from the `raw-ptr` feature.
 
-### 3.3 Prefix extractor e prefix bloom para chave com id de 8 bytes
+### 3.3 Prefix extractor and prefix bloom for keys with an 8-byte id
 
-Em `out` e `in`, a chave começa pelo id do nó, 8 bytes big-endian:
+In `out` and `in`, the key starts with the node id, 8 bytes big-endian:
 
-- `Options::set_prefix_extractor(SliceTransform::create_fixed_prefix(8))`. Toda
-  chave tem pelo menos 8 bytes, então todas estão no domínio.
-- `BlockBasedOptions::set_whole_key_filtering(false)`: só o prefixo vai para o
-  filtro.
-- Memtable: `set_memtable_prefix_bloom_ratio(0.1)` cria um bloom de
-  `write_buffer_size` × 0,1 dentro da memtable; `set_memtable_whole_key_filtering`
-  põe a chave inteira ali também, e só vale com a razão acima de 0
+- `Options::set_prefix_extractor(SliceTransform::create_fixed_prefix(8))`. Every
+  key has at least 8 bytes, so all of them are in the domain.
+- `BlockBasedOptions::set_whole_key_filtering(false)`: only the prefix goes into the
+  filter.
+- Memtable: `set_memtable_prefix_bloom_ratio(0.1)` creates a bloom of
+  `write_buffer_size` × 0.1 inside the memtable; `set_memtable_whole_key_filtering`
+  puts the whole key there too, and only applies with the ratio above 0
   (`advanced_options.h`).
-- Leitura: `ReadOptions::set_prefix_same_as_start(true)` com
-  `set_iterate_upper_bound` no prefixo seguinte. `set_total_order_seek(true)`
-  ignora o bloom. O `auto_prefix_mode`, que a wiki recomenda desde a 6.8 porque
-  devolve sempre o mesmo resultado da ordem total, não está no crate.
+- Reads: `ReadOptions::set_prefix_same_as_start(true)` with
+  `set_iterate_upper_bound` at the next prefix. `set_total_order_seek(true)`
+  ignores the bloom. `auto_prefix_mode`, which the wiki has recommended since 6.8 because
+  it always returns the same result as total order, is not in the crate.
 
-Armadilhas, pela wiki de prefix seek:
+Pitfalls, according to the prefix seek wiki:
 
-- trocar o prefix extractor depois deixa SSTs com filtro de outro extractor, então
-  o tamanho do prefixo precisa ser decidido antes da carga;
-- `SeekToLast()` e iteração reversa não funcionam bem com prefixo (o tempo
-  invertido de `event` já contorna isso);
-- no modo manual, uso errado não dá erro, dá resultado indefinido;
-- a wiki prefere o transform "capped" ao fixo. O crate não tem esse construtor;
-  tem `SliceTransform::create(nome, função, in_domain)`, com uma função Rust
-  chamada pelo C a cada chave em flush, compactação e seek.
+- changing the prefix extractor later leaves SSTs with a filter from another extractor, so
+  the prefix length has to be decided before the load;
+- `SeekToLast()` and reverse iteration do not work well with a prefix (the
+  inverted time in `event` already works around this);
+- in manual mode, wrong usage does not raise an error, it gives an undefined result;
+- the wiki prefers the "capped" transform over the fixed one. The crate does not have that constructor;
+  it has `SliceTransform::create(name, function, in_domain)`, with a Rust function
+  called from C for each key in flush, compaction and seek.
 
-Três famílias do spec não começam por um id de 8 bytes:
+Three families in the spec do not start with an 8-byte id:
 
-- `event`: stream primeiro, depois entidade. Um prefixo de 8 bytes pega o stream e
-  parte da entidade. O prefixo precisa ter o tamanho do stream mais 8, ou a
-  entidade precisa vir primeiro.
-- `pk`: começa pelo `entity_id` com prefixo de tamanho, que é variável. O bloom de
-  chave inteira atende o get com label; o seek sem label só teria bloom com um
-  transform próprio que leia o tamanho.
-- `idx` e `ident`: valor de tamanho variável depois do tipo, mesmo caso da `pk`.
+- `event`: stream first, then entity. An 8-byte prefix covers the stream and
+  part of the entity. The prefix needs to be the length of the stream plus 8, or the
+  entity needs to come first.
+- `pk`: starts with the `entity_id` with a length prefix, which is variable. The whole-key
+  bloom serves the get with a label; the seek without a label would only have a bloom with a
+  custom transform that reads the length.
+- `idx` and `ident`: variable-length value after the type, same case as `pk`.
 
 ---
 
-## 4. Carga em massa
+## 4. Bulk load
 
-### 4.1 SstFileWriter e IngestExternalFile
+### 4.1 SstFileWriter and IngestExternalFile
 
-Requisitos (wiki de criação e ingestão):
+Requirements (creation and ingestion wiki):
 
-- chaves em ordem estritamente crescente no comparador (range tombstones podem vir
-  fora de ordem);
-- comparador idêntico ao do DB; as opções dadas ao `SstFileWriter` definem
-  formato e compressão;
-- toda chave sai com número de sequência 0 (doc do crate).
+- keys in strictly increasing order under the comparator (range tombstones may come
+  out of order);
+- comparator identical to the DB's; the options given to `SstFileWriter` define
+  format and compression;
+- every key comes out with sequence number 0 (crate doc).
 
-A ingestão copia ou liga o arquivo no diretório do DB, bloqueia escritas,
-descarrega a memtable se ela se sobrepõe ao arquivo, escolhe o nível mais baixo em
-que o arquivo cabe sem se sobrepor a esse nível, aos de cima e a compactações em
-andamento, atribui um número de sequência global e libera as escritas. Num
-database vazio, com arquivos de faixas disjuntas, tudo vai para o último nível sem
-compactação: é o caminho offline do spec. Arquivos que se sobrepõem no mesmo lote
-iam sempre para o L0; o `HISTORY.md` registra que hoje a atribuição é feita em
-lotes, para que eles possam cair em níveis mais baixos. A FAQ sugere gerar os SSTs
-de faixas disjuntas em paralelo.
+Ingestion copies or links the file into the DB directory, blocks writes,
+flushes the memtable if it overlaps the file, picks the lowest level at
+which the file fits without overlapping that level, the ones above it and compactions in
+progress, assigns a global sequence number and unblocks writes. In an
+empty database, with files of disjoint ranges, everything goes to the last level without
+compaction: this is the spec's offline path. Files that overlap within the same batch
+always went to L0; `HISTORY.md` records that the assignment is now done in
+batches, so that they can land in lower levels. The FAQ suggests generating the SSTs
+of disjoint ranges in parallel.
 
-`ingest_behind` ingere sempre no último nível e pula chave duplicada, mas só se o
-DB tiver `allow_ingest_behind = true` desde a criação.
+`ingest_behind` always ingests into the last level and skips duplicate keys, but only if the
+DB has had `allow_ingest_behind = true` since its creation.
 
-No crate:
+In the crate:
 
 - `SstFileWriter::create(&opts)`, `open(path)`, `put`, `merge`, `delete`,
-  `delete_range` (novo na 0.25.0), `finish` e `file_size`;
-- `ingest_external_file`, `ingest_external_file_opts`, `ingest_external_file_cf` e
+  `delete_range` (new in 0.25.0), `finish` and `file_size`;
+- `ingest_external_file`, `ingest_external_file_opts`, `ingest_external_file_cf` and
   `ingest_external_file_cf_opts`;
-- `IngestExternalFileOptions` com `set_move_files`, `set_snapshot_consistency`,
-  `set_allow_global_seqno`, `set_allow_blocking_flush` e `set_ingest_behind`;
+- `IngestExternalFileOptions` with `set_move_files`, `set_snapshot_consistency`,
+  `set_allow_global_seqno`, `set_allow_blocking_flush` and `set_ingest_behind`;
 - `Options::set_allow_ingest_behind`.
 
-Faltam `fail_if_not_bottommost_level`, `link_files`, `write_global_seqno`,
-`verify_checksums_before_ingest`, `fill_cache`, `file_opening_threads`, o
-`IngestExternalFiles` (várias famílias, tudo ou nada) e o `PrepareFileIngestion`
-da 11.5.
+Missing: `fail_if_not_bottommost_level`, `link_files`, `write_global_seqno`,
+`verify_checksums_before_ingest`, `fill_cache`, `file_opening_threads`,
+`IngestExternalFiles` (several families, all or nothing) and the `PrepareFileIngestion`
+from 11.5.
 
-**Recomendação**: na carga de um database novo, `set_allow_global_seqno(false)`,
-que faz a ingestão falhar se houver sobreposição com o que já existe, e conferir
-depois com `property_int_value(properties::num_files_at_level(6))` que tudo foi
-para o último nível (7 níveis no padrão), já que falta
-`fail_if_not_bottommost_level`. `set_move_files(true)` pede o SST no mesmo sistema
-de arquivos do DB.
+**Recommendation**: when loading a new database, `set_allow_global_seqno(false)`,
+which makes the ingestion fail if there is overlap with what already exists, and check
+afterwards with `property_int_value(properties::num_files_at_level(6))` that everything went
+to the last level (7 levels by default), since
+`fail_if_not_bottommost_level` is missing. `set_move_files(true)` requires the SST on the same file
+system as the DB.
 
-### 4.2 WAL desligado e flush no fim
+### 4.2 WAL off and flush at the end
 
-- Pela FAQ, escrita com WAL desligado se perde num crash se não tiver ido para
-  SST; com várias famílias, o flush consistente pede `atomic_flush = true`.
-- A receita da FAQ para inserir rápido: um escritor, chaves em ordem, centenas de
-  chaves por WriteBatch, memtable vetor, mais flushes em paralelo e compactação
-  automática desligada durante a carga.
-- `PrepareForBulkLoad()` faz parte disso, mas também põe `num_levels = 2`,
-  `disable_auto_compactions = true`, gatilhos de L0 em `1 << 30`, os limites de
-  compactação pendente desligados (0) e `target_file_size_base` de 256 MB,
-  contando com uma compactação manual no fim (`options.cc`). Serve a um DB criado só para a carga;
-  num database que responde consultas, não.
-- `atomic_flush` e `enable_pipelined_write` juntos: o DB recusa abrir
+- Per the FAQ, a write with the WAL off is lost in a crash if it has not reached an
+  SST; with several families, a consistent flush requires `atomic_flush = true`.
+- The FAQ recipe for fast inserts: one writer, keys in order, hundreds of
+  keys per WriteBatch, vector memtable, more flushes in parallel and automatic
+  compaction turned off during the load.
+- `PrepareForBulkLoad()` is part of this, but it also sets `num_levels = 2`,
+  `disable_auto_compactions = true`, L0 triggers at `1 << 30`, the pending
+  compaction limits turned off (0) and `target_file_size_base` of 256 MB,
+  counting on a manual compaction at the end (`options.cc`). It suits a DB created only for the load;
+  not a database that answers queries.
+- `atomic_flush` and `enable_pipelined_write` together: the DB refuses to open
   (`db_impl_open.cc`).
 
-No crate: `WriteOptions::disable_wal(true)` ou `write_without_wal(batch)`;
-`flush`, `flush_cf`, `flush_opt` e `flush_cfs_opt(&[...], &FlushOptions)` com
+In the crate: `WriteOptions::disable_wal(true)` or `write_without_wal(batch)`;
+`flush`, `flush_cf`, `flush_opt` and `flush_cfs_opt(&[...], &FlushOptions)` with
 `FlushOptions::set_wait(true)`; `flush_wal(sync)`; `Options::set_atomic_flush`;
-`Options::prepare_for_bulk_load`; `set_options(&[("chave", "valor")])` e
-`set_options_cf` para mudar gatilhos com o DB aberto e voltar depois;
+`Options::prepare_for_bulk_load`; `set_options(&[("key", "value")])` and
+`set_options_cf` to change triggers with the DB open and revert them later;
 `wait_for_compact(&WaitForCompactOptions)`.
 
-Custo comparado, conta minha a partir do exemplo do guia de tuning (500 GB,
-amplificação de escrita de ~33 vezes): carregar 350 GB pelas memtables, com ou
-sem WAL, escreve ~11,6 TB em disco ao longo das compactações. O caminho por SST
-escreve cada byte uma vez, fora a ordenação externa. Desligar o WAL tira só a
-primeira parcela da soma.
+Compared cost, my own calculation from the tuning guide example (500 GB,
+write amplification of ~33 times): loading 350 GB through the memtables, with or
+without WAL, writes ~11.6 TB to disk over the compactions. The SST path
+writes each byte once, apart from the external sort. Turning off the WAL removes only the
+first term of the sum.
 
 ---
 
-## 5. Transações e leitura das próprias escritas
+## 5. Transactions and reading your own writes
 
 ### 5.1 WriteBatchWithIndex
 
-No C++, é um WriteBatch com um índice de busca sobre as chaves inseridas.
-`GetFromBatchAndDB` lê o lote e o DB e junta o resultado, com o merge operator se
-preciso; `NewIteratorWithBase` põe o lote como delta sobre um iterador do DB. Com
-`overwrite_key = true`, o iterador não mostra a mesma chave duas vezes. DeleteRange
-não é suportado: as três variantes devolvem erro (`write_batch_with_index.h`). A
-10.2.0 acrescentou `IngestWriteBatchWithIndex()`, que grava um WBWI no DB sem
-passar pela memtable.
+In C++, it is a WriteBatch with a search index over the inserted keys.
+`GetFromBatchAndDB` reads the batch and the DB and combines the result, with the merge operator if
+needed; `NewIteratorWithBase` puts the batch as a delta over a DB iterator. With
+`overwrite_key = true`, the iterator does not show the same key twice. DeleteRange
+is not supported: the three variants return an error (`write_batch_with_index.h`). Version
+10.2.0 added `IngestWriteBatchWithIndex()`, which writes a WBWI into the DB without
+going through the memtable.
 
-No crate: não existe. Alternativas:
+In the crate: it does not exist. Alternatives:
 
-1. `Transaction` (seções 5.2 e 5.3), que lê as próprias escritas.
-2. FFI: o C API tem `rocksdb_writebatch_wi_create`,
+1. `Transaction` (sections 5.2 and 5.3), which reads its own writes.
+2. FFI: the C API has `rocksdb_writebatch_wi_create`,
    `rocksdb_writebatch_wi_get_from_batch_and_db`,
-   `rocksdb_writebatch_wi_create_iterator_with_base` e
-   `rocksdb_write_writebatch_wi` (`c.h`; no índice do `librocksdb-sys` conferi a
-   primeira), e a feature `raw-ptr` entrega o `*mut rocksdb_t`. Snapshot, read
-   options e iterador base também teriam de ser criados por FFI, porque o crate
-   não dá o ponteiro deles.
-3. O fork `rust-rocksdb` 0.53.0 tem `WriteBatchWithIndex` com
+   `rocksdb_writebatch_wi_create_iterator_with_base` and
+   `rocksdb_write_writebatch_wi` (`c.h`; in the `librocksdb-sys` index I checked the
+   first one), and the `raw-ptr` feature provides the `*mut rocksdb_t`. Snapshot, read
+   options and base iterator would also have to be created through FFI, because the crate
+   does not expose their pointers.
+3. The `rust-rocksdb` 0.53.0 fork has `WriteBatchWithIndex` with
    `get_from_batch_and_db`, `get_pinned_from_batch_and_db`, `iterator_with_base`
-   e savepoints. O `delete_range` dele grava a faixa, mas a doc avisa que ela não
-   é indexada e não aparece nas leituras do lote.
-4. Overlay próprio em Rust: mapa ordenado de chave para valor ou tombstone, mais
-   as faixas apagadas, combinado com o iterador do snapshot. Como o WBWI não
-   indexa faixa, o `DETACH DELETE` dentro de uma transação precisa de algo assim
-   de qualquer forma.
+   and savepoints. Its `delete_range` writes the range, but the doc warns that it is not
+   indexed and does not appear in the batch reads.
+4. Our own overlay in Rust: an ordered map from key to value or tombstone, plus
+   the deleted ranges, combined with the snapshot iterator. Since the WBWI does not
+   index ranges, `DETACH DELETE` inside a transaction needs something like this
+   anyway.
 
 ### 5.2 OptimisticTransactionDB
 
-- Não trava chave na escrita. No commit, confere se alguém escreveu a chave
-  depois da primeira escrita dela na transação, ou depois do snapshot, se houver
-  (`SetSnapshot`). `GetForUpdate` torna uma leitura condição do commit; o `Get`
-  comum não (wiki de transações).
-- A conferência usa o histórico de memtables em memória, e a wiki manda aumentar
-  `max_write_buffer_size_to_maintain` se o commit falhar por falta de histórico.
-  Em DB de transação, o padrão é `max_write_buffer_number × write_buffer_size`
-  por família (`advanced_options.h`): 128 MB por família com os padrões, 1,25 GiB
-  para as 10 famílias de um database.
-- A validação padrão é `kValidateParallel`, feita antes de entrar no grupo de
-  escrita para reduzir disputa de mutex, com `occ_lock_buckets = 1 << 20`.
-- DeleteRange, inclusive dentro de WriteBatch passado a `Write()`, é incompatível
-  e devolve erro (`optimistic_transaction_db.h`).
+- It does not lock keys on write. At commit, it checks whether someone wrote the key
+  after its first write in the transaction, or after the snapshot, if there is one
+  (`SetSnapshot`). `GetForUpdate` makes a read a condition of the commit; the plain `Get`
+  does not (transactions wiki).
+- The check uses the in-memory memtable history, and the wiki says to increase
+  `max_write_buffer_size_to_maintain` if the commit fails for lack of history.
+  In a transaction DB, the default is `max_write_buffer_number × write_buffer_size`
+  per family (`advanced_options.h`): 128 MB per family with the defaults, 1.25 GiB
+  for the 10 families of a database.
+- The default validation is `kValidateParallel`, done before entering the write
+  group to reduce mutex contention, with `occ_lock_buckets = 1 << 20`.
+- DeleteRange, including inside a WriteBatch passed to `Write()`, is incompatible
+  and returns an error (`optimistic_transaction_db.h`).
 
-No crate: `OptimisticTransactionDB<T>` é um alias de `DBCommon<T,
-OptimisticTransactionDBInner>`, cujo `inner()` devolve o DB base. Por isso ele
-herda quase tudo do DB comum: `compact_range*`, `ingest_external_file*`,
-propriedades, `snapshot()`, `delete_file_in_range*`, `Checkpoint::new` e
-`BackupEngine::create_new_backup`. `delete_range_cf` existe desde a 0.23.0 e chama
-`rocksdb_delete_range_cf` no DB base, por fora da validação; não achei
-documentação sobre como a validação trata um DeleteRange feito assim. Transação:
-`transaction()` e `transaction_opt(&WriteOptions, &OptimisticTransactionOptions)`,
-com `OptimisticTransactionOptions::set_snapshot`. `commit()` devolve `Busy` no
-conflito e `TryAgain` quando falta histórico (doc do `Transaction`). Não há
-`OptimisticTransactionDBOptions`; o fork tem, com `set_validate_policy`,
-`set_occ_lock_buckets` e `set_shared_lock_buckets`.
+In the crate: `OptimisticTransactionDB<T>` is an alias of `DBCommon<T,
+OptimisticTransactionDBInner>`, whose `inner()` returns the base DB. That is why it
+inherits almost everything from the plain DB: `compact_range*`, `ingest_external_file*`,
+properties, `snapshot()`, `delete_file_in_range*`, `Checkpoint::new` and
+`BackupEngine::create_new_backup`. `delete_range_cf` has existed since 0.23.0 and calls
+`rocksdb_delete_range_cf` on the base DB, outside the validation; documentation on
+how the validation treats a DeleteRange done this way: not found. Transaction:
+`transaction()` and `transaction_opt(&WriteOptions, &OptimisticTransactionOptions)`,
+with `OptimisticTransactionOptions::set_snapshot`. `commit()` returns `Busy` on a
+conflict and `TryAgain` when history is missing (`Transaction` doc). There is no
+`OptimisticTransactionDBOptions`; the fork has it, with `set_validate_policy`,
+`set_occ_lock_buckets` and `set_shared_lock_buckets`.
 
 ### 5.3 TransactionDB
 
-- Pessimista: toda chave escrita é travada, com timeout e detecção de deadlock; o
-  commit só falha se o DB não puder escrever (wiki de transações).
-- Recusa DeleteRange desde a 6.15; a saída indicada é o DB base (issue 7913).
-- Políticas de escrita `WriteCommitted` (padrão), `WritePrepared` e
+- Pessimistic: every written key is locked, with timeout and deadlock detection; the
+  commit only fails if the DB cannot write (transactions wiki).
+- It has refused DeleteRange since 6.15; the recommended way out is the base DB (issue 7913).
+- Write policies `WriteCommitted` (default), `WritePrepared` and
   `WriteUnprepared`.
 
-No crate: `TransactionDB` é uma struct à parte, com `transaction`,
+In the crate: `TransactionDB` is a separate struct, with `transaction`,
 `transaction_opt`, `prepared_transactions`, get, put, delete, merge, write,
-iteradores, `snapshot`, `flush`, `flush_wal`, propriedades e famílias. Não tem
-`compact_range`, `ingest_external_file` nem `delete_range`, e o `BackupEngine` só
-recebe `&DBCommon`, que ele não é. Checkpoint: `checkpoint::TransactionDBCheckpoint`
+iterators, `snapshot`, `flush`, `flush_wal`, properties and families. It does not have
+`compact_range`, `ingest_external_file` or `delete_range`, and `BackupEngine` only
+accepts `&DBCommon`, which it is not. Checkpoint: `checkpoint::TransactionDBCheckpoint`
 (0.25.0). `TransactionDBOptions`: `set_default_lock_timeout`,
-`set_txn_lock_timeout`, `set_max_num_locks` e `set_num_stripes`.
+`set_txn_lock_timeout`, `set_max_num_locks` and `set_num_stripes`.
 `TransactionOptions`: `set_snapshot`, `set_deadlock_detect`, `set_lock_timeout`,
-`set_expiration`, `set_deadlock_detect_depth`, `set_max_write_batch_size` e
-`set_skip_prepare`. Sem política de escrita; o fork tem `set_write_policy` e
+`set_expiration`, `set_deadlock_detect_depth`, `set_max_write_batch_size` and
+`set_skip_prepare`. No write policy; the fork has `set_write_policy` and
 `set_skip_concurrency_control`.
 
-`Transaction`, nos dois tipos: `get*`, `get_for_update*`, `multi_get*`, `put`,
-`delete`, `merge`, iteradores que leem as próprias escritas, `set_savepoint`,
+`Transaction`, in both types: `get*`, `get_for_update*`, `multi_get*`, `put`,
+`delete`, `merge`, iterators that read their own writes, `set_savepoint`,
 `rollback_to_savepoint`, `prepare`, `set_name`, `commit`, `rollback`,
-`snapshot()`, `get_writebatch()` (um `WriteBatchWithTransaction<true>`) e
-`rebuild_from_writebatch`. Sem `delete_range`; a doc do WriteBatch diz que ele não
-é suportado em `Transaction`.
+`snapshot()`, `get_writebatch()` (a `WriteBatchWithTransaction<true>`) and
+`rebuild_from_writebatch`. No `delete_range`; the WriteBatch doc says it is not
+supported in `Transaction`.
 
 ### 5.4 Snapshots
 
-- Um snapshot é um número de sequência numa lista ligada do DB, e flush e
-  compactação preservam o que qualquer snapshot enxerga. Com centenas de milhares
-  de snapshots, percorrer a lista chega a causar write stall (wiki de snapshot).
-- Snapshot não impede a remoção de arquivos, mas a compactação nunca apaga uma
-  chave que algum snapshot enxerga (visão geral do RocksDB). Snapshot velho segura
-  espaço e atrasa purga. Iterador aberto segura as memtables e os SSTs do momento
-  em que foi criado, e a wiki pede iterador de vida curta ou `Refresh()`.
+- A snapshot is a sequence number in a linked list in the DB, and flush and
+  compaction preserve what any snapshot sees. With hundreds of thousands
+  of snapshots, walking the list can even cause a write stall (snapshot wiki).
+- A snapshot does not prevent file removal, but compaction never deletes a
+  key that some snapshot sees (RocksDB overview). An old snapshot holds on to
+  space and delays purging. An open iterator holds on to the memtables and SSTs from the moment
+  it was created, and the wiki asks for short-lived iterators or `Refresh()`.
 
-No crate: `snapshot()` devolve `SnapshotWithThreadMode`, que é `Send` e `Sync`, lê
-com `get*` e `multi_get*`, cria iteradores e tem `sequence_number()`; é liberado no
-`Drop`. Também há `ReadOptions::set_snapshot`, `latest_sequence_number()` e as
-propriedades `NUM_SNAPSHOTS` e `OLDEST_SNAPSHOT_TIME`.
+In the crate: `snapshot()` returns `SnapshotWithThreadMode`, which is `Send` and `Sync`, reads
+with `get*` and `multi_get*`, creates iterators and has `sequence_number()`; it is released on
+`Drop`. There are also `ReadOptions::set_snapshot`, `latest_sequence_number()` and the
+properties `NUM_SNAPSHOTS` and `OLDEST_SNAPSHOT_TIME`.
 
-### 5.5 Commit em grupo, pipelined write e sync
+### 5.5 Group commit, pipelined write and sync
 
-- O group commit é automático: escritas simultâneas que podem ser combinadas vão
-  ao WAL de uma vez, com um fsync só, em grupos de até 1 MB; escritas com opções
-  diferentes podem não se juntar, e o RocksDB não atrasa ninguém para encher o
-  grupo (wiki de desempenho do WAL).
-- `sync = true` faz fsync antes de devolver. `manual_wal_flush = true` segura o WAL
-  no buffer do RocksDB até `FlushWAL()`, e nesse modo a escrita não resiste a
+- Group commit is automatic: simultaneous writes that can be combined go
+  to the WAL at once, with a single fsync, in groups of up to 1 MB; writes with different
+  options may not be grouped together, and RocksDB does not delay anyone to fill the
+  group (WAL performance wiki).
+- `sync = true` does an fsync before returning. `manual_wal_flush = true` keeps the WAL
+  in RocksDB's buffer until `FlushWAL()`, and in that mode the write does not survive a
   crash.
-- Pipelined write separa as filas do WAL e da memtable: +20% no db_bench com
-  escritores concorrentes e WAL ligado, ~30% em tmpfs com 8 threads (wiki). O DB
-  recusa abrir com ele junto de `unordered_write` ou de `atomic_flush`
+- Pipelined write separates the WAL and memtable queues: +20% in db_bench with
+  concurrent writers and WAL on, ~30% on tmpfs with 8 threads (wiki). The DB
+  refuses to open when it is combined with `unordered_write` or `atomic_flush`
   (`db_impl_open.cc`).
-- `unordered_write` troca a imutabilidade do snapshot por vazão (+63% com WAL e
-  +131% sem, na wiki) e exige `allow_concurrent_memtable_write`.
-- `two_write_queues` serve ao commit em duas fases das transações `WritePrepared`
-  (wiki de WritePrepared).
+- `unordered_write` trades snapshot immutability for throughput (+63% with WAL and
+  +131% without, in the wiki) and requires `allow_concurrent_memtable_write`.
+- `two_write_queues` serves the two-phase commit of `WritePrepared` transactions
+  (WritePrepared wiki).
 
-No crate: `WriteOptions::set_sync`, `disable_wal`, `set_no_slowdown` e
+In the crate: `WriteOptions::set_sync`, `disable_wal`, `set_no_slowdown` and
 `set_low_pri`; `Options::set_enable_pipelined_write`, `set_unordered_write`,
-`set_manual_wal_flush`, `set_allow_concurrent_memtable_write` e
-`set_enable_write_thread_adaptive_yield`; `flush_wal(sync)`. Sem
+`set_manual_wal_flush`, `set_allow_concurrent_memtable_write` and
+`set_enable_write_thread_adaptive_yield`; `flush_wal(sync)`. No
 `two_write_queues`.
 
-Com uma thread escrevendo por database, como no commitador do spec, o group commit
-do RocksDB não tem o que juntar: quem junta é o commitador, com um WriteBatch por
-grupo e `sync = true`. O pipelined write ajuda quando há vários escritores
-concorrentes e ainda bloqueia `atomic_flush`. **Recomendação**: deixar desligado e
-medir.
+With one thread writing per database, as in the spec's committer, RocksDB's group
+commit has nothing to group: the committer does the grouping, with one WriteBatch per
+group and `sync = true`. Pipelined write helps when there are several concurrent
+writers and also blocks `atomic_flush`. **Recommendation**: leave it off and
+measure.
 
-### 5.6 O que muda no commitador do spec
+### 5.6 What changes in the spec's committer
 
-Decisão em jogo: quem detecta conflito. Opções: o `OptimisticTransactionDB` do
-RocksDB, ou DB comum com a validação no commitador. Modelo de linguagem tende a
-recomendar construir, por isso a opção pronta vem primeiro.
+Decision at stake: who detects conflicts. Options: RocksDB's `OptimisticTransactionDB`,
+or a plain DB with the validation in the committer. A language model tends to
+recommend building, so the ready-made option comes first.
 
-**OptimisticTransactionDB.** Está no crate hoje, sem FFI. Traz snapshot, leitura
-das próprias escritas, `get_for_update` para a `pk` ausente que o `MERGE` leu e
-uma validação que o próprio RocksDB mantém. `Busy` e `TryAgain` viram o erro
-transitório do Neo4j sem código novo. Custos: DeleteRange só pela base, fora da
-validação; o histórico de memtables em memória (até 1,25 GiB por database no
-padrão), ou mais `TryAgain` se ele for cortado; política de validação e buckets
-fixos no crate; e o seguidor do Raft aplicaria o lote por `write`, fora de
-transação, com dois caminhos de aplicação.
+**OptimisticTransactionDB.** It is in the crate today, without FFI. It brings snapshots, reading
+your own writes, `get_for_update` for the absent `pk` that `MERGE` read and
+a validation that RocksDB itself maintains. `Busy` and `TryAgain` become the Neo4j
+transient error without new code. Costs: DeleteRange only through the base DB, outside the
+validation; the in-memory memtable history (up to 1.25 GiB per database by
+default), or more `TryAgain` if it is trimmed; validation policy and buckets
+fixed in the crate; and the Raft follower would apply the batch via `write`, outside a
+transaction, with two apply paths.
 
-**DB comum e commitador próprio.** A validação não depende do histórico de
-memtables: o commitador guarda, para as chaves confirmadas depois do snapshot mais
-velho em uso, o número de sequência do commit (`latest_sequence_number()` depois
-de cada `write_opt`) e compara com o `sequence_number()` do snapshot da transação.
-O WriteBatch comum aceita `delete_range_cf`, e o mesmo `WriteBatch::data()` vira a
-entrada do Raft (`WriteBatch::from_data` no seguidor), com um caminho de aplicação
-só. Custos: leitura das próprias escritas e validação passam a ser código do
-Brainwire, inclusive o caso da chave lida e ausente.
+**Plain DB and our own committer.** The validation does not depend on the memtable
+history: the committer keeps, for the keys committed after the oldest snapshot
+in use, the commit's sequence number (`latest_sequence_number()` after
+each `write_opt`) and compares it with the `sequence_number()` of the transaction's snapshot.
+The plain WriteBatch accepts `delete_range_cf`, and the same `WriteBatch::data()` becomes the
+Raft entry (`WriteBatch::from_data` on the follower), with a single apply
+path. Costs: reading your own writes and the validation become Brainwire
+code, including the case of a key that was read and was absent.
 
-O que inverte: se o overlay e a validação própria não passarem no gate 1 (30/09),
-entra o `OptimisticTransactionDB` com `set_max_write_buffer_size_to_maintain`
-explícito, e o `DETACH DELETE` passa a apagar ponto a ponto dentro da transação.
-Confiança média: o custo de memória do histórico vem do padrão documentado, não de
-medida. Decisão: Allan.
+What reverses it: if the overlay and our own validation do not pass gate 1 (2026-09-30),
+`OptimisticTransactionDB` comes in with `set_max_write_buffer_size_to_maintain`
+set explicitly, and `DETACH DELETE` switches to deleting point by point inside the transaction.
+Medium confidence: the memory cost of the history comes from the documented default, not from
+measurement. Decision: Allan.
 
 ---
 
-## 6. Backup, recuperação e purga
+## 6. Backup, recovery and purge
 
 ### 6.1 Checkpoint
 
-- SST e blob viram hard links quando o destino está no mesmo sistema de arquivos,
-  e cópia quando não; MANIFEST e afins são sempre copiados; o diretório não pode
-  existir (`checkpoint.h`).
-- `log_size_for_flush` 0 (padrão) força flush sempre. Com outro valor, o
-  checkpoint pode sair sem os dados recentes se houve escrita sem WAL, que é o
-  caso do `bulk()` (`checkpoint.h`).
-- O checkpoint abre como DB somente leitura ou normal; aberto normal, os SSTs
-  continuam hard links até ficarem obsoletos (wiki de checkpoints). É o formato
-  natural do snapshot do Raft.
-- O C++ devolve um número de sequência garantido no checkpoint
-  (`sequence_number_ptr`); o crate não. **Recomendação**: gravar o índice aplicado
-  do Raft na família `meta`, no mesmo WriteBatch de cada entrada, para o
-  checkpoint levar o índice junto.
+- SST and blob files become hard links when the destination is on the same file system,
+  and copies when it is not; MANIFEST and the like are always copied; the directory must not
+  exist (`checkpoint.h`).
+- `log_size_for_flush` 0 (default) always forces a flush. With another value, the
+  checkpoint may come out without the recent data if there were writes without WAL, which is the
+  case of `bulk()` (`checkpoint.h`).
+- The checkpoint opens as a read-only or normal DB; opened as normal, the SSTs
+  remain hard links until they become obsolete (checkpoints wiki). It is the natural
+  format for the Raft snapshot.
+- The C++ API returns a sequence number guaranteed in the checkpoint
+  (`sequence_number_ptr`); the crate does not. **Recommendation**: write the Raft applied
+  index to the `meta` family, in the same WriteBatch as each entry, so that the
+  checkpoint carries the index along.
 
-No crate: `checkpoint::Checkpoint::new(&db)` (aceita `DBCommon`, isto é, DB e
-`OptimisticTransactionDB`), `create_checkpoint(path)` (com `log_size_for_flush =
-0`), `create_checkpoint_with_log_size(path, n)` e `TransactionDBCheckpoint`.
-`ExportColumnFamily` não está; o C API tem `rocksdb_checkpoint_export_column_family`
-e o fork tem `ExportImportFilesMetaData`.
+In the crate: `checkpoint::Checkpoint::new(&db)` (accepts `DBCommon`, that is, DB and
+`OptimisticTransactionDB`), `create_checkpoint(path)` (with `log_size_for_flush =
+0`), `create_checkpoint_with_log_size(path, n)` and `TransactionDBCheckpoint`.
+`ExportColumnFamily` is missing; the C API has `rocksdb_checkpoint_export_column_family`
+and the fork has `ExportImportFilesMetaData`.
 
-### 6.2 BackupEngine incremental
+### 6.2 Incremental BackupEngine
 
-- É incremental no padrão: com `share_table_files = true`, SST já presente no
-  diretório de backup não é copiado de novo; com `share_files_with_checksum =
-  true` (padrão), o nome do arquivo compartilhado leva tamanho e checksum
-  (`backup_engine.h` e wiki de backup).
-- Sem `flush_before_backup`, o backup leva os WALs das memtables vivas. Com WAL
-  desligado, o header manda usar `flush_before_backup = true` para não perder o
-  que está só na memtable.
-- O restore confere o checksum de cada arquivo; `PurgeOldBackups(N)` mantém os N
-  mais novos; num teste da wiki, 16 threads levaram o backup a um terço do tempo.
-- O backup se apoia no mecanismo do checkpoint: suspende a remoção de arquivos,
-  lista os vivos, copia e retoma.
+- It is incremental by default: with `share_table_files = true`, an SST already present in the
+  backup directory is not copied again; with `share_files_with_checksum =
+  true` (default), the name of the shared file carries size and checksum
+  (`backup_engine.h` and backup wiki).
+- Without `flush_before_backup`, the backup includes the WALs of the live memtables. With WAL
+  disabled, the header says to use `flush_before_backup = true` so as not to lose what
+  is only in the memtable.
+- Restore checks the checksum of each file; `PurgeOldBackups(N)` keeps the N
+  newest; in a wiki test, 16 threads brought the backup down to a third of the time.
+- Backup relies on the checkpoint mechanism: it suspends file deletion,
+  lists the live files, copies and resumes.
 
-No crate: `BackupEngine::open(&BackupEngineOptions, &Env)`,
+In the crate: `BackupEngine::open(&BackupEngineOptions, &Env)`,
 `create_new_backup(&db)`, `create_new_backup_flush(&db, flush)`,
 `purge_old_backups(n)`, `restore_from_latest_backup(db_dir, wal_dir,
-&RestoreOptions)`, `restore_from_backup(..., id)`, `verify_backup(id)` e
-`get_backup_info()`. `BackupEngineOptions` tem só `new(dir)`,
-`set_max_background_operations` e `set_sync` (sync e fsync entraram na 0.24.0). O
-padrão do C++ já é incremental; faltam rate limit, `backup_log_files` e os demais
-ajustes, que o `librocksdb-sys` tem
-(`rocksdb_backup_engine_options_set_share_table_files` e
-`rocksdb_backup_engine_options_set_backup_rate_limit`). `create_new_backup` recebe
-`&DBCommon`, então não aceita `TransactionDB`.
+&RestoreOptions)`, `restore_from_backup(..., id)`, `verify_backup(id)` and
+`get_backup_info()`. `BackupEngineOptions` has only `new(dir)`,
+`set_max_background_operations` and `set_sync` (sync and fsync were added in 0.24.0). The
+C++ default is already incremental; missing are rate limit, `backup_log_files` and the other
+settings, which `librocksdb-sys` has
+(`rocksdb_backup_engine_options_set_share_table_files` and
+`rocksdb_backup_engine_options_set_backup_rate_limit`). `create_new_backup` takes
+`&DBCommon`, so it does not accept `TransactionDB`.
 
-### 6.3 DeleteRange e DeleteFilesInRange
+### 6.3 DeleteRange and DeleteFilesInRange
 
-Pelo `db.h`, DeleteRange remove o intervalo do início (incluído) ao fim (excluído)
-e está pronto para produção, com três ressalvas: muitos range tombstones na
-memtable pioram a leitura (resolve com flush de vez em quando); limitar
-`max_open_files` com range tombstones piora a leitura (usar -1); e é incompatível
-com row cache, com erro na chamada. Como funciona (wiki de implementação): o
-tombstone de faixa vai para uma memtable própria e, no SST, para um meta-block; é
-fragmentado na leitura; a compactação apaga as chaves cobertas, e o próprio
-tombstone só some no último nível, quando cada chave tem uma versão só ali e
-nenhum snapshot o cobre. No teste do blog de 2018, gets com DeleteRange rodaram a
-1,63 milhão por segundo, contra 1,67 milhão com o padrão de varrer e apagar chave a
-chave.
+Per `db.h`, DeleteRange removes the interval from the start (included) to the end (excluded)
+and is production-ready, with three caveats: many range tombstones in the
+memtable degrade reads (fixed by flushing now and then); limiting
+`max_open_files` with range tombstones degrades reads (use -1); and it is incompatible
+with row cache, with an error on the call. How it works (implementation wiki): the
+range tombstone goes into its own memtable and, in the SST, into a meta-block; it is
+fragmented on read; compaction deletes the covered keys, and the tombstone
+itself only goes away at the last level, when each key has a single version there and
+no snapshot covers it. In the 2018 blog test, gets with DeleteRange ran at
+1.63 million per second, versus 1.67 million with the pattern of scanning and deleting key by
+key.
 
-`DeleteFilesInRange` apaga só arquivos inteiros dentro da faixa: pode sobrar chave
-em arquivo que cruza a borda, os arquivos do L0 ficam, e snapshots anteriores podem
-deixar de ver os dados (`convenience.h`). Serve para liberar espaço antes de um
-DeleteRange seguido de compactação.
+`DeleteFilesInRange` deletes only whole files inside the range: keys may remain
+in a file that crosses the boundary, L0 files stay, and earlier snapshots may
+stop seeing the data (`convenience.h`). It serves to free space before a
+DeleteRange followed by compaction.
 
-No crate: `delete_range_cf` e `delete_range_cf_opt` no DB;
-`WriteBatch::delete_range` e `delete_range_cf`, só no lote sem transação;
-`OptimisticTransactionDB::delete_range_cf`, pela base; `SstFileWriter::delete_range`;
-`delete_file_in_range` e `delete_file_in_range_cf`. Nada de DeleteRange em
-`Transaction` nem em `TransactionDB`. `Options::set_row_cache` existe;
-**recomendação**: não usar, por causa do DeleteRange.
+In the crate: `delete_range_cf` and `delete_range_cf_opt` on the DB;
+`WriteBatch::delete_range` and `delete_range_cf`, only on the non-transactional batch;
+`OptimisticTransactionDB::delete_range_cf`, via the base; `SstFileWriter::delete_range`;
+`delete_file_in_range` and `delete_file_in_range_cf`. No DeleteRange in
+`Transaction` or in `TransactionDB`. `Options::set_row_cache` exists;
+**recommendation**: do not use it, because of DeleteRange.
 
-### 6.4 CompactRange para purga física
+### 6.4 CompactRange for physical purge
 
-- A compactação manual descarta versões apagadas e sobrescritas, bloqueia até
-  terminar, e o intervalo real pode ser maior que o pedido (`db.h`).
-- Em compactação por nível, os arquivos da faixa descem até o último nível com
-  dados. Só que o padrão, `kIfHaveCompactionFilter`, pula o último nível quando não
-  há compaction filter (wiki de compactação manual). Para purga, `kForce` ou
-  `kForceOptimized`, que evita recompactar no último nível arquivos criados pela
-  mesma compactação.
-- `exclusive_manual_compaction` vem `true`: nenhuma outra compactação roda junto.
-  Com o banco em uso, `false`.
+- Manual compaction discards deleted and overwritten versions, blocks until
+  it finishes, and the actual interval may be larger than the requested one (`db.h`).
+- In leveled compaction, the files in the range move down to the last level with
+  data. But the default, `kIfHaveCompactionFilter`, skips the last level when there is no
+  compaction filter (manual compaction wiki). For purge, `kForce` or
+  `kForceOptimized`, which avoids recompacting, at the last level, files created by the
+  same compaction.
+- `exclusive_manual_compaction` defaults to `true`: no other compaction runs alongside.
+  With the database in use, `false`.
 
-No crate: `compact_range`, `compact_range_opt`, `compact_range_cf` e
-`compact_range_cf_opt`, com `CompactOptions`: `set_exclusive_manual_compaction`,
+In the crate: `compact_range`, `compact_range_opt`, `compact_range_cf` and
+`compact_range_cf_opt`, with `CompactOptions`: `set_exclusive_manual_compaction`,
 `set_bottommost_level_compaction(BottommostLevelCompaction::{Skip,
 IfHaveCompactionFilter, Force, ForceOptimized})`, `set_change_level`,
-`set_target_level` e `set_full_history_ts_low`. Faltam `max_subcompactions` por
-chamada, `allow_write_stall` e `canceled`; `Options::set_max_subcompactions` vale
-para o DB todo.
+`set_target_level` and `set_full_history_ts_low`. Missing are `max_subcompactions` per
+call, `allow_write_stall` and `canceled`; `Options::set_max_subcompactions` applies
+to the whole DB.
 
-### 6.5 Tempo até o dado sumir de verdade
+### 6.5 Time until the data is actually gone
 
-| Onde o dado pode continuar | Até quando | O que controla |
+| Where the data can remain | Until when | What controls it |
 |---|---|---|
-| Leitura com snapshot anterior ao delete | o snapshot ser liberado | vida de snapshots e transações |
-| Memtable | o flush gravar o tombstone | `write_buffer_size`, WBM |
-| WAL | todas as famílias descarregarem além do maior número de sequência do arquivo (wiki do WAL) | `max_total_wal_size` força flush de família parada; WAL arquivado só existe com `WAL_ttl_seconds` ou `WAL_size_limit_MB` acima de 0; com `recycle_log_file_num` acima de 0 (padrão 0), o arquivo é reaproveitado e sobrescrito em vez de apagado |
-| SST, inclusive no último nível | uma compactação juntar o tombstone e a versão velha no último nível, sem snapshot no meio | CompactRange forçado (prazo: a duração da chamada); sem ele, ver abaixo |
-| SST obsoleto depois da compactação | nenhum iterador segurar o arquivo e a remoção de arquivos estar ligada | iterador curto; `IS_FILE_DELETIONS_ENABLED` |
-| Checkpoint | o diretório ser apagado | retenção dos checkpoints (o hard link segura o arquivo) |
-| Backup | sair o último backup que usa o SST | `purge_old_backups` |
+| Read with a snapshot prior to the delete | the snapshot is released | lifetime of snapshots and transactions |
+| Memtable | the flush writes the tombstone | `write_buffer_size`, WBM |
+| WAL | all families flush past the largest sequence number in the file (WAL wiki) | `max_total_wal_size` forces a flush of an idle family; archived WAL only exists with `WAL_ttl_seconds` or `WAL_size_limit_MB` above 0; with `recycle_log_file_num` above 0 (default 0), the file is reused and overwritten instead of deleted |
+| SST, including at the last level | a compaction brings the tombstone and the old version together at the last level, with no snapshot in between | forced CompactRange (deadline: the duration of the call); without it, see below |
+| Obsolete SST after compaction | no iterator holds the file and file deletion is enabled | short-lived iterator; `IS_FILE_DELETIONS_ENABLED` |
+| Checkpoint | the directory is deleted | checkpoint retention (the hard link holds the file) |
+| Backup | the last backup that uses the SST is removed | `purge_old_backups` |
 
-Sem compactação manual:
+Without manual compaction:
 
-- `ttl` (padrão de 30 dias no formato block-based): no nível, arquivos fora do
-  último nível com todas as chaves mais velhas que o TTL entram em compactação, em
-  cascata até o último nível, e o comentário do `advanced_options.h` diz que o
-  objetivo é tirar do disco entradas apagadas ou atualizadas. Pela letra do
-  comentário, um arquivo que recebe chave nova não tem todas as chaves velhas; não
-  achei garantia de prazo quando a mesma faixa continua recebendo escrita.
-- `periodic_compaction_seconds` (padrão 0 no nível sem compaction filter): arquivos
-  mais velhos que o valor são reescritos, para o nível seguinte com
-  `level_compaction_dynamic_level_bytes`, ou no mesmo lugar se já estão no último.
-  A idade vem primeiro de `file_creation_time`, então cada descida espera o prazo
-  de novo. Desde a 10.4.0, o RocksDB procura essas compactações a cada 12 horas.
+- `ttl` (default of 30 days in the block-based format): in leveled compaction, files outside the
+  last level with all keys older than the TTL enter compaction, cascading
+  down to the last level, and the comment in `advanced_options.h` says the
+  goal is to remove deleted or updated entries from disk. By the letter of the
+  comment, a file that receives a new key no longer has only old keys; not
+  found: a guaranteed deadline when the same range keeps receiving writes.
+- `periodic_compaction_seconds` (default 0 in leveled compaction without a compaction filter): files
+  older than the value are rewritten, into the next level with
+  `level_compaction_dynamic_level_bytes`, or in place if they are already in the last one.
+  The age comes first from `file_creation_time`, so each move down waits for the period
+  again. Since 10.4.0, RocksDB looks for these compactions every 12 hours.
 
-Procedimento para o motor dizer que o dado saiu do disco, montado com o que o
-crate expõe (inferência, a testar):
+Procedure for the engine to state that the data has left the disk, built from what the
+crate exposes (inference, to be tested):
 
-1. gravar os deletes e fazer `flush_cf` nas famílias tocadas;
-2. esperar `OLDEST_SNAPSHOT_TIME` passar do instante do delete, ou `NUM_SNAPSHOTS`
-   zerar, e os iteradores anteriores fecharem;
-3. `compact_range_cf_opt` em cada faixa, com `Force` e
+1. write the deletes and run `flush_cf` on the families touched;
+2. wait for `OLDEST_SNAPSHOT_TIME` to pass the moment of the delete, or for `NUM_SNAPSHOTS`
+   to reach zero, and for the earlier iterators to close;
+3. `compact_range_cf_opt` on each range, with `Force` and
    `exclusive_manual_compaction = false`;
-4. conferir `MIN_OBSOLETE_SST_NUMBER_TO_KEEP` e `MIN_LOG_NUMBER_TO_KEEP` contra
-   `live_files()` e os WALs do diretório;
-5. registrar que checkpoints e backups anteriores guardam o dado até a retenção
-   deles vencer.
+4. check `MIN_OBSOLETE_SST_NUMBER_TO_KEEP` and `MIN_LOG_NUMBER_TO_KEEP` against
+   `live_files()` and the WALs in the directory;
+5. record that earlier checkpoints and backups keep the data until their retention
+   expires.
 
-Apagar o arquivo não zera o bloco no SSD. Se a exigência for apagamento
-criptográfico, é outro assunto, que não pesquisei.
+Deleting the file does not zero the block on the SSD. If the requirement is cryptographic
+erasure, that is a different subject, which I did not research.
 
 ---
 
-## 7. O que o crate `rocksdb` expõe
+## 7. What the `rocksdb` crate exposes
 
-Todas as linhas foram conferidas no docs.rs da 0.25.0 ou no código da tag
-`v0.25.0`. A coluna "Versão" diz 0.25.0 e, quando o changelog informa, desde
-quando existe.
+All rows were checked on docs.rs for 0.25.0 or in the code at tag
+`v0.25.0`. The "Version" column says 0.25.0 and, where the changelog gives it, since
+when it has existed.
 
-| Recurso | Expõe | API | Versão | Alternativa |
+| Feature | Exposes | API | Version | Alternative |
 |---|---|---|---|---|
-| Índice particionado | sim | `BlockBasedOptions::set_index_type(BlockBasedIndexType::TwoLevelIndexSearch)`, `set_metadata_block_size` | 0.25.0 | |
-| Filtro particionado | sim | `set_partition_filters` | 0.25.0 | |
-| Índice e filtro no cache, prioridade alta | sim | `set_cache_index_and_filter_blocks`, `set_cache_index_and_filter_blocks_with_high_priority` | 0.25.0 | |
-| Fixar o topo e o L0 | sim | `set_pin_top_level_index_and_filter`, `set_pin_l0_filter_and_index_blocks_in_cache`, `set_top_level_index_pinning_tier`, `set_partition_pinning_tier`, `set_unpartitioned_pinning_tier` | 0.25.0 | |
-| Bloom, Ribbon e híbrido | sim | `set_bloom_filter`, `set_ribbon_filter`, `set_hybrid_ribbon_filter` | 0.25.0 | |
-| `optimize_filters_for_memory` e `optimize_filters_for_hits` | sim | `BlockBasedOptions::set_optimize_filters_for_memory`, `Options::set_optimize_filters_for_hits` | 0.25.0 | |
-| Restart interval do índice, `format_version` | sim | `set_index_block_restart_interval`, `set_format_version` | 0.25.0 | |
-| Cobrar table reader, construção de filtro e metadados no cache | não | | 0.25.0 | não conferi no C API; medir com `ESTIMATE_TABLE_READERS_MEM` |
-| Medir memória | sim | `property_int_value` com `ESTIMATE_TABLE_READERS_MEM`, `BLOCK_CACHE_USAGE`, `BLOCK_CACHE_PINNED_USAGE`, `CUR_SIZE_ALL_MEM_TABLES`; `properties::aggregated_table_properties_at_level`; `Cache::get_usage` | 0.25.0 | |
-| Cache LRU compartilhado | parcial | `Cache::new_lru_cache`, `new_lru_cache_opts` (só capacidade e shards) | 0.25.0 (opções de LRU desde 0.23.0) | `strict_capacity_limit` por FFI (`rocksdb_cache_create_lru_with_strict_capacity_limit`); `high_pri_pool_ratio` fica no padrão 0,5 |
-| HyperClockCache | sim | `Cache::new_hyper_clock_cache(capacity, estimated_entry_charge)` | 0.25.0 | fork: `HyperClockCacheOptions` |
-| WriteBufferManager compartilhado e cobrado no cache | sim | `WriteBufferManager::new_write_buffer_manager_with_cache`, `Options::set_write_buffer_manager` | 0.25.0 | |
-| Escolher qual memtable descarregar entre DBs | não existe no RocksDB | | | PR 15047, aberto |
-| Pools de flush e compactação compartilhados | sim | `Env::new`, `set_background_threads`, `set_high_priority_background_threads`, `set_bottom_priority_background_threads`, `Options::set_env`, `set_max_background_jobs` | 0.25.0 | |
-| `Env` com pools próprios | não achei | só `Env::new()` e `Env::mem_env()` | 0.25.0 | |
-| Rate limiter compartilhado | parcial | `set_ratelimiter`, `set_auto_tuned_ratelimiter` (um limitador por chamada) | 0.25.0 | clonar um `Options` base (inferência) |
-| SstFileManager | não | | 0.25.0 | fork: `Options::set_sst_file_manager` |
-| Opções do OptimisticTransactionDB (validação, buckets) | não | | 0.25.0 | fork: `OptimisticTransactionDBOptions` |
-| Compressão por nível e no último nível | sim | `set_compression_type`, `set_compression_per_level`, `set_bottommost_compression_type` | 0.25.0 | |
-| Dicionário ZSTD | parcial | `set_bottommost_compression_options(.., max_dict_bytes, enabled)`, `set_bottommost_zstd_max_train_bytes` | 0.25.0 | `max_dict_buffer_bytes` por FFI com `raw-ptr`; `use_zstd_dict_trainer` não conferi no C API |
-| Compressão paralela | sim | `set_compression_options_parallel_threads` | 0.25.0 | |
-| Prefix extractor fixo | sim | `SliceTransform::create_fixed_prefix` | 0.25.0 | |
-| Prefix extractor "capped" | não | | 0.25.0 | `SliceTransform::create` com função Rust |
-| Bloom na memtable | sim | `set_memtable_prefix_bloom_ratio`, `set_memtable_whole_key_filtering` | 0.25.0 | |
-| Filtro só de prefixo | sim | `BlockBasedOptions::set_whole_key_filtering(false)` | 0.25.0 | |
-| Leitura por prefixo | parcial | `ReadOptions::set_prefix_same_as_start`, `set_total_order_seek`, `set_iterate_upper_bound`, `set_iterate_lower_bound` | 0.25.0 | `auto_prefix_mode` não exposto; não conferi no C API |
-| SstFileWriter | sim | `SstFileWriter::create`, `open`, `put`, `merge`, `delete`, `delete_range`, `finish` | 0.25.0 (`delete_range` desde 0.25.0) | |
-| IngestExternalFile | parcial | `ingest_external_file*`; `IngestExternalFileOptions::set_move_files`, `set_snapshot_consistency`, `set_allow_global_seqno`, `set_allow_blocking_flush`, `set_ingest_behind` | 0.25.0 | sem `fail_if_not_bottommost_level` (conferir com `num_files_at_level`), `link_files`, `IngestExternalFiles` e `PrepareFileIngestion`; não conferi o fork |
-| Ingestão atrás | sim | `set_ingest_behind`, `Options::set_allow_ingest_behind` | 0.25.0 | |
-| WAL desligado | sim | `WriteOptions::disable_wal`, `write_without_wal` | 0.25.0 | |
-| Flush no fim, atômico | sim | `flush*`, `flush_cfs_opt`, `FlushOptions::set_wait`, `Options::set_atomic_flush`, `flush_wal` | 0.25.0 | |
-| PrepareForBulkLoad | sim | `Options::prepare_for_bulk_load` | 0.25.0 | cuidado com `num_levels = 2` |
-| Mudar opção com o DB aberto | sim | `set_options`, `set_options_cf` | 0.25.0 | |
-| WriteBatchWithIndex | não | | 0.25.0 | `Transaction`; FFI (`rocksdb_writebatch_wi_*` e `raw-ptr`); fork; overlay próprio |
-| OptimisticTransactionDB | sim | `OptimisticTransactionDB`, `transaction_opt`, `OptimisticTransactionOptions::set_snapshot` | 0.25.0 | |
-| TransactionDB | sim | `TransactionDB`, `TransactionDBOptions`, `TransactionOptions`, `prepared_transactions` | 0.25.0 | |
-| Política de escrita `WritePrepared` e `WriteUnprepared` | não | | 0.25.0 | fork: `TransactionDBOptions::set_write_policy` |
-| Ler as próprias escritas | sim, na transação | `Transaction::get*`, `get_for_update*`, iteradores | 0.25.0 | |
-| DeleteRange na transação | não (nem o C++ aceita) | | 0.25.0 | DB base |
-| Snapshot | sim | `snapshot()`, `SnapshotWithThreadMode::sequence_number`, `ReadOptions::set_snapshot`, `Transaction::snapshot` | 0.25.0 | |
-| WriteBatch serializado para o Raft | sim | `WriteBatch::data`, `from_data`, `iterate` | 0.25.0 | |
-| Group commit | automático | nenhuma | | |
-| Pipelined write e unordered write | sim | `set_enable_pipelined_write`, `set_unordered_write` | 0.25.0 | |
-| `two_write_queues` | não | | 0.25.0 | não conferi no C API |
-| Sync e WAL manual | sim | `WriteOptions::set_sync`, `Options::set_manual_wal_flush`, `flush_wal` | 0.25.0 | |
-| Checkpoint | sim | `Checkpoint::new`, `create_checkpoint`, `create_checkpoint_with_log_size`, `TransactionDBCheckpoint` | 0.25.0 (checkpoint de `TransactionDB` desde 0.25.0) | |
-| Exportar família | não | | 0.25.0 | C API `rocksdb_checkpoint_export_column_family`; fork |
-| BackupEngine | parcial | `BackupEngine::open`, `create_new_backup`, `create_new_backup_flush`, `purge_old_backups`, `restore_from_latest_backup`, `restore_from_backup`, `verify_backup`, `get_backup_info`; `BackupEngineOptions::set_max_background_operations`, `set_sync` | 0.25.0 (`set_sync` desde 0.24.0) | rate limit e `share_table_files` por FFI |
-| DeleteRange | sim | `delete_range_cf`, `delete_range_cf_opt`, `WriteBatch::delete_range*`, `OptimisticTransactionDB::delete_range_cf`, `SstFileWriter::delete_range` | 0.25.0 (no OCC desde 0.23.0) | |
-| DeleteFilesInRange | sim | `delete_file_in_range`, `delete_file_in_range_cf` | 0.25.0 | |
-| CompactRange forçado | sim | `compact_range_cf_opt`, `CompactOptions::set_bottommost_level_compaction(Force)`, `set_exclusive_manual_compaction` | 0.25.0 | sem `max_subcompactions` por chamada |
-| TTL e compactação periódica | sim | `set_ttl`, `set_periodic_compaction_seconds` | 0.25.0 | |
-| Suspender remoção de arquivos, listar arquivos | sim | `disable_file_deletions`, `enable_file_deletions` (só no DB), `live_files` | 0.25.0 | |
-| Esperar compactação | sim | `wait_for_compact` | 0.25.0 | |
-| `max_open_files` e threads de abertura | sim | `set_max_open_files`, `set_max_file_opening_threads`, `set_skip_stats_update_on_db_open` | 0.25.0 | |
-| `skip_checking_sst_file_sizes_on_db_open` | não | deprecado no RocksDB 10.5 e no crate 0.24.0 | 0.25.0 | a checagem agora roda em paralelo |
-| `fast_sst_open`, `reuse_manifest_on_open` | não | | 0.25.0 | não conferi no C API |
-| Ponteiro C para chamar o C API | sim, com a feature `raw-ptr` | `AsRawPtr` para `DB`, `Options` e `Env` | 0.25.0 | |
+| Partitioned index | yes | `BlockBasedOptions::set_index_type(BlockBasedIndexType::TwoLevelIndexSearch)`, `set_metadata_block_size` | 0.25.0 | |
+| Partitioned filter | yes | `set_partition_filters` | 0.25.0 | |
+| Index and filter in the cache, high priority | yes | `set_cache_index_and_filter_blocks`, `set_cache_index_and_filter_blocks_with_high_priority` | 0.25.0 | |
+| Pin the top level and L0 | yes | `set_pin_top_level_index_and_filter`, `set_pin_l0_filter_and_index_blocks_in_cache`, `set_top_level_index_pinning_tier`, `set_partition_pinning_tier`, `set_unpartitioned_pinning_tier` | 0.25.0 | |
+| Bloom, Ribbon and hybrid | yes | `set_bloom_filter`, `set_ribbon_filter`, `set_hybrid_ribbon_filter` | 0.25.0 | |
+| `optimize_filters_for_memory` and `optimize_filters_for_hits` | yes | `BlockBasedOptions::set_optimize_filters_for_memory`, `Options::set_optimize_filters_for_hits` | 0.25.0 | |
+| Index restart interval, `format_version` | yes | `set_index_block_restart_interval`, `set_format_version` | 0.25.0 | |
+| Charge table reader, filter construction and metadata to the cache | no | | 0.25.0 | not checked in the C API; measure with `ESTIMATE_TABLE_READERS_MEM` |
+| Measure memory | yes | `property_int_value` with `ESTIMATE_TABLE_READERS_MEM`, `BLOCK_CACHE_USAGE`, `BLOCK_CACHE_PINNED_USAGE`, `CUR_SIZE_ALL_MEM_TABLES`; `properties::aggregated_table_properties_at_level`; `Cache::get_usage` | 0.25.0 | |
+| Shared LRU cache | partial | `Cache::new_lru_cache`, `new_lru_cache_opts` (only capacity and shards) | 0.25.0 (LRU options since 0.23.0) | `strict_capacity_limit` via FFI (`rocksdb_cache_create_lru_with_strict_capacity_limit`); `high_pri_pool_ratio` stays at the default 0.5 |
+| HyperClockCache | yes | `Cache::new_hyper_clock_cache(capacity, estimated_entry_charge)` | 0.25.0 | fork: `HyperClockCacheOptions` |
+| Shared WriteBufferManager charged to the cache | yes | `WriteBufferManager::new_write_buffer_manager_with_cache`, `Options::set_write_buffer_manager` | 0.25.0 | |
+| Choose which memtable to flush across DBs | does not exist in RocksDB | | | PR 15047, open |
+| Shared flush and compaction pools | yes | `Env::new`, `set_background_threads`, `set_high_priority_background_threads`, `set_bottom_priority_background_threads`, `Options::set_env`, `set_max_background_jobs` | 0.25.0 | |
+| `Env` with its own pools | not found | only `Env::new()` and `Env::mem_env()` | 0.25.0 | |
+| Shared rate limiter | partial | `set_ratelimiter`, `set_auto_tuned_ratelimiter` (one limiter per call) | 0.25.0 | clone a base `Options` (inference) |
+| SstFileManager | no | | 0.25.0 | fork: `Options::set_sst_file_manager` |
+| OptimisticTransactionDB options (validation, buckets) | no | | 0.25.0 | fork: `OptimisticTransactionDBOptions` |
+| Per-level and last-level compression | yes | `set_compression_type`, `set_compression_per_level`, `set_bottommost_compression_type` | 0.25.0 | |
+| ZSTD dictionary | partial | `set_bottommost_compression_options(.., max_dict_bytes, enabled)`, `set_bottommost_zstd_max_train_bytes` | 0.25.0 | `max_dict_buffer_bytes` via FFI with `raw-ptr`; `use_zstd_dict_trainer` not checked in the C API |
+| Parallel compression | yes | `set_compression_options_parallel_threads` | 0.25.0 | |
+| Fixed prefix extractor | yes | `SliceTransform::create_fixed_prefix` | 0.25.0 | |
+| "Capped" prefix extractor | no | | 0.25.0 | `SliceTransform::create` with a Rust function |
+| Bloom in the memtable | yes | `set_memtable_prefix_bloom_ratio`, `set_memtable_whole_key_filtering` | 0.25.0 | |
+| Prefix-only filter | yes | `BlockBasedOptions::set_whole_key_filtering(false)` | 0.25.0 | |
+| Prefix reads | partial | `ReadOptions::set_prefix_same_as_start`, `set_total_order_seek`, `set_iterate_upper_bound`, `set_iterate_lower_bound` | 0.25.0 | `auto_prefix_mode` not exposed; not checked in the C API |
+| SstFileWriter | yes | `SstFileWriter::create`, `open`, `put`, `merge`, `delete`, `delete_range`, `finish` | 0.25.0 (`delete_range` since 0.25.0) | |
+| IngestExternalFile | partial | `ingest_external_file*`; `IngestExternalFileOptions::set_move_files`, `set_snapshot_consistency`, `set_allow_global_seqno`, `set_allow_blocking_flush`, `set_ingest_behind` | 0.25.0 | without `fail_if_not_bottommost_level` (check with `num_files_at_level`), `link_files`, `IngestExternalFiles` and `PrepareFileIngestion`; fork not checked |
+| Ingest behind | yes | `set_ingest_behind`, `Options::set_allow_ingest_behind` | 0.25.0 | |
+| WAL disabled | yes | `WriteOptions::disable_wal`, `write_without_wal` | 0.25.0 | |
+| Flush at the end, atomic | yes | `flush*`, `flush_cfs_opt`, `FlushOptions::set_wait`, `Options::set_atomic_flush`, `flush_wal` | 0.25.0 | |
+| PrepareForBulkLoad | yes | `Options::prepare_for_bulk_load` | 0.25.0 | watch out for `num_levels = 2` |
+| Change an option with the DB open | yes | `set_options`, `set_options_cf` | 0.25.0 | |
+| WriteBatchWithIndex | no | | 0.25.0 | `Transaction`; FFI (`rocksdb_writebatch_wi_*` and `raw-ptr`); fork; custom overlay |
+| OptimisticTransactionDB | yes | `OptimisticTransactionDB`, `transaction_opt`, `OptimisticTransactionOptions::set_snapshot` | 0.25.0 | |
+| TransactionDB | yes | `TransactionDB`, `TransactionDBOptions`, `TransactionOptions`, `prepared_transactions` | 0.25.0 | |
+| `WritePrepared` and `WriteUnprepared` write policy | no | | 0.25.0 | fork: `TransactionDBOptions::set_write_policy` |
+| Read your own writes | yes, in the transaction | `Transaction::get*`, `get_for_update*`, iterators | 0.25.0 | |
+| DeleteRange in the transaction | no (not even C++ accepts it) | | 0.25.0 | base DB |
+| Snapshot | yes | `snapshot()`, `SnapshotWithThreadMode::sequence_number`, `ReadOptions::set_snapshot`, `Transaction::snapshot` | 0.25.0 | |
+| Serialized WriteBatch for Raft | yes | `WriteBatch::data`, `from_data`, `iterate` | 0.25.0 | |
+| Group commit | automatic | none | | |
+| Pipelined write and unordered write | yes | `set_enable_pipelined_write`, `set_unordered_write` | 0.25.0 | |
+| `two_write_queues` | no | | 0.25.0 | not checked in the C API |
+| Sync and manual WAL | yes | `WriteOptions::set_sync`, `Options::set_manual_wal_flush`, `flush_wal` | 0.25.0 | |
+| Checkpoint | yes | `Checkpoint::new`, `create_checkpoint`, `create_checkpoint_with_log_size`, `TransactionDBCheckpoint` | 0.25.0 (`TransactionDB` checkpoint since 0.25.0) | |
+| Export a family | no | | 0.25.0 | C API `rocksdb_checkpoint_export_column_family`; fork |
+| BackupEngine | partial | `BackupEngine::open`, `create_new_backup`, `create_new_backup_flush`, `purge_old_backups`, `restore_from_latest_backup`, `restore_from_backup`, `verify_backup`, `get_backup_info`; `BackupEngineOptions::set_max_background_operations`, `set_sync` | 0.25.0 (`set_sync` since 0.24.0) | rate limit and `share_table_files` via FFI |
+| DeleteRange | yes | `delete_range_cf`, `delete_range_cf_opt`, `WriteBatch::delete_range*`, `OptimisticTransactionDB::delete_range_cf`, `SstFileWriter::delete_range` | 0.25.0 (in OCC since 0.23.0) | |
+| DeleteFilesInRange | yes | `delete_file_in_range`, `delete_file_in_range_cf` | 0.25.0 | |
+| Forced CompactRange | yes | `compact_range_cf_opt`, `CompactOptions::set_bottommost_level_compaction(Force)`, `set_exclusive_manual_compaction` | 0.25.0 | no per-call `max_subcompactions` |
+| TTL and periodic compaction | yes | `set_ttl`, `set_periodic_compaction_seconds` | 0.25.0 | |
+| Suspend file deletion, list files | yes | `disable_file_deletions`, `enable_file_deletions` (only on the DB), `live_files` | 0.25.0 | |
+| Wait for compaction | yes | `wait_for_compact` | 0.25.0 | |
+| `max_open_files` and opening threads | yes | `set_max_open_files`, `set_max_file_opening_threads`, `set_skip_stats_update_on_db_open` | 0.25.0 | |
+| `skip_checking_sst_file_sizes_on_db_open` | no | deprecated in RocksDB 10.5 and in crate 0.24.0 | 0.25.0 | the check now runs in parallel |
+| `fast_sst_open`, `reuse_manifest_on_open` | no | | 0.25.0 | not checked in the C API |
+| C pointer to call the C API | yes, with the `raw-ptr` feature | `AsRawPtr` for `DB`, `Options` and `Env` | 0.25.0 | |
 
-Decisão que a tabela levanta: ficar no `rocksdb` e completar por FFI, ou trocar
-pelo fork. A favor do `rocksdb`: é o crate do plano, e o que falta para o desenho
-recomendado (overlay próprio, DB comum) é pouco e cabe em FFI pontual. A favor do
-fork: `WriteBatchWithIndex`, `SstFileManager`, opções do OCC, política de escrita
-e mais tipos já prontos, com lançamentos mensais sobre a mesma 11.8.1. Não
-verifiquei quem mantém o fork nem a política de compatibilidade dele. O que
-inverte: se o Brainwire precisar de três ou mais itens do fork, a troca custa
-menos que o FFI. Decisão: Allan.
+The decision the table raises: stay with `rocksdb` and complete it via FFI, or switch
+to the fork. In favor of `rocksdb`: it is the plan's crate, and what is missing for the
+recommended design (custom overlay, plain DB) is small and fits in targeted FFI. In favor of the
+fork: `WriteBatchWithIndex`, `SstFileManager`, OCC options, write policy
+and more types already built, with monthly releases on the same 11.8.1. I did not
+verify who maintains the fork or its compatibility policy. What
+flips it: if Brainwire needs three or more items from the fork, switching costs
+less than the FFI. Decision: Allan.
 
 ---
 
-## 8. Riscos em escala e ajustes
+## 8. Risks at scale and adjustments
 
-### 8.1 Amplificação de escrita
+### 8.1 Write amplification
 
-A compactação por nível reescreve cada byte várias vezes: no exemplo do guia de
-tuning (500 GB, L1 de 512 MB, multiplicador 10), ~33 vezes, e a wiki de
-compactação por nível diz que costuma passar de 10. No caminho online do
-Brainwire, o teto de ingestão é de ~10 mil elementos por segundo (README); com 2
-chaves de ~50 bytes por elemento (hipótese minha), são ~1 MB/s lógicos e ~33 MB/s
-de compactação, folgado para NVMe. Na carga de 5 bilhões pelas memtables, são
-~11,6 TB escritos (seção 4.2).
+Leveled compaction rewrites each byte several times: in the example from the
+tuning guide (500 GB, 512 MB L1, multiplier 10), ~33 times, and the leveled
+compaction wiki says it usually exceeds 10. On the online path of
+Brainwire, the ingestion ceiling is ~10,000 elements per second (README); with 2
+keys of ~50 bytes per element (my assumption), that is ~1 MB/s logical and ~33 MB/s
+of compaction, comfortable for NVMe. For the 5 billion load through the memtables, that is
+~11.6 TB written (section 4.2).
 
-Ajustes: carga grande por SST (4.1); `write_buffer_size` maior e
-`min_write_buffer_number_to_merge` reduzem a amplificação (wiki de write stalls),
-mas pesam no WBM (8.3); `set_max_subcompactions` paraleliza o L0 para L1, que não
-é paralelo por padrão (wiki de compactação por nível); `set_auto_tuned_ratelimiter`
-suaviza os picos. A compactação em camadas reduz a amplificação de escrita ao custo
-de espaço e leitura (wiki de compactação), e a por nível economiza mais espaço
-(wiki de espaço). Com a meta de disco do README, a por nível fica.
+Adjustments: large loads via SST (4.1); a larger `write_buffer_size` and
+`min_write_buffer_number_to_merge` reduce amplification (write stalls wiki),
+but weigh on the WBM (8.3); `set_max_subcompactions` parallelizes L0 to L1, which is not
+parallel by default (leveled compaction wiki); `set_auto_tuned_ratelimiter`
+smooths the peaks. Tiered compaction reduces write amplification at the cost
+of space and reads (compaction wiki), and leveled saves more space
+(space wiki). Given the README's disk target, leveled stays.
 
-### 8.2 Stalls de L0 e de compactação pendente
+### 8.2 L0 and pending compaction stalls
 
-Padrões: escrita desacelera com 20 arquivos no L0 e para com 36; desacelera com
-64 GB de compactação pendente e para com 256 GB; e para quando as memtables
-imutáveis chegam a `max_write_buffer_number` (2) (`advanced_options.h` e wiki de
-write stalls). Num database de 350 GB, uma rajada passa dos 64 GB pendentes com
-facilidade. Com o pool dividido, o atraso de um database tira thread dos outros.
+Defaults: writes slow down at 20 files in L0 and stop at 36; they slow down at
+64 GB of pending compaction and stop at 256 GB; and they stop when the immutable
+memtables reach `max_write_buffer_number` (2) (`advanced_options.h` and the write
+stalls wiki). In a 350 GB database, a burst goes past the 64 GB pending with
+ease. With the pool shared, one database's backlog takes threads from the others.
 
-Ajustes da wiki: mais jobs em segundo plano, memtables maiores, pool de flush
-separado. Durante carga, subir os gatilhos com `set_options` e voltar depois.
-`WriteOptions::set_no_slowdown(true)` faz a escrita falhar com `Incomplete` em vez
-de esperar. Monitorar `IS_WRITE_STOPPED`, `ACTUAL_DELAYED_WRITE_RATE`,
-`ESTIMATE_PENDING_COMPACTION_BYTES`, `COMPACTION_PENDING` e
-`NUM_RUNNING_COMPACTIONS` por database.
+Adjustments from the wiki: more background jobs, larger memtables, a separate flush
+pool. During a load, raise the triggers with `set_options` and revert them afterwards.
+`WriteOptions::set_no_slowdown(true)` makes the write fail with `Incomplete` instead
+of waiting. Monitor `IS_WRITE_STOPPED`, `ACTUAL_DELAYED_WRITE_RATE`,
+`ESTIMATE_PENDING_COMPACTION_BYTES`, `COMPACTION_PENDING` and
+`NUM_RUNNING_COMPACTIONS` per database.
 
-### 8.3 WriteBufferManager compartilhado
+### 8.3 Shared WriteBufferManager
 
-- PR 15047 do RocksDB (aberto, de agosto a setembro de 2026): o WBM compartilhado
-  dispara o flush no DB cuja escrita percebe a pressão e escolhe a memtable mutável
-  mais antiga desse DB. Com muitas famílias ou DBs, ele descarrega memtables
-  pequenas várias vezes e não toca quem ocupa mais. O PR propõe descarregar a maior
-  do DB, ou a maior entre todos os DBs.
-- Harper (PR 2492): em produção, dois nós paravam todo dia. Com o orçamento
-  espalhado por muitas famílias, nenhuma chegava ao gatilho, o contador de flush
-  por motivo do WBM ficava em 0 e todas as threads de escrita esperavam; a saída
-  era reiniciar. Eles mudaram o padrão de `allow_stall` para `false`.
-- Camunda (issue 51669): WBM e cache dimensionados na partida; quando o número de
-  instâncias cresceu, `min_write_buffer_number_to_merge = 3` impedia o flush, e
-  baixaram para 1.
+- RocksDB PR 15047 (open, from 2026-08 to 2026-09): the shared WBM
+  triggers the flush in the DB whose write notices the pressure and picks the oldest mutable
+  memtable of that DB. With many families or DBs, it flushes small memtables
+  several times and does not touch the ones that take up the most. The PR proposes flushing the largest
+  one in the DB, or the largest across all DBs.
+- Harper (PR 2492): in production, two nodes stopped every day. With the budget
+  spread across many families, none reached the trigger, the flush counter
+  for the WBM reason stayed at 0 and all write threads waited; the way out
+  was to restart. They changed the default of `allow_stall` to `false`.
+- Camunda (issue 51669): WBM and cache sized at startup; when the number of
+  instances grew, `min_write_buffer_number_to_merge = 3` prevented the flush, and
+  they lowered it to 1.
 
-Ajustes: `allow_stall = false` e alerta em `WriteBufferManager::get_usage()` acima
-do orçamento; `min_write_buffer_number_to_merge = 1` (padrão);
-`write_buffer_size` pequeno nas famílias pequenas (`meta`, `acl`, `lbl`);
-`max_total_wal_size` para forçar o flush de família parada; recalcular o WBM com
-`set_buffer_size` quando um database for criado ou apagado.
+Adjustments: `allow_stall = false` and an alert on `WriteBufferManager::get_usage()` above
+the budget; `min_write_buffer_number_to_merge = 1` (default);
+a small `write_buffer_size` in the small families (`meta`, `acl`, `lbl`);
+`max_total_wal_size` to force the flush of an idle family; recompute the WBM with
+`set_buffer_size` when a database is created or deleted.
 
-### 8.4 Abertura com muitos SSTs
+### 8.4 Opening with many SSTs
 
-Com 175 a 350 GB por grafo, são 2.700 a 5.500 SSTs com arquivos de 64 MB (padrão
-de `target_file_size_base`) e 700 a 1.400 com 256 MB, vezes o número de
-databases. A wiki de abertura rápida lista as causas de lentidão: replay do
-MANIFEST, replay do WAL, leitura do rodapé e dos metadados de todos os SSTs com
-`max_open_files = -1` (leituras aleatórias), checagem do tamanho de todos os SSTs
-e abertura de um DB por vez.
+With 175 to 350 GB per graph, that is 2,700 to 5,500 SSTs with 64 MB files (the default
+for `target_file_size_base`) and 700 to 1,400 with 256 MB, times the number of
+databases. The fast-open wiki lists the causes of slowness: replay of the
+MANIFEST, replay of the WAL, reading the footer and metadata of all SSTs with
+`max_open_files = -1` (random reads), checking the size of all SSTs
+and opening one DB at a time.
 
-Ajustes: `set_max_file_opening_threads` (padrão 16),
+Adjustments: `set_max_file_opening_threads` (default 16),
 `set_skip_stats_update_on_db_open(true)`, `set_max_manifest_file_size`,
-`set_max_total_wal_size`, `target_file_size_base` maior e os databases abertos em
-paralelo. No RocksDB, a 10.5 passou a checar tamanhos em paralelo; a 11.2
-trouxe `fast_sst_open` (experimental) e a 11.3 `reuse_manifest_on_open`, que o
-crate não expõe. Não achei medida pública de tempo de abertura com milhares de
+`set_max_total_wal_size`, a larger `target_file_size_base` and the databases opened in
+parallel. In RocksDB, 10.5 started checking sizes in parallel; 11.2
+brought `fast_sst_open` (experimental) and 11.3 `reuse_manifest_on_open`, which the
+crate does not expose. Not found: a public measurement of open time with thousands of
 SSTs.
 
-### 8.5 `max_open_files` e descritores
+### 8.5 `max_open_files` and descriptors
 
-Com -1, todos os arquivos ficam abertos (o guia de tuning recomenda, para evitar o
-custo do table cache, e o `db.h` pede o mesmo por causa do DeleteRange). Cada SST
-segura um descritor, então o `ulimit -n` do container precisa cobrir a soma de
-SSTs, WALs, MANIFESTs e LOGs de todos os databases, mais sockets. O TiKV usa 40.960
-como padrão. A memória dos table readers fica fora do cache (1.4). Limitar
-`max_open_files` troca memória por reabertura e piora leitura com range
+With -1, all files stay open (the tuning guide recommends it, to avoid the
+cost of the table cache, and `db.h` asks for the same because of DeleteRange). Each SST
+holds a descriptor, so the container's `ulimit -n` must cover the sum of
+SSTs, WALs, MANIFESTs and LOGs of all databases, plus sockets. TiKV uses 40,960
+as its default. Table reader memory stays outside the cache (1.4). Limiting
+`max_open_files` trades memory for reopening and degrades reads with range
 tombstones.
 
-### 8.6 Snapshots e iteradores longos
+### 8.6 Long-lived snapshots and iterators
 
-Transação ou consulta longa segura versões (espaço e purga) e SSTs; centenas de
-milhares de snapshots causam stall; iterador segura blocos e arquivos. Ajustes: o
-teto de execução por consulta do spec, snapshot liberado no fim de cada
-transação, iterador recriado em varredura longa. A wiki sugere `Refresh()`; não
-conferi se o crate expõe.
+A long transaction or query holds versions (space and purge) and SSTs; hundreds of
+thousands of snapshots cause stalls; an iterator holds blocks and files. Adjustments: the
+spec's per-query execution cap, snapshot released at the end of each
+transaction, iterator recreated in long scans. The wiki suggests `Refresh()`; I did not
+check whether the crate exposes it.
 
-### 8.7 Histórico e buckets do OptimisticTransactionDB
+### 8.7 OptimisticTransactionDB history and buckets
 
-Se ele for escolhido, `set_max_write_buffer_size_to_maintain` precisa de valor
-explícito: no padrão, até 1,25 GiB por database com 10 famílias, acima do
-orçamento de memtables do spec. No caso do Harper, a mesma retenção chegava a
-~256 MiB por família. Os 2^20 buckets de lock por database não mudam pelo crate.
+If it is chosen, `set_max_write_buffer_size_to_maintain` needs an explicit
+value: by default, up to 1.25 GiB per database with 10 families, above the
+spec's memtable budget. In Harper's case, the same retention reached
+~256 MiB per family. The 2^20 lock buckets per database cannot be changed through the crate.
 
-### 8.8 Build e plataforma
+### 8.8 Build and platform
 
-O RocksDB exige compilador C++20 (GCC 11 ou mais, Clang 10 ou mais) desde a
-10.7.0, inclusive para quem usa os headers, então a imagem que compila o
-`librocksdb-sys` 0.19 precisa disso. O crate pede Rust 1.88.0 (README). O HCC
-automático depende de mmap anônimo. O crate tem as features `jemalloc` e
-`io-uring`.
+RocksDB requires a C++20 compiler (GCC 11 or later, Clang 10 or later) since
+10.7.0, including for those who use the headers, so the image that compiles
+`librocksdb-sys` 0.19 needs it. The crate requires Rust 1.88.0 (README). Automatic
+HCC depends on anonymous mmap. The crate has the `jemalloc` and
+`io-uring` features.
 
-### 8.9 O que não achei
+### 8.9 What was not found
 
-- tamanho de memória por table reader aberto;
-- se a compactação por nível usa o pool BOTTOM na versão atual;
-- como a validação do `OptimisticTransactionDB` trata DeleteRange feito na base;
-- prazo garantido do `ttl` quando a faixa continua recebendo escrita;
-- tempo de abertura medido com milhares de SSTs;
-- custo de memória por bucket de lock do OCC;
-- quando falha a reserva de cache do buffer de dicionário;
-- se o C API tem `two_write_queues`, `auto_prefix_mode`,
-  `fail_if_not_bottommost_level`, `use_zstd_dict_trainer`, `fast_sst_open` e
-  `cache_usage_options` (não conferi);
-- se o crate expõe `Refresh()` de iterador.
+- memory size per open table reader;
+- whether leveled compaction uses the BOTTOM pool in the current version;
+- how `OptimisticTransactionDB` validation handles a DeleteRange done on the base;
+- the guaranteed deadline for `ttl` when the range keeps receiving writes;
+- open time measured with thousands of SSTs;
+- memory cost per OCC lock bucket;
+- when the cache reservation for the dictionary buffer fails;
+- whether the C API has `two_write_queues`, `auto_prefix_mode`,
+  `fail_if_not_bottommost_level`, `use_zstd_dict_trainer`, `fast_sst_open` and
+  `cache_usage_options` (not checked);
+- whether the crate exposes iterator `Refresh()`.
 
 ---
 
-## 9. Fontes
+## 9. Sources
 
-Wiki do RocksDB:
+RocksDB wiki:
 
 - https://github.com/facebook/rocksdb/wiki/Partitioned-Index-Filters
 - https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter
@@ -1135,7 +1135,7 @@ Wiki do RocksDB:
 - https://github.com/facebook/rocksdb/wiki/Setup-Options-and-Basic-Tuning
 - https://github.com/facebook/rocksdb/wiki/RocksDB-Overview
 
-Headers e código do RocksDB (branch `main`):
+RocksDB headers and code (branch `main`):
 
 - https://github.com/facebook/rocksdb/blob/main/include/rocksdb/table.h
 - https://github.com/facebook/rocksdb/blob/main/include/rocksdb/cache.h
@@ -1159,7 +1159,7 @@ Headers e código do RocksDB (branch `main`):
 - https://github.com/facebook/rocksdb/blob/main/table/block_based/partitioned_filter_block.cc
 - https://github.com/facebook/rocksdb/blob/main/HISTORY.md
 
-Blog, notas de versão, issues e PRs do RocksDB:
+RocksDB blog, release notes, issues and PRs:
 
 - https://rocksdb.org/blog/2021/05/31/dictionary-compression.html
 - https://rocksdb.org/blog/2018/11/21/delete-range.html
@@ -1172,7 +1172,7 @@ Blog, notas de versão, issues e PRs do RocksDB:
 - https://github.com/facebook/rocksdb/issues/12942
 - https://github.com/facebook/rocksdb/pull/15047
 
-Crate `rocksdb` 0.25.0:
+`rocksdb` crate 0.25.0:
 
 - https://crates.io/api/v1/crates/rocksdb
 - https://crates.io/api/v1/crates/librocksdb-sys
@@ -1219,7 +1219,7 @@ Crate `rocksdb` 0.25.0:
 - https://github.com/rust-rocksdb/rust-rocksdb/blob/v0.25.0/src/raw_ptr.rs
 - https://github.com/rust-rocksdb/rust-rocksdb/blob/v0.25.0/src/transactions/optimistic_transaction_db.rs
 
-Fork `rust-rocksdb` 0.53.0:
+`rust-rocksdb` fork 0.53.0:
 
 - https://crates.io/api/v1/crates/rust-rocksdb
 - https://crates.io/api/v1/crates/rust-librocksdb-sys
@@ -1232,7 +1232,7 @@ Fork `rust-rocksdb` 0.53.0:
 - https://docs.rs/rust-rocksdb/0.53.0/rust_rocksdb/sst_file_manager/index.html
 - https://github.com/zaidoon1/rust-rocksdb/blob/master/CHANGELOG.md
 
-Outras fontes técnicas públicas:
+Other public technical sources:
 
 - https://docs.confluent.io/platform/current/streams/developer-guide/memory-mgmt.html
 - https://docs.pingcap.com/tidb/stable/tikv-configuration-file/
@@ -1240,19 +1240,19 @@ Outras fontes técnicas públicas:
 - http://smalldatum.blogspot.com/2022/07/the-impact-of-maxbackgroundjobs-on.html
 - https://github.com/HarperFast/harper/pull/2492
 - https://github.com/camunda/camunda/issues/51669
-- https://docs.rs/ckb-rocksdb/latest/ckb_rocksdb/struct.Options.html (só como
-  resultado de busca, para o nome da função de `max_dict_buffer_bytes`)
+- https://docs.rs/ckb-rocksdb/latest/ckb_rocksdb/struct.Options.html (only as a
+  search result, for the name of the function for `max_dict_buffer_bytes`)
 
-Neste repositório:
+In this repository:
 
-- `client-brainwire/README.md` (volume, meta de disco, teto de ingestão)
-- `client-brainwire/PLANO.md`
+- `client-brainwire/README.md` (volume, disk target, ingestion ceiling)
+- `client-brainwire/PLAN.md`
 - `client-brainwire/docs/superpowers/specs/2026-09-24-brainwire-design.md`
-  (seção 1: famílias, chaves, memória, transações, carga e purga)
+  (section 1: families, keys, memory, transactions, loading and purge)
 
 ---
 
-Proveniência: rascunho apoiado por IA (Claude Opus 5.5, 24/09/2026). Protocolo
-anti-trendslop aplicado nas decisões das seções 5.6 e 7. Tensões identificadas:
-validação pronta do RocksDB contra commitador próprio; crate `rocksdb` com FFI
-contra o fork `rust-rocksdb`. Decisão final: Allan.
+Provenance: AI-assisted draft (Claude Opus 5.5, 2026-09-24). Anti-trendslop
+protocol applied to the decisions in sections 5.6 and 7. Tensions identified:
+RocksDB's ready-made validation versus a custom committer; `rocksdb` crate with FFI
+versus the `rust-rocksdb` fork. Final decision: Allan.
