@@ -59,6 +59,7 @@ pub fn get_u64(input: &mut &[u8]) -> Result<u64, KeyError> {
     Ok(u64::from_be_bytes(take::<8>(input)?))
 }
 
+/// Flips the sign bit back so negative numbers sort before positive ones.
 pub fn get_i64(input: &mut &[u8]) -> Result<i64, KeyError> {
     Ok((get_u64(input)? ^ (1 << 63)) as i64)
 }
@@ -122,6 +123,46 @@ mod tests {
         assert_eq!(get_u64(&mut input), Err(KeyError::Truncated));
     }
 
+    #[test]
+    fn u16_round_trip() {
+        let value = 42u16;
+        let mut out = Vec::new();
+        put_u16(&mut out, value);
+        let mut input = out.as_slice();
+        assert_eq!(get_u16(&mut input).unwrap(), value);
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn u32_round_trip() {
+        let value = 12345u32;
+        let mut out = Vec::new();
+        put_u32(&mut out, value);
+        let mut input = out.as_slice();
+        assert_eq!(get_u32(&mut input).unwrap(), value);
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn u64_round_trip() {
+        let value = 9876543210u64;
+        let mut out = Vec::new();
+        put_u64(&mut out, value);
+        let mut input = out.as_slice();
+        assert_eq!(get_u64(&mut input).unwrap(), value);
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn i64_round_trip() {
+        let value = -42i64;
+        let mut out = Vec::new();
+        put_i64(&mut out, value);
+        let mut input = out.as_slice();
+        assert_eq!(get_i64(&mut input).unwrap(), value);
+        assert!(input.is_empty());
+    }
+
     proptest! {
         #[test]
         fn u64_order(a: u64, b: u64) {
@@ -129,6 +170,13 @@ mod tests {
             put_u64(&mut x, a);
             put_u64(&mut y, b);
             prop_assert_eq!(a.cmp(&b), x.cmp(&y));
+            // Also verify round-trip for both values
+            let mut input = x.as_slice();
+            prop_assert_eq!(get_u64(&mut input).unwrap(), a);
+            prop_assert!(input.is_empty());
+            let mut input = y.as_slice();
+            prop_assert_eq!(get_u64(&mut input).unwrap(), b);
+            prop_assert!(input.is_empty());
         }
 
         #[test]
@@ -137,6 +185,13 @@ mod tests {
             put_i64(&mut x, a);
             put_i64(&mut y, b);
             prop_assert_eq!(a.cmp(&b), x.cmp(&y));
+            // Also verify round-trip for both values
+            let mut input = x.as_slice();
+            prop_assert_eq!(get_i64(&mut input).unwrap(), a);
+            prop_assert!(input.is_empty());
+            let mut input = y.as_slice();
+            prop_assert_eq!(get_i64(&mut input).unwrap(), b);
+            prop_assert!(input.is_empty());
         }
 
         #[test]
