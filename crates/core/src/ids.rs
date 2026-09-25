@@ -151,4 +151,42 @@ mod tests {
         let e = edge_element_id(src, EdgeTypeId(9), dst, EdgeId::MERGED);
         assert_eq!(e, format!("e:{}:9:{}:0", src.0, dst.0));
     }
+
+    #[test]
+    fn edge_id_new_success() {
+        let id = EdgeId::new(5, 1000).unwrap();
+        assert_eq!(id.0, (5u64 << 54) | 1000);
+    }
+
+    #[test]
+    fn edge_id_new_partition_out_of_range() {
+        assert_eq!(EdgeId::new(1024, 0), Err(IdError::PartitionOutOfRange));
+    }
+
+    #[test]
+    fn edge_id_new_sequence_out_of_range() {
+        assert_eq!(EdgeId::new(0, 1u64 << 54), Err(IdError::SequenceOutOfRange));
+    }
+
+    #[test]
+    fn edge_id_merged_constant() {
+        assert_eq!(EdgeId::MERGED.0, 0);
+    }
+
+    #[test]
+    fn type_id_constants() {
+        assert_eq!(TypeId::UNTYPED.0, 0);
+        assert_eq!(TypeId::MAX, (1u16 << 12) - 1);
+        assert_eq!(TypeId::MAX, 4095);
+    }
+
+    #[test]
+    fn parse_element_id_invalid_formats() {
+        assert_eq!(NodeId::parse_element_id(""), Err(IdError::BadElementId));
+        assert_eq!(NodeId::parse_element_id("n:"), Err(IdError::BadElementId));
+        assert_eq!(
+            NodeId::parse_element_id("n:not-a-number"),
+            Err(IdError::BadElementId)
+        );
+    }
 }
