@@ -14,7 +14,7 @@ behind a `QueryEngine` trait; this plan ships a stub engine that answers
 `RETURN <int> [AS <name>]`, and the Cypher plan replaces it.
 
 **Tech Stack:** Rust (stable), `tokio`, `thiserror`; Python 3 with the `neo4j`
-driver 5.x for the smoke test.
+driver 5.x or 6.x for the smoke test (checked with 6.3.0).
 
 **Spec:** [2026-09-24-brainwire-design.md](../specs/2026-09-24-brainwire-design.md),
 section 3.3, and the protocol notes in

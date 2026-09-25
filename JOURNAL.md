@@ -20,10 +20,11 @@ Allan stays in Portuguese.
 
 1. A new entry **at the top** of the list, with: done, decided, next step,
    blockers.
-2. **No commit until the spec is approved** (decision of 2026-09-24). The
-   folder is untracked in the main checkout, so no `git clean` there. After
-   the spec, commits go to a dedicated branch, never to another feature's
-   branch.
+2. Commits go to `feat/brainwire`, or to a sub-branch of it that merges back
+   (plan 2 uses `feat/brainwire-bolt`), never to another feature's branch, and
+   nothing is pushed unless Allan asks. The code lives in the worktree
+   `.worktrees/brainwire`; `client-brainwire` in the main checkout is a
+   symlink to it, so no `git clean` there.
 
 ## Phases
 
@@ -36,6 +37,51 @@ Allan stays in Portuguese.
 No line of code before the end of phase 2.
 
 ## Entries
+
+### 2026-09-25, 14:45 (second session: the code starts)
+
+- **Done:** Rust installed with Allan's permission (rustup, stable 1.98.1,
+  minimal profile with clippy and rustfmt, about 470 MB; the shell PATH was not
+  changed, so run `source "$HOME/.cargo/env"` first). Worktree
+  `.worktrees/brainwire` on `feat/brainwire`; the untracked copy of this folder
+  in the main checkout went to the session scratchpad and the old path is now a
+  symlink to the worktree. Plan 2 runs in a second worktree,
+  `.worktrees/brainwire-bolt`, on `feat/brainwire-bolt`. Plan 1: Tasks 0 to 4
+  done and reviewed (workspace, keys, ids, values and the row codec; 32 tests).
+  Plan 2: all six tasks done and reviewed (chunk framing, PackStream,
+  negotiation, messages, session, TCP server; 31 tests). The official Neo4j
+  Python driver 6.3.0 connects to `brainwire-bolt-dev`, negotiates Bolt 5.4 and
+  runs `RETURN 1 AS x` in auto-commit and in a managed transaction; 2,000 round
+  trips in one session took 0.087 ms each (release build, stub engine).
+- **Measured:** the first full build takes 1m57s (RocksDB compiled from
+  source) and the incremental `cargo test` 0.70s, far below the 2-minute
+  reversal rule of the plan: Rust stays.
+- **Found by the task reviews and fixed:** two crash paths on hostile input
+  (PackStream and the row codec decoded nested values without a depth limit,
+  so a stream of nested lists aborted the process; both now stop at 64
+  levels); `NodeId::type_range` panicked on an invalid type and now returns a
+  `Result`; decoders and error variants without tests; the server's message
+  cap moved to the spec's 256 MiB (the first version used 1 MiB, which would
+  refuse the platform's 200 MB batches); a malformed message now closes the
+  connection.
+- **Decided under Allan's go-ahead (to review):** plan 2 on its own branch,
+  merged back into `feat/brainwire` later; plan 2 Tasks 1 to 4 in one dispatch
+  with one review; the driver check uses the neo4j 6.3.0 already in
+  `client-core/.venv`, so nothing was installed; nesting limit of 64 levels
+  on the wire and on disk; `type_range` returns a `Result` (plan 3 uses it
+  that way); `Cargo.lock` is committed right after the merge; the message cap
+  is configurable through `serve_with_limit`. Every ruling, with what it costs
+  if wrong, is in the ledgers
+  (`.worktrees/brainwire/.superpowers/sdd/<plan>/progress.md`, git-ignored).
+- **Next step:** final whole-branch review of plan 2 on the most capable
+  model, then merge `feat/brainwire-bolt` into `feat/brainwire` and commit
+  `Cargo.lock`; then plan 1 from Task 5 (schema and catalog) to Task 10 (crash
+  test), with `superpowers:subagent-driven-development`.
+- **Open for plan 3 (from the reviews):** `ChunkReader` copies each message
+  twice, while spec 3.3 asks for decoding straight from the chunks;
+  auto-commit PULL does not return a bookmark yet; the server has no logging,
+  read timeout or connection cap; LOGOFF is not handled.
+- **Blockers:** none.
 
 ### 2026-09-25, 11:48 (session)
 

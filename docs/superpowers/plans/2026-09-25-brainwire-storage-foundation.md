@@ -13,7 +13,7 @@ the row codec and the catalog built from the platform's `GraphMappingConfig`.
 `brainwire-store` owns RocksDB: one database per directory, shared cache and
 memtable budget, an in-house write overlay per transaction, a committer that
 validates conflicts, id allocation in blocks, and graph operations on top of
-it. Bolt and Cypher come in plan 2.
+it. Bolt comes in plan 2 and Cypher in plan 3.
 
 **Tech Stack:** Rust (stable), `rocksdb` 0.25 (bundles RocksDB 11.8.1),
 `serde` + `serde_json`, `thiserror`, `proptest`, `tempfile`.
