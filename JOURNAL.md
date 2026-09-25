@@ -44,11 +44,13 @@ No line of code before the end of phase 2.
   approved sections 1 to 4 one by one; implementation plan 1, the storage
   foundation, written in 11 tasks with tests first
   ([plan 1](docs/superpowers/plans/2026-09-25-brainwire-storage-foundation.md));
-  the docs committed to the local branch `feat/brainwire` (commit `d1c50cfab`,
-  no push), written without switching branches, so the PII branch was not
-  touched. The three research notes are still in Portuguese: two rounds of
-  translation agents stalled without writing anything, and the files are
-  intact.
+  implementation plan 2, the minimal Bolt server, written in 6 tasks
+  ([plan 2](docs/superpowers/plans/2026-09-25-brainwire-bolt-minimal.md)); the
+  docs committed to the local branch `feat/brainwire` (no push), written without
+  switching branches, so the PII branch was not touched. `research/cypher-corpus.md`
+  is now in English. `bolt.md` and `rocksdb.md` are being translated in parts
+  under `research/.parts/` after two earlier rounds of translation agents stalled
+  without writing anything; the originals are intact.
 - **Decided by Allan:** an event inherits the visibility of its owning entity
   unless it comes with its own ACL; "see comments" in the CLI means people's
   annotations on nodes and types.
@@ -59,11 +61,15 @@ No line of code before the end of phase 2.
   terminator instead of a length prefix; ids come in blocks whose end is
   committed before use; one implementation plan per gate (plan 1 storage,
   plan 2 Bolt, plan 3 Cypher and ACL).
-- **Next step:** Allan reviews the go-ahead decisions above and plan 1. Then
-  execute plan 1 with `superpowers:subagent-driven-development`, starting with
-  its Task 0 (a worktree of `feat/brainwire`, which needs Allan's consent).
-  Translate the research notes in small chunks.
-- **Blockers:** consent for the worktree.
+- **Next step:** Allan reviews the go-ahead decisions above and plans 1 and 2.
+  Then execute plan 1 and plan 2 with `superpowers:subagent-driven-development`,
+  starting with Task 0 of plan 1. If `research/.parts/` holds finished parts,
+  join them into `bolt.md` and `rocksdb.md` (part1 + part2 + part3) and delete
+  the folder.
+- **Blockers:** the Rust toolchain is not installed on this machine, and
+  installing it (rustup from the official source) is a download that needs
+  Allan's permission; consent for the worktree of `feat/brainwire`; the Python
+  `neo4j` package for plan 2's driver check, if it is missing.
 
 ### 2026-09-24, 22:00 (wrap-up)
 

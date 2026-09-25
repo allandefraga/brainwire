@@ -1,40 +1,41 @@
-# Corpus de Cypher da plataforma
+# The platform's Cypher corpus
 
-> Inventário feito em 2026-09-24 por um agente de busca, varrendo o monorepo.
-> Serve para priorizar o parser e o executor do Brainwire. As contagens são
-> templates distintos no código, não execuções: o repo não tem telemetria de
-> tráfego. Caminhos com `arquivo:linha` valem para o commit `5dc9ef10b`.
+> Inventory made on 2026-09-24 by a search agent sweeping the monorepo. It sets
+> the priorities of Brainwire's parser and executor. Counts are distinct
+> templates in the code, not executions: the repo has no traffic telemetry.
+> `file:line` references are for commit `5dc9ef10b`.
 
-## Conclusões principais
+## Main conclusions
 
-1. **Há dois caminhos, com dialetos diferentes.**
-   - O interno (`execute`, `execute_batch`, `execute_pipeline`) não passa por
-     gramática nenhuma e leva tudo o que o memory-worker e o memory-api escrevem
-     à mão.
-   - O governado (`run_read_cypher`) só aceita o subconjunto da gramática `lark`
-     e injeta o predicado de ACL em todo nó casado. Por ele passam o
-     `run_cypher` do MCP, o `/v1/memory/cypher` do console e parte das leituras
-     do memory-api.
-2. **Quase toda a escrita é `UNWIND $rows AS row` sobre três templates** (nó,
-   aresta, evento). Os lotes têm 10.000 linhas no código e 250.000 no starter.
-3. **O predicado de ACL depende de `any()`/`all()`** sobre lista com
-   `coalesce(prop, [])`, `size()` e `IN $lista`. HydraDB e PuppyGraph ficaram
-   fora da leitura governada por não avaliarem isso.
-4. **As variáveis de iteração do predicado (`p`, `c`) têm o mesmo nome das
-   variáveis que os modelos mais usam**, `(p:Person)` e `(c:Company)`. O motor
-   precisa acertar o escopo: a lista do quantificador é avaliada fora dele.
-   Nenhum teste do repo prova essa semântica.
-5. **O `get_entity_context` busca `(e {entity_id: $entity_id})` sem label.** Nos
-   backends atuais o índice é por label.
-6. **Não aparecem em produção:** caminho de comprimento variável, shortestPath,
-   `EXISTS {}`, `CALL` subquery (fora do wipe), `FOREACH`, `REMOVE`,
-   `ON CREATE/ON MATCH SET`, `+=`, comprehensions, map projection, regex e
-   funções de data. `CONTAINS`/`STARTS WITH`/`ENDS WITH` só aparecem no
-   construtor de views do console, que a gramática recusa.
+1. **There are two paths, with different dialects.**
+   - The internal one (`execute`, `execute_batch`, `execute_pipeline`) goes
+     through no grammar at all and carries everything the memory-worker and the
+     memory-api write by hand.
+   - The governed one (`run_read_cypher`) only accepts the subset of the `lark`
+     grammar and injects the ACL predicate on every matched node. The MCP's
+     `run_cypher`, the console's `/v1/memory/cypher` and part of the memory-api
+     reads go through it.
+2. **Almost every write is `UNWIND $rows AS row` over three templates** (node,
+   edge, event). Batches have 10,000 rows in the code and 250,000 in the
+   starter.
+3. **The ACL predicate depends on `any()`/`all()`** over a list with
+   `coalesce(prop, [])`, `size()` and `IN $list`. HydraDB and PuppyGraph were
+   left out of governed reads because they do not evaluate it.
+4. **The predicate's iteration variables (`p`, `c`) have the same names as the
+   variables models use most**, `(p:Person)` and `(c:Company)`. The engine must
+   get the scope right: a quantifier's list is evaluated outside it. No test in
+   the repo proves this semantics.
+5. **`get_entity_context` looks up `(e {entity_id: $entity_id})` without a
+   label.** In the current backends the index is per label.
+6. **Absent from production:** variable-length paths, shortestPath,
+   `EXISTS {}`, `CALL` subqueries (outside the wipe), `FOREACH`, `REMOVE`,
+   `ON CREATE/ON MATCH SET`, `+=`, comprehensions, map projection, regex and
+   date functions. `CONTAINS`/`STARTS WITH`/`ENDS WITH` only appear in the
+   console's view builder, which the grammar refuses.
 
-## Arquivos citados
+## Files cited
 
-| Apelido | Caminho |
+| Alias | Path |
 |---|---|
 | `common` | `client-core/src/client_core/repository/_cypher_common.py` |
 | `neo4j` | `client-core/src/client_core/repository/neo4j.py` |
@@ -62,173 +63,179 @@
 | `gb/` | `client-brain/tools/graph-bench/` |
 | `bench/` | `client-bench/` |
 
-## 1. Cláusulas
+## 1. Clauses
 
-| Cláusula | Templates em produção | Exemplo real |
+| Clause | Templates in production | Real example |
 |---|---|---|
-| MATCH | ~33 | `MATCH (a:{from_label} {entity_id: $from_entity_id})` e `MATCH (b:{to_label} {entity_id: $to_entity_id})` generator:361-362 |
+| MATCH | ~33 | `MATCH (a:{from_label} {entity_id: $from_entity_id})` and `MATCH (b:{to_label} {entity_id: $to_entity_id})` generator:361-362 |
 | OPTIONAL MATCH | 2 | `OPTIONAL MATCH (e)-[r{rel_pat}]-(neighbor) WHERE NOT neighbor:Event{acl_n}` graph.py:565-566 |
-| WHERE | ~20, mais o que o rewriter injeta em todo MATCH governado | `WHERE NOT n:Event AND n.__schema_marker IS NULL` layout:257-258 |
-| WITH | 0 | só em LLM e bench: `WITH n.event_id AS id, count(n) AS c WHERE c > 1` |
-| UNWIND | 3 | `UNWIND $rows AS row` em todo lote (common:320-322); `UNWIND $items AS item MATCH (n) WHERE id(n) = item.id SET n.x = item.x` layout:485-487 |
+| WHERE | ~20, plus what the rewriter injects in every governed MATCH | `WHERE NOT n:Event AND n.__schema_marker IS NULL` layout:257-258 |
+| WITH | 0 | only in LLM and bench queries: `WITH n.event_id AS id, count(n) AS c WHERE c > 1` |
+| UNWIND | 3 | `UNWIND $rows AS row` in every batch (common:320-322); `UNWIND $items AS item MATCH (n) WHERE id(n) = item.id SET n.x = item.x` layout:485-487 |
 | RETURN | ~24 | `RETURN type(r) AS rel, labels(n)[0] AS label, count(*) AS c` graph.py:687 |
-| RETURN DISTINCT | 0 | a gramática aceita; 4 das 74 queries de LLM recusadas |
+| RETURN DISTINCT | 0 | the grammar accepts it; 4 of the 74 refused LLM queries |
 | ORDER BY | 3 | `ORDER BY ev.timestamp DESC` graph.py:456 |
-| SKIP | 0 | a gramática aceita |
-| LIMIT | ~14 | `LIMIT $limit`; literal interpolado; `LIMIT $_acl_limit` neo4j:675 |
-| UNION | 1 | dois braços, cada um com `LIMIT $limit` (graph.py:563-575) |
-| CALL {} IN TRANSACTIONS | 1 | `MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS` neo4j:757, em auto-commit |
-| CREATE | 1 template, 2 cláusulas | `CREATE (ev:Event {...})` e `CREATE (e)-[:HAD_EVENT]->(ev)` generator:441-442 |
+| SKIP | 0 | the grammar accepts it |
+| LIMIT | ~14 | `LIMIT $limit`; an interpolated literal; `LIMIT $_acl_limit` neo4j:675 |
+| UNION | 1 | two branches, each with `LIMIT $limit` (graph.py:563-575) |
+| CALL {} IN TRANSACTIONS | 1 | `MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS` neo4j:757, in auto-commit |
+| CREATE | 1 template, 2 clauses | `CREATE (ev:Event {...})` and `CREATE (e)-[:HAD_EVENT]->(ev)` generator:441-442 |
 | MERGE | 9 | `MERGE (n:{label} {entity_id: $entity_id})` generator:243; `MERGE (a)-[r:{rel_type}]->(b)` generator:363; `MERGE (e)-[r:MENTIONED_IN {source_id: $source_id}]->(s)` graph.py:373 |
 | ON CREATE / ON MATCH SET | 0 | |
-| SET de propriedade | 9 | `SET n.p = $p, ..., n.acl_allow = $acl_allow, ..., n.updated_at = $updated_at` generator:243 |
-| SET +=, SET de label, REMOVE, DELETE, FOREACH | 0 | propriedade se remove com `SET x = NULL`, de propósito |
-| DETACH DELETE | 5 | `MATCH (n{label_frag}){where_frag} DETACH DELETE n` neo4j:794; wipe `MATCH (n) DETACH DELETE n` |
-| CALL procedure | 5, sem YIELD | `CALL db.labels()`, `CALL db.relationshipTypes()`, `CALL db.indexes()` (falkordb) |
-| YIELD | 1, em SHOW | `SHOW INDEXES YIELD labelsOrTypes, properties WHERE $lbl IN labelsOrTypes RETURN properties` neo4j:815-816 |
+| SET of a property | 9 | `SET n.p = $p, ..., n.acl_allow = $acl_allow, ..., n.updated_at = $updated_at` generator:243 |
+| SET +=, SET of a label, REMOVE, DELETE, FOREACH | 0 | a property is removed with `SET x = NULL`, on purpose |
+| DETACH DELETE | 5 | `MATCH (n{label_frag}){where_frag} DETACH DELETE n` neo4j:794; the wipe `MATCH (n) DETACH DELETE n` |
+| CALL procedure | 5, without YIELD | `CALL db.labels()`, `CALL db.relationshipTypes()`, `CALL db.indexes()` (falkordb) |
+| YIELD | 1, in SHOW | `SHOW INDEXES YIELD labelsOrTypes, properties WHERE $lbl IN labelsOrTypes RETURN properties` neo4j:815-816 |
 
-## 2. Funções e operadores
+## 2. Functions and operators
 
-| Item | Produção | Exemplo ou onde aparece |
+| Item | Production | Example or where it appears |
 |---|---|---|
-| any() | renderer de ACL + 1 | `any(p IN coalesce({var}.acl_allow, []) WHERE p IN $acl_principals)` visibility:255; `any(lbl IN labels(n) WHERE lbl IN $entity_types)` graph.py:794 |
-| all() | renderer de ACL | `all(c IN {conn} WHERE c IN $acl_open_connectors)` visibility:283 |
-| size(), coalesce() | renderer de ACL | `size(coalesce(n.acl_connector_ids, [])) = 0` |
+| any() | ACL renderer + 1 | `any(p IN coalesce({var}.acl_allow, []) WHERE p IN $acl_principals)` visibility:255; `any(lbl IN labels(n) WHERE lbl IN $entity_types)` graph.py:794 |
+| all() | ACL renderer | `all(c IN {conn} WHERE c IN $acl_open_connectors)` visibility:283 |
+| size(), coalesce() | ACL renderer | `size(coalesce(n.acl_connector_ids, [])) = 0` |
 | labels() | 4 | `labels(n)[0]`; `NOT 'Event' IN labels(n)` |
 | type() | 2 | `type(r) AS rel` |
 | id() | 3 | `RETURN id(n) AS nid`; `id(a) IN $node_ids`; `WHERE id(n) = item.id` (layout) |
-| keys() | 2, uso interno | `RETURN keys(n) AS k LIMIT 1` neo4j:845 |
+| keys() | 2, internal use | `RETURN keys(n) AS k LIMIT 1` neo4j:845 |
 | count() | 2 | `count(*) AS c` |
 | IN | 7 + renderer | `ev.event_type IN $event_types`; `n.entity_id IN $node_ids` |
-| IS NULL / IS NOT NULL | 5 e 1 | `n.__schema_marker IS NULL` |
-| teste de label no WHERE | 7 | `NOT neighbor:Event` |
-| `<>` entre nós | 2 | `neighbor <> e` |
-| índice de lista `[0]` | 2 | `labels(n)[0]` |
-| elementId, properties, toLower e família, collect, sum/avg/min/max, CASE, STARTS/ENDS WITH, CONTAINS, `=~`, comprehensions, map projection, EXISTS, path functions, shortestPath, datas | 0 | aparecem no Cypher de LLM (seção 6) ou em testes |
+| IS NULL / IS NOT NULL | 5 and 1 | `n.__schema_marker IS NULL` |
+| label test in WHERE | 7 | `NOT neighbor:Event` |
+| `<>` between nodes | 2 | `neighbor <> e` |
+| list index `[0]` | 2 | `labels(n)[0]` |
+| elementId, properties, toLower and family, collect, sum/avg/min/max, CASE, STARTS/ENDS WITH, CONTAINS, `=~`, comprehensions, map projection, EXISTS, path functions, shortestPath, dates | 0 | they appear in LLM-written Cypher (section 6) or in tests |
 
-`pii_token('email', 'x')` vira um literal hex antes de chegar ao motor (pii:609-661);
-o motor nunca vê essa função.
+`pii_token('email', 'x')` becomes a hex literal before it reaches the engine
+(pii:609-661); the engine never sees that function.
 
-## 3. Padrões de caminho
+## 3. Path patterns
 
-- Comprimento variável: 0 em produção (a gramática só aceita fixo). O LLM tentou
-  `MATCH (cf)-[*1..2]->(node)` uma vez.
-- Direção: `->` é a regra; não direcionado `-[r]-` em 5 templates; `<-` só no
-  graph-bench e em 3 queries de LLM.
-- Vários tipos `[:A|B]`: 1 site (graph.py:560), com tipos vindos do planner LLM.
-- Relação sem tipo `-[]-`: graph.py:698.
-- Propriedades inline no nó: ~17 templates, com label e **sem label**
-  (`(e {entity_id: $entity_id})` em graph.py:371, 453, 564, 570, 578, 685, 698).
-- Cadeia de dois saltos: `(e {...})-[{rel_pat}]-(mid)-[r2]-(neighbor)` graph.py:570.
-- Padrões separados por vírgula: 2.
+- Variable length: 0 in production (the grammar only accepts fixed length). The
+  LLM tried `MATCH (cf)-[*1..2]->(node)` once.
+- Direction: `->` is the rule; undirected `-[r]-` in 5 templates; `<-` only in
+  the graph-bench and in 3 LLM queries.
+- Several types `[:A|B]`: 1 site (graph.py:560), with types coming from the LLM
+  planner.
+- Untyped relationship `-[]-`: graph.py:698.
+- Inline properties on a node: ~17 templates, with a label and **without a
+  label** (`(e {entity_id: $entity_id})` in graph.py:371, 453, 564, 570, 578,
+  685, 698).
+- Two-hop chain: `(e {...})-[{rel_pat}]-(mid)-[r2]-(neighbor)` graph.py:570.
+- Comma-separated patterns: 2.
 
-## 4. Schema, introspecção e procedures
+## 4. Schema, introspection and procedures
 
-- Índice: `CREATE INDEX {nome} IF NOT EXISTS FOR (n:{lbl}) ON (n.{p})`
-  (neo4j:721-724), nome `client_<label>_<sha1>_<prop>`; erro com "already",
-  "exist" ou "equivalent" é engolido como reexecução.
-- Quem cria índice: o pipeline, a cada run, para `entity_id` de cada label,
-  para `Event`, para os match_field e os indexed_fields (pipeline:1270-1285).
-- Listar índices: `SHOW INDEXES YIELD labelsOrTypes, properties WHERE $lbl IN
+- Index: `CREATE INDEX {name} IF NOT EXISTS FOR (n:{lbl}) ON (n.{p})`
+  (neo4j:721-724), named `client_<label>_<sha1>_<prop>`; an error containing
+  "already", "exist" or "equivalent" is swallowed as a rerun.
+- Who creates indexes: the pipeline, on every run, for `entity_id` of each
+  label, for `Event`, for the match_fields and the indexed_fields
+  (pipeline:1270-1285).
+- Listing indexes: `SHOW INDEXES YIELD labelsOrTypes, properties WHERE $lbl IN
   labelsOrTypes RETURN properties` (neo4j:814-818).
-- `CALL db.labels()` e `CALL db.relationshipTypes()` a cada `get_schema`, sem
-  cache, junto com `keys(n)` e SHOW INDEXES por label. O código chama o
-  `get_schema` de "the most-called tool there is" (query.py:153-158).
-- Amostras de assinatura: `MATCH (a)-[r:{t}]->(b) RETURN labels(a) AS la,
-  labels(b) AS lb LIMIT 200` por tipo (common:157-158) e `MATCH (:{a})-[:{t}]->(:{b})
-  RETURN 1 AS ok LIMIT 1` (common:182).
+- `CALL db.labels()` and `CALL db.relationshipTypes()` on every `get_schema`,
+  with no cache, together with `keys(n)` and SHOW INDEXES per label. The code
+  calls `get_schema` "the most-called tool there is" (query.py:153-158).
+- Signature samples: `MATCH (a)-[r:{t}]->(b) RETURN labels(a) AS la,
+  labels(b) AS lb LIMIT 200` per type (common:157-158) and
+  `MATCH (:{a})-[:{t}]->(:{b}) RETURN 1 AS ok LIMIT 1` (common:182).
 - Health: `RETURN 1`.
-- Sem uso: CREATE CONSTRAINT, db.schema.*, db.propertyKeys, dbms.*, apoc.
+- Not used: CREATE CONSTRAINT, db.schema.*, db.propertyKeys, dbms.*, apoc.
 
-## 5. Parâmetros reservados de ACL
+## 5. Reserved ACL parameters
 
-- O predicado sai de `AclPredicate.to_cypher` (visibility:237-284) e os
-  parâmetros de `bound_acl_params` (visibility:286-301): `acl_principals`
-  sempre que há principal; `acl_connectors` com o eixo de entrada ligado e lista
-  não vazia; `acl_open_connectors` com conjunto aberto não vazio. Todos são
-  listas de strings em minúscula.
-- O token do MCP sempre liga o eixo de entrada.
-- `bind_acl_params` recusa parâmetro do chamador com prefixo `acl_` ou `_acl` e
-  sobrescreve com os valores do servidor (common:433-455).
-- O rewriter injeta o predicado em todo nó de cada MATCH e OPTIONAL MATCH de
-  cada braço de UNION; nó anônimo ganha a variável `_acl_anon_N`.
-- `get_graph` e `get_neighborhood_schema` injetam o predicado à mão pelo caminho
-  cru (graph.py:530-539, 669-678) e o endpoint recheca no Postgres;
-  `get_timeline` não leva predicado (a raiz é checada no Postgres).
+- The predicate comes from `AclPredicate.to_cypher` (visibility:237-284) and the
+  parameters from `bound_acl_params` (visibility:286-301): `acl_principals`
+  whenever there is a principal; `acl_connectors` with the entry axis on and a
+  non-empty list; `acl_open_connectors` with a non-empty open set. All of them
+  are lists of lowercase strings.
+- The MCP token always turns the entry axis on.
+- `bind_acl_params` refuses caller parameters prefixed `acl_` or `_acl` and
+  overwrites them with the server's values (common:433-455).
+- The rewriter injects the predicate on every node of every MATCH and OPTIONAL
+  MATCH of every UNION branch; an anonymous node gets the variable
+  `_acl_anon_N`.
+- `get_graph` and `get_neighborhood_schema` inject the predicate by hand
+  through the raw path (graph.py:530-539, 669-678) and the endpoint checks again
+  in Postgres; `get_timeline` carries no predicate (the root is checked in
+  Postgres).
 
-Exemplo real do sombreamento, saída do rewriter para
+A real example of the shadowing, the rewriter's output for
 `MATCH (p:Person)-[:TRABALHA_EM]->(:Company) RETURN p.name`:
 
 ```
 MATCH (p:Person)-[:TRABALHA_EM]->(_acl_anon_0:Company) WHERE (any(p IN coalesce(p.acl_allow, []) WHERE p IN $acl_principals) AND NOT any(p IN coalesce(p.acl_deny, []) WHERE p IN $acl_principals)) AND (...) RETURN p.name
 ```
 
-O pós-filtro (common:330-431) derruba a linha inteira se algum nó alcançável em
-qualquer célula for invisível, julgando cada nó por `acl.is_visible` sobre as
-propriedades `acl_*` devolvidas; depois remove todas as chaves `acl_*`. Relações
-não são julgadas, e as relações de um Path não são visitadas.
+The post-filter (common:330-431) drops the whole row if any node reachable in
+any cell is invisible, judging each node by `acl.is_visible` over the returned
+`acl_*` properties; then it removes every `acl_*` key. Relationships are not
+judged, and the relationships of a Path are not visited.
 
-**Consequências para o Brainwire:**
+**Consequences for Brainwire:**
 
-- Pelo `neo4j.py` sem mudança, todo nó devolvido a uma sessão de serviço
-  precisa trazer as propriedades `acl_*`, senão o pós-filtro descarta toda linha
-  de quem não é allow_all. O motor as materializa a partir do conjunto de ACL.
-- Escalar e agregado só ficam protegidos pelo predicado no MATCH; o pós-filtro
-  não julga escalar. A ACL nativa do Brainwire fecha esse buraco.
+- Through an unchanged `neo4j.py`, every node returned to a service session must
+  carry the `acl_*` properties, or the post-filter discards every row of a
+  caller that is not allow_all. The engine materializes them from the ACL set.
+- Scalars and aggregates are only protected by the predicate in the MATCH; the
+  post-filter does not judge scalars. Brainwire's native ACL closes that gap.
 
-## 6. Cypher escrito por LLM
+## 6. LLM-written Cypher
 
-- Só a tool `run_cypher` do MCP recebe Cypher livre (mcp_server:629-648 até
-  query.py:386-477 e `run_read_cypher`).
-- A instrução ao modelo é a descrição da tool (catalog:426-441 em PT,
-  1301-1316 em EN): chamar `get_schema` antes, preferir propriedade indexada, e
-  o subconjunto aceito (MATCH/OPTIONAL MATCH/WITH/RETURN de comprimento fixo,
-  WHERE, agregados, ORDER BY/SKIP/LIMIT, UNION; sem CONTAINS e família, sem
-  UNWIND, CALL, subquery, caminho variável, properties()/keys(), mutação), com
-  teto de 200 linhas.
-- A descrição do `get_schema` diz que o grafo é "(FalkorDB)", qualquer que seja
-  o backend.
-- Medido no run g4: 175 chamadas de `run_cypher`, 104 (59%) sem resultado
-  aproveitável; das 49 recusas, 12 por função e 37 por sintaxe (19 por
-  CONTAINS/STARTS WITH/ENDS WITH, 3 por `=~`, 3 por LIKE, 1 por GROUP BY).
+- Only the MCP `run_cypher` tool receives free Cypher (mcp_server:629-648
+  through query.py:386-477 and `run_read_cypher`).
+- The instruction to the model is the tool description (catalog:426-441 in PT,
+  1301-1316 in EN): call `get_schema` first, prefer indexed properties, and the
+  accepted subset (fixed-length MATCH/OPTIONAL MATCH/WITH/RETURN, WHERE,
+  aggregates, ORDER BY/SKIP/LIMIT, UNION; no CONTAINS and family, no UNWIND,
+  CALL, subqueries, variable-length paths, properties()/keys(), no mutation),
+  with a ceiling of 200 rows.
+- The `get_schema` description says the graph is "(FalkorDB)", whatever the
+  backend.
+- Measured in run g4: 175 `run_cypher` calls, 104 (59%) without a usable
+  result; of the 49 refusals, 12 were for a function and 37 for syntax (19 for
+  CONTAINS/STARTS WITH/ENDS WITH, 3 for `=~`, 3 for LIKE, 1 for GROUP BY).
 
-Construtos na amostra de 74 queries de LLM recusadas (fixture):
+Constructs in the sample of 74 refused LLM queries (fixture):
 
-| Construto | Queries |
+| Construct | Queries |
 |---|---|
-| propriedade inline no padrão | 30 |
+| inline property in the pattern | 30 |
 | CONTAINS | 29 |
-| busca por entity_id | 28 |
+| lookup by entity_id | 28 |
 | properties() | 17 |
 | count() | 16 |
 | LIMIT | 16 |
-| padrão não direcionado | 14 |
+| undirected pattern | 14 |
 | toLower | 12 |
 | ORDER BY | 11 |
-| `;` final | 9 |
-| `\n` literal | 8 |
+| trailing `;` | 9 |
+| literal `\n` | 8 |
 | coalesce | 8 |
 | type() | 7 |
-| padrão dentro de WHERE (`NOT (c)--(:Ticket)`) | 5 |
-| RETURN DISTINCT, WITH | 4 cada |
-| OPTIONAL MATCH, collect(DISTINCT), `<-`, `=~`, LIKE, `x.*` | 3 cada |
+| pattern inside WHERE (`NOT (c)--(:Ticket)`) | 5 |
+| RETURN DISTINCT, WITH | 4 each |
+| OPTIONAL MATCH, collect(DISTINCT), `<-`, `=~`, LIKE, `x.*` | 3 each |
 | ENDS WITH | 2 |
-| STARTS WITH, `size((c)--())`, EXISTS {}, caminho variável, fatia `[0..5]`, GROUP BY, toDate | 1 cada |
+| STARTS WITH, `size((c)--())`, EXISTS {}, variable-length path, slice `[0..5]`, GROUP BY, toDate | 1 each |
 
-## 7. Escrita em lote
+## 7. Batched writes
 
-- O gerador produz um par (cypher, params) por linha; o pipeline descarrega a
-  cada `_batch_size` linhas (10.000 no código, 250.000 no starter).
-- Arestas e eventos (começam por MATCH) vão para `execute_pipeline`; MERGE de nó
-  para `execute_batch` (graph_client:99-111, 199-214).
-- A dobra em UNWIND (common:288-322) agrupa statements consecutivos de texto
-  idêntico, troca `$nome` por `row.nome` fora de literais e envia
-  `{"rows": [...]}`. Grupo de um statement só não é dobrado, e se a dobra falha
-  cai para statement por statement: o motor precisa aceitar as duas formas.
-- Um lote de 250.000 linhas passa de 200 MB num parâmetro só (estimativa a
-  partir de ~1 KB por nó).
+- The generator produces one (cypher, params) pair per row; the pipeline flushes
+  every `_batch_size` rows (10,000 in the code, 250,000 in the starter).
+- Edges and events (they start with MATCH) go to `execute_pipeline`; node MERGE
+  goes to `execute_batch` (graph_client:99-111, 199-214).
+- The UNWIND fold (common:288-322) groups consecutive statements with identical
+  text, replaces `$name` with `row.name` outside literals and sends
+  `{"rows": [...]}`. A group of one statement is not folded, and if folding
+  fails it falls back to statement by statement: the engine must accept both
+  shapes.
+- A 250,000-row batch goes over 200 MB in a single parameter (an estimate from
+  about 1 KB per node).
 
-O que chega ao motor pelo `neo4j.py`:
+What reaches the engine through `neo4j.py`:
 
 ```
 UNWIND $rows AS row
@@ -247,84 +254,84 @@ CREATE (ev:Event {event_id: row.event_id, type: row.event_type, timestamp: row.e
 CREATE (e)-[:HAD_EVENT]->(ev)
 ```
 
-Semântica que o lote pressupõe:
+Semantics the batch assumes:
 
-- um MERGE dentro do UNWIND enxerga as linhas anteriores do mesmo lote;
-- uma aresta só existe se os dois MATCH acharem os nós, senão some em silêncio;
-- `SET` com NULL remove a propriedade;
-- o CREATE de evento não é idempotente.
+- a MERGE inside the UNWIND sees the earlier rows of the same batch;
+- an edge only exists if both MATCHes find their nodes, otherwise it vanishes
+  silently;
+- `SET` with NULL removes the property;
+- the event CREATE is not idempotent.
 
-Valores de linha: str, int, float, bool, None e listas de str. Datetime, Decimal
-e UUID chegam como string ou float.
+Row values: str, int, float, bool, None and lists of str. Datetime, Decimal and
+UUID arrive as strings or floats.
 
-## 8. O que o `neo4j.py` exige do Bolt
+## 8. What `neo4j.py` requires from Bolt
 
-- Driver com `notifications_disabled_classifications=["UNRECOGNIZED"]` e
-  `verify_connectivity()`; esquemas bolt, bolt+s, bolt+ssc, neo4j, neo4j+s,
+- A driver with `notifications_disabled_classifications=["UNRECOGNIZED"]` and
+  `verify_connectivity()`; schemes bolt, bolt+s, bolt+ssc, neo4j, neo4j+s,
   neo4j+ssc.
-- Toda query vai por `execute_query` (transação gerenciada, rota de escrita por
-  padrão, leitura também), com `database_` que pode ser None.
-- O wipe exige RUN em auto-commit (IN TRANSACTIONS não roda dentro de transação
-  explícita).
-- Valores: Node com labels, element_id e propriedades; Relationship com type,
-  start_node, end_node e element_id; Path. `element_id` estável dentro de um
-  resultado; `id()` devolve inteiro.
-- Erros: falha de driver e erro transitório param o lote; "sintaxe não
-  suportada" é reconhecida pelo texto ("invalidinput", "syntaxerror",
-  "unsupportedadministrationcommand", "notsupported"); índice duplicado por
-  "already", "exist" ou "equivalent". Códigos no padrão Neo4j mantêm esse
-  comportamento.
-- O skills-api monta driver novo e roda `verify_connectivity` a cada
-  requisição de `get_schema` e `run_cypher`.
+- Every query goes through `execute_query` (a managed transaction, write route
+  by default, reads included), with a `database_` that may be None.
+- The wipe needs RUN in auto-commit (IN TRANSACTIONS does not run inside an
+  explicit transaction).
+- Values: Node with labels, element_id and properties; Relationship with type,
+  start_node, end_node and element_id; Path. `element_id` stable within one
+  result; `id()` returns an integer.
+- Errors: a driver failure and a transient error stop the batch; "unsupported
+  syntax" is recognized by text ("invalidinput", "syntaxerror",
+  "unsupportedadministrationcommand", "notsupported"); a duplicate index by
+  "already", "exist" or "equivalent". Neo4j-style codes keep this behavior.
+- The skills-api builds a new driver and runs `verify_connectivity` on every
+  `get_schema` and `run_cypher` request.
 
-## 9. Inconsistências encontradas na plataforma
+## 9. Inconsistencies found in the platform
 
-- O construtor de views do console oferece CONTAINS, STARTS WITH e ENDS WITH,
-  que a gramática recusa; a pré-visualização devolve 400.
-- A mensagem de erro do `/v1/memory/cypher` diz que UNWIND é aceito
-  (graph.py:1009-1010); a gramática recusa.
-- A descrição do `get_schema` diz que o grafo é FalkorDB, qualquer que seja o
+- The console's view builder offers CONTAINS, STARTS WITH and ENDS WITH, which
+  the grammar refuses; the preview returns 400.
+- The `/v1/memory/cypher` error message says UNWIND is accepted
+  (graph.py:1009-1010); the grammar refuses it.
+- The `get_schema` description says the graph is FalkorDB, whatever the
   backend.
-- O evento é gravado com `type` (generator:412), mas a timeline filtra e lê
-  `event_type` (graph.py:448, 468).
-- O regex de mutação do skills-api não tem o lookbehind nem a máscara de
-  literais do core (query.py:94-97 contra common:49-68).
+- The event is written with `type` (generator:412), but the timeline filters and
+  reads `event_type` (graph.py:448, 468).
+- The skills-api mutation regex lacks the lookbehind and the literal masking of
+  the core (query.py:94-97 against common:49-68).
 
-## 10. Os 20 construtos por prioridade
+## 10. The 20 constructs by priority
 
-1. `UNWIND $rows AS row` com lista de maps grande e acesso `row.campo`.
-2. `MERGE (n:L {entity_id: row.entity_id})` com busca por índice, enxergando as
-   linhas anteriores do lote.
-3. `SET n.p = expr, ...` com mais de 10 itens, listas e `= NULL` removendo.
-4. `MATCH (a:L {entity_id: row.x})` com índice dentro do UNWIND, em dois MATCH
-   seguidos.
-5. `MERGE (a)-[r:T]->(b)` entre variáveis ligadas, com `SET r.p` e props inline.
-6. `CREATE (ev:L {map})` e `CREATE (e)-[:T]->(ev)`.
-7. O predicado de ACL (`any()`/`all()` sobre `coalesce(n.lista, [])`, `IN`,
-   `size()`, NOT/AND/OR) com o escopo certo das variáveis.
-8. Nó com map inline, com ou sem label: `(e {entity_id: $id})` pede busca
-   global por `entity_id`.
-9. Relação de comprimento fixo: `->`, `-[r]-`, `:A|B`, `-[]-`, cadeia de dois
-   saltos.
-10. `OPTIONAL MATCH ... WHERE`, com NULL na falta.
-11. Predicados: `NOT n:L`, IS NULL, IS NOT NULL, `IN $lista`, comparações sobre
-    string e número, `<>` entre nós.
-12. RETURN de Node, Relationship e Path completos, com `acl_*` para sessão de
-    serviço, aliases e constantes (`RETURN 1`).
-13. `count(*)` com agrupamento implícito.
-14. `ORDER BY alias [DESC]` e `LIMIT` com parâmetro ou literal.
-15. `UNION` com LIMIT por braço.
-16. `labels()`, `type()`, `id()`, `keys()` e índice `[0]`.
-17. `CREATE INDEX nome IF NOT EXISTS FOR (n:L) ON (n.p)`.
+1. `UNWIND $rows AS row` with a large list of maps and `row.field` access.
+2. `MERGE (n:L {entity_id: row.entity_id})` with an index lookup, seeing the
+   batch's earlier rows.
+3. `SET n.p = expr, ...` with more than 10 items, lists, and `= NULL` removing.
+4. `MATCH (a:L {entity_id: row.x})` with an index inside the UNWIND, in two
+   consecutive MATCHes.
+5. `MERGE (a)-[r:T]->(b)` between bound variables, with `SET r.p` and inline
+   properties.
+6. `CREATE (ev:L {map})` and `CREATE (e)-[:T]->(ev)`.
+7. The ACL predicate (`any()`/`all()` over `coalesce(n.list, [])`, `IN`,
+   `size()`, NOT/AND/OR) with the right variable scope.
+8. A node with an inline map, with or without a label: `(e {entity_id: $id})`
+   needs a global lookup by `entity_id`.
+9. Fixed-length relationships: `->`, `-[r]-`, `:A|B`, `-[]-`, two-hop chains.
+10. `OPTIONAL MATCH ... WHERE`, with NULL when absent.
+11. Predicates: `NOT n:L`, IS NULL, IS NOT NULL, `IN $list`, comparisons on
+    strings and numbers, `<>` between nodes.
+12. RETURN of whole Nodes, Relationships and Paths, with `acl_*` for service
+    sessions, aliases and constants (`RETURN 1`).
+13. `count(*)` with implicit grouping.
+14. `ORDER BY alias [DESC]` and `LIMIT` with a parameter or a literal.
+15. `UNION` with a LIMIT per branch.
+16. `labels()`, `type()`, `id()`, `keys()` and index `[0]`.
+17. `CREATE INDEX name IF NOT EXISTS FOR (n:L) ON (n.p)`.
 18. `CALL db.labels()`, `CALL db.relationshipTypes()`, `SHOW INDEXES YIELD ...
     WHERE ... RETURN`.
-19. `MATCH ... DETACH DELETE n` e `CALL (n) { DETACH DELETE n } IN TRANSACTIONS
-    OF 10000 ROWS` em auto-commit.
-20. O que os modelos usam e a gramática aceita: `WITH` com WHERE depois de
-    agregar, `RETURN DISTINCT`, `collect(DISTINCT x)`, `size()`, `toLower`,
-    `coalesce` com default string, `min`/`max`.
+19. `MATCH ... DETACH DELETE n` and `CALL (n) { DETACH DELETE n } IN TRANSACTIONS
+    OF 10000 ROWS` in auto-commit.
+20. What models use and the grammar accepts: `WITH` with WHERE after
+    aggregating, `RETURN DISTINCT`, `collect(DISTINCT x)`, `size()`, `toLower`,
+    `coalesce` with a string default, `min`/`max`.
 
-Fora da lista, com demanda medida: CONTAINS e família (19 das 37 recusas de
-sintaxe no g4) e `properties()` (12 recusas, bloqueada de propósito pelo IR5).
-O gate do graph-bench pede ainda `<-`, cadeias de 4 saltos e
+Outside the list, with measured demand: CONTAINS and family (19 of the 37
+syntax refusals in g4) and `properties()` (12 refusals, blocked on purpose by
+IR5). The graph-bench gate also needs `<-`, four-hop chains and
 `UNWIND ... CREATE ... RETURN count(b)`.
