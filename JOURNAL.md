@@ -38,6 +38,35 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-26, UI planning after the engine session
+
+- **Requested:** plan the generated graph-centric terminal concept. Allan
+  chose both graph exploration and Cypher in the first prototype, then added
+  memory usage/budget visibility, explanations for memory variables, a logo,
+  and a backoffice to inspect and understand database files. After trying
+  magenta/cyan, he preferred stronger green with restrained supporting colors.
+- **Delivered:** [Observatory design proposal](docs/design/2026-09-26-brainwire-observatory.md),
+  local concept assets and image-generation prompts. The plan includes Graph,
+  Query, Memory and Disk & Files, contextual F1 help, file-purpose inspection,
+  a shared config explanation catalog, client/server boundaries, staged
+  acceptance and a green visual direction. Images are synthetic concepts;
+  no UI code or engine changes in this planning session.
+- **Findings:** configured memory budgets are not allocated RAM. Memtables
+  are charged within the shared cache budget. Cache accounting, process RSS
+  and container usage are overlapping scopes and must not be summed. Query
+  memory enforcement is not implemented; global versus per-query admission
+  needs an explicit contract. A connected graph explorer also needs bounded
+  neighborhood/edge results beyond the current MVP node/scalar output plan.
+- **Next:** continue the existing engine MVP with Task 4 (executor), then
+  Task 5 (real Bolt transaction lifecycle and serve). Use this design to brief
+  the integrated TUI prototype and telemetry/storage inspection work. Before
+  shipping live backoffice features, implement the listed backend contracts.
+- **Verification:** local design links, PNG signatures and selected-image
+  copy hashes checked; Git whitespace checks pass. No code tests rerun for
+  this documentation and concept-art-only change.
+- **Local only:** design and documentation changes are kept in this standalone
+  repository; no remote, publication or push.
+
 ### 2026-09-26, 17:48 (Codex, one-hour local session)
 
 - **Scope:** Allan requested one hour of work and explicitly prohibited pushes.

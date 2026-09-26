@@ -17,6 +17,11 @@ adapter; the platform remains the first integration target.
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
 > progress in [JOURNAL.md](JOURNAL.md).
 
+The proposed terminal backoffice is documented in
+[Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
+graph/query workflows, explained memory settings, disk inspection and concept
+images. It is a design proposal; the TUI has not been implemented yet.
+
 ## Local development
 
 ```sh
