@@ -38,6 +38,22 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-26, visual identity selected; continue tomorrow
+
+- **Decision:** Allan explicitly chose the latest green v2 identity: electric
+  green `#57FF48`, near-black `#070B09`, restrained cyan, and the interwoven
+  B/W graph logo. The [Observatory design](docs/design/2026-09-26-brainwire-observatory.md#2-selected-visual-identity)
+  identifies the canonical logo, memory and backoffice references. Earlier
+  color variants are historical explorations. Production assets should refine
+  this choice, not reopen the visual direction.
+- **Scope:** visual identity approval does not imply the proposed backend
+  contracts or TUI features are implemented. README and design status updated.
+- **Next session:** Allan asked to stop and continue tomorrow. Resume the
+  executor (MVP Task 4), then real Bolt transactions and serve (Task 5), with
+  the selected identity preserved for the TUI/backoffice work. No automation
+  or scheduled run requested.
+- **Verification:** documentation whitespace checked; local changes only.
+
 ### 2026-09-26, UI planning after the engine session
 
 - **Requested:** plan the generated graph-centric terminal concept. Allan

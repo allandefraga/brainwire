@@ -1,7 +1,8 @@
 # Brainwire Observatory: terminal backoffice
 
-Status: design proposal, 2026-09-26. No TUI or new engine features are
-implemented by this document. The user requested planning around the generated
+Status: visual identity selected by Allan on 2026-09-26; interaction and
+implementation details remain a design proposal. No TUI or new engine features
+are implemented by this document. The user requested planning around the generated
 concept, both graph exploration and Cypher in the first prototype, a cyberpunk
 palette and logo (then preferred a stronger green with restrained cyan), an
 understandable memory panel, and a backoffice for files
@@ -27,7 +28,13 @@ shared inspector and contextual explanations. It uses an explicitly labeled
 synthetic scenario. A connected release requires the real backend contracts
 below; a mock response is never presented as live query execution or telemetry.
 
-## 2. Visual direction
+## 2. Selected visual identity
+
+Allan explicitly chose the latest green identity on 2026-09-26. The green v2
+memory and backoffice images below, together with the green B/W logo, are the
+canonical visual references for future Brainwire screens and brand assets.
+Earlier mint and magenta concepts are retained only as exploration history.
+Implementation refinements should preserve this identity.
 
 ![Memory concept](assets/brainwire-memory-green-v2.png)
 
@@ -45,7 +52,7 @@ Use sharp panel boundaries, monospaced typography, fine graph lines, and
 sparse animated accents. Color identifies graph types, while shape, labels
 and selection markers keep meaning available without color. Honor ontology
 `display_color` with contrast handling. Warnings also carry words and icons.
-The user preferred this greener direction over the magenta cyberpunk variant.
+The selected identity uses strong green with restrained cyan.
 Remove glitch effects, rainbow accents and glowing panel borders. Keep the
 graph character through geometry and interaction. Stop animation when it settles.
 Glowing pixels in the concept are art direction, not a promise of identical
@@ -53,9 +60,10 @@ rendering in every terminal.
 
 The [logo concept](assets/brainwire-logo-green-concept-v2.png) combines
 interwoven B/W wiring with three junctions. The spelling remains BRAINWIRE.
-This transparent raster is a concept; a production task must refine a clean
-vector master, monochrome mark, and small terminal glyph. Verify legibility at
-small sizes before making it the default identity. Generation prompts and
+The logo direction is selected. This transparent raster is the reference for
+a clean vector master, monochrome mark, and small terminal glyph. Verify
+legibility at small sizes before shipping those production assets, preserving
+the chosen mark and palette. Generation prompts and
 provenance are in [image-prompts.md](image-prompts.md).
 
 ## 3. Workspace and navigation

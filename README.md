@@ -20,7 +20,10 @@ adapter; the platform remains the first integration target.
 The proposed terminal backoffice is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
 graph/query workflows, explained memory settings, disk inspection and concept
-images. It is a design proposal; the TUI has not been implemented yet.
+images. Allan selected the latest electric-green identity on 2026-09-26:
+near-black background, restrained cyan and the connected B/W logo. That visual
+identity is the reference for future screens. Interaction and implementation
+details remain a proposal; the TUI has not been implemented yet.
 
 ## Local development
 
