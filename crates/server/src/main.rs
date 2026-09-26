@@ -1,8 +1,7 @@
-//! The `brainwire` binary. Today: `config init` and `config show`. `serve`
-//! and `db` subcommands land in Task 5, once the store and Bolt crates are
-//! wired in.
+//! Brainwire configuration, synthetic observatory and embedded Cypher CLI.
 
 mod config;
+mod cypher;
 mod size;
 
 use std::collections::BTreeMap;
@@ -19,6 +18,27 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Execute one atomic query against an embedded local store (exclusive access).
+    #[command(
+        long_about = "Execute one atomic Cypher query against an embedded local store. Cannot attach to an already-open server database. Output is JSON {fields, rows}; nodes use {type: node, id, label, properties}, including entity_id. Ontology is applied separately before the query. Query memory budgets are loaded but not yet enforced; output errors may follow committed writes."
+    )]
+    Cypher {
+        /// Directory holding the local database; RocksDB requires exclusive access.
+        #[arg(long)]
+        database: PathBuf,
+        /// One query in the supported Cypher subset.
+        #[arg(long)]
+        query: String,
+        /// Graph-mapping JSON used to initialize or update the ontology.
+        #[arg(long)]
+        ontology: Option<PathBuf>,
+        /// JSON object of named parameters; integers must fit signed i64.
+        #[arg(long, default_value = "{}")]
+        params: String,
+        /// Config file; otherwise uses ./brainwire.toml. Environment overrides it.
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Open the graph observatory. Live backend is not yet connected.
     Shell {
         /// Use the bounded synthetic demo fixture.
@@ -73,6 +93,19 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Cypher {
+            database,
+            query,
+            ontology,
+            params,
+            config,
+        } => cypher::run(
+            &database,
+            &query,
+            ontology.as_deref(),
+            &params,
+            config.as_deref(),
+        ),
         Commands::Shell {
             demo,
             lang,

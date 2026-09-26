@@ -8,11 +8,10 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::{CrosstermBackend, TestBackend};
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::{Frame, Terminal};
+use ratatui::style::Color;
+use ratatui::Terminal;
+mod ui;
+pub use ui::render;
 
 const GREEN: Color = Color::Rgb(0x57, 0xff, 0x48);
 const BG: Color = Color::Rgb(0x07, 0x0b, 0x09);
@@ -257,13 +256,6 @@ const FILES_PT_DESC: [&str; 7] = [
     "Log de diagnóstico ilustrativo, não dados do grafo.",
     "Marcador ilustrativo de bloqueio exclusivo do banco.",
 ];
-const MEM_PT_VALUES: [&str; 5] = [
-    "limite 16 GiB / uso simulado 11.5 GiB / livre 4.5 GiB",
-    "configurado 10 GiB / uso simulado 7.2 GiB",
-    "orçamento 1 GiB / uso simulado 0.6 GiB",
-    "configurado 2 GiB / uso simulado 0.8 GiB",
-    "uso simulado 3.5 GiB",
-];
 const MEM_PT_NAMES: [&str; 5] = ["Contêiner", "Cache", "Memtables", "Consulta", "Outros"];
 const MEM_PT_DESC: [&str; 5] = [
     "Escopo físico do contêiner neste cenário sintético. O uso é simulado, não é RSS nem medição do sistema operacional.",
@@ -295,6 +287,7 @@ pub struct App {
     pub result: String,
     pub query_scroll: usize,
     pub result_scroll: usize,
+    pub inspector_scroll: u16,
     lang: Language,
     fixture: Fixture,
 }
@@ -307,13 +300,14 @@ impl App {
             editing: false,
             quit: false,
             selected_node: 0,
-            selected_file: 0,
+            selected_file: if view == View::Disk { 3 } else { 0 },
             selected_memory: 0,
             example: 0,
             query: EXAMPLES[0].into(),
             result: String::new(),
             query_scroll: 0,
             result_scroll: 0,
+            inspector_scroll: 0,
             lang,
             fixture: Fixture::new(),
         }
@@ -360,6 +354,8 @@ impl App {
                     self.set_view(View::from_index((c as u8 - b'1') as usize));
                 }
             }
+            KeyCode::PageUp if self.focus == Focus::Inspector => self.move_selection(-4),
+            KeyCode::PageDown if self.focus == Focus::Inspector => self.move_selection(4),
             KeyCode::Up => self.move_selection(-1),
             KeyCode::Down => self.move_selection(1),
             KeyCode::Left => {
@@ -399,10 +395,19 @@ impl App {
     }
     fn set_view(&mut self, view: View) {
         self.view = view;
+        self.inspector_scroll = 0;
         self.focus = Focus::Main;
         self.editing = false;
     }
     fn move_selection(&mut self, delta: isize) {
+        if self.focus == Focus::Inspector {
+            self.inspector_scroll = self
+                .inspector_scroll
+                .saturating_add_signed(delta as i16)
+                .min(12);
+            return;
+        }
+        self.inspector_scroll = 0;
         if self.focus == Focus::Navigation {
             self.set_view(View::from_index(
                 (self.view.index() as isize + delta).rem_euclid(4) as usize,
@@ -507,418 +512,6 @@ impl App {
             }
         }
     }
-}
-
-fn style(color: Color, no_color: bool) -> Style {
-    if no_color {
-        Style::default()
-    } else {
-        Style::default().fg(color).bg(BG)
-    }
-}
-fn block<'a>(title: &'a str, color: Color, no_color: bool) -> Block<'a> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(style(color, no_color))
-        .style(style(PALE, no_color))
-}
-
-fn usage_line(
-    label: &'static str,
-    filled: usize,
-    value: &'static str,
-    no_color: bool,
-) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label:<11}["), style(PALE, no_color)),
-        Span::styled("█".repeat(filled), style(GREEN, no_color)),
-        Span::styled("░".repeat(20 - filled), style(CYAN, no_color)),
-        Span::styled(format!("] {value}"), style(PALE, no_color)),
-    ])
-}
-
-fn graph_lines(app: &App, width: usize, height: usize) -> Vec<Line<'static>> {
-    if width < 4 || height < 3 {
-        return vec![Line::from("Graph area too small")];
-    }
-    let w = width;
-    let h = height;
-    let mut cells = vec![vec![' '; w]; h];
-    let pos = |n: &Node| -> (isize, isize) {
-        let cluster = n.id / 12;
-        let local = n.id % 12;
-        if w < 90 || h < 20 {
-            let third = w / 3;
-            (
-                (cluster * third + (local % 3 + 1) * third / 4) as isize,
-                ((local / 3 + 1) * h / 5) as isize,
-            )
-        } else {
-            let angle = (local as f64 / 12.0) * std::f64::consts::TAU + (cluster as f64 * 0.21);
-            let center_x = (cluster as f64 + 0.5) * w as f64 / 3.0;
-            let radius_x = w as f64 / 8.0;
-            let center_y = h as f64 / 2.0;
-            let radius_y = h as f64 * 0.4;
-            (
-                (center_x + radius_x * angle.cos()).round() as isize,
-                (center_y + radius_y * angle.sin()).round() as isize,
-            )
-        }
-    };
-    for edge in &app.fixture.edges {
-        let (x0, y0) = pos(&app.fixture.nodes[edge.from]);
-        let (x1, y1) = pos(&app.fixture.nodes[edge.to]);
-        let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
-        let mark = if edge.from == app.selected_node || edge.to == app.selected_node {
-            '*'
-        } else {
-            '·'
-        };
-        for step in 1..steps {
-            let x = x0 + (x1 - x0) * step / steps;
-            let y = y0 + (y1 - y0) * step / steps;
-            if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
-                cells[y as usize][x as usize] = mark;
-            }
-        }
-    }
-    for n in &app.fixture.nodes {
-        let (x, y) = pos(n);
-        if x >= 0 && y >= 0 && (x as usize) + 2 < w && (y as usize) < h {
-            let tag = format!(
-                "{}{:02}",
-                if n.id == app.selected_node {
-                    '◆'
-                } else {
-                    match n.label {
-                        "Customer" => 'C',
-                        "Company" => 'O',
-                        _ => 'P',
-                    }
-                },
-                n.id
-            );
-            for (i, c) in tag.chars().enumerate() {
-                cells[y as usize][x as usize + i] = c;
-            }
-        }
-    }
-    cells
-        .into_iter()
-        .map(|row| Line::from(row.into_iter().collect::<String>()))
-        .collect()
-}
-
-pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
-    let area = frame.area();
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(5),
-            Constraint::Length(2),
-        ])
-        .split(area);
-    let header = Line::from(vec![
-        Span::styled(
-            " BRAINWIRE ",
-            style(GREEN, no_color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            app.lang
-                .choose("/ observatório de grafos    ", "/ graph observatory    "),
-            style(PALE, no_color),
-        ),
-        Span::styled(
-            format!(
-                "{}   •   {}",
-                app.lang.choose("DEMO / SINTÉTICO", "DEMO / SYNTHETIC"),
-                app.view.display(app.lang)
-            ),
-            style(CYAN, no_color),
-        ),
-    ]);
-    frame.render_widget(
-        Paragraph::new(header).block(block("", GREEN, no_color)),
-        sections[0],
-    );
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(if area.width < 100 { 16 } else { 21 }),
-            Constraint::Min(1),
-        ])
-        .split(sections[1]);
-    let names = if app.lang == Language::PtBr {
-        if area.width < 100 {
-            ["1 Grafo", "2 Consulta", "3 Memória", "4 Disco"]
-        } else {
-            ["1 Grafo", "2 Consulta", "3 Memória", "4 Disco/arquivos"]
-        }
-    } else if area.width < 100 {
-        ["1 Graph", "2 Query", "3 Memory", "4 Disk"]
-    } else {
-        ["1 Graph", "2 Query", "3 Memory", "4 Disk & Files"]
-    };
-    let nav: Vec<Line> = names
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            Line::from(Span::styled(
-                format!(" {} {}", if i == app.view.index() { "▶" } else { " " }, n),
-                if i == app.view.index() {
-                    style(GREEN, no_color).add_modifier(Modifier::BOLD)
-                } else {
-                    style(PALE, no_color)
-                },
-            ))
-        })
-        .collect();
-    frame.render_widget(
-        Paragraph::new(nav).block(block(
-            app.lang.choose("Vistas", "Views"),
-            if app.focus == Focus::Navigation {
-                GREEN
-            } else {
-                CYAN
-            },
-            no_color,
-        )),
-        body[0],
-    );
-    let detail_height = if area.height < 30 { 5 } else { 8 };
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(5), Constraint::Length(detail_height)])
-        .split(body[1]);
-    let main = right[0];
-    let inspector = right[1];
-    match app.view {
-        View::Graph => {
-            let inner_width = main.width.saturating_sub(2) as usize;
-            let inner_height = main.height.saturating_sub(2) as usize;
-            let colored: Vec<Line> = graph_lines(app, inner_width, inner_height)
-                .into_iter()
-                .map(|line| {
-                    let text = line.to_string();
-                    Line::from(
-                        text.chars()
-                            .map(|c| {
-                                let color = match c {
-                                    'C' | '◆' | '*' => GREEN,
-                                    'O' => CYAN,
-                                    'P' => PALE,
-                                    _ => Color::DarkGray,
-                                };
-                                Span::styled(c.to_string(), style(color, no_color))
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .collect();
-            frame.render_widget(
-                Paragraph::new(colored).block(block(
-                    app.lang.choose(
-                        "Grafo • 36 nós / 64 arestas • setas selecionam",
-                        "Graph • 36 nodes / 64 edges • arrows select",
-                    ),
-                    GREEN,
-                    no_color,
-                )),
-                main,
-            );
-        }
-        View::Query => {
-            let query_parts = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(5), Constraint::Min(5)])
-                .split(main);
-            let title = format!(
-                "{} {}/2 • {}",
-                app.lang.choose("Exemplo", "Example"),
-                app.example + 1,
-                if app.editing {
-                    app.lang
-                        .choose("EDITANDO • PgUp/PgDn rola", "EDITING • PgUp/PgDn scroll")
-                } else {
-                    app.lang
-                        .choose("Enter edita • ←/→ exemplos", "Enter edit • ←/→ examples")
-                }
-            );
-            frame.render_widget(
-                Paragraph::new(app.query.as_str())
-                    .scroll((0, app.query_scroll.min(u16::MAX as usize) as u16))
-                    .block(block(&title, GREEN, no_color)),
-                query_parts[0],
-            );
-            let result = if app.result.is_empty() {
-                app.lang.choose(
-                    "F5 executa o exemplo selecionado.",
-                    "F5 runs the selected example.",
-                )
-            } else {
-                &app.result
-            };
-            frame.render_widget(
-                Paragraph::new(result)
-                    .scroll((app.result_scroll.min(u16::MAX as usize) as u16, 0))
-                    .wrap(Wrap { trim: false })
-                    .block(block(
-                        app.lang.choose(
-                            "Resultado guiado • ↑↓ rola • F5 executa",
-                            "Guided result • ↑↓ scroll • F5 run",
-                        ),
-                        CYAN,
-                        no_color,
-                    )),
-                query_parts[1],
-            );
-        }
-        View::Memory => {
-            let mut lines = Vec::new();
-            for (i, (name, value, _)) in MEM.iter().enumerate() {
-                lines.push(Line::from(Span::styled(
-                    format!(
-                        "{} {:<12} {}",
-                        if i == app.selected_memory { "▶" } else { " " },
-                        if app.lang == Language::PtBr {
-                            MEM_PT_NAMES[i]
-                        } else {
-                            name
-                        },
-                        if app.lang == Language::PtBr {
-                            MEM_PT_VALUES[i]
-                        } else {
-                            value
-                        }
-                    ),
-                    if i == app.selected_memory {
-                        style(GREEN, no_color)
-                    } else {
-                        style(PALE, no_color)
-                    },
-                )));
-            }
-            lines.push(Line::from(""));
-            lines.push(usage_line(
-                app.lang.choose("Contêiner", "Container"),
-                14,
-                "11.5 / 16 GiB",
-                no_color,
-            ));
-            lines.push(usage_line("Cache", 14, "7.2 / 10 GiB", no_color));
-            lines.push(usage_line(
-                "Memtables",
-                12,
-                app.lang
-                    .choose("0.6 / 1 GiB (no cache)", "0.6 / 1 GiB (inside cache)"),
-                no_color,
-            ));
-            lines.push(usage_line(
-                app.lang.choose("Consulta", "Query"),
-                8,
-                app.lang.choose(
-                    "0.8 / 2 GiB (sem limite nesta demo)",
-                    "0.8 / 2 GiB (not enforced here)",
-                ),
-                no_color,
-            ));
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .wrap(Wrap { trim: false })
-                    .block(block(
-                        app.lang.choose(
-                            "Memória • simulação, não RSS medido",
-                            "Memory • simulated, not measured RSS",
-                        ),
-                        GREEN,
-                        no_color,
-                    )),
-                main,
-            );
-        }
-        View::Disk => {
-            let lines: Vec<Line> = FILES
-                .iter()
-                .enumerate()
-                .map(|(i, (name, size, _))| {
-                    Line::from(Span::styled(
-                        format!(
-                            "{} {:<20} {:>8}",
-                            if i == app.selected_file { "▶" } else { " " },
-                            name,
-                            size
-                        ),
-                        if i == app.selected_file {
-                            style(GREEN, no_color)
-                        } else {
-                            style(PALE, no_color)
-                        },
-                    ))
-                })
-                .collect();
-            frame.render_widget(
-                Paragraph::new(lines).block(block(
-                    app.lang.choose(
-                        "Disco e arquivos • ilustrativo, sem acesso ao disco",
-                        "Disk & Files • illustrative, no filesystem access",
-                    ),
-                    GREEN,
-                    no_color,
-                )),
-                main,
-            );
-        }
-    }
-    let explanation = if app.help {
-        app.lang.choose("F1/Esc fecha ajuda. Tab muda foco. 1-4 abre vistas. Setas selecionam. Enter edita Query. F5 executa exemplo. q sai fora do editor.","F1/Esc closes help. Tab changes focus. 1-4 opens views. Arrows select. Enter edits Query. F5 runs example. q quits outside editor.").to_string()
-    } else if app.view == View::Graph {
-        format!(
-            "{}\n{}",
-            app.selected_description(),
-            app.lang.choose(
-                "C=Cliente  O=Empresa  P=Projeto  *=aresta selecionada",
-                "C=Customer  O=Company  P=Project  *=selected edge"
-            )
-        )
-    } else {
-        app.selected_description()
-    };
-    frame.render_widget(
-        Paragraph::new(explanation)
-            .wrap(Wrap { trim: false })
-            .block(block(
-                if app.help {
-                    app.lang.choose("Ajuda", "Help")
-                } else {
-                    app.lang
-                        .choose("Inspetor / explicação", "Inspector / explanation")
-                },
-                if app.focus == Focus::Inspector {
-                    GREEN
-                } else {
-                    CYAN
-                },
-                no_color,
-            )),
-        inspector,
-    );
-    let footer = if app.lang == Language::PtBr {
-        if area.width < 100 {
-            " F1 ajuda Tab foco 1-4 vistas ↑↓ seleciona Enter edita F5 roda Esc/q sai"
-        } else {
-            " F1 ajuda  Tab foco  1-4 vistas  ↑↓ seleciona  Enter inspeciona/edita  F5 executa  Esc volta  q sai  •  DEMO"
-        }
-    } else if area.width < 100 {
-        " F1 help Tab focus 1-4 views ↑↓ select Enter edit F5 run Esc/q back"
-    } else {
-        " F1 help  Tab focus  1-4 views  ↑↓ select  Enter inspect/edit  F5 run  Esc back  q quit  •  DEMO"
-    };
-    frame.render_widget(
-        Paragraph::new(footer).style(style(PALE, no_color)),
-        sections[2],
-    );
 }
 
 struct TerminalGuard {
@@ -1149,20 +742,14 @@ mod tests {
     #[test]
     fn graph_highlight_follows_selection() {
         let mut app = App::new(Language::En, View::Graph);
-        let before = graph_lines(&app, 80, 18)
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<String>();
-        assert!(before.contains('◆'));
-        assert!(before.contains('*'));
+        let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+        terminal.draw(|f| render(f, &app, false)).unwrap();
+        let before = terminal.backend().buffer().clone();
         app.focus = Focus::Main;
         app.handle(key(KeyCode::Down));
-        let after = graph_lines(&app, 80, 18)
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<String>();
-        assert_ne!(before, after);
-        assert!(after.contains('◆'));
+        terminal.draw(|f| render(f, &app, false)).unwrap();
+        assert_ne!(&before, terminal.backend().buffer());
+        assert!(app.selected_description().contains("Bruno"));
     }
     #[test]
     fn no_color_and_languages_render() {
@@ -1193,5 +780,127 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod composition_tests {
+    use super::*;
+    fn text(app: &App, w: u16, h: u16, no_color: bool) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| render(f, app, no_color)).unwrap();
+        if no_color {
+            assert!(terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .all(|c| c.fg == Color::Reset && c.bg == Color::Reset));
+        }
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+    #[test]
+    fn disk_and_memory_keep_core_composition_at_every_size() {
+        for (w, h) in [(160, 48), (120, 36), (80, 24)] {
+            for no_color in [false, true] {
+                let mut app = App::new(Language::En, View::Disk);
+                let disk = text(&app, w, h, no_color);
+                for expected in [
+                    "SYNTHETIC",
+                    "CURRENT",
+                    "MANIFEST-000001",
+                    "000004.log",
+                    "000011.sst",
+                    "OPTIONS-000003",
+                    "LOCK",
+                    "TYPE",
+                    "SIZE",
+                    "MEMTABLE",
+                    "L0",
+                    "L1",
+                    "L2",
+                    "F1 help",
+                ] {
+                    assert!(disk.contains(expected), "{w}x{h}: {expected}");
+                }
+                if w >= 100 {
+                    for expected in [
+                        "Graph preview",
+                        "WHAT IS IT?",
+                        "WHY DOES IT EXIST?",
+                        "memory.cache",
+                    ] {
+                        assert!(disk.contains(expected));
+                    }
+                }
+                if w == 160 {
+                    assert!(disk.contains("checkpoints"));
+                }
+                app.view = View::Memory;
+                let memory = text(&app, w, h, no_color);
+                for expected in [
+                    "HEADROOM",
+                    "16 GiB",
+                    "11.5 GiB",
+                    "4.5 GiB",
+                    "7.2 / 10 GiB",
+                    "0.6 / 1 GiB",
+                    "inside cache",
+                ] {
+                    assert!(memory.contains(expected), "{w}x{h}: {expected}");
+                }
+                if w >= 120 {
+                    assert!(memory.contains("included"));
+                }
+            }
+        }
+    }
+    #[test]
+    fn inspector_scroll_is_independent_and_cannot_erase_explanation() {
+        let mut app = App::new(Language::En, View::Disk);
+        app.selected_file = 3;
+        app.focus = Focus::Inspector;
+        app.handle(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.selected_file, 3);
+        assert_eq!(app.inspector_scroll, 1);
+        for _ in 0..40 {
+            app.handle(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        }
+        let compact = text(&app, 80, 24, false);
+        assert!(compact.contains("persisted key/value"));
+        app.set_view(View::Graph);
+        assert_eq!(app.inspector_scroll, 0);
+        assert!(text(&app, 80, 24, false).contains("name: Ana Silva"));
+    }
+    #[test]
+    fn wrapped_examples_and_overflow_hint_are_visible_in_compact_query() {
+        let mut app = App::new(Language::En, View::Query);
+        app.load_example(1);
+        let query = text(&app, 80, 24, false);
+        assert!(query.contains("co.name LIMIT 12"));
+        app.query = "界".repeat(150);
+        assert!(text(&app, 80, 24, false).contains("MORE TEXT: Enter, PgUp/PgDn"));
+    }
+    #[test]
+    fn all_files_have_contextual_explanations_and_selection_stays_reachable() {
+        let mut app = App::new(Language::En, View::Disk);
+        app.focus = Focus::Main;
+        for _ in 0..7 {
+            let i = app.selected_file;
+            let visible = text(&app, 120, 36, false);
+            assert!(visible.contains(FILES[i].0));
+            assert!(!app.selected_description().is_empty());
+            if i == 3 {
+                assert!(visible.contains("Column family: node"));
+            }
+            app.handle(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        assert_eq!(app.selected_file, 3);
     }
 }

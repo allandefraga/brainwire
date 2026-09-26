@@ -14,6 +14,10 @@ clap.workspace = true
 toml.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+brainwire-core = { path = "../core" }
+brainwire-store = { path = "../store" }
+brainwire-cypher = { path = "../cypher" }
 brainwire-tui = { path = "../tui" }
 
 [dev-dependencies]
