@@ -44,6 +44,20 @@ use crate::lexer::{tokenize, Spanned, Tok};
 /// many levels deep before parsing gives up; see the module docs.
 const MAX_NESTING: usize = 64;
 
+/// Bound on the depth of the whole expression tree, shared by every bracket
+/// level (parentheses, list, map, `count(...)`) and every `AND`/`OR` term
+/// beyond the first in a chain. Unlike `MAX_NESTING`, this is not about the
+/// parser's own call stack: `parse_and`/`parse_or` build a chained
+/// `Expr::And`/`Expr::Or` tree in a flat loop, so the parser never recurses
+/// for a long chain, but the resulting tree does grow one level per extra
+/// term, and the compiler-derived `Drop` (and `Clone`/`Debug`/`PartialEq`)
+/// for that tree recurses once per level - an unbounded chain crashes the
+/// process when the value is later dropped, not while it is parsed. Fix
+/// round 1 (reviewer finding): `RETURN 1 AND 1 AND ... AND 1` with enough
+/// terms overflowed the stack in `Drop`, past where `catch_unwind` could
+/// help, since a stack overflow aborts the process unconditionally.
+pub const MAX_EXPR_DEPTH: usize = 1024;
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("{message} (at byte {offset})")]
 pub struct ParseError {
@@ -62,6 +76,7 @@ pub fn parse(query: &str) -> Result<Query, ParseError> {
         toks,
         pos: 0,
         depth: 0,
+        expr_depth: 0,
     };
 
     let mut clauses = Vec::new();
@@ -88,7 +103,15 @@ struct Parser<'a> {
     src: &'a str,
     toks: Vec<Spanned>,
     pos: usize,
+    /// Bracket-only nesting depth (parens/list/map/count-arg), capped at
+    /// `MAX_NESTING`. Bounds the parser's own recursion.
     depth: usize,
+    /// Depth of the expression tree along the current parse path: every
+    /// bracket level and every extra `AND`/`OR` term draws from this same
+    /// budget, capped at `MAX_EXPR_DEPTH`. Bounds the tree the parser
+    /// builds, independent of how deeply the parser itself recurses to
+    /// build it.
+    expr_depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -182,10 +205,33 @@ impl<'a> Parser<'a> {
         if self.depth >= MAX_NESTING {
             return Err(self.error_here("nested deeper than 64 levels"));
         }
+        self.enter_expr_depth()?;
         self.depth += 1;
         let result = f(self);
         self.depth -= 1;
+        self.exit_expr_depth();
         result
+    }
+
+    /// Consumes one unit of the shared expression-depth budget (see
+    /// `MAX_EXPR_DEPTH`), failing before consuming it once the budget is
+    /// already spent. Every bracket level (`with_nesting`) and every extra
+    /// `AND`/`OR` term draws from this one counter, so a long chain wrapped
+    /// in brackets, or a long chain on its own, are both bounded the same
+    /// way.
+    fn enter_expr_depth(&mut self) -> Result<(), ParseError> {
+        if self.expr_depth >= MAX_EXPR_DEPTH {
+            return Err(self.error_here(format!(
+                "expression nested deeper than {MAX_EXPR_DEPTH} levels"
+            )));
+        }
+        self.expr_depth += 1;
+        Ok(())
+    }
+
+    /// Gives back one unit of the shared expression-depth budget.
+    fn exit_expr_depth(&mut self) {
+        self.expr_depth -= 1;
     }
 
     // -- clauses ------------------------------------------------------------
@@ -463,20 +509,40 @@ impl<'a> Parser<'a> {
 
     fn parse_or(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_and()?;
+        // parse_and/parse_or build this chain in a flat loop, so the parser
+        // never recurses deeply here - but the tree does grow one level per
+        // extra term, and dropping (or cloning/debug-printing) that tree
+        // does recurse once per level. Each extra term draws one unit from
+        // the shared expression-depth budget (see MAX_EXPR_DEPTH), given
+        // back once this chain is fully built so independent siblings (e.g.
+        // other elements of an enclosing list) don't pay for it too.
+        let mut extra_terms = 0usize;
         while self.check_keyword("OR") {
             self.advance();
+            self.enter_expr_depth()?;
+            extra_terms += 1;
             let right = self.parse_and()?;
             left = Expr::Or(Box::new(left), Box::new(right));
+        }
+        for _ in 0..extra_terms {
+            self.exit_expr_depth();
         }
         Ok(left)
     }
 
     fn parse_and(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_not()?;
+        // See the comment in parse_or: same shared-budget accounting.
+        let mut extra_terms = 0usize;
         while self.check_keyword("AND") {
             self.advance();
+            self.enter_expr_depth()?;
+            extra_terms += 1;
             let right = self.parse_not()?;
             left = Expr::And(Box::new(left), Box::new(right));
+        }
+        for _ in 0..extra_terms {
+            self.exit_expr_depth();
         }
         Ok(left)
     }
@@ -916,6 +982,86 @@ mod tests {
         let over = format!("RETURN {}1{}", "([".repeat(34), "])".repeat(34));
         let e = parse(&over).unwrap_err();
         assert_eq!(e.message, "nested deeper than 64 levels");
+    }
+
+    // -- expression depth budget (fix round 1: unbounded AND/OR chains) -----
+    //
+    // parse_and/parse_or build a left-associated Expr::And/Or chain in a
+    // flat loop, so the *parser* never recurses deeply for a long chain -
+    // but the *resulting Expr tree* does grow one level per extra term, and
+    // the compiler-derived Drop/Clone/Debug/PartialEq for that tree recurses
+    // once per level. A long enough chain overflows the stack when the
+    // value is dropped, not while it is being parsed. MAX_EXPR_DEPTH bounds
+    // the tree's depth directly: every extra AND/OR term and every bracket
+    // level (parens/list/map/count(..)) draws from this one budget.
+
+    fn and_chain(extra_terms: usize) -> String {
+        format!("1{}", " AND 1".repeat(extra_terms))
+    }
+
+    fn or_chain(extra_terms: usize) -> String {
+        format!("1{}", " OR 1".repeat(extra_terms))
+    }
+
+    #[test]
+    fn and_chain_up_to_1024_extra_terms_is_ok_and_1025_is_an_error() {
+        assert!(
+            parse(&format!("RETURN {}", and_chain(1024))).is_ok(),
+            "1024 extra AND terms should parse"
+        );
+
+        let e = parse(&format!("RETURN {}", and_chain(1025))).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+    }
+
+    #[test]
+    fn or_chain_up_to_1024_extra_terms_is_ok_and_1025_is_an_error() {
+        assert!(
+            parse(&format!("RETURN {}", or_chain(1024))).is_ok(),
+            "1024 extra OR terms should parse"
+        );
+
+        let e = parse(&format!("RETURN {}", or_chain(1025))).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+    }
+
+    #[test]
+    fn very_long_and_or_chains_are_refused_quickly_without_crashing() {
+        // 200,000 extra terms is far beyond MAX_EXPR_DEPTH. This must return
+        // Err (never panic, never hang) almost immediately - the parser has
+        // to give up within about 1024 iterations, long before it would ever
+        // build anything close to a 200,000-deep tree, since the crash the
+        // reviewer found happens when a deep-enough tree is *dropped*, not
+        // while it is being assembled.
+        let e = parse(&format!("RETURN {}", and_chain(200_000))).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+
+        let e = parse(&format!("RETURN {}", or_chain(200_000))).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+    }
+
+    #[test]
+    fn and_chain_inside_parentheses_shares_the_expression_depth_budget() {
+        // 64 levels of parens is fine on its own (a separate, smaller cap -
+        // see the bracket-nesting tests above). Wrapped around a chain long
+        // enough that 64 + the chain's extra terms exceeds 1024, the whole
+        // thing must be refused: parens and AND terms draw from the same
+        // 1024-level budget, not two independent ones.
+        let opens = "(".repeat(64);
+        let closes = ")".repeat(64);
+
+        let short = format!("RETURN {opens}{}{closes}", and_chain(100));
+        assert!(
+            parse(&short).is_ok(),
+            "64 parens + 100 extra AND terms (164 total) should still parse"
+        );
+
+        let long = format!("RETURN {opens}{}{closes}", and_chain(1000));
+        let e = parse(&long).unwrap_err();
+        assert_eq!(
+            e.message, "expression nested deeper than 1024 levels",
+            "64 parens + 1000 extra AND terms (1064 total) must be refused"
+        );
     }
 
     // -- lexer-level errors, surfaced through parse -------------------------
