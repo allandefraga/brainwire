@@ -10,8 +10,6 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
-use config::{Config, ConfigError, Source};
-
 #[derive(Parser)]
 #[command(name = "brainwire", version, about = "Brainwire graph database")]
 struct Cli {
@@ -46,17 +44,6 @@ enum ConfigCommands {
         config: Option<PathBuf>,
     },
 }
-
-/// The dotted keys `config show` prints, in this order.
-const KEYS: [&str; 7] = [
-    "server.listen",
-    "server.data_dir",
-    "server.default_database",
-    "server.max_message",
-    "memory.cache",
-    "memory.memtables",
-    "memory.query",
-];
 
 fn main() {
     let cli = Cli::parse();
@@ -98,30 +85,11 @@ fn run_config_show(explicit_path: Option<&Path>) -> Result<(), String> {
         }
     };
 
-    let loaded = config::load(path.as_deref(), &env).map_err(|e: ConfigError| e.to_string())?;
+    let loaded = config::load(path.as_deref(), &env).map_err(|e| e.to_string())?;
 
-    for key in KEYS {
-        let value = display_value(&loaded.config, key);
-        let origin = match &loaded.sources[key] {
-            Source::Default => "default".to_string(),
-            Source::File(p) => format!("file {}", p.display()),
-            Source::Env(v) => format!("env {v}"),
-        };
+    for (key, value, origin) in config::describe(&loaded) {
         println!("{key:<24} = {value:<14} ({origin})");
     }
 
     Ok(())
-}
-
-fn display_value(config: &Config, key: &str) -> String {
-    match key {
-        "server.listen" => config.server.listen.clone(),
-        "server.data_dir" => config.server.data_dir.display().to_string(),
-        "server.default_database" => config.server.default_database.clone(),
-        "server.max_message" => config.server.max_message.to_string(),
-        "memory.cache" => config.memory.cache.to_string(),
-        "memory.memtables" => config.memory.memtables.to_string(),
-        "memory.query" => config.memory.query.to_string(),
-        _ => unreachable!("display_value called with an unknown key {key:?}"),
-    }
 }

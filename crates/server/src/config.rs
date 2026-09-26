@@ -92,8 +92,10 @@ pub enum ConfigError {
 }
 
 /// The dotted keys `load` tracks provenance for, in the order `config show`
-/// prints them.
-const KEYS: [&str; 7] = [
+/// prints them. `pub(crate)` so `main.rs` and `describe` share this single
+/// list instead of each keeping their own copy (fix round 1: a second,
+/// hand-copied list in `main.rs` could drift and panic on lookup).
+pub(crate) const KEYS: [&str; 7] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -118,7 +120,12 @@ fn env_var_name(dotted_key: &str) -> String {
 /// told apart from an unset one. Not part of the public API: `Config` itself
 /// has no `Deserialize` impl, since `load` needs per-field provenance, not
 /// just the merged values.
+///
+/// `deny_unknown_fields` on all three (fix round 1): without it, a typo like
+/// `chace` for `cache`, or an entire bogus `[section]`, was silently ignored
+/// (every key still reads as its default, exit 0) instead of being reported.
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileConfig {
     #[serde(default)]
     server: FileServerSection,
@@ -127,6 +134,7 @@ struct FileConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileServerSection {
     #[serde(default)]
     listen: Option<String>,
@@ -139,6 +147,7 @@ struct FileServerSection {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileMemorySection {
     #[serde(default)]
     cache: Option<ByteSize>,
@@ -334,6 +343,48 @@ pub fn default_file() -> String {
     )
 }
 
+/// One `(key, value, source)` row per entry in `KEYS`, in that order —
+/// `config show`'s only source of what to print; `main.rs` just formats
+/// these rows (fix round 1: this replaces a second, hand-copied key list and
+/// a `loaded.sources[key]` index in `main.rs`, either of which panicked if it
+/// ever drifted from this module's own `KEYS`/field set).
+///
+/// Never panics: a key in `KEYS` with no matching entry in `loaded.sources`
+/// (which `load` always populates from this same `KEYS`, so this should not
+/// happen) reads as `"default"` rather than indexing the map; a key with no
+/// matching arm in the value lookup (same non-happening case) reads as an
+/// empty value rather than hitting an `unreachable!()`.
+pub fn describe(loaded: &Loaded) -> Vec<(&'static str, String, String)> {
+    KEYS.iter()
+        .map(|&key| {
+            let value = value_text(&loaded.config, key);
+            let source = loaded.sources.get(key).cloned().unwrap_or(Source::Default);
+            (key, value, source_text(&source))
+        })
+        .collect()
+}
+
+fn value_text(config: &Config, key: &str) -> String {
+    match key {
+        "server.listen" => config.server.listen.clone(),
+        "server.data_dir" => config.server.data_dir.display().to_string(),
+        "server.default_database" => config.server.default_database.clone(),
+        "server.max_message" => config.server.max_message.to_string(),
+        "memory.cache" => config.memory.cache.to_string(),
+        "memory.memtables" => config.memory.memtables.to_string(),
+        "memory.query" => config.memory.query.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn source_text(source: &Source) -> String {
+    match source {
+        Source::Default => "default".to_string(),
+        Source::File(p) => format!("file {}", p.display()),
+        Source::Env(v) => format!("env {v}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,5 +568,67 @@ mod tests {
                 "key {key} was not sourced from env"
             );
         }
+    }
+
+    // Fix round 1 (reviewer findings): unknown TOML keys must be refused,
+    // and `config show`'s key/value/source listing must come from one
+    // function in this module with no panicking indexing, rather than a
+    // second hand-copied key list in main.rs.
+
+    #[test]
+    fn an_unknown_key_in_a_known_section_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("brainwire.toml");
+        std::fs::write(&file, "[memory]\nchace = \"4GiB\"\n").unwrap();
+        let err = load(Some(&file), &env(&[])).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(ref msg) if msg.contains("chace")));
+    }
+
+    #[test]
+    fn an_unknown_top_level_section_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("brainwire.toml");
+        std::fs::write(&file, "[bogus]\nx = 1\n").unwrap();
+        let err = load(Some(&file), &env(&[])).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(_)));
+    }
+
+    #[test]
+    fn describe_returns_one_row_per_key_in_order() {
+        let loaded = load(None, &env(&[])).unwrap();
+        let rows = describe(&loaded);
+        let keys: Vec<&str> = rows.iter().map(|(k, _, _)| *k).collect();
+        assert_eq!(keys, KEYS.to_vec());
+    }
+
+    #[test]
+    fn describe_reports_value_and_source_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("brainwire.toml");
+        std::fs::write(&file, "[memory]\ncache = \"4GiB\"\n").unwrap();
+        let loaded = load(
+            Some(&file),
+            &env(&[("BRAINWIRE_MEMORY_MEMTABLES", "512MiB")]),
+        )
+        .unwrap();
+        let rows: BTreeMap<&str, (String, String)> = describe(&loaded)
+            .into_iter()
+            .map(|(k, v, s)| (k, (v, s)))
+            .collect();
+        assert_eq!(
+            rows["memory.cache"],
+            ("4 GiB".to_string(), format!("file {}", file.display()))
+        );
+        assert_eq!(
+            rows["memory.memtables"],
+            (
+                "512 MiB".to_string(),
+                "env BRAINWIRE_MEMORY_MEMTABLES".to_string()
+            )
+        );
+        assert_eq!(
+            rows["memory.query"],
+            ("2 GiB".to_string(), "default".to_string())
+        );
     }
 }
