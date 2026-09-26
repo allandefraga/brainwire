@@ -245,12 +245,12 @@ review the whole change, keep commits local and give runnable examples.
 
 Task 1 completed in `5ace18d` and `51aca5a`; Task 2 in `f6d94fb` and
 `7571721`. Both task reviews pass spec and quality with no findings.
-The consolidated workspace passes 262 tests, all-target clippy with denied
+Before the bulk-input addendum, the workspace passed 262 tests and clippy with denied
 warnings, formatting and binary build. Independent actual-binary and PTY
 verification covers persistence/rollback/numeric boundaries and terminal
 layouts/interaction/restoration. See JOURNAL and the local query / terminal
-run guides for scope and limitations. Final whole-change review follows the
-documentation/capture commit. No remote operations are part of this handoff.
+run guides for scope and limitations. The whole-change review through
+`c4a7462` passed clean. No remote operations are part of this handoff.
 
 ## Task 3 addendum: file input for bulk query parameters
 
@@ -270,5 +270,7 @@ Task 3 completed in `664d428`; spec/quality review passes with no findings.
 The final workspace now passes 265 tests, all-target clippy and formatting.
 A real 1,708,900-byte parameter file imported 10,000 records, confirmed after
 reopening, without passing that object through process arguments. The original
-whole-change review of `5e7b86c..c4a7462` passed clean; the small amendment receives
-its final integration follow-up review after documentation is committed.
+whole-change review of `5e7b86c..c4a7462` passed clean. Final amendment review
+of `c4a7462..186cf28` also passes, approving the combined change with no open
+findings. All three tasks are complete. Next: the linked Bolt transaction
+preflight and MVP Task 5; no durable-server or live-TUI claim is made.

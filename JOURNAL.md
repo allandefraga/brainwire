@@ -97,15 +97,27 @@ No line of code before the end of phase 2.
   10,000 synthetic records from that file and confirmed count and property
   lookup in separate reopened processes. File input remains materialized.
   The final 265-test workspace suite, all-target clippy and fmt pass.
-  Task 3 review passes spec and quality with no findings; the final
-  integration amendment review follows this documentation update.
+  Task 3 review passes spec and quality with no findings. Final integration
+  amendment review of `c4a7462..186cf28` passes; the combined change through
+  `186cf28` is approved with no open findings.
 - **Next:** real Bolt transaction lifecycle and durable `serve` (engine MVP
   Task 5), then connected TUI query/neighborhood and telemetry/file contracts.
   The [transaction preflight](docs/superpowers/plans/2026-09-26-brainwire-bolt-transaction-preflight.md)
   identifies the borrowed Txn lifetime, async runtime boundary, transaction
   failure states and mandatory reset/disconnect cleanup tests.
+- **Autonomous decisions and costs:** reused the clean standalone branch
+  (a different isolation choice would require moving local commits); explicitly
+  rejected relationship bindings/property filters pending an edge read API
+  (some parsed queries remain unavailable); exposed real execution separately
+  from the synthetic TUI (network-connected UI comes later); corrected the
+  signed-minimum parser boundary now (small parser/review scope and UI delay);
+  added file parameters after the measured OS argument limit (one additional
+  CLI option and its tests/review). These are the complete session rulings.
 - **Local only:** standalone `/Users/fraga/Documents/brainwire`, no push,
   publication or remote PR. Local database files under `/data/` are ignored.
+  All verification databases were temporary and removed by their test harnesses.
+  No test server remains running. Final reports are summarized here and the
+  completed plan's scratch workspace is removed after clean review.
 
 ### 2026-09-26, extra 30-minute session: runnable terminal demo
 
