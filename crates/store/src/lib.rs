@@ -2,6 +2,7 @@
 
 pub mod alloc;
 pub mod db;
+pub mod graph;
 pub mod txn;
 
 #[cfg(test)]

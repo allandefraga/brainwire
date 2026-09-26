@@ -9,6 +9,7 @@ publish.workspace = true
 brainwire-core = { path = "../core" }
 rocksdb.workspace = true
 thiserror.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -80,6 +80,7 @@ version = "0.1.0"
 dependencies = [
  "brainwire-core",
  "rocksdb",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]
