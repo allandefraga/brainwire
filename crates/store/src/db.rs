@@ -74,9 +74,8 @@ pub enum StoreError {
 }
 
 pub struct Database {
-    // Read starting in Task 7 (txn.rs: `db.write_opt`), outside this task's scope.
-    #[allow(dead_code)]
     pub(crate) db: DB,
+    pub(crate) committer: crate::txn::Committer,
 }
 
 fn family_options(res: &Resources) -> Options {
@@ -100,12 +99,12 @@ impl Database {
             .iter()
             .map(|name| ColumnFamilyDescriptor::new(*name, family_options(res)));
         let db = DB::open_cf_descriptors(&opts, path, families)?;
-        Ok(Database { db })
+        Ok(Database {
+            db,
+            committer: crate::txn::Committer::default(),
+        })
     }
 
-    // Called starting in Task 7 (txn.rs), outside this task's scope; exercised
-    // here only by tests.
-    #[allow(dead_code)]
     pub(crate) fn cf(&self, name: &'static str) -> Result<&rocksdb::ColumnFamily, StoreError> {
         self.db
             .cf_handle(name)
