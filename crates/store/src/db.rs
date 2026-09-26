@@ -82,6 +82,8 @@ pub enum StoreError {
 pub struct Database {
     pub(crate) db: DB,
     pub(crate) committer: crate::txn::Committer,
+    pub(crate) alloc: crate::alloc::IdAllocator,
+    pub(crate) id_block: u64,
 }
 
 fn family_options(res: &Resources) -> Options {
@@ -108,6 +110,8 @@ impl Database {
         Ok(Database {
             db,
             committer: crate::txn::Committer::new(res.config.conflict_history_keys),
+            alloc: crate::alloc::IdAllocator::default(),
+            id_block: res.config.id_block,
         })
     }
 
@@ -130,6 +134,8 @@ impl Database {
         Database {
             db,
             committer: crate::txn::Committer::new(conflict_history_keys),
+            alloc: crate::alloc::IdAllocator::default(),
+            id_block: StoreConfig::for_tests().id_block,
         }
     }
 }

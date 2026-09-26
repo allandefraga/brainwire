@@ -1,0 +1,271 @@
+//! Id allocation in blocks. The end of a block is committed before any id in
+//! it is used, so a crash never reuses an id (spec 1.3).
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use brainwire_core::ids::{EdgeId, NodeId, TypeId};
+
+use crate::db::{Database, StoreError};
+use crate::txn::{Cf, TxnError};
+
+#[derive(Default)]
+pub(crate) struct IdAllocator {
+    blocks: Mutex<HashMap<Vec<u8>, Block>>,
+}
+
+#[derive(Clone, Copy)]
+struct Block {
+    next: u64,
+    end: u64,
+}
+
+const EDGE_COUNTER_KEY: &[u8] = b"seq/edge";
+
+pub(crate) fn node_counter_key(ty: TypeId) -> Vec<u8> {
+    let mut key = b"seq/node/".to_vec();
+    key.extend_from_slice(&ty.0.to_be_bytes());
+    key
+}
+
+impl Database {
+    pub fn next_node_id(&self, ty: TypeId) -> Result<NodeId, StoreError> {
+        let seq = self.next_seq(node_counter_key(ty), 0)?;
+        NodeId::new(0, ty, seq).map_err(|e| StoreError::Corrupt(e.to_string()))
+    }
+
+    pub fn next_edge_id(&self) -> Result<EdgeId, StoreError> {
+        let seq = self.next_seq(EDGE_COUNTER_KEY.to_vec(), 1)?;
+        EdgeId::new(0, seq).map_err(|e| StoreError::Corrupt(e.to_string()))
+    }
+
+    fn next_seq(&self, key: Vec<u8>, first: u64) -> Result<u64, StoreError> {
+        let mut blocks = self.alloc.blocks.lock().expect("allocator lock");
+        let exhausted = blocks.get(&key).is_none_or(|b| b.next >= b.end);
+        if exhausted {
+            let block = self.reserve(&key, first)?;
+            blocks.insert(key.clone(), block);
+        }
+        let block = blocks.get_mut(&key).expect("block present");
+        let seq = block.next;
+        block.next += 1;
+        Ok(seq)
+    }
+
+    fn reserve(&self, key: &[u8], first: u64) -> Result<Block, StoreError> {
+        loop {
+            let mut txn = self.begin();
+            let current = match txn.get_for_update(Cf::Meta, key)? {
+                Some(v) => u64::from_be_bytes(
+                    v.as_slice()
+                        .try_into()
+                        .map_err(|_| StoreError::Corrupt("id counter".into()))?,
+                ),
+                None => first,
+            };
+            let end = current + self.id_block;
+            txn.put(Cf::Meta, key.to_vec(), end.to_be_bytes().to_vec());
+            match txn.commit() {
+                Ok(_) => return Ok(Block { next: current, end }),
+                Err(TxnError::Conflict) => continue,
+                Err(TxnError::Store(e)) => return Err(e),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use brainwire_core::ids::{EdgeId, NodeId, TypeId};
+
+    use crate::db::{Database, Resources, StoreConfig, StoreError};
+    use crate::txn::Cf;
+
+    #[test]
+    fn ids_grow_and_never_repeat_across_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+        let ids: Vec<NodeId> = (0..10)
+            .map(|_| db.next_node_id(TypeId(1)).unwrap())
+            .collect();
+        assert!(ids.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn a_reopen_never_reuses_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let first = Database::open(dir.path(), &res)
+            .unwrap()
+            .next_node_id(TypeId(1))
+            .unwrap();
+        let second = Database::open(dir.path(), &res)
+            .unwrap()
+            .next_node_id(TypeId(1))
+            .unwrap();
+        assert!(second.seq() >= first.seq() + StoreConfig::for_tests().id_block);
+    }
+
+    #[test]
+    fn edge_ids_start_at_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+        assert_eq!(db.next_edge_id().unwrap(), EdgeId::new(0, 1).unwrap());
+    }
+
+    #[test]
+    fn concurrent_allocation_is_unique() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+        let mut all: Vec<NodeId> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    s.spawn(|| {
+                        (0..50)
+                            .map(|_| db.next_node_id(TypeId(2)).unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap())
+                .collect()
+        });
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), 200);
+    }
+
+    // Additional tests beyond the brief: the plan's carried-over review rule
+    // requires every public function and every error path to be exercised by
+    // a test, and the task dispatch additionally asked for a stress test that
+    // shares one `Database` across real OS threads via `Arc` (as a server
+    // would), not just borrowed scoped threads.
+
+    #[test]
+    fn next_node_id_rejects_an_out_of_range_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+        // TypeId(u16) accepts any u16 at construction; only NodeId::new
+        // rejects one over TypeId::MAX, so next_node_id must propagate that
+        // rejection as an error instead of panicking.
+        match db.next_node_id(TypeId(TypeId::MAX + 1)) {
+            Err(StoreError::Corrupt(_)) => {}
+            other => panic!("expected StoreError::Corrupt for an out-of-range type, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn next_node_id_errors_instead_of_panicking_at_the_sequence_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+
+        // Seed the counter one block before the 42-bit sequence ceiling so
+        // the very next reservation straddles it.
+        let boundary = (1u64 << 42) - 1;
+        let mut seed = db.begin();
+        seed.put(
+            Cf::Meta,
+            super::node_counter_key(TypeId(9)),
+            boundary.to_be_bytes().to_vec(),
+        );
+        seed.commit().unwrap();
+
+        // The last id that still fits in 42 bits is handed out normally.
+        let last_valid = db.next_node_id(TypeId(9)).unwrap();
+        assert_eq!(last_valid.seq(), boundary);
+
+        // The next id in the same block overflows the 42-bit sequence;
+        // NodeId::new's rejection must come back as an error, not a panic.
+        match db.next_node_id(TypeId(9)) {
+            Err(StoreError::Corrupt(_)) => {}
+            other => panic!("expected StoreError::Corrupt at the sequence boundary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn next_edge_id_errors_instead_of_panicking_at_the_sequence_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+
+        // Same boundary proof as above, for the 54-bit edge sequence.
+        let boundary = (1u64 << 54) - 1;
+        let mut seed = db.begin();
+        seed.put(
+            Cf::Meta,
+            super::EDGE_COUNTER_KEY.to_vec(),
+            boundary.to_be_bytes().to_vec(),
+        );
+        seed.commit().unwrap();
+
+        let last_valid = db.next_edge_id().unwrap();
+        assert_eq!(last_valid, EdgeId::new(0, boundary).unwrap());
+
+        match db.next_edge_id() {
+            Err(StoreError::Corrupt(_)) => {}
+            other => panic!("expected StoreError::Corrupt at the sequence boundary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reserve_propagates_a_store_error_instead_of_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        // Create every column family, then close the read-write handle so a
+        // second, read-only handle can attach to the same path (mirrors
+        // txn.rs's a_failed_write_is_a_store_error_not_a_panic).
+        drop(Database::open(dir.path(), &res).unwrap());
+
+        let opts = rocksdb::Options::default();
+        let cfs = crate::db::COLUMN_FAMILIES
+            .iter()
+            .map(|name| rocksdb::ColumnFamilyDescriptor::new(*name, rocksdb::Options::default()));
+        let ro = rocksdb::DB::open_cf_descriptors_read_only(&opts, dir.path(), cfs, false).unwrap();
+        let db = Database::for_test(ro, 1_000_000);
+
+        // The reservation's read succeeds (reads work against a read-only
+        // handle); its commit's write does not, and reserve's
+        // `Err(TxnError::Store(e)) => return Err(e)` branch must surface
+        // that as a StoreError rather than panicking or looping forever.
+        match db.next_node_id(TypeId(1)) {
+            Err(StoreError::Rocks(_)) => {}
+            other => panic!(
+                "expected StoreError::Rocks for a write against a read-only db, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn concurrent_allocation_from_an_arc_database_is_unique() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        // Arc, not a borrow: this is how a real server shares one Database
+        // across connection-handling threads, unlike the scoped-borrow test
+        // above.
+        let db = std::sync::Arc::new(Database::open(dir.path(), &res).unwrap());
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let db = std::sync::Arc::clone(&db);
+                std::thread::spawn(move || {
+                    (0..50)
+                        .map(|_| db.next_node_id(TypeId(3)).unwrap())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let mut all: Vec<NodeId> = handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), 200);
+    }
+}
