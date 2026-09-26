@@ -2,7 +2,7 @@
 //! it is used, so a crash never reuses an id (spec 1.3).
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use brainwire_core::ids::{EdgeId, NodeId, TypeId};
 
@@ -12,6 +12,28 @@ use crate::txn::{Cf, TxnError};
 #[derive(Default)]
 pub(crate) struct IdAllocator {
     blocks: Mutex<HashMap<Vec<u8>, Block>>,
+}
+
+impl IdAllocator {
+    /// The one place that locks the in-memory blocks. A poisoned lock means
+    /// an earlier holder panicked while a block's in-memory state might not
+    /// match what has actually been handed out, so every in-memory block is
+    /// dropped rather than trusted: the next allocation for any key reserves
+    /// a fresh block starting from the persisted counter (spec 1.3 — a
+    /// block's end is committed to RocksDB before any id in it is used), so
+    /// ids already handed out from a dropped block are simply skipped,
+    /// wasted but never reused or repeated. Clears the poison flag for the
+    /// same reason as the committer's equivalent (`txn::Committer::lock`):
+    /// left set, this recovery — dropping every block again — would rerun
+    /// on every later allocation instead of once.
+    fn lock(&self) -> MutexGuard<'_, HashMap<Vec<u8>, Block>> {
+        self.blocks.lock().unwrap_or_else(|poisoned| {
+            let mut blocks = poisoned.into_inner();
+            blocks.clear();
+            self.blocks.clear_poison();
+            blocks
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -40,7 +62,7 @@ impl Database {
     }
 
     fn next_seq(&self, key: Vec<u8>, first: u64) -> Result<u64, StoreError> {
-        let mut blocks = self.alloc.blocks.lock().expect("allocator lock");
+        let mut blocks = self.alloc.lock();
         let exhausted = blocks.get(&key).is_none_or(|b| b.next >= b.end);
         if exhausted {
             let block = self.reserve(&key, first)?;
@@ -267,5 +289,66 @@ mod tests {
         all.sort();
         all.dedup();
         assert_eq!(all.len(), 200);
+    }
+
+    // Follow-up (Task 8 review, Important): `.expect("allocator lock")`
+    // panicked on a poisoned lock, wedging id allocation for the life of the
+    // process — unlike the committer, which already recovered. Proves the
+    // fix: after a real poisoning, both `next_node_id` and `next_edge_id`
+    // keep working, every id handed out afterward is greater than every id
+    // handed out before, and nothing repeats — the in-memory blocks at the
+    // time of poisoning are dropped and never trusted again, so their unused
+    // tail is skipped rather than reused.
+    #[test]
+    fn a_poisoned_allocator_recovers_and_never_reuses_or_repeats_an_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+
+        // Hand out ids before poisoning, so recovery has something at risk
+        // of reusing if it trusted the in-memory blocks instead of dropping
+        // them.
+        let before_nodes: Vec<NodeId> = (0..5)
+            .map(|_| db.next_node_id(TypeId(1)).unwrap())
+            .collect();
+        let before_edges: Vec<EdgeId> = (0..5).map(|_| db.next_edge_id().unwrap()).collect();
+
+        let panicked = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _guard = db.alloc.blocks.lock().unwrap();
+                    panic!("simulated panic while holding the allocator lock");
+                })
+                .join()
+                .is_err()
+        });
+        assert!(panicked, "expected the spawned thread to panic");
+
+        // Neither call panics on the now-poisoned lock.
+        let after_nodes: Vec<NodeId> = (0..5)
+            .map(|_| db.next_node_id(TypeId(1)).unwrap())
+            .collect();
+        let after_edges: Vec<EdgeId> = (0..5).map(|_| db.next_edge_id().unwrap()).collect();
+
+        assert!(after_nodes
+            .iter()
+            .all(|after| before_nodes.iter().all(|before| after > before)));
+        assert!(after_edges
+            .iter()
+            .all(|after| before_edges.iter().all(|before| after > before)));
+
+        let mut all_nodes = before_nodes;
+        all_nodes.extend(after_nodes);
+        let node_count = all_nodes.len();
+        all_nodes.sort();
+        all_nodes.dedup();
+        assert_eq!(all_nodes.len(), node_count, "a node id repeated");
+
+        let mut all_edges = before_edges;
+        all_edges.extend(after_edges);
+        let edge_count = all_edges.len();
+        all_edges.sort();
+        all_edges.dedup();
+        assert_eq!(all_edges.len(), edge_count, "an edge id repeated");
     }
 }

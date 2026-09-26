@@ -3,10 +3,11 @@
 //! expose WriteBatchWithIndex, hence the overlay. The committer's conflict
 //! history is bounded (`StoreConfig::conflict_history_keys`): once it holds
 //! more keys than the cap, the oldest commits are evicted even if a
-//! still-open transaction could have depended on them, and `pruned_through`
-//! remembers how far that unsafe eviction reached so such a transaction
-//! fails closed (`Conflict`) on its next write or dependency instead of
-//! silently skipping a check it can no longer make.
+//! still-open transaction could have depended on them. `pruned_through`
+//! tracks the highest commit sequence ever evicted — on every eviction, safe
+//! or not, and on recovery from a poisoned lock — so a transaction old
+//! enough to predate it fails closed (`Conflict`) at commit if it touched
+//! anything, instead of silently skipping a check it can no longer make.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
@@ -73,16 +74,22 @@ impl Committer {
     /// The one place that locks the committer. A poisoned lock means an
     /// earlier holder panicked partway through updating `last_write` /
     /// `history` for a commit, so that update can no longer be trusted for
-    /// any key it might or might not have finished recording. Recovering by
-    /// raising `pruned_through` to the sequence at the time of poisoning
-    /// makes every transaction old enough to have possibly missed that
-    /// update fail closed on its next write or dependency (see
-    /// `Txn::commit`), the same way a capacity-driven eviction does, instead
-    /// of silently trusting half-written state.
+    /// any key it might or might not have finished recording. Recovering
+    /// raises `pruned_through` to the sequence at the time of poisoning —
+    /// the same fail-closed-at-commit mechanism every eviction uses (see
+    /// `CommitState::prune`) — so every transaction old enough to have
+    /// possibly missed that update retries. It then clears the poison flag:
+    /// `PoisonError::into_inner` recovers the guard but leaves the `Mutex`
+    /// marked poisoned, and left set, this whole recovery — including the
+    /// `pruned_through` bump, against whatever `seq` has become by then —
+    /// would rerun on every later `begin`, `commit` and `drop` instead of
+    /// once, eventually raising `pruned_through` past transactions that
+    /// never had anything to do with the original panic.
     fn lock(&self) -> MutexGuard<'_, CommitState> {
         self.state.lock().unwrap_or_else(|poisoned| {
             let mut st = poisoned.into_inner();
             st.pruned_through = st.pruned_through.max(st.seq);
+            self.state.clear_poison();
             st
         })
     }
@@ -99,10 +106,12 @@ struct CommitState {
     /// checking the cap never has to sum the deque.
     history_keys: usize,
     active: BTreeMap<u64, usize>,
-    /// The highest commit sequence ever evicted from `history` while some
-    /// active transaction might still have depended on it (an eviction
-    /// driven by `cap` rather than the safe horizon, or a poison recovery).
-    /// See `Txn::commit`'s conflict check.
+    /// The highest commit sequence ever evicted from `history`: raised on
+    /// every eviction in `prune` (whether the entry was safe to drop or
+    /// not) and on recovery from a poisoned lock (`Committer::lock`). A
+    /// transaction that began before this and touched anything can no
+    /// longer be checked precisely, so `Txn::commit` fails it closed
+    /// instead of trusting a check it can't fully make.
     pruned_through: u64,
     cap: usize,
 }
@@ -122,10 +131,15 @@ impl CommitState {
     /// the oldest active start (safe — conflict needs a commit sequence
     /// strictly after a transaction's start, so no active or future
     /// transaction can conflict on an entry this old), then, if the cap is
-    /// still exceeded, the oldest remaining entries regardless (unsafe —
-    /// raises `pruned_through` so any transaction old enough to have missed
-    /// this eviction fails closed instead of silently passing a check it can
-    /// no longer make).
+    /// still exceeded, the oldest remaining entries regardless (unsafe: some
+    /// active transaction might have depended on one of them). Every
+    /// eviction here, safe or not, raises `pruned_through` — harmless for
+    /// the safe ones, since by construction no active transaction's start
+    /// can be below them anyway — but it's the unsafe branch that actually
+    /// matters: only it can push `pruned_through` past a still-active
+    /// transaction's start, which is what makes that transaction fail
+    /// closed at commit instead of silently passing a check that can no
+    /// longer be made precisely.
     fn prune(&mut self) {
         let horizon = self.active.keys().next().copied().unwrap_or(self.seq);
         while let Some(&(front_seq, _)) = self.history.front() {
@@ -236,10 +250,11 @@ impl<'db> Txn<'db> {
         let mut st = db.committer.lock();
         let start = self.start_seq;
         let touched_anything = !self.writes.is_empty() || !self.depends.is_empty();
-        // A transaction old enough to predate an unsafe (cap-driven, or
-        // poison-recovery) eviction cannot be checked precisely any more —
-        // fail it closed rather than silently skip the check. Cheap and
-        // broad, so it runs before the precise per-key scan.
+        // A transaction old enough to predate `pruned_through` can no longer
+        // be checked precisely — some eviction (safe or not) or a poison
+        // recovery might have removed the one entry that mattered — so fail
+        // it closed rather than silently skip the check. Cheap and broad,
+        // so it runs before the precise per-key scan.
         let conflict = (touched_anything && start < st.pruned_through)
             || self
                 .writes
@@ -568,5 +583,41 @@ mod tests {
         let mut fresh = db.begin();
         fresh.put(Cf::Node, b"fresh-after-poison".to_vec(), b"y".to_vec());
         fresh.commit().unwrap();
+    }
+
+    // Follow-up (re-review of fix round 1, finding 1): `PoisonError::into_inner`
+    // recovers the guard but leaves the `Mutex` marked poisoned, so without
+    // `clear_poison()` the recovery above — including its `pruned_through`
+    // bump against whatever `seq` is by then — reran on every later `begin`,
+    // `commit` and `drop`. After one real poisoning, any transaction that
+    // touched anything would get `Conflict` if another commit landed while it
+    // was open, even with fully disjoint keys.
+    #[test]
+    fn poison_recovers_only_once_so_later_disjoint_transactions_still_both_commit() {
+        let (_d, _r, db) = open();
+
+        let panicked = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _guard = db.committer.state.lock().unwrap();
+                    panic!("simulated panic while holding the committer lock");
+                })
+                .join()
+                .is_err()
+        });
+        assert!(panicked, "expected the spawned thread to panic");
+
+        // t1's begin() is the call that recovers from the poisoning above.
+        let mut t1 = db.begin();
+        let mut t2 = db.begin();
+        t1.put(Cf::Node, b"disjoint-a".to_vec(), b"1".to_vec());
+        t2.put(Cf::Node, b"disjoint-b".to_vec(), b"2".to_vec());
+        // t1's commit is a second lock() call, and it writes (advancing the
+        // shared sequence) while t2 is still open. If the poison flag were
+        // still set, this commit would re-run the recovery and re-raise
+        // pruned_through past t2's start, conflicting t2 below even though
+        // t2 never touched "disjoint-a".
+        t1.commit().unwrap();
+        t2.commit().unwrap();
     }
 }

@@ -22,9 +22,13 @@ pub struct StoreConfig {
     /// Cap on the number of keys the transaction committer keeps in its
     /// conflict-detection history (`txn::Committer`). Once exceeded, the
     /// oldest commits are evicted even if a still-open transaction could
-    /// have depended on them, and such a transaction fails closed on its
-    /// next write or dependency (spec 1.4). Production default undecided;
-    /// tests use a small cap so the eviction path itself is reachable.
+    /// have depended on them, and such a transaction fails closed at commit
+    /// if it touched anything (spec 1.4). Production default is 1,000,000;
+    /// `for_tests()` uses the same value, since a small cap can make a
+    /// long-lived transaction conflict with its own id-block reservations
+    /// (`alloc.rs`) — a test that needs to reach the eviction path sets its
+    /// own small cap explicitly instead (see `txn.rs`'s
+    /// `a_transaction_older_than_the_pruned_history_conflicts_on_any_touch`).
     pub conflict_history_keys: usize,
 }
 
@@ -34,7 +38,7 @@ impl StoreConfig {
             cache_bytes: 64 << 20,
             memtable_bytes: 16 << 20,
             id_block: 4,
-            conflict_history_keys: 4,
+            conflict_history_keys: 1_000_000,
         }
     }
 }
