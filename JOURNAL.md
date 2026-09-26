@@ -66,7 +66,13 @@ No line of code before the end of phase 2.
 - **In flight at the end of the session:** the plan 2 fix wave, the re-review
   of Task 5's last fix, and the review of Task 7 (most capable model, because
   it is the concurrency code).
-- **Next step:** finish those three loops from the ledgers; re-review the plan
+- **After the session:** the plan 2 fix wave came back done (driver check
+  ok), and the Task 7 review asked for three fixes: the conflict history grows
+  without limit while any transaction is open, no test proves the
+  read-for-update dependency, and a poisoned lock panics. The rulings for fix
+  round 1 are in the plan 1 ledger.
+- **Next step:** finish those loops from the ledgers (Task 7 fix round 1, the
+  scoped re-review of the plan 2 fix wave); re-review the plan
   2 fix wave, merge `feat/brainwire-bolt` and `feat/brainwire-catalog` into
   `feat/brainwire`, and commit `Cargo.lock`; then Task 8 (id blocks), Task 9
   (graph operations) and Task 10 (the kill -9 crash test), which closes Gate 1
