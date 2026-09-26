@@ -118,6 +118,17 @@ impl<E: QueryEngine> Session<E> {
         vec![response]
     }
 
+    /// Like [`Session::fail`], but for violations that happen before the
+    /// session ever reached `Ready` (research/bolt.md 3.1, 3.5, 6.6): those
+    /// are fatal, not recoverable with RESET, so the state goes straight to
+    /// `Defunct` instead of `Failed`. The caller (`server::handle_connection`)
+    /// already closes the socket once it observes `Defunct`.
+    fn defunct(&mut self, response: Response) -> Vec<Response> {
+        self.state = State::Defunct;
+        self.rows.clear();
+        vec![response]
+    }
+
     fn start_query(&mut self, query: &str, params: &PackValue, in_tx: bool) -> Vec<Response> {
         match self.engine.run(self.db.as_deref(), query, params) {
             Ok(result) => {
@@ -179,15 +190,6 @@ impl<E: QueryEngine> Session<E> {
                 self.state = Defunct;
                 vec![]
             }
-            (_, Request::Reset) => {
-                self.rows.clear();
-                self.state = Ready;
-                vec![meta(vec![])]
-            }
-            (Failed, _) => vec![Response::Ignored],
-            (_, Request::Route) => self.fail(invalid(
-                "routing arrives with the cluster plan; use bolt://",
-            )),
             (Connected, Request::Hello { .. }) => {
                 self.state = Authentication;
                 vec![meta(vec![
@@ -202,10 +204,36 @@ impl<E: QueryEngine> Session<E> {
                     ),
                 ])]
             }
+            // HELLO is only ever valid right after the handshake (research/
+            // bolt.md 3.5: "State: only in NEGOTIATION. In any other state
+            // it is a violation and closes the connection."); a second
+            // HELLO -- even from Ready -- is fatal, not merely refused.
+            (_, Request::Hello { .. }) => {
+                self.defunct(invalid("HELLO is only valid right after the handshake"))
+            }
             (Authentication, Request::Logon { .. }) => {
                 self.state = Ready;
                 vec![meta(vec![])]
             }
+            // Anything else while the session has not logged on yet is a
+            // protocol violation, and unlike the same violation post-login it
+            // is fatal (3.1, 3.5, 6.6): no RESET recovers a connection that
+            // never reached READY, so it can never land in Failed here, only
+            // Defunct. This must stay ahead of the generic RESET/ROUTE/
+            // catch-all arms below, which are for states that already
+            // reached Ready at least once.
+            (Connected | Authentication, _) => self.defunct(invalid(
+                "a session that has not logged on accepts only HELLO, LOGON and GOODBYE",
+            )),
+            (_, Request::Reset) => {
+                self.rows.clear();
+                self.state = Ready;
+                vec![meta(vec![])]
+            }
+            (Failed, _) => vec![Response::Ignored],
+            (_, Request::Route) => self.fail(invalid(
+                "routing arrives with the cluster plan; use bolt://",
+            )),
             (Ready | TxReady, Request::Telemetry) => vec![meta(vec![])],
             (
                 Ready,
@@ -469,5 +497,68 @@ mod tests {
             matches!(&r[0], Response::Failure { code, .. } if code == "Neo.ClientError.Request.Invalid")
         );
         assert_eq!(s.state(), State::Failed);
+    }
+
+    // I1 (review finding, 2026-09-25): a session that never sent HELLO/LOGON
+    // must never reach READY or FAILED. Before the fix, RESET and the
+    // catch-all both matched `(_, _)`-style arms ahead of the Connected/
+    // Authentication-specific ones, so RESET short-circuited straight to
+    // READY (an authentication bypass) and a bad message in Connected or
+    // Authentication landed in FAILED, which RESET then also turns back
+    // into READY. research/bolt.md 3.1 ("a message that is unexpected for
+    // the state ... the server goes to DEFUNCT"), 3.5 (RESET: "FAILURE only
+    // if the connection has not reached READY yet, and then the server
+    // closes it") and 6.6 ("FAILURE on HELLO or LOGON: the server closes")
+    // all agree the outcome pre-login is FAILURE + DEFUNCT, never READY or
+    // FAILED.
+
+    #[test]
+    fn reset_right_after_the_handshake_is_refused_and_the_session_becomes_defunct() {
+        let mut s = Session::new(StubEngine, AuthMode::AllowAll);
+        assert_eq!(s.state(), State::Connected);
+        let r = s.handle(Request::Reset);
+        assert!(
+            matches!(&r[0], Response::Failure { code, .. } if code == "Neo.ClientError.Request.Invalid"),
+            "expected FAILURE, got {r:?}"
+        );
+        assert_eq!(s.state(), State::Defunct);
+    }
+
+    #[test]
+    fn reset_after_hello_but_before_logon_is_refused_and_the_session_becomes_defunct() {
+        let mut s = Session::new(StubEngine, AuthMode::AllowAll);
+        s.handle(Request::Hello { extra: map(&[]) });
+        assert_eq!(s.state(), State::Authentication);
+        let r = s.handle(Request::Reset);
+        assert!(
+            matches!(&r[0], Response::Failure { code, .. } if code == "Neo.ClientError.Request.Invalid"),
+            "expected FAILURE, got {r:?}"
+        );
+        assert_eq!(s.state(), State::Defunct);
+    }
+
+    #[test]
+    fn run_after_hello_but_before_logon_is_refused_and_the_session_becomes_defunct_not_failed() {
+        let mut s = Session::new(StubEngine, AuthMode::AllowAll);
+        s.handle(Request::Hello { extra: map(&[]) });
+        let r = s.handle(run("RETURN 7 AS z"));
+        assert!(
+            matches!(&r[0], Response::Failure { code, .. } if code == "Neo.ClientError.Request.Invalid"),
+            "expected FAILURE, got {r:?}"
+        );
+        // The important distinction: DEFUNCT (closed), not FAILED (recoverable
+        // with RESET) -- a session that never logged on must not linger.
+        assert_eq!(s.state(), State::Defunct);
+    }
+
+    #[test]
+    fn a_second_hello_from_ready_is_refused_and_the_session_becomes_defunct() {
+        let mut s = ready(StubEngine);
+        let r = s.handle(Request::Hello { extra: map(&[]) });
+        assert!(
+            matches!(&r[0], Response::Failure { code, .. } if code == "Neo.ClientError.Request.Invalid"),
+            "expected FAILURE, got {r:?}"
+        );
+        assert_eq!(s.state(), State::Defunct);
     }
 }

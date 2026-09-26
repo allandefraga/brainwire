@@ -228,6 +228,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reset_right_after_the_handshake_gets_one_failure_then_the_connection_closes() {
+        // I1 (review finding, 2026-09-25): over a real socket, handshake then
+        // RESET must not silently reach READY (an authentication bypass). It
+        // must answer exactly one FAILURE and then close -- and a RUN sent
+        // right behind it must never be answered, because the server has
+        // already gone DEFUNCT and stopped serving the connection.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(serve(listener, || StubEngine));
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        handshake(&mut client).await;
+
+        let mut reset_body = Vec::new();
+        pack(
+            &PackValue::Struct {
+                tag: 0x0F,
+                fields: vec![],
+            },
+            &mut reset_body,
+        );
+        client
+            .write_all(&encode_message(&reset_body))
+            .await
+            .unwrap();
+
+        let mut run_body = Vec::new();
+        pack(
+            &PackValue::Struct {
+                tag: 0x10,
+                fields: vec![
+                    PackValue::String("RETURN 7 AS z".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            },
+            &mut run_body,
+        );
+        // The server may already have closed its side by the time this
+        // arrives; whether the write itself errors is not the point being
+        // tested, so it is not unwrapped.
+        let _ = client.write_all(&encode_message(&run_body)).await;
+
+        let mut out = Vec::new();
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.read_to_end(&mut out),
+        )
+        .await;
+        assert!(read.is_ok(), "server never closed the connection");
+        let (code, _message) = decode_failure(&out);
+        assert_eq!(code, "Neo.ClientError.Request.Invalid");
+    }
+
+    #[tokio::test]
     async fn a_malformed_message_gets_a_failure_then_the_connection_closes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
