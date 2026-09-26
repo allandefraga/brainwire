@@ -38,6 +38,39 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-26, 11:03 (MVP push, interrupted at about 12:15)
+
+- **Done:** the MVP plan (config file and CLI, a Cypher subset, the executor
+  on the store, `brainwire serve`) written and committed
+  ([plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md)). Merged into
+  `feat/brainwire`: the Bolt server (final review plus one fix wave,
+  re-reviewed clean), and the config file with `config init` and `config show`
+  (unknown keys are refused; `BRAINWIRE_<SECTION>_<KEY>` overrides; memory
+  defaults 10 GiB cache with 1 GiB of memtables inside it and 2 GiB for
+  queries). `Cargo.lock` is committed. Storage Tasks 7 (transactions, bounded
+  conflict history, read-for-update proven by tests, poison recovery) and 8
+  (id blocks, poison recovery that never reuses an id) are complete and
+  reviewed. Task 9 (graph operations) is implemented and reviewed. The Cypher
+  parser (Task 2 of the MVP plan) is implemented and reviewed once. The
+  workspace had 164 tests green at the last merge.
+- **Found by the reviews:** a dangling edge when an edge commits before a
+  concurrent DETACH DELETE of its node (fix: prefix dependencies in the
+  committer); SET NULL not clearing a property promoted to a column; an
+  invariant check blind to dangling edges; long AND/OR chains that crash the
+  parser (bounded, but the bound had a bypass that the second fix closes);
+  a typo in a config key passing silently.
+- **Interrupted:** the API session limit stopped two implementers mid-work,
+  and Allan closed the day. `.worktrees/brainwire` holds the uncommitted,
+  unfinished Task 9 fix (graph.rs and txn.rs; 64 store tests pass on it, not
+  yet linted or committed). `.worktrees/brainwire-cypher` is clean; its fix
+  round 2 had not started.
+- **Next step:** resume both implementers from the ledgers (Task 9 fix round 1
+  and MVP Task 3 in `.worktrees/brainwire`, MVP Task 2 fix round 2 in
+  `.worktrees/brainwire-cypher`), review, merge the parser, then MVP Task 4
+  (executor) and Task 5 (`brainwire serve` and the driver demo: create, restart,
+  read from disk).
+- **Blockers:** none.
+
 ### 2026-09-26, 08:13
 
 - **Done:** plan 1 Task 5 (catalog from the ontology) implemented on the
