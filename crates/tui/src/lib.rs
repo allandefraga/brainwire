@@ -932,12 +932,13 @@ impl TerminalGuard {
             alternate: false,
             paste: false,
         };
+        // A failed write may still have sent the escape sequence to the terminal.
+        guard.alternate = true;
         execute!(io::stdout(), EnterAlternateScreen)
             .map_err(|e| format!("alternate screen setup: {e}"))?;
-        guard.alternate = true;
+        guard.paste = true;
         execute!(io::stdout(), crossterm::event::EnableBracketedPaste)
             .map_err(|e| format!("bracketed paste setup: {e}"))?;
-        guard.paste = true;
         Ok(guard)
     }
 }
