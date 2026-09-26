@@ -254,6 +254,37 @@ impl<'db> Txn<'db> {
             .collect())
     }
 
+    /// Reads the half-open key range from this transaction's snapshot and
+    /// applies its pending writes and deletes in key order.
+    #[allow(clippy::type_complexity)]
+    pub fn scan_range(
+        &self,
+        cf: Cf,
+        lo: &[u8],
+        hi: &[u8],
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+        if lo >= hi {
+            return Ok(Vec::new());
+        }
+
+        let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
+        let handle = self.db.cf(cf.name())?;
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_upper_bound(hi);
+        let mode = rocksdb::IteratorMode::From(lo, rocksdb::Direction::Forward);
+        for item in self.snapshot.iterator_cf_opt(handle, options, mode) {
+            let (key, value) = item?;
+            merged.insert(key.to_vec(), Some(value.to_vec()));
+        }
+        for ((_, key), value) in self.writes.range((cf, lo.to_vec())..(cf, hi.to_vec())) {
+            merged.insert(key.clone(), value.clone());
+        }
+        Ok(merged
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| (key, value)))
+            .collect())
+    }
+
     /// A range read that is also a dependency: unlike `scan_prefix`, a key
     /// under `prefix` written by a transaction that commits first makes this
     /// one conflict — even a key this snapshot never saw, because it did not
@@ -415,6 +446,67 @@ mod tests {
             vec![
                 (b"p:2".to_vec(), b"y".to_vec()),
                 (b"p:3".to_vec(), b"w".to_vec())
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_range_merges_snapshot_and_overlay_with_exclusive_upper_bound() {
+        let (_d, _r, db) = open();
+        let mut seed = db.begin();
+        for (key, value) in [
+            (b"a".as_slice(), b"before".as_slice()),
+            (b"b", b"old"),
+            (b"c", b"removed"),
+            (b"e", b"upper"),
+            (b"f", b"after"),
+        ] {
+            seed.put(Cf::Node, key.to_vec(), value.to_vec());
+        }
+        seed.put(Cf::Pk, b"b".to_vec(), b"other-cf".to_vec());
+        seed.commit().unwrap();
+
+        let mut txn = db.begin();
+        txn.put(Cf::Node, b"b".to_vec(), b"new".to_vec());
+        txn.delete(Cf::Node, b"c".to_vec());
+        txn.put(Cf::Node, b"d".to_vec(), b"inserted".to_vec());
+        txn.put(Cf::Node, b"e".to_vec(), b"outside".to_vec());
+        txn.put(Cf::Pk, b"d".to_vec(), b"other-cf".to_vec());
+
+        assert_eq!(
+            txn.scan_range(Cf::Node, b"b", b"e").unwrap(),
+            vec![
+                (b"b".to_vec(), b"new".to_vec()),
+                (b"d".to_vec(), b"inserted".to_vec()),
+            ]
+        );
+        assert!(txn.scan_range(Cf::Node, b"e", b"e").unwrap().is_empty());
+        assert!(txn.scan_range(Cf::Node, b"f", b"b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn scan_range_uses_the_transaction_snapshot() {
+        let (_d, _r, db) = open();
+        let mut seed = db.begin();
+        seed.put(Cf::Node, b"b".to_vec(), b"initial".to_vec());
+        seed.commit().unwrap();
+
+        let mut reader = db.begin();
+        let mut writer = db.begin();
+        writer.put(Cf::Node, b"b".to_vec(), b"later".to_vec());
+        writer.put(Cf::Node, b"c".to_vec(), b"later".to_vec());
+        writer.commit().unwrap();
+
+        assert_eq!(
+            reader.scan_range(Cf::Node, b"b", b"d").unwrap(),
+            vec![(b"b".to_vec(), b"initial".to_vec())]
+        );
+        reader.put(Cf::Node, b"c".to_vec(), b"own".to_vec());
+        assert_eq!(
+            reader.scan_range(Cf::Node, b"b", b"d").unwrap(),
+            vec![
+                (b"b".to_vec(), b"initial".to_vec()),
+                (b"c".to_vec(), b"own".to_vec()),
             ]
         );
     }

@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use brainwire_core::codec::{decode_row, encode_row, Row};
-use brainwire_core::ids::{EdgeId, EdgeTypeId, NodeId, TypeId};
+use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
 use brainwire_core::schema::{Catalog, Column, GraphMapping};
 use brainwire_core::value::Value;
@@ -27,6 +27,8 @@ pub enum GraphError {
     ReservedProperty(String),
     #[error("node {0:?} not found")]
     NodeNotFound(NodeId),
+    #[error(transparent)]
+    Id(#[from] IdError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
@@ -233,6 +235,24 @@ pub fn merge_node(
 
 pub fn get_node(txn: &Txn, id: NodeId) -> Result<Option<NodeRecord>, GraphError> {
     Ok(read_node(txn, id)?.map(|(entity_id, row)| NodeRecord { id, entity_id, row }))
+}
+
+/// Lists nodes of one type in partition zero by their encoded id order.
+pub fn nodes_of_type(txn: &Txn, ty: TypeId) -> Result<Vec<NodeId>, GraphError> {
+    let (lo, inclusive_hi) = NodeId::type_range(0, ty)?;
+    // Partition zero leaves room above even type 4095, so the inclusive
+    // type_range endpoint can safely become a half-open scan bound.
+    let exclusive_hi = inclusive_hi.0 + 1;
+    txn.scan_range(Cf::Node, &lo.0.to_be_bytes(), &exclusive_hi.to_be_bytes())?
+        .into_iter()
+        .map(|(key, _)| {
+            let raw: [u8; 8] = key
+                .as_slice()
+                .try_into()
+                .map_err(|_| StoreError::Corrupt("node key".into()))?;
+            Ok(NodeId(u64::from_be_bytes(raw)))
+        })
+        .collect()
 }
 
 pub fn find_by_entity_id(
@@ -514,6 +534,66 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn nodes_of_type_reads_own_writes_and_deletes_in_id_order() {
+        let (_d, _r, db, cat) = setup();
+        let customer = cat.node_type("Customer").unwrap().id;
+        let company = cat.node_type("Company").unwrap().id;
+        let mut seed = db.begin();
+        let c1 = merge_node(&mut seed, &cat, "Customer", "c:1", &BTreeMap::new()).unwrap();
+        let k1 = merge_node(&mut seed, &cat, "Company", "k:1", &BTreeMap::new()).unwrap();
+        let c2 = merge_node(&mut seed, &cat, "Customer", "c:2", &BTreeMap::new()).unwrap();
+        seed.commit().unwrap();
+
+        let mut txn = db.begin();
+        let k2 = merge_node(&mut txn, &cat, "Company", "k:2", &BTreeMap::new()).unwrap();
+        let c3 = merge_node(&mut txn, &cat, "Customer", "c:3", &BTreeMap::new()).unwrap();
+        detach_delete(&mut txn, c1).unwrap();
+        assert_eq!(nodes_of_type(&txn, customer).unwrap(), vec![c2, c3]);
+        assert_eq!(nodes_of_type(&txn, company).unwrap(), vec![k1, k2]);
+        assert!(nodes_of_type(&txn, TypeId(100)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn nodes_of_type_includes_last_sequence_and_isolates_maximum_type() {
+        let (_d, _r, db, _cat) = setup();
+        let max_seq = (1u64 << 42) - 1;
+        let last = NodeId::new(0, TypeId(TypeId::MAX), max_seq).unwrap();
+        let first = NodeId::new(0, TypeId(TypeId::MAX), 0).unwrap();
+        let previous_type = NodeId::new(0, TypeId(TypeId::MAX - 1), max_seq).unwrap();
+        let next_partition = NodeId::new(1, TypeId(TypeId::MAX), 0).unwrap();
+        let mut txn = db.begin();
+        for id in [last, previous_type, next_partition, first] {
+            txn.put(Cf::Node, node_key(id), Vec::new());
+        }
+        assert_eq!(
+            nodes_of_type(&txn, TypeId(TypeId::MAX)).unwrap(),
+            vec![first, last]
+        );
+        assert_eq!(
+            nodes_of_type(&txn, TypeId(TypeId::MAX - 1)).unwrap(),
+            vec![previous_type]
+        );
+        assert!(matches!(
+            nodes_of_type(&txn, TypeId(TypeId::MAX + 1)),
+            Err(GraphError::Id(IdError::TypeOutOfRange))
+        ));
+    }
+
+    #[test]
+    fn nodes_of_type_reports_malformed_node_keys() {
+        let (_d, _r, db, _cat) = setup();
+        let id = NodeId::new(0, TypeId(7), 1).unwrap();
+        let mut malformed = node_key(id);
+        malformed.push(0);
+        let mut txn = db.begin();
+        txn.put(Cf::Node, malformed, Vec::new());
+        assert!(matches!(
+            nodes_of_type(&txn, TypeId(7)),
+            Err(GraphError::Store(StoreError::Corrupt(_)))
+        ));
     }
 
     #[test]
@@ -965,6 +1045,52 @@ mod tests {
         )
         .unwrap();
         t.commit().unwrap();
+        let node = get_node(&db.begin(), id).unwrap().unwrap();
+        assert_eq!(
+            node.row.columns.get(&nickname_col),
+            Some(&Value::Str("Bob".into()))
+        );
+        assert!(!node.row.extra.contains_key("nickname"));
+    }
+
+    #[test]
+    fn non_null_set_after_promotion_removes_the_old_extra_value_directly() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+        let v1 = db
+            .apply_ontology(&mapping_with_customer_properties(&["name"]))
+            .unwrap();
+        let mut seed = db.begin();
+        let id = merge_node(
+            &mut seed,
+            &v1,
+            "Customer",
+            "c:1",
+            &props(&[("nickname", Value::Str("Al".into()))]),
+        )
+        .unwrap();
+        seed.commit().unwrap();
+        let v2 = db
+            .apply_ontology(&mapping_with_customer_properties(&["name", "nickname"]))
+            .unwrap();
+        let nickname_col = v2
+            .node_type("Customer")
+            .unwrap()
+            .column("nickname")
+            .unwrap();
+
+        let mut update = db.begin();
+        merge_node(
+            &mut update,
+            &v2,
+            "Customer",
+            "c:1",
+            &props(&[("nickname", Value::Str("Bob".into()))]),
+        )
+        .unwrap();
+        update.commit().unwrap();
+
         let node = get_node(&db.begin(), id).unwrap().unwrap();
         assert_eq!(
             node.row.columns.get(&nickname_col),
