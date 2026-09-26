@@ -38,6 +38,44 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-26, 08:13
+
+- **Done:** plan 1 Task 5 (catalog from the ontology) implemented on the
+  temporary branch `feat/brainwire-catalog` (worktree
+  `.worktrees/brainwire-catalog`), with two review fixes: id arithmetic is
+  checked (`IdSpaceExhausted` instead of a silent wrap that would give two
+  columns the same id), and entries that share a label merge into one type, as
+  the platform's `GraphMappingConfig` allows; spec 2.1 now says so. A demo over
+  the synthetic fixture showed ids staying stable when the ontology changes.
+  Task 6 (RocksDB with the eleven column families and a shared cache and
+  memtable budget) done and reviewed on `feat/brainwire`. Task 7 (snapshot
+  transactions, first committer wins) implemented, 20 store tests. The final
+  review of plan 2 (most capable model) asked for fixes before the merge.
+- **Found by the final review of plan 2:** a client could reach READY without
+  HELLO or LOGON through RESET (the plan's own state table was wrong against
+  research/bolt.md 3.1, 3.5 and 6.6), and one `accept()` error, such as running
+  out of file descriptors, ended the process. Both are in a fix wave. Parked as
+  blockers for plan 3 and for any client outside this machine: the "message
+  too large" error never reaches the driver, which retries for up to 30 s, and
+  decoding multiplies memory by up to about 33 before authentication.
+- **Decided under Allan's go-ahead (to review):** Task 5 ran in parallel on its
+  own branch; shared labels merge instead of failing (union of properties,
+  first `display_color`, `DuplicateLabel` removed); the plan 2 fix wave covers
+  the two Important findings the reviewer asked for before the merge, and the
+  rest waits for plan 3. The ledgers hold each ruling with its cost.
+- **In flight at the end of the session:** the plan 2 fix wave, the re-review
+  of Task 5's last fix, and the review of Task 7 (most capable model, because
+  it is the concurrency code).
+- **Next step:** finish those three loops from the ledgers; re-review the plan
+  2 fix wave, merge `feat/brainwire-bolt` and `feat/brainwire-catalog` into
+  `feat/brainwire`, and commit `Cargo.lock`; then Task 8 (id blocks), Task 9
+  (graph operations) and Task 10 (the kill -9 crash test), which closes Gate 1
+  (due 2026-09-30).
+- **Blockers:** production pins the Python driver to `neo4j>=5.0,<6`
+  (`client-core/pyproject.toml`), and the driver check has only run with
+  6.3.0; running it with 5.28.x means installing that package, which needs
+  Allan's OK.
+
 ### 2026-09-25, 14:45 (second session: the code starts)
 
 - **Done:** Rust installed with Allan's permission (rustup, stable 1.98.1,

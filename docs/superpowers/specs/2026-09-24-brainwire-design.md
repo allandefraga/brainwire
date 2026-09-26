@@ -185,6 +185,13 @@ Rules that keep all of Cypher valid:
   labels the ontology does not declare returns an error. A type outside the
   ontology has no signature. Each type can be marked lenient.
 - `SET x = NULL` removes the property, as the platform already assumes.
+- Several `nodes[]` entries may share a label when one entity is fed by several
+  connectors (Person from HubSpot, Zendesk and Jira). They become one node type:
+  the columns are the union of their properties in declaration order, indexes and
+  identifiers are unions, and the first `display_color` declared wins, as in the
+  platform's `presentation_is_resolved_per_label`. The memory-worker's validators
+  already reject the harmful cases (sources whose identifiers cannot converge),
+  so Brainwire merges instead of refusing (decided 2026-09-26).
 
 ### 2.2 ACL: the client model, inside the engine
 
