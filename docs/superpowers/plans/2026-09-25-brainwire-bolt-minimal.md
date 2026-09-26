@@ -854,6 +854,8 @@ Behavior, from the 5.1+ state machine in research/bolt.md, section 3:
 |---|---|---|---|
 | Connected | HELLO | SUCCESS `{server: "Neo4j/5.26.0", connection_id, hints}` | Authentication |
 | Authentication | LOGON | SUCCESS | Ready |
+| Connected, Authentication | anything else (RESET and ROUTE included; HELLO/LOGON/GOODBYE excepted) | FAILURE `Neo.ClientError.Request.Invalid` | Defunct |
+| any state but Connected | HELLO | FAILURE `Neo.ClientError.Request.Invalid` | Defunct |
 | Ready | RUN | SUCCESS `{fields, t_first}` or FAILURE | Streaming or Failed |
 | Streaming | PULL `{n}` | n RECORDs, then SUCCESS `{has_more: true}` or `{type: "r", t_last}` | Streaming or Ready |
 | Streaming | DISCARD | SUCCESS `{type: "r"}` | Ready |
@@ -862,14 +864,33 @@ Behavior, from the 5.1+ state machine in research/bolt.md, section 3:
 | TxStreaming | PULL | as above | TxStreaming or TxReady |
 | TxReady | COMMIT | SUCCESS `{bookmark: "bw:<db>:<n>"}` | Ready |
 | TxReady | ROLLBACK | SUCCESS | Ready |
-| any but Defunct | RESET | SUCCESS | Ready |
+| Ready, Streaming, TxReady, TxStreaming, Failed | RESET | SUCCESS | Ready |
 | any | GOODBYE | nothing | Defunct |
 | Ready, TxReady | TELEMETRY | SUCCESS | same |
 | Failed | anything else | IGNORED | Failed |
-| any | ROUTE | FAILURE (routing arrives with the cluster plan; use `bolt://`) | Failed |
-| any | out of place | FAILURE `Neo.ClientError.Request.Invalid` | Failed |
+| Ready, Streaming, TxReady, TxStreaming | ROUTE | FAILURE (routing arrives with the cluster plan; use `bolt://`) | Failed |
+| Ready, Streaming, TxReady, TxStreaming | out of place | FAILURE `Neo.ClientError.Request.Invalid` | Failed |
 
 `n = -1` in PULL means all remaining rows.
+
+> **Corrected 2026-09-25 (final whole-branch review, finding I1).** The table
+> above originally read "any but Defunct | RESET | SUCCESS | Ready" and "any |
+> ROUTE/out of place | FAILURE | Failed", with no row for a bad message before
+> login. Read literally, RESET and the catch-all matched Connected and
+> Authentication too, so RESET right after the handshake (no HELLO/LOGON at
+> all) fell into the "any but Defunct" row and returned SUCCESS/Ready, and a
+> bad message in Connected or Authentication fell into "any | out of place"
+> and landed in Failed -- from which RESET then also returns SUCCESS/Ready.
+> Net effect: a client could reach Ready without ever sending HELLO or LOGON,
+> which is an authentication bypass as soon as a later plan puts checks in
+> the LOGON arm. research/bolt.md 3.1 ("a message that is unexpected for the
+> state ... the server goes to DEFUNCT and closes the connection"), 3.5
+> (RESET: "FAILURE only if the connection has not reached READY yet, and then
+> the server closes it") and 6.6 ("FAILURE on HELLO or LOGON: the server
+> closes") all agree pre-login violations are fatal, not recoverable with
+> RESET. The table now says so explicitly: a session that has not logged on
+> can reach only Authentication, Ready (via HELLO then LOGON) or Defunct --
+> never Ready via RESET, and never Failed.
 
 - [ ] **Step 1: Write the failing tests**
 
