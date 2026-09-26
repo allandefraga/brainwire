@@ -31,6 +31,19 @@ acceptance tests as code, but not the full implementation. Implementers run on
 a mid or top tier model and write the code from these contracts; the task
 reviews stay as they are.
 
+## Current handoff (2026-09-26)
+
+Brainwire now lives at `/Users/fraga/Documents/brainwire`, a standalone sibling
+of the platform. Run the commands below from this repository.
+Tasks 1, 2 and 3 are complete and reviewed. Task 4 has not started. The merged
+storage foundation includes the five-cycle process-crash recovery test.
+All 225 workspace tests, clippy with warnings denied and formatting pass.
+The latest progress and limitations are recorded in `JOURNAL.md`.
+
+The transaction requirement under Task 5 below supersedes the old assumption
+that real engine transactions could wait until plan 3. Managed driver writes
+already require them in this MVP.
+
 ## Global Constraints
 
 - The config file is TOML; every value can be overridden by an environment
@@ -52,19 +65,20 @@ reviews stay as they are.
 - Tests, fixtures and demos use synthetic data only.
 - Code, identifiers, comments, commit messages and docs in English; no em
   dashes or en dashes in docs.
-- Commits go to `feat/brainwire` or to a sub-branch that merges back into it.
+- Keep commits local on `codex/brainwire` or another `codex/` branch. Do not
+  push or create a remote PR unless Allan explicitly asks.
 
 ## File structure
 
 ```
-client-brainwire/crates/cypher/        package brainwire-cypher
+crates/cypher/                            package brainwire-cypher
   Cargo.toml
   src/lib.rs                             module list, re-exports parse and execute
   src/ast.rs                             the AST
   src/lexer.rs                           tokens
   src/parser.rs                          recursive descent parser
   src/exec.rs                            executor over brainwire-store
-client-brainwire/crates/server/        package brainwire-server, binary brainwire
+crates/server/                            package brainwire-server, binary brainwire
   Cargo.toml
   src/main.rs                            CLI (clap)
   src/config.rs                          Config, sources, loading, validation
@@ -72,15 +86,15 @@ client-brainwire/crates/server/        package brainwire-server, binary brainwir
   src/databases.rs                       registry of open databases
   src/engine.rs                          QueryEngine adapter (Value and PackValue)
   tests/mvp_demo.py                      end-to-end check with the Python driver
-client-brainwire/crates/store/src/txn.rs    + scan_range (Task 3)
-client-brainwire/crates/store/src/graph.rs  + nodes_of_type (Task 3)
+crates/store/src/txn.rs                   + scan_range (Task 3)
+crates/store/src/graph.rs                 + nodes_of_type (Task 3)
 ```
 
 ## Task 1: Config file and the config commands
 
 **Files:**
 - Create: `crates/server/Cargo.toml`, `src/main.rs`, `src/config.rs`, `src/size.rs`
-- Modify: `client-brainwire/Cargo.toml` (add `"crates/server"` to `members`;
+- Modify: `Cargo.toml` (add `"crates/server"` to `members`;
   add `clap = { version = "4", features = ["derive"] }` and `toml = "0.8"` to
   `[workspace.dependencies]`)
 
@@ -231,7 +245,7 @@ that `main.rs` calls, and keep `load` pure: `None` means defaults and env only.
 **Files:**
 - Create: `crates/cypher/Cargo.toml` (depends on `brainwire-core`, `thiserror`),
   `src/lib.rs`, `src/ast.rs`, `src/lexer.rs`, `src/parser.rs`
-- Modify: `client-brainwire/Cargo.toml` (add `"crates/cypher"` to `members`)
+- Modify: `Cargo.toml` (add `"crates/cypher"` to `members`)
 
 **Interfaces:**
 - Consumes: `brainwire_core::value::Value` (`Null`, `Bool`, `Int(i64)`,
@@ -568,6 +582,22 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
     `brainwire db list`, `brainwire db create <name> [--ontology <file.json>]`,
     `brainwire db apply-ontology <name> <file.json>`.
 
+**Required transaction integration:** the current Bolt `QueryEngine` only has
+`run`; BEGIN, COMMIT and ROLLBACK currently change session state without
+calling the engine. Directly calling the per-query `execute` helper from each
+RUN would commit writes before COMMIT and falsely acknowledge ROLLBACK.
+Before the managed driver demo, add real transaction ownership and lifecycle
+hooks to the engine/session boundary. Preserve Task 4's atomic standalone
+`execute` API, but provide a way for multiple RUNs to share an uncommitted
+storage transaction. Do not substitute an accepted no-op for a transaction
+operation that has not been implemented.
+
+Acceptance must cover a multi-query transaction committing all its writes;
+ROLLBACK leaving no writes after reopen; RESET and connection teardown
+aborting pending writes; a later query error preventing earlier staged writes
+from being committed; and commit conflicts returning the transient error.
+These checks belong alongside the adapter and driver tests below.
+
 - [ ] **Step 1: Failing tests:** engine conversion tests (a params map with
   every PackValue kind; a node output becomes the 0x4E struct with the right
   element id; each `ExecError` gets its code); `Databases::open_all` on an empty
@@ -594,5 +624,5 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
 
 The platform's own queries need more of the language (`WITH`, `OPTIONAL
 MATCH`, `ORDER BY`, functions, the ACL predicate), the real engine seam from
-the Bolt final review (transactions in the engine, cursors, execution off the
-runtime) and the pre-authentication limits parked as blockers. That is plan 3.
+the Bolt final review (cursors and execution off the runtime) and the
+pre-authentication limits parked as blockers. That is plan 3.

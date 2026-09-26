@@ -59,8 +59,9 @@ No line of code before the end of phase 2.
 - **Relocation complete:** extracted 54 Brainwire-only commits, moved all 50
   working source/documentation files and the build cache, preserved task
   ledgers, and removed the main platform checkout's untracked shortcut.
-  SHA-256 verification matched every moved source/documentation file. The old feature branch/worktree remains a
-  clean historical recovery checkpoint. The standalone repo has no remote
+  SHA-256 verification matched every moved source/documentation file. The old
+  feature branch/worktree remains a clean historical recovery checkpoint.
+  The standalone repo has no remote
   and its Git objects have no dependency on the platform object store.
   Rewritten equivalents: parser fix `73cb05c`, label scans `2c52501`, crash
   test `1315687` (the original IDs remain above for historical context).
@@ -77,6 +78,8 @@ No line of code before the end of phase 2.
   add real engine transaction ownership/hooks before accepting durable writes
   inside explicit transactions. Wiring per-query commits into that stub would
   incorrectly acknowledge rollback after persisting the write.
+  Updated the active MVP plan with standalone paths and branch, completed
+  task status, and required transaction lifecycle acceptance checks.
 - **Decisions:** the user's one-hour request replaces the usual 45-minute
   limit for this session. Parser work continues in the main Brainwire worktree
   after a local merge; the old parser checkout is preserved. Scratch reports
