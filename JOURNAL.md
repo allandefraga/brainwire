@@ -70,7 +70,8 @@ No line of code before the end of phase 2.
   user image remains the visual target. The
   [executor/backoffice plan](docs/superpowers/plans/2026-09-26-brainwire-executor-backoffice.md)
   records this implementation slice.
-- **Consolidated verification:** **262 workspace tests** pass, plus all-target
+- **Consolidated verification:** **265 workspace tests** pass after the
+  parameter-file addition, plus all-target
   clippy with denied warnings, formatting and binary build. Independent command
   QA verified 1,000 persistent records across processes, Unicode and parameters,
   node JSON, directed hops, duplicate/late-error rollback, numeric boundaries,
@@ -78,7 +79,9 @@ No line of code before the end of phase 2.
   at 160×48, 120×36 and 80×24, second-query wrapping, result 12, a bounded long
   paste, shortcut typing, inspector scrolling/help, resizing, normal exit and
   exact termios restoration. Task 2 review of `51aca5a..7571721` passes spec
-  and quality with no findings; final integration review is pending.
+  and quality with no findings. Final integration review of
+  `5e7b86c..c4a7462` also passes with no findings; the parameter-file addendum
+  below has its own review gate.
 - **Decisions/limits:** use the existing standalone branch; reject unsupported
   relationship bindings/property filters explicitly; expose real execution
   through a local command while keeping the TUI's fixture/metrics/files labeled
@@ -87,8 +90,20 @@ No line of code before the end of phase 2.
   are not implemented. Per-call atomic execution must not be mistaken for
   multi-query Bolt transactions. The original backoffice image remains the
   primary composition reference.
+- **Bulk-input addendum:** a real launch attempt with a 1,708,900-byte JSON
+  argument failed before the binary ran (this Mac's ARG_MAX is 1,048,576).
+  `664d428` adds `--params-file` using the same strict converter, mutually
+  exclusive with explicit `--params`. Independent verification imported all
+  10,000 synthetic records from that file and confirmed count and property
+  lookup in separate reopened processes. File input remains materialized.
+  The final 265-test workspace suite, all-target clippy and fmt pass.
+  Task 3 review passes spec and quality with no findings; the final
+  integration amendment review follows this documentation update.
 - **Next:** real Bolt transaction lifecycle and durable `serve` (engine MVP
   Task 5), then connected TUI query/neighborhood and telemetry/file contracts.
+  The [transaction preflight](docs/superpowers/plans/2026-09-26-brainwire-bolt-transaction-preflight.md)
+  identifies the borrowed Txn lifetime, async runtime boundary, transaction
+  failure states and mandatory reset/disconnect cleanup tests.
 - **Local only:** standalone `/Users/fraga/Documents/brainwire`, no push,
   publication or remote PR. Local database files under `/data/` are ignored.
 

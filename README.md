@@ -32,7 +32,7 @@ and a file inspector with an illustrative LSM storage flow. See the
 For real graph reads and writes, use the separate embedded
 `brainwire cypher --database <directory> --query <text>` command. Queries commit
 atomically to RocksDB and survive reopening. The [local query guide](docs/local-cypher.md)
-walks through ontology initialization, parameters and JSON output. Connecting
+walks through ontology initialization, parameters, bulk JSON files and JSON output. Connecting
 the TUI to the engine, real telemetry and real files remains pending.
 
 ## Local development

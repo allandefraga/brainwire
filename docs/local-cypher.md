@@ -51,6 +51,38 @@ operation: a later query error does not undo the ontology update. RocksDB's
 exclusive lock prevents this command from attaching to a directory already
 open by another process. Stop that process or choose another local directory.
 
+## Bulk parameters from a file
+
+For larger imports, write the same parameter object to JSON and pass
+`--params-file`. This avoids the operating system's command-line argument-size
+limit and cumbersome shell quoting. It is mutually exclusive with explicit
+`--params`; omitting both uses an empty object. The file is read and validated
+before opening storage, with the same signed-integer and finite-float checks.
+
+For example, after initializing the ontology above:
+
+```sh
+python3 - <<'PYDATA'
+import json
+from pathlib import Path
+path = Path("data/import-params.json")
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps({"rows": [
+    {"id": f"bulk-{i}", "name": f"Customer {i}"}
+    for i in range(10_000)
+]}))
+PYDATA
+
+BRAINWIRE_MEMORY_CACHE=64MiB BRAINWIRE_MEMORY_MEMTABLES=16MiB \
+./target/debug/brainwire cypher \
+  --database ./data/local-demo \
+  --params-file ./data/import-params.json \
+  --query 'UNWIND $rows AS row MERGE (c:Customer {entity_id: row.id}) SET c.name = row.name RETURN count(*) AS processed'
+```
+
+This still materializes the parameter file and query rows in memory; file input
+does not add streaming or enforce the configured query-memory ceiling.
+
 ## Implemented subset
 
 - `CREATE` and `MERGE` nodes identified by label and `entity_id`; anonymous

@@ -585,6 +585,9 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
     `brainwire db list`, `brainwire db create <name> [--ontology <file.json>]`,
     `brainwire db apply-ontology <name> <file.json>`.
 
+Read the [transaction integration preflight](2026-09-26-brainwire-bolt-transaction-preflight.md)
+for the current ownership/runtime seams and the next implementation slices.
+
 **Required transaction integration:** the current Bolt `QueryEngine` only has
 `run`; BEGIN, COMMIT and ROLLBACK currently change session state without
 calling the engine. Directly calling the per-query `execute` helper from each

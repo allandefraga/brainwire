@@ -251,3 +251,24 @@ verification covers persistence/rollback/numeric boundaries and terminal
 layouts/interaction/restoration. See JOURNAL and the local query / terminal
 run guides for scope and limitations. Final whole-change review follows the
 documentation/capture commit. No remote operations are part of this handoff.
+
+## Task 3 addendum: file input for bulk query parameters
+
+The final local-load check exposed an OS argument limit: a synthetic 10,000-row
+JSON object (1,708,900 bytes) cannot be passed through `--params` on this Mac
+(ARG_MAX 1,048,576; process launch returns Argument list too long). Add
+`--params-file <json-file>` to the embedded command, mutually exclusive with
+explicit `--params`, retaining empty parameters when both are omitted. Read and
+validate before storage mutation through the same strict JSON converter. Keep
+all transaction and output behavior unchanged. Missing/malformed/non-object
+files and out-of-i64 integers must fail explicitly. Process tests cover import,
+reopen, invalid files and conflicting options. Controller verifies a >ARG_MAX
+10,000-record import and repeats affected integration gates after the amendment.
+
+
+Task 3 completed in `664d428`; spec/quality review passes with no findings.
+The final workspace now passes 265 tests, all-target clippy and formatting.
+A real 1,708,900-byte parameter file imported 10,000 records, confirmed after
+reopening, without passing that object through process arguments. The original
+whole-change review of `5e7b86c..c4a7462` passed clean; the small amendment receives
+its final integration follow-up review after documentation is committed.
