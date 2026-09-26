@@ -45,12 +45,65 @@ where
 {
     let make_engine = Arc::new(make_engine);
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            Err(err) => {
+                // A single bad `accept()` must never end the process: with a
+                // low file-descriptor ulimit and enough idle connections that
+                // never send the handshake, this was previously reached
+                // (EMFILE) and the `?` below took the whole server down,
+                // refusing every new client from then on. Log and keep
+                // serving instead.
+                eprintln!("brainwire-bolt: accept() failed: {err}");
+                if is_resource_exhausted(&err) {
+                    // The shortage will not clear itself between this
+                    // `accept()` and the next: spinning the loop as fast as
+                    // possible only burns CPU (and floods this log) while
+                    // existing connections close and free the resource up.
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                continue;
+            }
+        };
         let make = Arc::clone(&make_engine);
         tokio::spawn(async move {
             let _ = handle_connection(stream, make(), max_message_bytes).await;
         });
     }
+}
+
+/// True when an `accept()` error means the process (or the whole system) is
+/// out of some finite resource -- file descriptors, the socket backlog, or
+/// kernel memory -- rather than a problem specific to one connection
+/// attempt (for example `ECONNABORTED` from a peer that reset before the
+/// handshake finished). [`serve_with_limit`] backs off briefly for these
+/// instead of spinning the accept loop as fast as the kernel will let it
+/// fail, which only burns CPU while the shortage persists; anything else is
+/// safe, and better, to retry at once.
+fn is_resource_exhausted(err: &std::io::Error) -> bool {
+    // `ENOMEM` has a portable `ErrorKind` (stable since Rust 1.68). EMFILE,
+    // ENFILE and ENOBUFS do not, so those are matched by raw errno instead,
+    // which is why the numeric values need `cfg`: ENOBUFS differs between
+    // macOS (55) and Linux (105) even though EMFILE/ENFILE/ENOMEM agree.
+    if err.kind() == std::io::ErrorKind::OutOfMemory {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    const EXHAUSTED: [i32; 3] = [
+        24, /* EMFILE */
+        23, /* ENFILE */
+        55, /* ENOBUFS */
+    ];
+    #[cfg(target_os = "linux")]
+    const EXHAUSTED: [i32; 3] = [
+        24,  /* EMFILE */
+        23,  /* ENFILE */
+        105, /* ENOBUFS */
+    ];
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    const EXHAUSTED: [i32; 0] = [];
+
+    matches!(err.raw_os_error(), Some(code) if EXHAUSTED.contains(&code))
 }
 
 async fn handle_connection<E: QueryEngine>(
@@ -146,6 +199,53 @@ mod tests {
     use super::*;
     use crate::packstream::PackValue;
     use crate::session::StubEngine;
+
+    // I2 (review finding, 2026-09-25): `is_resource_exhausted` decides
+    // whether an `accept()` error is a finite-resource shortage (worth a
+    // brief backoff so the accept loop does not spin) or a per-connection
+    // problem (safe, and better, to retry at once).
+
+    #[test]
+    fn out_of_memory_is_resource_exhaustion_on_every_platform() {
+        let err = std::io::Error::from(std::io::ErrorKind::OutOfMemory);
+        assert!(is_resource_exhausted(&err));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn emfile_and_enfile_are_resource_exhaustion() {
+        assert!(is_resource_exhausted(&std::io::Error::from_raw_os_error(
+            24
+        ))); // EMFILE
+        assert!(is_resource_exhausted(&std::io::Error::from_raw_os_error(
+            23
+        ))); // ENFILE
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn enobufs_is_resource_exhaustion_with_the_macos_errno() {
+        assert!(is_resource_exhausted(&std::io::Error::from_raw_os_error(
+            55
+        )));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn enobufs_is_resource_exhaustion_with_the_linux_errno() {
+        assert!(is_resource_exhausted(&std::io::Error::from_raw_os_error(
+            105
+        )));
+    }
+
+    #[test]
+    fn a_connection_level_error_is_not_resource_exhaustion() {
+        // ECONNABORTED: a peer reset before the handshake finished. Nothing
+        // about the server's own resources is wrong, so the caller should
+        // retry accept() immediately instead of sleeping.
+        let err = std::io::Error::from(std::io::ErrorKind::ConnectionAborted);
+        assert!(!is_resource_exhausted(&err));
+    }
 
     async fn handshake(client: &mut TcpStream) {
         let mut hello = MAGIC.to_vec();
