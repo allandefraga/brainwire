@@ -19,6 +19,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Open the graph observatory. Live backend is not yet connected.
+    Shell {
+        /// Use the bounded synthetic demo fixture.
+        #[arg(long)]
+        demo: bool,
+        /// Interface language: pt-BR or en.
+        #[arg(long, default_value = "pt-BR")]
+        lang: String,
+        /// Disable animations (the current demo uses a static layout).
+        #[arg(long)]
+        no_anim: bool,
+        /// Render one plain-text frame without a terminal.
+        #[arg(long)]
+        snapshot: bool,
+        /// Initial view: graph, query, memory or disk.
+        #[arg(long, default_value = "graph")]
+        view: String,
+        /// Snapshot columns (80..240).
+        #[arg(long, default_value_t = 160)]
+        width: u16,
+        /// Snapshot rows (24..80).
+        #[arg(long, default_value_t = 48)]
+        height: u16,
+    },
     /// Inspect or create the config file.
     Config {
         #[command(subcommand)]
@@ -49,6 +73,23 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Shell {
+            demo,
+            lang,
+            no_anim,
+            snapshot,
+            view,
+            width,
+            height,
+        } => brainwire_tui::run(brainwire_tui::Options {
+            demo,
+            lang,
+            no_anim,
+            snapshot,
+            view,
+            width,
+            height,
+        }),
         Commands::Config { command } => match command {
             ConfigCommands::Init { path, force } => run_config_init(&path, force),
             ConfigCommands::Show { config } => run_config_show(config.as_deref()),
