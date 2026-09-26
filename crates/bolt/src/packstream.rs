@@ -19,9 +19,12 @@ pub enum PackValue {
 }
 
 impl PackValue {
+    /// Looks a key up in a `Map`. PackStream does not forbid duplicate keys,
+    /// and the spec (research/bolt.md 2.1) says the *last* one wins, so this
+    /// searches from the end rather than returning the first match.
     pub fn get(&self, key: &str) -> Option<&PackValue> {
         match self {
-            PackValue::Map(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            PackValue::Map(entries) => entries.iter().rev().find(|(k, _)| k == key).map(|(_, v)| v),
             _ => None,
         }
     }
@@ -37,7 +40,7 @@ pub enum PackError {
     BadUtf8,
     #[error("map key is not a string")]
     BadMapKey,
-    #[error("value nested deeper than 64 levels")]
+    #[error("value nested deeper than {} levels", MAX_DEPTH)]
     TooDeep,
 }
 
@@ -303,6 +306,50 @@ mod tests {
         let m = PackValue::Map(vec![("a".into(), PackValue::Int(1))]);
         assert_eq!(m.get("a"), Some(&PackValue::Int(1)));
         assert_eq!(m.get("b"), None);
+    }
+
+    // M1 (review finding, 2026-09-25): PackStream says the *last* entry with
+    // a given key wins (research/bolt.md 2.1), but `get` returned the first
+    // match. A BEGIN with `{db: "first", db: "last"}` produced the bookmark
+    // `bw:first:1` instead of `bw:last:1`.
+    #[test]
+    fn map_get_returns_the_last_matching_key_not_the_first() {
+        let m = PackValue::Map(vec![
+            ("db".to_string(), PackValue::String("first".into())),
+            ("db".to_string(), PackValue::String("last".into())),
+        ]);
+        assert_eq!(m.get("db"), Some(&PackValue::String("last".into())));
+    }
+
+    // M7 (review finding, 2026-09-25): the TooDeep message hardcoded "64"
+    // instead of reading MAX_DEPTH, so the two could drift silently. This
+    // pins the rendered text; changing MAX_DEPTH must change the value below
+    // as a reminder to check the message still reads correctly.
+    #[test]
+    fn too_deep_message_is_built_from_max_depth_and_reads_the_same_as_before() {
+        assert_eq!(MAX_DEPTH, 64);
+        assert_eq!(
+            PackError::TooDeep.to_string(),
+            "value nested deeper than 64 levels"
+        );
+    }
+
+    // Missing-test gap flagged by the review: BadUtf8 and BadMapKey had no
+    // coverage through `unpack`.
+    #[test]
+    fn invalid_utf8_in_a_tiny_string_is_rejected() {
+        // 0x81 = tiny string, length 1; 0xFF is never valid UTF-8 (standalone
+        // continuation byte with no leading byte).
+        let mut input: &[u8] = &[0x81, 0xFF];
+        assert_eq!(unpack(&mut input), Err(PackError::BadUtf8));
+    }
+
+    #[test]
+    fn a_non_string_map_key_is_rejected() {
+        // 0xA1 = tiny map, 1 entry; 0x01 = Int(1) where a String key is
+        // required.
+        let mut input: &[u8] = &[0xA1, 0x01];
+        assert_eq!(unpack(&mut input), Err(PackError::BadMapKey));
     }
 
     #[test]
