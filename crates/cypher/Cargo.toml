@@ -8,3 +8,8 @@ publish.workspace = true
 [dependencies]
 brainwire-core = { path = "../core" }
 thiserror.workspace = true
+brainwire-store = { path = "../store" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

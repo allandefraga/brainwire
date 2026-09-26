@@ -135,6 +135,9 @@ name = "brainwire-cypher"
 version = "0.1.0"
 dependencies = [
  "brainwire-core",
+ "brainwire-store",
+ "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
