@@ -5,6 +5,11 @@ use std::collections::VecDeque;
 use crate::message::{Request, Response};
 use crate::packstream::PackValue;
 
+/// The `server` value of the HELLO answer. Driver 5.x refuses a server whose
+/// agent does not start with `Neo4j/`; the rest says what Brainwire is, so it
+/// never passes for Neo4j itself (Memgraph uses the same form).
+const SERVER_AGENT: &str = "Neo4j/5.26.0 compatible graph database server - Brainwire";
+
 pub struct QueryResult {
     pub fields: Vec<String>,
     pub rows: Vec<Vec<PackValue>>,
@@ -186,7 +191,7 @@ impl<E: QueryEngine> Session<E> {
             (Connected, Request::Hello { .. }) => {
                 self.state = Authentication;
                 vec![meta(vec![
-                    ("server", PackValue::String("Neo4j/5.26.0".into())),
+                    ("server", PackValue::String(SERVER_AGENT.into())),
                     ("connection_id", PackValue::String("bw-1".into())),
                     (
                         "hints",
@@ -283,8 +288,11 @@ mod tests {
                     .iter()
                     .find(|(k, _)| k == "server")
                     .map(|(_, v)| v.clone());
-                assert!(
-                    matches!(server, Some(PackValue::String(ref v)) if v.starts_with("Neo4j/"))
+                assert_eq!(
+                    server,
+                    Some(PackValue::String(
+                        "Neo4j/5.26.0 compatible graph database server - Brainwire".into()
+                    ))
                 );
             }
             other => panic!("unexpected {other:?}"),
