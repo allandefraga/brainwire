@@ -70,6 +70,12 @@ No line of code before the end of phase 2.
   restoration. A final 80×24 flow reached result 12, kept unsupported status
   visible after a 512-character paste and preserved `q` while editing.
   Existing `config show` and CLI negative/snapshot paths were checked.
+  Final whole-change review of `b6d3519..2a892f2` approved local demo delivery,
+  with no open Critical/Important findings. Two nonblocking polish items remain:
+  inspector focus is mostly a visual cue, and the second query initially clips
+  at 80 columns (its tail is reachable with Enter/PgDn). Preserve these as
+  follow-ups; they are not marked fixed. All work remains on the standalone
+  branch, isolated from the platform; no merge or remote operation was needed.
 - **Next:** executor (engine MVP Task 4), then real Bolt transaction lifecycle
   and durable `serve` (Task 5). Connect this shell only after those contracts
   exist; add bounded graph neighborhoods and real telemetry/file metadata.

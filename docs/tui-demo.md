@@ -41,6 +41,9 @@ between terminal emulators.
 | `Esc` | Leave editing or help before exiting |
 | `q` | Quit when not editing |
 
+At 80 columns, longer query text is initially clipped; enter editing and use
+`PgDn` to reveal its tail. Query results scroll separately with Up/Down.
+
 The footer shows the current controls. Typed shortcut characters remain text
 while editing. A changed query outside the guided examples is refused
 explicitly instead of receiving a fabricated successful result.
