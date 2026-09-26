@@ -4,8 +4,8 @@ One 45-minute session per day, started when Allan asks. This file is the memory
 between sessions: each session starts with no context other than this file and
 the README.
 
-Internal documents are in English (Allan, 2026-09-24). The conversation with
-Allan stays in Portuguese.
+Internal documents are in English (Allan, 2026-09-24). The conversation follows
+Allan's current language.
 
 ## How a session starts
 
@@ -20,11 +20,11 @@ Allan stays in Portuguese.
 
 1. A new entry **at the top** of the list, with: done, decided, next step,
    blockers.
-2. Commits go to `feat/brainwire`, or to a sub-branch of it that merges back
-   (plan 2 uses `feat/brainwire-bolt`), never to another feature's branch, and
-   nothing is pushed unless Allan asks. The code lives in the worktree
-   `.worktrees/brainwire`; `client-brainwire` in the main checkout is a
-   symlink to it, so no `git clean` there.
+2. Brainwire now lives in its standalone repository at
+   `/Users/fraga/Documents/brainwire`, on `codex/brainwire`. Nothing is pushed
+   unless Allan asks. The old platform branch and its worktrees are historical
+   recovery points. Older entries below retain their original paths and commit
+   IDs; standalone history has rewritten IDs after subtree extraction.
 
 ## Phases
 
@@ -37,6 +37,54 @@ Allan stays in Portuguese.
 No line of code before the end of phase 2.
 
 ## Entries
+
+### 2026-09-26, 17:48 (Codex, one-hour local session)
+
+- **Scope:** Allan requested one hour of work and explicitly prohibited pushes.
+  During the session he requested moving Brainwire into an independent sibling
+  repository at `/Users/fraga/Documents/brainwire`. No remote PR or push.
+- **Done:** re-ran the merged workspace's 177 tests; the scoped review
+  of `711a3e3` found all three graph fixes addressed and no new blocking issue.
+  Merged the existing local Cypher branch (`d51482ffd`) and closed its second
+  depth-limit fix round (`dd054f759`): expression depth now follows the actual
+  subtree, including mixed operators and wrappers. All 41 parser tests pass;
+  the scoped review is clean. MVP Task 3 is complete (`a6a741050`): snapshot
+  range scans and label scans, including maximum ID bounds and transaction
+  overlay behavior; 70 store tests, clippy and fmt pass, review clean. Added an
+  independent regression for non-null SET after property promotion. Storage
+  Task 10 is complete (`a0165496d`): five SIGKILL/reopen cycles verify every
+  acknowledged Customer, Company and WORKS_AT edge; focused test and review
+  pass. This proves process-crash recovery, not hardware power-loss durability.
+  Corrected the README's obsolete brainstorming status.
+- **Relocation complete:** extracted 54 Brainwire-only commits, moved all 50
+  working source/documentation files and the build cache, preserved task
+  ledgers, and removed the main platform checkout's untracked shortcut.
+  SHA-256 verification matched every moved source/documentation file. The old feature branch/worktree remains a
+  clean historical recovery checkpoint. The standalone repo has no remote
+  and its Git objects have no dependency on the platform object store.
+  Rewritten equivalents: parser fix `73cb05c`, label scans `2c52501`, crash
+  test `1315687` (the original IDs remain above for historical context).
+- **Verification after relocation:** all 225 workspace tests pass (44 Bolt,
+  46 core, 41 parser, 23 config, 70 store, 1 crash integration test), as do
+  workspace clippy with warnings denied and formatting. `brainwire config
+  show` works from the new root. No server was left running.
+- **Next step:** MVP Task 4 (executor), then Task 5 (`brainwire serve` and the
+  driver demo). The executor agent had only read its brief when relocation was
+  requested; no executor code or tests were written. Resume in the standalone
+  repository. The session stops at 18:48 CEST.
+- **Integration finding:** the current Bolt `QueryEngine` exposes only `run`;
+  BEGIN, COMMIT and ROLLBACK still operate only on session state. Task 5 must
+  add real engine transaction ownership/hooks before accepting durable writes
+  inside explicit transactions. Wiring per-query commits into that stub would
+  incorrectly acknowledge rollback after persisting the write.
+- **Decisions:** the user's one-hour request replaces the usual 45-minute
+  limit for this session. Parser work continues in the main Brainwire worktree
+  after a local merge; the old parser checkout is preserved. Scratch reports
+  from `/tmp/brainwire-20260926` are preserved under the standalone repository's
+  ignored `.superpowers/sdd/session-2026-09-26/`; this journal records the
+  durable handoff. The crash test verifies every acknowledged write, not only
+  the most recent one. Scan APIs still materialize vectors per the MVP
+  contract; streaming and enforcement of execution memory limits remain ahead.
 
 ### 2026-09-26, 11:03 (MVP push, interrupted at about 12:15)
 

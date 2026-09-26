@@ -1,11 +1,40 @@
-# client-brainwire
+# Brainwire
 
-client's own graph engine. The name comes from the brain's wiring: neurons
-and the connections between them, which is literally a graph.
+An independent graph database developed alongside client. The name comes
+from the brain's wiring: neurons and the connections between them.
 
-> **Status: brainstorming.** There is no code yet. The design becomes a spec
-> before the first implementation commit. The plan is in [PLAN.md](PLAN.md) and
-> the progress of each session in [JOURNAL.md](JOURNAL.md).
+This is a standalone Rust repository at `/Users/fraga/Documents/brainwire`,
+beside `client-platform`. Its crates build without the platform checkout.
+client integration uses Bolt/Cypher and the planned Python SDK and repository
+adapter; the platform remains the first integration target.
+
+> **Status: local MVP development.** The Rust workspace contains the RocksDB
+> storage foundation, graph operations, the Bolt protocol server, configuration
+> commands and a Cypher subset parser. The durable query server is still under
+> development. The design is in
+> [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
+> the implementation tasks in
+> [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
+> progress in [JOURNAL.md](JOURNAL.md).
+
+## Local development
+
+```sh
+cargo test --workspace --locked --offline
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+cargo fmt --all -- --check
+cargo run -p brainwire-server -- config show
+```
+
+Offline commands require dependencies to have been fetched previously.
+The `brainwire` binary currently provides configuration commands; the
+`brainwire-bolt-dev` binary uses a stub query engine. The executor and durable
+`brainwire serve` integration are the next MVP tasks.
+
+The local history was extracted from the platform's Brainwire feature branch.
+Old journal entries retain their original commit IDs and checkout paths; the
+rewritten history in this repository contains only Brainwire. No remote is
+configured and no code has been pushed.
 
 ## Requirements (2026-09-24)
 
