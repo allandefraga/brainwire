@@ -154,9 +154,15 @@ fn apply_props(row: &mut Row, columns: &[Column], props: &BTreeMap<String, Value
         match columns.iter().find(|c| &c.name == name).map(|c| c.id) {
             Some(id) if *value == Value::Null => {
                 row.columns.remove(&id);
+                // A row written before this name was a column may still
+                // carry the old value in `extra` (fix round 1, reviewer
+                // Important 1): a property that gets promoted to a column
+                // must not leave a stale value behind under its old home.
+                row.extra.remove(name);
             }
             Some(id) => {
                 row.columns.insert(id, value.clone());
+                row.extra.remove(name);
             }
             None if *value == Value::Null => {
                 row.extra.remove(name);
@@ -307,13 +313,34 @@ pub fn in_edges(txn: &Txn, dst: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
     edges(txn, Cf::In, dst)
 }
 
+/// Same listing as `edges`, but through `scan_prefix_for_update`: the whole
+/// (cf, node-prefix) range becomes a tracked dependency, so a concurrent
+/// `merge_edge` that adds a *new* edge under this node — one this scan could
+/// not have seen — makes whichever of the two transactions commits second
+/// conflict, instead of the edge surviving with a since-deleted endpoint
+/// (fix round 1, reviewer Critical). `merge_edge`'s own `get_for_update` on
+/// the node key (see `read_node_for_update`) only protects the opposite
+/// commit order; this closes the other half.
+fn edges_for_update(txn: &mut Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
+    let mut found = Vec::new();
+    for (key, _) in txn.scan_prefix_for_update(cf, &node.0.to_be_bytes())? {
+        let (_, edge_type, other, id) = decode_edge_key(&key)?;
+        found.push(EdgeRef {
+            edge_type,
+            other,
+            id,
+        });
+    }
+    Ok(found)
+}
+
 pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
     let (entity_id, _) = read_node(txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
-    for e in out_edges(txn, id)? {
+    for e in edges_for_update(txn, Cf::Out, id)? {
         txn.delete(Cf::Out, edge_key(id, e.edge_type, e.other, e.id));
         txn.delete(Cf::In, edge_key(e.other, e.edge_type, id, e.id));
     }
-    for e in in_edges(txn, id)? {
+    for e in edges_for_update(txn, Cf::In, id)? {
         txn.delete(Cf::In, edge_key(id, e.edge_type, e.other, e.id));
         txn.delete(Cf::Out, edge_key(e.other, e.edge_type, id, e.id));
     }
@@ -323,8 +350,9 @@ pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
 }
 
 /// Checks the invariants the crash test relies on: pk and node agree both
-/// ways, node ids are unique, `out` and `in` mirror each other, and every id
-/// counter is above the largest id in use.
+/// ways, node ids are unique, `out` and `in` mirror each other with both
+/// endpoints still existing as nodes, and every id counter is above the
+/// largest id in use.
 pub fn check_invariants(db: &Database) -> Result<(), String> {
     let txn = db.begin();
     let err = |e: &dyn std::fmt::Display| e.to_string();
@@ -371,6 +399,20 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
     for (cf, mirror) in [(Cf::Out, Cf::In), (Cf::In, Cf::Out)] {
         for (key, _) in txn.scan_prefix(cf, &[]).map_err(|e| err(&e))? {
             let (a, ty, b, id) = decode_edge_key(&key).map_err(|e| err(&e))?;
+            // `a` is this key's own side (source in Out, target in In): across
+            // both directions of this outer loop, every logical edge's two
+            // endpoints each get checked here once (fix round 1, reviewer
+            // Important 2b — previously a dangling edge, endpoint deleted
+            // out from under it, passed this check silently).
+            if txn
+                .get(Cf::Node, &node_key(a))
+                .map_err(|e| err(&e))?
+                .is_none()
+            {
+                return Err(format!(
+                    "edge {a:?} {ty:?} {b:?} has a missing endpoint {a:?}"
+                ));
+            }
             if txn
                 .get(mirror, &edge_key(b, ty, a, id))
                 .map_err(|e| err(&e))?
@@ -390,6 +432,7 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::db::{Resources, StoreConfig};
+    use brainwire_core::schema::NodeSpec;
 
     fn setup() -> (tempfile::TempDir, Resources, Database, Catalog) {
         let dir = tempfile::tempdir().unwrap();
@@ -706,23 +749,22 @@ mod tests {
         assert!(matches!(merge_txn.commit(), Err(TxnError::Conflict)));
     }
 
-    // The reverse commit order: merge_edge reaches commit() FIRST, and the
-    // concurrent detach_delete of its destination commits second. Documented
-    // here rather than left untested, because it is the asymmetric half of
-    // rule 1 that the fix does *not* close (see task-9-report.md, Concerns):
-    // detach_delete's own scan for edges to delete (`out_edges`/`in_edges`)
-    // is a range read that records no dependency (this transaction model has
-    // no phantom-read protection, only exact-key tracking), so when its
-    // snapshot predates the new edge, it neither depends on nor overwrites
-    // any key merge_edge wrote, and it commits clean, unaware of the edge it
-    // just made dangling. Fixing this fully would need detach_delete to
-    // depend on something that changes whenever an edge touching the node is
-    // added - out of scope for this task (graph.rs only; txn.rs is frozen).
-    // This test pins the *current, true* behavior so a future change to
-    // either function is forced to update it deliberately instead of
-    // silently drifting.
+    // Fix round 1 (reviewer Critical, on top of this file's original rule 1):
+    // the *opposite* commit order from the four tests above — merge_edge
+    // reaches commit() FIRST, and a concurrent detach_delete of an endpoint,
+    // whose own snapshot predates the merge and so never saw the new edge,
+    // commits second. Before `edges_for_update`/`scan_prefix_for_update`,
+    // this order left the new edge dangling and check_invariants silent
+    // about it (see git history of this file, and task-9-report.md's "Fix
+    // round 1" section, for the previous version of this test that pinned
+    // that bug as the then-current, true behavior). Now the delete's own
+    // range dependency on the node's (Out, In) prefixes catches the write
+    // merge_edge lands under them, so it is *delete_txn* — the second
+    // committer — that conflicts; k and the edge it never got to touch both
+    // survive.
+
     #[test]
-    fn a_detach_delete_that_commits_after_a_concurrent_merge_edge_does_not_see_the_new_edge() {
+    fn merge_edge_first_then_a_concurrent_detach_delete_of_the_destination_conflicts() {
         let (_d, _r, db, cat) = setup();
         let (c, k) = seed_customer_and_company(&db, &cat);
 
@@ -730,20 +772,301 @@ mod tests {
         let mut delete_txn = db.begin();
         merge_edge(&mut merge_txn, &cat, c, "WORKS_AT", k, &BTreeMap::new()).unwrap();
         // delete_txn's snapshot predates merge_txn's commit, so its own scan
-        // for k's edges (inside detach_delete) finds none yet.
+        // for k's edges (inside detach_delete) finds none yet - and must
+        // depend on the range anyway.
         detach_delete(&mut delete_txn, k).unwrap();
         merge_txn.commit().unwrap();
-        delete_txn.commit().unwrap();
+        assert!(matches!(delete_txn.commit(), Err(TxnError::Conflict)));
 
-        // k is gone, but the edge merge_txn created now points at a deleted
-        // node: exactly the dangling edge rule 1 is about, in the one
-        // ordering the fix does not cover. check_invariants does not check
-        // edge endpoint existence (only pk/node agreement and out/in
-        // mirroring, per its own doc comment), so it stays quiet here; the
-        // mirror itself is still intact.
+        let r = db.begin();
+        assert!(
+            get_node(&r, k).unwrap().is_some(),
+            "k must survive: its delete never committed"
+        );
+        assert_eq!(
+            out_edges(&r, c).unwrap().len(),
+            1,
+            "the edge must survive too"
+        );
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn merge_edge_first_then_a_concurrent_detach_delete_of_the_source_conflicts() {
+        let (_d, _r, db, cat) = setup();
+        let (c, k) = seed_customer_and_company(&db, &cat);
+
+        let mut merge_txn = db.begin();
+        let mut delete_txn = db.begin();
+        merge_edge(&mut merge_txn, &cat, c, "WORKS_AT", k, &BTreeMap::new()).unwrap();
+        detach_delete(&mut delete_txn, c).unwrap();
+        merge_txn.commit().unwrap();
+        assert!(matches!(delete_txn.commit(), Err(TxnError::Conflict)));
+
+        let r = db.begin();
+        assert!(get_node(&r, c).unwrap().is_some());
+        assert_eq!(in_edges(&r, k).unwrap().len(), 1);
+        check_invariants(&db).unwrap();
+    }
+
+    // Sanity checks alongside the fix: the new range dependency must not
+    // over-constrain ordinary concurrent activity that never touches it.
+
+    #[test]
+    fn two_merge_edges_into_the_same_hub_from_different_sources_both_commit() {
+        let (_d, _r, db, cat) = setup();
+        let mut t = db.begin();
+        let c1 = merge_node(&mut t, &cat, "Customer", "c:1", &BTreeMap::new()).unwrap();
+        let c2 = merge_node(&mut t, &cat, "Customer", "c:2", &BTreeMap::new()).unwrap();
+        let k = merge_node(&mut t, &cat, "Company", "k:1", &BTreeMap::new()).unwrap();
+        t.commit().unwrap();
+
+        let mut t1 = db.begin();
+        let mut t2 = db.begin();
+        merge_edge(&mut t1, &cat, c1, "WORKS_AT", k, &BTreeMap::new()).unwrap();
+        merge_edge(&mut t2, &cat, c2, "WORKS_AT", k, &BTreeMap::new()).unwrap();
+        t1.commit().unwrap();
+        t2.commit().unwrap();
+
+        let r = db.begin();
+        assert_eq!(in_edges(&r, k).unwrap().len(), 2);
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn detach_delete_of_an_unrelated_node_does_not_conflict_with_a_concurrent_merge_edge() {
+        let (_d, _r, db, cat) = setup();
+        let mut t = db.begin();
+        let c = merge_node(&mut t, &cat, "Customer", "c:1", &BTreeMap::new()).unwrap();
+        let k = merge_node(&mut t, &cat, "Company", "k:1", &BTreeMap::new()).unwrap();
+        let unrelated = merge_node(&mut t, &cat, "Company", "k:2", &BTreeMap::new()).unwrap();
+        t.commit().unwrap();
+
+        let mut merge_txn = db.begin();
+        let mut delete_txn = db.begin();
+        merge_edge(&mut merge_txn, &cat, c, "WORKS_AT", k, &BTreeMap::new()).unwrap();
+        detach_delete(&mut delete_txn, unrelated).unwrap();
+        merge_txn.commit().unwrap();
+        delete_txn.commit().unwrap();
+        check_invariants(&db).unwrap();
+    }
+
+    // Fix round 1 (reviewer Important 2a): no existing test ever executes
+    // detach_delete's *incoming*-edge loop with a real edge present (the
+    // brief's own happy-path test deletes the edge's source, which only
+    // exercises the outgoing loop) - emptying that loop's body kept every
+    // graph test green. Deleting the destination instead exercises it, and
+    // proves the mirrored `out` entry the loop is responsible for
+    // (`c`'s edge to `k`) is actually removed too.
+    #[test]
+    fn detach_delete_of_the_destination_also_removes_the_mirrored_out_edge() {
+        let (_d, _r, db, cat) = setup();
+        let mut t = db.begin();
+        let c = merge_node(&mut t, &cat, "Customer", "c:1", &BTreeMap::new()).unwrap();
+        let k = merge_node(&mut t, &cat, "Company", "k:1", &BTreeMap::new()).unwrap();
+        merge_edge(&mut t, &cat, c, "WORKS_AT", k, &BTreeMap::new()).unwrap();
+        t.commit().unwrap();
+
+        let mut t = db.begin();
+        detach_delete(&mut t, k).unwrap();
+        t.commit().unwrap();
+
         let r = db.begin();
         assert!(get_node(&r, k).unwrap().is_none());
-        assert_eq!(out_edges(&r, c).unwrap().len(), 1);
+        assert!(out_edges(&r, c).unwrap().is_empty());
         check_invariants(&db).unwrap();
+    }
+
+    // Fix round 1 (reviewer Important 1): a property that starts out unknown
+    // to the catalog lands in `row.extra`; once a later `apply_ontology`
+    // promotes its name to a real column, a subsequent SET (including SET
+    // NULL) must stop leaving the old value behind under its old, now-stale
+    // home. Before the fix, step 2 below left "Al" sitting in `extra` forever.
+    fn mapping_with_customer_properties(properties: &[&str]) -> GraphMapping {
+        GraphMapping {
+            version: "1".into(),
+            nodes: vec![NodeSpec {
+                label: "Customer".into(),
+                properties: properties.iter().map(|s| s.to_string()).collect(),
+                er_fields: vec![],
+                indexed_fields: vec![],
+                identifier_columns: BTreeMap::new(),
+                display_color: None,
+            }],
+            edges: vec![],
+            timeline: vec![],
+        }
+    }
+
+    #[test]
+    fn promoting_a_property_to_a_column_clears_the_stale_extra_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+
+        // v1: "nickname" is not a column, so it lands in extra.
+        let v1 = db
+            .apply_ontology(&mapping_with_customer_properties(&["name"]))
+            .unwrap();
+        let mut t = db.begin();
+        let id = merge_node(
+            &mut t,
+            &v1,
+            "Customer",
+            "c:1",
+            &props(&[("nickname", Value::Str("Al".into()))]),
+        )
+        .unwrap();
+        t.commit().unwrap();
+        let node = get_node(&db.begin(), id).unwrap().unwrap();
+        assert_eq!(
+            node.row.extra.get("nickname"),
+            Some(&Value::Str("Al".into()))
+        );
+
+        // v2: "nickname" is promoted to a real column.
+        let v2 = db
+            .apply_ontology(&mapping_with_customer_properties(&["name", "nickname"]))
+            .unwrap();
+        let nickname_col = v2
+            .node_type("Customer")
+            .unwrap()
+            .column("nickname")
+            .unwrap();
+
+        // SET NULL through the now-promoted name must clear the stale extra
+        // value, not just no-op on a column that was never set.
+        let mut t = db.begin();
+        merge_node(
+            &mut t,
+            &v2,
+            "Customer",
+            "c:1",
+            &props(&[("nickname", Value::Null)]),
+        )
+        .unwrap();
+        t.commit().unwrap();
+        let node = get_node(&db.begin(), id).unwrap().unwrap();
+        assert!(!node.row.columns.contains_key(&nickname_col));
+        assert!(
+            !node.row.extra.contains_key("nickname"),
+            "stale extra value must be cleared once its name is promoted to a column"
+        );
+
+        // A real SET afterward must not leave both a column value and a
+        // stale extra value for the same logical property.
+        let mut t = db.begin();
+        merge_node(
+            &mut t,
+            &v2,
+            "Customer",
+            "c:1",
+            &props(&[("nickname", Value::Str("Bob".into()))]),
+        )
+        .unwrap();
+        t.commit().unwrap();
+        let node = get_node(&db.begin(), id).unwrap().unwrap();
+        assert_eq!(
+            node.row.columns.get(&nickname_col),
+            Some(&Value::Str("Bob".into()))
+        );
+        assert!(!node.row.extra.contains_key("nickname"));
+    }
+
+    // Fix round 1 (reviewer Important 2b): check_invariants had no test for
+    // any of its own negative paths - a body of `Ok(())` would have passed
+    // every other test in this file. One test per invariant it checks,
+    // written by corrupting state directly through a Txn with raw keys
+    // (never through the public graph API, which cannot produce these
+    // states on its own).
+
+    #[test]
+    fn check_invariants_catches_a_pk_pointing_to_a_missing_node() {
+        let (_d, _r, db, cat) = setup();
+        let customer = cat.node_type("Customer").unwrap();
+        let ghost = NodeId::new(0, customer.id, 777).unwrap();
+        let mut t = db.begin();
+        t.put(
+            Cf::Pk,
+            pk_key("ghost:1", customer.id),
+            ghost.0.to_be_bytes().to_vec(),
+        );
+        t.commit().unwrap();
+        let err = check_invariants(&db).unwrap_err();
+        assert!(err.contains("missing node"), "unexpected message: {err}");
+    }
+
+    #[test]
+    fn check_invariants_catches_a_missing_edge_mirror() {
+        let (_d, _r, db, cat) = setup();
+        let (c, k) = seed_customer_and_company(&db, &cat);
+        let et = cat.edge_type("WORKS_AT").unwrap();
+        let mut t = db.begin();
+        // Write only the `out` side directly: merge_edge would also write
+        // the `in` mirror, but this bypasses it.
+        t.put(
+            Cf::Out,
+            edge_key(c, et.id, k, EdgeId::MERGED),
+            encode_row(&Row::default()),
+        );
+        t.commit().unwrap();
+        let err = check_invariants(&db).unwrap_err();
+        assert!(err.contains("no mirror"), "unexpected message: {err}");
+    }
+
+    #[test]
+    fn check_invariants_catches_a_node_above_its_id_counter() {
+        let (_d, _r, db, cat) = setup();
+        let mut t = db.begin();
+        let c = merge_node(&mut t, &cat, "Customer", "c:1", &BTreeMap::new()).unwrap();
+        t.commit().unwrap();
+        // Corrupt the counter to sit at c's own sequence instead of past it.
+        let mut t = db.begin();
+        t.put(
+            Cf::Meta,
+            crate::alloc::node_counter_key(c.type_id()),
+            c.seq().to_be_bytes().to_vec(),
+        );
+        t.commit().unwrap();
+        let err = check_invariants(&db).unwrap_err();
+        assert!(
+            err.contains("above its counter"),
+            "unexpected message: {err}"
+        );
+    }
+
+    // Added beyond the reviewer's exact list: check_invariants' *new*
+    // endpoint-existence check (added in this same fix round, see above)
+    // is itself new logic and deserves the same treatment as the three
+    // pre-existing invariants above, rather than shipping unverified.
+    #[test]
+    fn check_invariants_catches_an_edge_with_a_missing_endpoint() {
+        let (_d, _r, db, cat) = setup();
+        let mut t = db.begin();
+        let c = merge_node(&mut t, &cat, "Customer", "c:1", &BTreeMap::new()).unwrap();
+        t.commit().unwrap();
+        let et = cat.edge_type("WORKS_AT").unwrap();
+        // Write both sides of an edge directly, but to a target that has no
+        // `node` entry at all - merge_edge's own existence check would
+        // refuse this; only a raw write can produce it.
+        let company_ty = cat.node_type("Company").unwrap().id;
+        let ghost = NodeId::new(0, company_ty, 555_555).unwrap();
+        let mut t = db.begin();
+        t.put(
+            Cf::Out,
+            edge_key(c, et.id, ghost, EdgeId::MERGED),
+            encode_row(&Row::default()),
+        );
+        t.put(
+            Cf::In,
+            edge_key(ghost, et.id, c, EdgeId::MERGED),
+            Vec::new(),
+        );
+        t.commit().unwrap();
+        let err = check_invariants(&db).unwrap_err();
+        assert!(
+            err.contains("missing endpoint"),
+            "unexpected message: {err}"
+        );
     }
 }

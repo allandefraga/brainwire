@@ -9,7 +9,7 @@
 //! enough to predate it fails closed (`Conflict`) at commit if it touched
 //! anything, instead of silently skipping a check it can no longer make.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::db::{Database, StoreError};
@@ -98,7 +98,10 @@ impl Committer {
 #[derive(Default)]
 struct CommitState {
     seq: u64,
-    last_write: HashMap<Key, u64>,
+    // BTreeMap, not HashMap: a prefix dependency (`Txn::scan_prefix_for_update`)
+    // needs a range scan over "every key of this Cf starting with this
+    // prefix", which only an ordered map gives cheaply.
+    last_write: BTreeMap<Key, u64>,
     /// Committed keys, ordered by commit sequence, so pruning removes an
     /// exact prefix instead of rescanning `last_write` in full.
     history: VecDeque<(u64, Vec<Key>)>,
@@ -167,6 +170,11 @@ pub struct Txn<'db> {
     start_seq: u64,
     writes: BTreeMap<Key, Option<Vec<u8>>>,
     depends: BTreeSet<Key>,
+    /// Range dependencies recorded by `scan_prefix_for_update`: (cf, prefix)
+    /// pairs such that a write landing anywhere under that prefix, by a
+    /// transaction that commits first, conflicts this one — including a key
+    /// that did not exist yet when this transaction scanned (a phantom).
+    depends_prefix: BTreeSet<Key>,
     done: bool,
 }
 
@@ -184,6 +192,7 @@ impl Database {
             start_seq,
             writes: BTreeMap::new(),
             depends: BTreeSet::new(),
+            depends_prefix: BTreeSet::new(),
             done: false,
         }
     }
@@ -245,11 +254,33 @@ impl<'db> Txn<'db> {
             .collect())
     }
 
+    /// A range read that is also a dependency: unlike `scan_prefix`, a key
+    /// under `prefix` written by a transaction that commits first makes this
+    /// one conflict — even a key this snapshot never saw, because it did not
+    /// exist yet (a phantom). Callers that scan a range to decide what to
+    /// delete or fold over, and need that decision to still hold at commit
+    /// time, should use this instead of a plain `scan_prefix` (`detach_delete`
+    /// relies on this for both the `out` and `in` prefixes of the node being
+    /// deleted, so a concurrent `merge_edge` that adds an edge to that node
+    /// conflicts instead of leaving a dangling edge — the other half of the
+    /// rule `merge_edge`'s own `get_for_update` on the node key only covers
+    /// one direction of).
+    #[allow(clippy::type_complexity)]
+    pub fn scan_prefix_for_update(
+        &mut self,
+        cf: Cf,
+        prefix: &[u8],
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+        self.depends_prefix.insert((cf, prefix.to_vec()));
+        self.scan_prefix(cf, prefix)
+    }
+
     pub fn commit(mut self) -> Result<u64, TxnError> {
         let db = self.db;
         let mut st = db.committer.lock();
         let start = self.start_seq;
-        let touched_anything = !self.writes.is_empty() || !self.depends.is_empty();
+        let touched_anything =
+            !self.writes.is_empty() || !self.depends.is_empty() || !self.depends_prefix.is_empty();
         // A transaction old enough to predate `pruned_through` can no longer
         // be checked precisely — some eviction (safe or not) or a poison
         // recovery might have removed the one entry that mattered — so fail
@@ -260,7 +291,13 @@ impl<'db> Txn<'db> {
                 .writes
                 .keys()
                 .chain(self.depends.iter())
-                .any(|k| st.last_write.get(k).is_some_and(|&s| s > start));
+                .any(|k| st.last_write.get(k).is_some_and(|&s| s > start))
+            || self.depends_prefix.iter().any(|(cf, prefix)| {
+                st.last_write
+                    .range((*cf, prefix.clone())..)
+                    .take_while(|((c, k), _)| c == cf && k.starts_with(prefix))
+                    .any(|(_, &s)| s > start)
+            });
         if conflict {
             st.release(start);
             self.done = true;
@@ -619,5 +656,47 @@ mod tests {
         // t2 never touched "disjoint-a".
         t1.commit().unwrap();
         t2.commit().unwrap();
+    }
+
+    // Task 9 fix round 1 (reviewer Critical: a concurrent merge_edge that
+    // commits before a detach_delete which never saw the new edge leaves a
+    // dangling edge, because `scan_prefix` records no dependency on the
+    // range it read). `scan_prefix_for_update` is the new public function
+    // that closes this; it needs its own direct tests, independent of
+    // graph.rs's higher-level detach_delete/merge_edge behavior.
+
+    #[test]
+    fn scan_prefix_for_update_conflicts_on_a_write_under_the_prefix_that_lands_after_start() {
+        let (_d, _r, db) = open();
+        let mut reader = db.begin();
+        let mut writer = db.begin();
+        // The prefix is empty of writes at this point; the scan alone must
+        // still record the dependency (a phantom-read guard).
+        assert!(reader
+            .scan_prefix_for_update(Cf::Out, b"p:")
+            .unwrap()
+            .is_empty());
+        writer.put(Cf::Out, b"p:1".to_vec(), b"x".to_vec());
+        writer.commit().unwrap();
+        // reader itself writes nothing; the range dependency alone must conflict.
+        assert!(matches!(reader.commit(), Err(TxnError::Conflict)));
+    }
+
+    #[test]
+    fn scan_prefix_for_update_does_not_conflict_on_a_write_outside_the_prefix_or_cf() {
+        let (_d, _r, db) = open();
+        let mut reader = db.begin();
+        let mut writer = db.begin();
+        assert!(reader
+            .scan_prefix_for_update(Cf::Out, b"p:")
+            .unwrap()
+            .is_empty());
+        // Same cf, a key that does not start with "p:".
+        writer.put(Cf::Out, b"q:1".to_vec(), b"x".to_vec());
+        // Same key bytes, a different cf.
+        writer.put(Cf::In, b"p:1".to_vec(), b"y".to_vec());
+        writer.commit().unwrap();
+        reader.put(Cf::Node, b"unrelated".to_vec(), b"1".to_vec());
+        reader.commit().unwrap();
     }
 }
