@@ -107,8 +107,6 @@ pub struct Catalog {
 pub enum SchemaError {
     #[error("unknown label {0}")]
     UnknownLabel(String),
-    #[error("label {0} is declared twice")]
-    DuplicateLabel(String),
     #[error("more than 4095 node types")]
     TooManyTypes,
     #[error("entity_join must look like 'column -> Label.property': {0}")]
@@ -179,29 +177,52 @@ impl Catalog {
         let prev = previous.unwrap_or(&empty);
 
         let mut node_types = prev.node_types.clone();
-        let mut seen = Vec::new();
+        let mut labels_seen: Vec<String> = Vec::new();
         for spec in &mapping.nodes {
-            if seen.contains(&spec.label) {
-                return Err(SchemaError::DuplicateLabel(spec.label.clone()));
+            if !labels_seen.contains(&spec.label) {
+                labels_seen.push(spec.label.clone());
             }
-            seen.push(spec.label.clone());
+        }
+        for label in &labels_seen {
+            // Multiple NodeSpecs may share a label: the same conceptual entity
+            // sourced from different connectors (e.g. Person <- hubspot_contacts +
+            // zendesk_users + jira_users). They merge into one NodeType, mirroring
+            // the platform's GraphMappingConfig (memory-worker/graph_mapping/
+            // models.py: duplicate_node_labels_must_share_id_field,
+            // presentation_is_resolved_per_label).
+            let group: Vec<&NodeSpec> =
+                mapping.nodes.iter().filter(|s| s.label == *label).collect();
+
             let mut indexed: Vec<String> = Vec::new();
-            for f in spec.er_fields.iter().chain(&spec.indexed_fields) {
-                if !indexed.contains(f) && !is_reserved(f) {
-                    indexed.push(f.clone());
+            for spec in &group {
+                for f in spec.er_fields.iter().chain(&spec.indexed_fields) {
+                    if !indexed.contains(f) && !is_reserved(f) {
+                        indexed.push(f.clone());
+                    }
                 }
             }
-            let identifiers: Vec<(String, String)> = spec
-                .identifier_columns
+            let mut identifiers: Vec<(String, String)> = Vec::new();
+            for spec in &group {
+                for (c, t) in &spec.identifier_columns {
+                    if !identifiers.iter().any(|(col, _)| col == c) {
+                        identifiers.push((c.clone(), t.clone()));
+                    }
+                }
+            }
+            // First entry in declaration order that sets a color wins; a later
+            // source with no opinion never erases an earlier source's color.
+            let display_color = group.iter().find_map(|spec| spec.display_color.clone());
+            let properties: Vec<String> = group
                 .iter()
-                .map(|(c, t)| (c.clone(), t.clone()))
+                .flat_map(|spec| spec.properties.clone())
                 .collect();
-            match node_types.iter_mut().find(|t| t.label == spec.label) {
+
+            match node_types.iter_mut().find(|t| t.label == *label) {
                 Some(t) => {
-                    t.columns = merge_columns(&t.columns, &spec.properties, &spec.label)?;
+                    t.columns = merge_columns(&t.columns, &properties, label)?;
                     t.indexed = indexed;
                     t.identifiers = identifiers;
-                    t.display_color = spec.display_color.clone();
+                    t.display_color = display_color;
                 }
                 None => {
                     let next = node_types.iter().map(|t| t.id.0 + 1).max().unwrap_or(1);
@@ -210,11 +231,11 @@ impl Catalog {
                     }
                     node_types.push(NodeType {
                         id: TypeId(next),
-                        label: spec.label.clone(),
-                        columns: merge_columns(&[], &spec.properties, &spec.label)?,
+                        label: label.clone(),
+                        columns: merge_columns(&[], &properties, label)?,
                         indexed,
                         identifiers,
-                        display_color: spec.display_color.clone(),
+                        display_color,
                     });
                 }
             }
@@ -372,18 +393,8 @@ mod tests {
     // --- Added beyond the brief: the ontology is external input, and the
     // task rules require every SchemaError variant to be exercised. The
     // brief's own tests cover UnknownLabel and BadEntityJoin but not
-    // DuplicateLabel or TooManyTypes, and don't pin the "malformed/hostile
-    // JSON never panics" contract. See task-5-report.md for the rationale.
-
-    #[test]
-    fn duplicate_node_label_is_an_error() {
-        let mut m = fixture();
-        m.nodes.push(m.nodes[0].clone());
-        assert_eq!(
-            Catalog::apply(&m, None),
-            Err(SchemaError::DuplicateLabel("Customer".into()))
-        );
-    }
+    // TooManyTypes, and don't pin the "malformed/hostile JSON never panics"
+    // contract. See task-5-report.md for the rationale.
 
     #[test]
     fn too_many_node_types_is_an_error() {
@@ -532,6 +543,124 @@ mod tests {
         assert_eq!(
             Catalog::apply(&mapping, Some(&previous)),
             Err(SchemaError::IdSpaceExhausted("edge types".into()))
+        );
+    }
+
+    // --- Fix round 2 (controller ruling): entries that share a label merge
+    // into one NodeType instead of erroring, mirroring the platform's
+    // GraphMappingConfig (memory-worker/graph_mapping/models.py:703-835),
+    // which explicitly supports one label sourced from several connectors.
+
+    fn node(label: &str, properties: &[&str], display_color: Option<&str>) -> NodeSpec {
+        NodeSpec {
+            label: label.into(),
+            properties: properties.iter().map(|s| s.to_string()).collect(),
+            er_fields: vec![],
+            indexed_fields: vec![],
+            identifier_columns: BTreeMap::new(),
+            display_color: display_color.map(String::from),
+        }
+    }
+
+    #[test]
+    fn sharing_a_label_merges_into_one_type() {
+        let mapping = GraphMapping {
+            version: "1".into(),
+            nodes: vec![
+                node("Customer", &["name", "email"], None),
+                node("Customer", &["email", "phone", "acl_allow"], None),
+            ],
+            edges: vec![],
+            timeline: vec![],
+        };
+        let cat = Catalog::apply(&mapping, None).unwrap();
+        assert_eq!(
+            cat.node_types
+                .iter()
+                .filter(|t| t.label == "Customer")
+                .count(),
+            1
+        );
+        let customer = cat.node_type("Customer").unwrap();
+        assert_eq!(customer.column("name"), Some(0));
+        assert_eq!(customer.column("email"), Some(1));
+        assert_eq!(customer.column("phone"), Some(2));
+        assert!(customer.column("acl_allow").is_none());
+    }
+
+    #[test]
+    fn reapplying_shared_label_keeps_ids_stable_and_appends() {
+        fn two_entries(second_properties: &[&str]) -> GraphMapping {
+            GraphMapping {
+                version: "1".into(),
+                nodes: vec![
+                    node("Customer", &["name", "email"], None),
+                    node("Customer", second_properties, None),
+                ],
+                edges: vec![],
+                timeline: vec![],
+            }
+        }
+
+        let first = Catalog::apply(&two_entries(&["email", "phone", "acl_allow"]), None).unwrap();
+        let second = Catalog::apply(
+            &two_entries(&["email", "phone", "acl_allow", "cpf"]),
+            Some(&first),
+        )
+        .unwrap();
+        let customer = second.node_type("Customer").unwrap();
+        assert_eq!(customer.column("name"), Some(0));
+        assert_eq!(customer.column("email"), Some(1));
+        assert_eq!(customer.column("phone"), Some(2));
+        assert_eq!(customer.column("cpf"), Some(3));
+    }
+
+    #[test]
+    fn shared_label_display_color_is_the_first_one_set() {
+        let mapping = GraphMapping {
+            version: "1".into(),
+            nodes: vec![
+                node("Customer", &[], None),
+                node("Customer", &[], Some("#111111")),
+                node("Customer", &[], Some("#222222")),
+            ],
+            edges: vec![],
+            timeline: vec![],
+        };
+        let cat = Catalog::apply(&mapping, None).unwrap();
+        assert_eq!(
+            cat.node_type("Customer").unwrap().display_color,
+            Some("#111111".into())
+        );
+    }
+
+    #[test]
+    fn edge_from_a_shared_label_resolves_to_the_merged_type() {
+        let mapping = GraphMapping {
+            version: "1".into(),
+            nodes: vec![
+                node("Customer", &["name"], None),
+                node("Customer", &["phone"], None),
+                node("Company", &["name"], None),
+            ],
+            edges: vec![EdgeSpec {
+                name: "WORKS_AT".into(),
+                from: EndpointSpec {
+                    label: "Customer".into(),
+                },
+                to: EndpointSpec {
+                    label: "Company".into(),
+                },
+                properties: vec![],
+            }],
+            timeline: vec![],
+        };
+        let cat = Catalog::apply(&mapping, None).unwrap();
+        let customer_id = cat.node_type("Customer").unwrap().id;
+        let company_id = cat.node_type("Company").unwrap().id;
+        assert_eq!(
+            cat.edge_type("WORKS_AT").unwrap().signatures,
+            vec![(customer_id, company_id)]
         );
     }
 }
