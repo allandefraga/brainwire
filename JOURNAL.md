@@ -71,10 +71,12 @@ No line of code before the end of phase 2.
   `feat/brainwire`, and commit `Cargo.lock`; then Task 8 (id blocks), Task 9
   (graph operations) and Task 10 (the kill -9 crash test), which closes Gate 1
   (due 2026-09-30).
-- **Blockers:** production pins the Python driver to `neo4j>=5.0,<6`
-  (`client-core/pyproject.toml`), and the driver check has only run with
-  6.3.0; running it with 5.28.x means installing that package, which needs
-  Allan's OK.
+- **Driver 5.x:** production pins the Python driver to `neo4j>=5.0,<6`
+  (`client-core/pyproject.toml`). With Allan's OK, neo4j 5.28.6 went into a
+  temporary venv in the session scratchpad, and the driver check and the demo
+  pass with it too (Bolt 5.4, 0.083 ms per round trip). Rerun it after the fix
+  wave.
+- **Blockers:** none.
 
 ### 2026-09-25, 14:45 (second session: the code starts)
 
