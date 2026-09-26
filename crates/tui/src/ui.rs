@@ -155,10 +155,15 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
             {
                 format!(
                     "{} • {}",
-                    app.lang.choose(
-                        "TEXTO LONGO: Enter, PgUp/PgDn",
-                        "MORE TEXT: Enter, PgUp/PgDn"
-                    ),
+                    if app.editing {
+                        app.lang
+                            .choose("EDITANDO • PgUp/PgDn rola", "EDITING • PgUp/PgDn scroll")
+                    } else {
+                        app.lang.choose(
+                            "TEXTO LONGO: Enter, PgUp/PgDn",
+                            "MORE TEXT: Enter, PgUp/PgDn",
+                        )
+                    },
                     app.query_scroll
                 )
             } else {

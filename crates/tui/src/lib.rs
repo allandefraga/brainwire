@@ -886,6 +886,10 @@ mod composition_tests {
         assert!(query.contains("co.name LIMIT 12"));
         app.query = "界".repeat(150);
         assert!(text(&app, 80, 24, false).contains("MORE TEXT: Enter, PgUp/PgDn"));
+        app.editing = true;
+        let editing = text(&app, 80, 24, false);
+        assert!(editing.contains("EDITING • PgUp/PgDn scroll"));
+        assert!(!editing.contains("MORE TEXT: Enter"));
     }
     #[test]
     fn all_files_have_contextual_explanations_and_selection_stays_reachable() {
