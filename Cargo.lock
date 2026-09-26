@@ -125,6 +125,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "brainwire-cypher"
+version = "0.1.0"
+dependencies = [
+ "brainwire-core",
+ "thiserror",
+]
+
+[[package]]
 name = "brainwire-server"
 version = "0.1.0"
 dependencies = [
