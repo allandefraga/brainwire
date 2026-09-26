@@ -293,6 +293,8 @@ pub struct App {
     pub example: usize,
     pub query: String,
     pub result: String,
+    pub query_scroll: usize,
+    pub result_scroll: usize,
     lang: Language,
     fixture: Fixture,
 }
@@ -310,6 +312,8 @@ impl App {
             example: 0,
             query: EXAMPLES[0].into(),
             result: String::new(),
+            query_scroll: 0,
+            result_scroll: 0,
             lang,
             fixture: Fixture::new(),
         }
@@ -328,6 +332,11 @@ impl App {
                 KeyCode::F(5) => self.run_query(),
                 KeyCode::Backspace => {
                     self.query.pop();
+                    self.query_scroll = self.query.chars().count().saturating_sub(48);
+                }
+                KeyCode::PageUp => self.query_scroll = self.query_scroll.saturating_sub(40),
+                KeyCode::PageDown => {
+                    self.query_scroll = (self.query_scroll + 40).min(self.query.chars().count())
                 }
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.insert(&c.to_string())
@@ -364,7 +373,9 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if self.view == View::Query {
+                if self.focus == Focus::Inspector {
+                    self.focus = Focus::Main;
+                } else if self.view == View::Query {
                     self.editing = true;
                     self.focus = Focus::Main;
                 } else {
@@ -384,6 +395,7 @@ impl App {
         let available = 512usize.saturating_sub(self.query.chars().count());
         self.query
             .extend(s.chars().filter(|c| !c.is_control()).take(available));
+        self.query_scroll = self.query.chars().count().saturating_sub(48);
     }
     fn set_view(&mut self, view: View) {
         self.view = view;
@@ -400,7 +412,8 @@ impl App {
         let (index, len) = match self.view {
             View::Graph => (&mut self.selected_node, self.fixture.nodes.len()),
             View::Query => {
-                self.load_example((self.example as isize + delta).rem_euclid(2) as usize);
+                let max = self.result.lines().count().saturating_sub(1);
+                self.result_scroll = self.result_scroll.saturating_add_signed(delta).min(max);
                 return;
             }
             View::Memory => (&mut self.selected_memory, MEM.len()),
@@ -412,8 +425,11 @@ impl App {
         self.example = index;
         self.query = EXAMPLES[index].into();
         self.result.clear();
+        self.query_scroll = 0;
+        self.result_scroll = 0;
     }
     pub fn run_query(&mut self) {
+        self.result_scroll = 0;
         let normalized = self.query.split_whitespace().collect::<Vec<_>>().join(" ");
         let customer = EXAMPLES[0].split_whitespace().collect::<Vec<_>>().join(" ");
         let works = EXAMPLES[1].split_whitespace().collect::<Vec<_>>().join(" ");
@@ -638,7 +654,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
         if area.width < 100 {
             ["1 Grafo", "2 Consulta", "3 Memória", "4 Disco"]
         } else {
-            ["1 Grafo", "2 Consulta", "3 Memória", "4 Disco e arquivos"]
+            ["1 Grafo", "2 Consulta", "3 Memória", "4 Disco/arquivos"]
         }
     } else if area.width < 100 {
         ["1 Graph", "2 Query", "3 Memory", "4 Disk"]
@@ -714,40 +730,49 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
             );
         }
         View::Query => {
-            let title = if app.editing {
-                app.lang.choose(
-                    "Consulta • EDITANDO (Esc/Enter termina)",
-                    "Query • EDITING (Esc/Enter ends)",
-                )
-            } else {
-                app.lang.choose(
-                    "Consulta • Enter edita • ←/→ exemplos • F5 executa",
-                    "Query • Enter edit • ←/→ examples • F5 run",
-                )
-            };
-            let content = format!(
-                "{} {}/2\n{}\n\n{}\n\n{}",
-                app.lang.choose("EXEMPLO", "EXAMPLE"),
+            let query_parts = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(5), Constraint::Min(5)])
+                .split(main);
+            let title = format!(
+                "{} {}/2 • {}",
+                app.lang.choose("Exemplo", "Example"),
                 app.example + 1,
-                app.query,
-                app.lang.choose(
-                    "RESULTADO GUIADO / dados sintéticos:",
-                    "GUIDED RESULT / synthetic fixture:"
-                ),
-                if app.result.is_empty() {
-                    app.lang.choose(
-                        "F5 para executar o exemplo selecionado.",
-                        "Press F5 to run selected example.",
-                    )
+                if app.editing {
+                    app.lang
+                        .choose("EDITANDO • PgUp/PgDn rola", "EDITING • PgUp/PgDn scroll")
                 } else {
-                    &app.result
+                    app.lang
+                        .choose("Enter edita • ←/→ exemplos", "Enter edit • ←/→ examples")
                 }
             );
             frame.render_widget(
-                Paragraph::new(content)
+                Paragraph::new(app.query.as_str())
+                    .scroll((0, app.query_scroll.min(u16::MAX as usize) as u16))
+                    .block(block(&title, GREEN, no_color)),
+                query_parts[0],
+            );
+            let result = if app.result.is_empty() {
+                app.lang.choose(
+                    "F5 executa o exemplo selecionado.",
+                    "F5 runs the selected example.",
+                )
+            } else {
+                &app.result
+            };
+            frame.render_widget(
+                Paragraph::new(result)
+                    .scroll((app.result_scroll.min(u16::MAX as usize) as u16, 0))
                     .wrap(Wrap { trim: false })
-                    .block(block(title, GREEN, no_color)),
-                main,
+                    .block(block(
+                        app.lang.choose(
+                            "Resultado guiado • ↑↓ rola • F5 executa",
+                            "Guided result • ↑↓ scroll • F5 run",
+                        ),
+                        CYAN,
+                        no_color,
+                    )),
+                query_parts[1],
             );
         }
         View::Memory => {
@@ -896,28 +921,34 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
     );
 }
 
-struct TerminalGuard;
+struct TerminalGuard {
+    alternate: bool,
+    paste: bool,
+}
 impl TerminalGuard {
     fn enter() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| format!("raw mode: {e}"))?;
-        if let Err(e) = execute!(
-            io::stdout(),
-            EnterAlternateScreen,
-            crossterm::event::EnableBracketedPaste
-        ) {
-            let _ = disable_raw_mode();
-            return Err(format!("terminal setup: {e}"));
-        }
-        Ok(Self)
+        let mut guard = Self {
+            alternate: false,
+            paste: false,
+        };
+        execute!(io::stdout(), EnterAlternateScreen)
+            .map_err(|e| format!("alternate screen setup: {e}"))?;
+        guard.alternate = true;
+        execute!(io::stdout(), crossterm::event::EnableBracketedPaste)
+            .map_err(|e| format!("bracketed paste setup: {e}"))?;
+        guard.paste = true;
+        Ok(guard)
     }
 }
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(
-            io::stdout(),
-            crossterm::event::DisableBracketedPaste,
-            LeaveAlternateScreen
-        );
+        if self.paste {
+            let _ = execute!(io::stdout(), crossterm::event::DisableBracketedPaste);
+        }
+        if self.alternate {
+            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        }
         let _ = disable_raw_mode();
     }
 }
@@ -1082,6 +1113,39 @@ mod tests {
         }
     }
     #[test]
+    fn query_results_and_unsupported_status_remain_reachable_at_80x24() {
+        let mut app = App::new(Language::En, View::Query);
+        app.focus = Focus::Main;
+        app.run_query();
+        for _ in 0..6 {
+            app.handle(key(KeyCode::Down));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render(f, &app, false)).unwrap();
+        let visible = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(visible.contains("Mateus Freitas"));
+
+        app.handle(key(KeyCode::Enter));
+        app.paste(&"x".repeat(512));
+        app.handle(key(KeyCode::F(5)));
+        terminal.draw(|f| render(f, &app, false)).unwrap();
+        let visible = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(visible.contains("Unsupported demo query"));
+        assert!(app.query.chars().count() <= 512);
+    }
+    #[test]
     fn graph_highlight_follows_selection() {
         let mut app = App::new(Language::En, View::Graph);
         let before = graph_lines(&app, 80, 18)
@@ -1114,9 +1178,9 @@ mod tests {
                     .map(|c| c.symbol())
                     .collect::<String>();
                 assert!(text.contains(if lang == Language::En {
-                    "Press F5"
+                    "F5 runs"
                 } else {
-                    "F5 para"
+                    "F5 executa"
                 }));
                 if no_color {
                     assert!(terminal
