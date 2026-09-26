@@ -1,8 +1,9 @@
 # Brainwire Observatory: terminal backoffice
 
-Status: visual identity selected by Allan on 2026-09-26. An initial interactive
+Status: visual identity selected by Allan on 2026-09-26. The interactive
 [terminal demo](../tui-demo.md) now implements Graph, guided Query examples,
-Memory and Disk & Files with synthetic data. Connected behavior, live telemetry
+Memory and Disk & Files with synthetic data, including a Braille graph canvas,
+explained memory cards and the folder/file/LSM backoffice composition. Connected behavior, live telemetry
 and the broader interactions below remain a design proposal. The user requested
 planning around the generated concept, both graph exploration and Cypher in the first prototype, a cyberpunk
 palette and logo (then preferred a stronger green with restrained cyan), an
@@ -11,7 +12,8 @@ and storage. Numerical budgets below are initial design targets to validate.
 
 This refines [approved design section 4.3](../superpowers/specs/2026-09-24-brainwire-design.md#43-cli-and-tui).
 After the demo, the [engine MVP](../superpowers/plans/2026-09-26-brainwire-mvp.md)
-remains the next implementation work: executor, real Bolt transactions, and `serve`.
+continues with real Bolt transactions and `serve`. The atomic executor and
+separate embedded [`brainwire cypher` command](../local-cypher.md) are implemented.
 
 ## 1. Product experience
 
@@ -305,7 +307,9 @@ Stage A can validate visual interactions without finishing the engine, but
 arbitrary Cypher execution in demo mode requires the real executor against an
 isolated synthetic database. Before that, a canned scenario must explicitly
 identify itself and reject unsupported input rather than pretend to execute
-it. The next engine session still starts with the executor.
+it. That explicitly synthetic behavior is implemented. The atomic executor is
+available separately through the local command; Stage B still needs real Bolt
+transaction lifecycle and durable server integration.
 
 Before implementation, turn each stage into a task brief with exact API
 contracts. Do not treat this design proposal as a completed implementation

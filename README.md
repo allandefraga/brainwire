@@ -10,8 +10,9 @@ adapter; the platform remains the first integration target.
 
 > **Status: local MVP development.** The Rust workspace contains the RocksDB
 > storage foundation, graph operations, the Bolt protocol server, configuration
-> commands, a Cypher subset parser and an interactive terminal demo. The
-> durable query server is still under development. The design is in
+> commands, a Cypher subset parser and atomic executor, and an interactive
+> terminal backoffice demo. Real local queries are available through
+> `brainwire cypher`; the durable query server is still under development. The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
 > the implementation tasks in
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
@@ -24,9 +25,15 @@ images. Allan selected the latest electric-green identity on 2026-09-26:
 near-black background, restrained cyan and the connected B/W logo. That visual
 identity is used by the first interactive TUI: Graph, Query, Memory and
 Disk & Files. Run `brainwire shell --demo` to explore its synthetic scenario.
-It includes guided query examples and contextual explanations; live engine
-queries, real telemetry and real file inspection are still pending. See the
-[terminal demo guide](docs/tui-demo.md) for controls and limitations.
+It includes a clustered graph, guided query examples, explained memory budgets
+and a file inspector with an illustrative LSM storage flow. See the
+[terminal demo guide](docs/tui-demo.md) for controls and actual captures.
+
+For real graph reads and writes, use the separate embedded
+`brainwire cypher --database <directory> --query <text>` command. Queries commit
+atomically to RocksDB and survive reopening. The [local query guide](docs/local-cypher.md)
+walks through ontology initialization, parameters and JSON output. Connecting
+the TUI to the engine, real telemetry and real files remains pending.
 
 ## Local development
 
@@ -39,8 +46,9 @@ cargo run --locked --offline -p brainwire-server -- shell --demo
 ```
 
 Offline commands require dependencies to have been fetched previously.
-The `brainwire` binary provides configuration commands and the terminal demo; the
-`brainwire-bolt-dev` binary uses a stub query engine. The executor and durable
+The `brainwire` binary provides configuration commands, local Cypher execution
+and the terminal demo. The `brainwire-bolt-dev` binary uses a stub query engine.
+Real Bolt transaction handling and durable
 `brainwire serve` integration are the next MVP tasks.
 
 The local history was extracted from the platform's Brainwire feature branch.

@@ -1,9 +1,10 @@
 # Brainwire terminal demo
 
-The first interactive shell demonstrates the selected electric-green identity
-and the Graph, Query, Memory and Disk & Files workflow. It uses synthetic data.
+The interactive shell demonstrates the selected electric-green identity and
+the Graph, Query, Memory and Disk & Files workflow. It uses synthetic data.
 It does not connect to a running database, inspect real files or execute
-arbitrary Cypher yet.
+arbitrary Cypher. For real local queries, use the separate
+[`brainwire cypher` command](local-cypher.md).
 
 From the standalone repository:
 
@@ -18,8 +19,9 @@ directly with `./target/debug/brainwire shell --demo` after building it.
 
 ## Actual terminal preview
 
-These images render ANSI output captured from the running binary in a 120×36
-pseudo-terminal (pt-BR, color enabled). They are executable-demo captures,
+These images render ANSI output captured from the running binary in a 160×48
+pseudo-terminal (pt-BR, color enabled). Text uses Menlo with Apple Symbols for
+Braille graph cells. They are executable-demo captures,
 separate from the earlier generated design concepts. Font rendering varies
 between terminal emulators.
 
@@ -27,22 +29,27 @@ between terminal emulators.
 
 ![Memory demo](design/assets/brainwire-tui-demo-memory.png)
 
+![Disk and files demo](design/assets/brainwire-tui-demo-disk.png)
+
 ## Explore the demo
 
 | Key | Action |
 |---|---|
 | `1`, `2`, `3`, `4` | Switch to Graph, Query, Memory or Disk outside editing |
 | `Tab` | Change focus |
-| Arrow keys | Move selection; scroll query results with Up/Down |
-| `PgUp`, `PgDn` | Move the query editor viewport |
+| Arrow keys | Move selection; scroll query results or the focused inspector with Up/Down |
+| `PgUp`, `PgDn` | Move the editor viewport while editing, or scroll the focused inspector |
 | `Enter` | Inspect a selection or enter editing, according to focus |
 | `F1` | Toggle contextual explanation |
 | `F5` | Run the supported guided query example |
 | `Esc` | Leave editing or help before exiting |
 | `q` | Quit when not editing |
 
-At 80 columns, longer query text is initially clipped; enter editing and use
-`PgDn` to reveal its tail. Query results scroll separately with Up/Down.
+Both guided examples wrap at 80 columns. Longer edited text shows an overflow
+hint; use `PgUp`/`PgDn` while editing to reveal the rest. Query results and the
+inspector scroll independently; changing a selection resets the inspector.
+The graph highlights the selected node and its incident edges, with labels and
+markers that remain useful when color is disabled.
 
 The footer shows the current controls. Typed shortcut characters remain text
 while editing. A changed query outside the guided examples is refused
@@ -53,7 +60,9 @@ difference between a container limit, an internal component budget and actual
 usage. Memtables are included in cache accounting; query-budget enforcement
 is not implemented by this demo. The disk inspector explains the roles of
 SST, WAL, MANIFEST, CURRENT, OPTIONS, LOG and LOCK without opening or modifying
-a real database directory.
+a real database directory. Wide terminals add a folder tree, mini graph,
+selected-file details and an LSM flow from memtable to disk. The compact layout
+retains file selection, the flow and contextual help.
 
 ## Preview without a terminal
 
@@ -67,11 +76,12 @@ cargo run --locked --offline -p brainwire-server -- shell --demo --snapshot --vi
 Views are `graph`, `query`, `memory` and `disk`. Snapshot dimensions are bounded
 to 80..240 columns and 24..80 rows. Interactive mode requires a terminal on
 both input and output. `--no-anim` and `NO_COLOR` are available for quiet or
-plain presentation.
+plain presentation. If your terminal environment sets `NO_COLOR`, unset it
+for the green palette; the application deliberately honors that preference.
 
 ## Toward the connected MVP
 
-The next engine work is the Cypher executor, followed by real Bolt
+The atomic Cypher executor is implemented. The next engine work is real Bolt
 transaction handling and `brainwire serve`. A connected explorer additionally
 needs bounded neighborhood results, and live memory/file views need the
 server telemetry and storage-inspection contracts. The

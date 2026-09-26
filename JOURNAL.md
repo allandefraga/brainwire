@@ -38,6 +38,60 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-26, continued session until 21:30: executor and backoffice
+
+- **Requested:** improve both database and CLI; Allan explicitly extended work
+  until 21:30 Europe/Amsterdam (19:30 UTC). All work remains local.
+- **Engine complete:** `5ace18d` adds the atomic Cypher executor;
+  `51aca5a` fixes signed integer minimum and nonfinite float literal boundaries.
+  MATCH, CREATE, MERGE, SET, DETACH DELETE, UNWIND, RETURN, grouping/count and
+  LIMIT operate on one storage snapshot/overlay and commit once after success.
+  The catalog shares that snapshot; late execution errors discard graph writes.
+  No store API changes were needed. The executor is split into validation,
+  evaluation, graph access and orchestration modules.
+- **Engine verification:** 61 focused tests pass (45 lexer/parser, 16 executor),
+  including 1,000-row UNWIND/reopen, duplicate and late-error rollback, directed
+  hops, self-loops, grouping/null logic, exact integer/float comparisons and
+  deterministic conflict mapping. Focused clippy/fmt pass. Task review of
+  `5e7b86c..51aca5a` is clean for spec and quality.
+- **CLI delivered:** `f6d94fb` adds embedded `brainwire cypher` with ontology,
+  parameters, configuration and explicit node/scalar JSON output. Parameter
+  integers outside i64 and nonfinite stored floats fail explicitly. Process
+  tests cover exclusive locks and reopen/rollback; ontology applies separately
+  before the query, and output errors can follow already-committed writes.
+  The [local query guide](docs/local-cypher.md) documents those boundaries.
+- **Backoffice delivered:** the same commit adds clustered Braille graph edges,
+  a proportioned mini-preview, file tree/table, LSM stage panels and selected-file
+  explanation, plus memory cards, inclusion diagram and usage bar. Inspector
+  focus now scrolls independently, both query examples wrap at 80 columns and
+  longer text has a viewport hint. `7571721` preserves EDITING in that hint.
+  The two polish follow-ups from the preceding demo session are addressed.
+  Actual 160×48 captures are in the [terminal guide](docs/tui-demo.md); the saved
+  user image remains the visual target. The
+  [executor/backoffice plan](docs/superpowers/plans/2026-09-26-brainwire-executor-backoffice.md)
+  records this implementation slice.
+- **Consolidated verification:** **262 workspace tests** pass, plus all-target
+  clippy with denied warnings, formatting and binary build. Independent command
+  QA verified 1,000 persistent records across processes, Unicode and parameters,
+  node JSON, directed hops, duplicate/late-error rollback, numeric boundaries,
+  null/SET/delete and missing parameters. Actual PTY checks covered all layouts
+  at 160×48, 120×36 and 80×24, second-query wrapping, result 12, a bounded long
+  paste, shortcut typing, inspector scrolling/help, resizing, normal exit and
+  exact termios restoration. Task 2 review of `51aca5a..7571721` passes spec
+  and quality with no findings; final integration review is pending.
+- **Decisions/limits:** use the existing standalone branch; reject unsupported
+  relationship bindings/property filters explicitly; expose real execution
+  through a local command while keeping the TUI's fixture/metrics/files labeled
+  synthetic. Queries still materialize rows; grouping searches first-seen groups
+  linearly. Streaming, a query memory ceiling, full Cypher and authorization
+  are not implemented. Per-call atomic execution must not be mistaken for
+  multi-query Bolt transactions. The original backoffice image remains the
+  primary composition reference.
+- **Next:** real Bolt transaction lifecycle and durable `serve` (engine MVP
+  Task 5), then connected TUI query/neighborhood and telemetry/file contracts.
+- **Local only:** standalone `/Users/fraga/Documents/brainwire`, no push,
+  publication or remote PR. Local database files under `/data/` are ignored.
+
 ### 2026-09-26, extra 30-minute session: runnable terminal demo
 
 - **Requested:** Allan asked for roughly 30 more minutes toward the MVP, with

@@ -35,10 +35,13 @@ reviews stay as they are.
 
 Brainwire now lives at `/Users/fraga/Documents/brainwire`, a standalone sibling
 of the platform. Run the commands below from this repository.
-Tasks 1, 2 and 3 are complete and reviewed. Task 4 has not started. The merged
-storage foundation includes the five-cycle process-crash recovery test.
-All 225 workspace tests, clippy with warnings denied and formatting pass.
-The latest progress and limitations are recorded in `JOURNAL.md`.
+Tasks 1 through 4 are complete and reviewed. Task 4 added the atomic executor
+in `5ace18d`, with numeric literal boundary corrections in `51aca5a`. Its
+focused verification passed 61 tests, clippy with warnings denied and formatting.
+The storage foundation includes the five-cycle process-crash recovery test.
+The latest consolidated verification and limitations are recorded in `JOURNAL.md`.
+The separate local Cypher command and TUI iteration are tracked in
+[the executor/backoffice plan](2026-09-26-brainwire-executor-backoffice.md).
 
 The transaction requirement under Task 5 below supersedes the old assumption
 that real engine transactions could wait until plan 3. Managed driver writes
@@ -513,7 +516,7 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
 - A missing `$param` is `ParameterMissing`; an unknown variable, label or edge
   type is `Semantic`; a `ParseError` is `Syntax`.
 
-- [ ] **Step 1: Failing tests** (in `src/exec.rs`, with a tempdir database and
+- [x] **Step 1: Failing tests** (in `src/exec.rs`, with a tempdir database and
   the synthetic fixture `crates/core/tests/fixtures/graph_mapping.json` applied
   through `Database::apply_ontology`):
   1. `CREATE (c:Customer {entity_id: 'c1', name: 'Ana'})` then
@@ -543,7 +546,7 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
       second commit gives `ExecError::Conflict` (drive `execute` from two
       threads on an `Arc<Database>` with a barrier, or test the mapping from
       `TxnError::Conflict` directly if the race is not deterministic).
-- [ ] **Step 2: Run to see them fail**, **Step 3: implement**, **Step 4: tests,
+- [x] **Step 2: Run to see them fail**, **Step 3: implement**, **Step 4: tests,
   clippy, fmt**, **Step 5: commit** `feat(brainwire): execute the Cypher subset on the store`
 
 ## Task 5: `brainwire serve`, databases and the driver check

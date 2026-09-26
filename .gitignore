@@ -1,2 +1,5 @@
 /target
 /.superpowers/
+
+# Local embedded database files.
+/data/
