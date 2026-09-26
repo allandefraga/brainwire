@@ -59,14 +59,16 @@ No line of code before the end of phase 2.
   invariant check blind to dangling edges; long AND/OR chains that crash the
   parser (bounded, but the bound had a bypass that the second fix closes);
   a typo in a config key passing silently.
-- **Interrupted:** the API session limit stopped two implementers mid-work,
-  and Allan closed the day. `.worktrees/brainwire` holds the uncommitted,
-  unfinished Task 9 fix (graph.rs and txn.rs; 64 store tests pass on it, not
-  yet linted or committed). `.worktrees/brainwire-cypher` is clean; its fix
-  round 2 had not started.
-- **Next step:** resume both implementers from the ledgers (Task 9 fix round 1
-  and MVP Task 3 in `.worktrees/brainwire`, MVP Task 2 fix round 2 in
-  `.worktrees/brainwire-cypher`), review, merge the parser, then MVP Task 4
+- **Interrupted:** the API session limit stopped two implementers mid-work.
+  At 16:07 Allan asked for a little more, and the Task 9 fix was finished and
+  committed (`711a3e3`: DETACH DELETE conflicts with a concurrent edge in both
+  orders, promotion clears the old value, the invariant check sees dangling
+  edges; 177 workspace tests green); its scoped re-review is still to do.
+  `.worktrees/brainwire-cypher` is clean; its fix round 2 had not started.
+- **Next step:** the scoped re-review of the Task 9 fix, MVP Task 3 in
+  `.worktrees/brainwire`, and MVP Task 2 fix round 2 in
+  `.worktrees/brainwire-cypher` (resume the implementers from the ledgers);
+  review, merge the parser, then MVP Task 4
   (executor) and Task 5 (`brainwire serve` and the driver demo: create, restart,
   read from disk).
 - **Blockers:** none.
