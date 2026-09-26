@@ -92,6 +92,88 @@ fn invalid_inputs_do_not_create_database() {
         .success());
     assert!(!d.path().join("db").exists());
 }
+
+#[test]
+fn parameter_file_imports_nested_rows_and_reopens() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("params.json"),
+        r#"{"rows":[{"id":"file-1","name":"Ana"},{"id":"file-2","name":"Béa"}],"finite":1.5}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        json(query(
+            &d,
+            "UNWIND $rows AS row CREATE (c:Customer {entity_id: row.id, name: row.name}) RETURN c.name, $finite",
+            &["--ontology", "schema.json", "--params-file", "params.json"],
+        ))["rows"],
+        serde_json::json!([["Ana", 1.5], ["Béa", 1.5]])
+    );
+    assert_eq!(
+        json(query(&d, "MATCH (c:Customer) RETURN count(*)", &[]))["rows"],
+        serde_json::json!([[2]])
+    );
+    assert_eq!(
+        json(query(
+            &d,
+            "MATCH (c:Customer {entity_id: 'file-2'}) RETURN c.name",
+            &[],
+        ))["rows"],
+        serde_json::json!([["Béa"]])
+    );
+}
+
+#[test]
+fn invalid_parameter_files_fail_before_opening_store() {
+    for content in [
+        &b"{"[..],
+        &b"[]"[..],
+        &b"\xff"[..],
+        &br#"{"x":9223372036854775808}"#[..],
+        &br#"{"x":-9223372036854775809}"#[..],
+        &br#"{"x":184467440737095516160}"#[..],
+        &br#"{"x":1e999}"#[..],
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("params.json"), content).unwrap();
+        let out = query(&d, "RETURN $x", &["--params-file", "params.json"]);
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("parameters:"));
+        assert!(out.stdout.is_empty());
+        assert!(!d.path().join("db").exists());
+    }
+    for path in ["missing.json", "."] {
+        let d = tempfile::tempdir().unwrap();
+        let out = query(&d, "RETURN 1", &["--params-file", path]);
+        assert!(!out.status.success());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("parameters:"));
+        assert!(error.contains("cannot read"));
+        assert!(error.contains(path));
+        assert!(!d.path().join("db").exists());
+    }
+}
+
+#[test]
+fn parameter_file_conflicts_with_explicit_parameters() {
+    let d = tempfile::tempdir().unwrap();
+    let out = query(
+        &d,
+        "RETURN 1",
+        &["--params", "{}", "--params-file", "missing.json"],
+    );
+    assert!(!out.status.success());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("cannot be used with"));
+    assert!(error.contains("--params-file"));
+    assert!(error.contains("--params"));
+    assert!(!d.path().join("db").exists());
+}
 #[test]
 fn config_and_shell_routes_survive() {
     let d = tempfile::tempdir().unwrap();

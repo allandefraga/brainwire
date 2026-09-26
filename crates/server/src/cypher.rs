@@ -16,10 +16,18 @@ pub fn run(
     database: &Path,
     query: &str,
     ontology: Option<&Path>,
-    params: &str,
+    params: Option<&str>,
+    params_file: Option<&Path>,
     config: Option<&Path>,
 ) -> Result<(), String> {
-    let params = parse_params(params)?;
+    let params = match params_file {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("parameters: cannot read {}: {e}", path.display()))?;
+            parse_params(&text)?
+        }
+        None => parse_params(params.unwrap_or("{}"))?,
+    };
     let ontology: Option<GraphMapping> = ontology
         .map(|path| {
             let text = std::fs::read_to_string(path)
@@ -77,7 +85,7 @@ fn category(e: &ExecError) -> &'static str {
 fn parse_params(text: &str) -> Result<BTreeMap<String, Value>, String> {
     let json: Json = serde_json::from_str(text).map_err(|e| format!("parameters: {e}"))?;
     let Json::Object(map) = json else {
-        return Err("parameters: --params must be a JSON object".into());
+        return Err("parameters: expected a JSON object of named parameters".into());
     };
     map.into_iter()
         .map(|(k, v)| from_json(v).map(|v| (k, v)))

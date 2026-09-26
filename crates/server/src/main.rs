@@ -33,8 +33,11 @@ enum Commands {
         #[arg(long)]
         ontology: Option<PathBuf>,
         /// JSON object of named parameters; integers must fit signed i64.
-        #[arg(long, default_value = "{}")]
-        params: String,
+        #[arg(long, conflicts_with = "params_file")]
+        params: Option<String>,
+        /// File containing the same JSON object of named parameters as --params.
+        #[arg(long, value_name = "JSON_FILE")]
+        params_file: Option<PathBuf>,
         /// Config file; otherwise uses ./brainwire.toml. Environment overrides it.
         #[arg(long)]
         config: Option<PathBuf>,
@@ -98,12 +101,14 @@ fn main() {
             query,
             ontology,
             params,
+            params_file,
             config,
         } => cypher::run(
             &database,
             &query,
             ontology.as_deref(),
-            &params,
+            params.as_deref(),
+            params_file.as_deref(),
             config.as_deref(),
         ),
         Commands::Shell {
