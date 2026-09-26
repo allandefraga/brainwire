@@ -19,6 +19,13 @@ pub struct StoreConfig {
     pub cache_bytes: usize,
     pub memtable_bytes: usize,
     pub id_block: u64,
+    /// Cap on the number of keys the transaction committer keeps in its
+    /// conflict-detection history (`txn::Committer`). Once exceeded, the
+    /// oldest commits are evicted even if a still-open transaction could
+    /// have depended on them, and such a transaction fails closed on its
+    /// next write or dependency (spec 1.4). Production default undecided;
+    /// tests use a small cap so the eviction path itself is reachable.
+    pub conflict_history_keys: usize,
 }
 
 impl StoreConfig {
@@ -27,14 +34,13 @@ impl StoreConfig {
             cache_bytes: 64 << 20,
             memtable_bytes: 16 << 20,
             id_block: 4,
+            conflict_history_keys: 4,
         }
     }
 }
 
 /// Shared by every database of the process, so ten databases fit the budget of one.
 pub struct Resources {
-    // Read starting in Task 8 (alloc.rs: `id_block`), outside this task's scope.
-    #[allow(dead_code)]
     pub(crate) config: StoreConfig,
     cache: Cache,
     write_buffers: WriteBufferManager,
@@ -101,7 +107,7 @@ impl Database {
         let db = DB::open_cf_descriptors(&opts, path, families)?;
         Ok(Database {
             db,
-            committer: crate::txn::Committer::default(),
+            committer: crate::txn::Committer::new(res.config.conflict_history_keys),
         })
     }
 
@@ -109,6 +115,22 @@ impl Database {
         self.db
             .cf_handle(name)
             .ok_or(StoreError::MissingColumnFamily(name))
+    }
+}
+
+#[cfg(test)]
+impl Database {
+    /// Wraps an already-open RocksDB handle (for example opened read-only,
+    /// to reach a write failure `Database::open` cannot produce) as a
+    /// `Database`, without depending on its exact field set from outside
+    /// this module — `txn.rs`'s tests used to build `Database { .. }`
+    /// directly, which would need updating every time this struct gains a
+    /// field (Task 8+).
+    pub(crate) fn for_test(db: DB, conflict_history_keys: usize) -> Database {
+        Database {
+            db,
+            committer: crate::txn::Committer::new(conflict_history_keys),
+        }
     }
 }
 
@@ -193,6 +215,7 @@ mod tests {
         assert_eq!(res.config.cache_bytes, cfg.cache_bytes);
         assert_eq!(res.config.memtable_bytes, cfg.memtable_bytes);
         assert_eq!(res.config.id_block, cfg.id_block);
+        assert_eq!(res.config.conflict_history_keys, cfg.conflict_history_keys);
     }
 
     #[test]
