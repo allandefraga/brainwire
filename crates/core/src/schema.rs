@@ -113,6 +113,8 @@ pub enum SchemaError {
     TooManyTypes,
     #[error("entity_join must look like 'column -> Label.property': {0}")]
     BadEntityJoin(String),
+    #[error("no ids left for {0}")]
+    IdSpaceExhausted(String),
 }
 
 fn is_reserved(name: &str) -> bool {
@@ -120,18 +122,29 @@ fn is_reserved(name: &str) -> bool {
 }
 
 /// Keeps the previous columns (so old rows decode) and appends new names.
-fn merge_columns(previous: &[Column], names: &[String]) -> Vec<Column> {
+/// `owner` names whose columns these are, for the `IdSpaceExhausted` message
+/// (e.g. "Customer", "WORKS_AT", "interaction").
+fn merge_columns(
+    previous: &[Column],
+    names: &[String],
+    owner: &str,
+) -> Result<Vec<Column>, SchemaError> {
     let mut cols = previous.to_vec();
     for name in names.iter().filter(|n| !is_reserved(n)) {
         if !cols.iter().any(|c| &c.name == name) {
-            let id = cols.iter().map(|c| c.id + 1).max().unwrap_or(0);
+            let id = match cols.iter().map(|c| c.id).max() {
+                Some(max_id) => max_id
+                    .checked_add(1)
+                    .ok_or_else(|| SchemaError::IdSpaceExhausted(format!("columns of {owner}")))?,
+                None => 0,
+            };
             cols.push(Column {
                 id,
                 name: name.clone(),
             });
         }
     }
-    cols
+    Ok(cols)
 }
 
 fn owner_label(entity_join: &str) -> Result<String, SchemaError> {
@@ -185,7 +198,7 @@ impl Catalog {
                 .collect();
             match node_types.iter_mut().find(|t| t.label == spec.label) {
                 Some(t) => {
-                    t.columns = merge_columns(&t.columns, &spec.properties);
+                    t.columns = merge_columns(&t.columns, &spec.properties, &spec.label)?;
                     t.indexed = indexed;
                     t.identifiers = identifiers;
                     t.display_color = spec.display_color.clone();
@@ -198,7 +211,7 @@ impl Catalog {
                     node_types.push(NodeType {
                         id: TypeId(next),
                         label: spec.label.clone(),
-                        columns: merge_columns(&[], &spec.properties),
+                        columns: merge_columns(&[], &spec.properties, &spec.label)?,
                         indexed,
                         identifiers,
                         display_color: spec.display_color.clone(),
@@ -222,15 +235,20 @@ impl Catalog {
                     if !t.signatures.contains(&sig) {
                         t.signatures.push(sig);
                     }
-                    t.columns = merge_columns(&t.columns, &spec.properties);
+                    t.columns = merge_columns(&t.columns, &spec.properties, &spec.name)?;
                 }
                 None => {
-                    let next = edge_types.iter().map(|t| t.id.0 + 1).max().unwrap_or(1);
+                    let next = match edge_types.iter().map(|t| t.id.0).max() {
+                        Some(max_id) => max_id
+                            .checked_add(1)
+                            .ok_or_else(|| SchemaError::IdSpaceExhausted("edge types".into()))?,
+                        None => 1,
+                    };
                     edge_types.push(EdgeType {
                         id: EdgeTypeId(next),
                         name: spec.name.clone(),
                         signatures: vec![sig],
-                        columns: merge_columns(&[], &spec.properties),
+                        columns: merge_columns(&[], &spec.properties, &spec.name)?,
                     });
                 }
             }
@@ -243,22 +261,33 @@ impl Catalog {
                 .iter_mut()
                 .find(|s| s.event_type == spec.event_type && s.owner == owner)
             {
-                Some(s) => s.columns = merge_columns(&s.columns, &spec.properties),
+                Some(s) => {
+                    s.columns = merge_columns(&s.columns, &spec.properties, &spec.event_type)?
+                }
                 None => {
-                    let next = streams.iter().map(|s| s.id + 1).max().unwrap_or(1);
+                    let next = match streams.iter().map(|s| s.id).max() {
+                        Some(max_id) => max_id
+                            .checked_add(1)
+                            .ok_or_else(|| SchemaError::IdSpaceExhausted("streams".into()))?,
+                        None => 1,
+                    };
                     streams.push(Stream {
                         id: next,
                         event_type: spec.event_type.clone(),
                         owner,
                         timestamp_field: spec.timestamp_field.clone(),
-                        columns: merge_columns(&[], &spec.properties),
+                        columns: merge_columns(&[], &spec.properties, &spec.event_type)?,
                     });
                 }
             }
         }
 
+        let version = prev
+            .version
+            .checked_add(1)
+            .ok_or_else(|| SchemaError::IdSpaceExhausted("catalog version".into()))?;
         Ok(Catalog {
-            version: prev.version + 1,
+            version,
             node_types,
             edge_types,
             streams,
@@ -393,5 +422,116 @@ mod tests {
         let cat = Catalog::apply(&fixture(), None).unwrap();
         assert!(cat.node_type("DoesNotExist").is_none());
         assert!(cat.edge_type("DOES_NOT_EXIST").is_none());
+    }
+
+    // --- Fix round 1 (controller ruling): id/version arithmetic must be
+    // checked, not wrapping, so a huge ontology returns IdSpaceExhausted
+    // instead of silently reusing an id. These build the previous Catalog
+    // directly with a column already at u16::MAX, rather than generating
+    // 65,536 properties.
+
+    #[test]
+    fn exhausting_column_ids_is_an_error() {
+        let previous = Catalog {
+            version: 1,
+            node_types: vec![NodeType {
+                id: TypeId(1),
+                label: "Customer".into(),
+                columns: vec![Column {
+                    id: u16::MAX,
+                    name: "old".into(),
+                }],
+                indexed: vec![],
+                identifiers: vec![],
+                display_color: None,
+            }],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let mapping = GraphMapping {
+            version: "2".into(),
+            nodes: vec![NodeSpec {
+                label: "Customer".into(),
+                properties: vec!["old".into(), "new_prop".into()],
+                er_fields: vec![],
+                indexed_fields: vec![],
+                identifier_columns: BTreeMap::new(),
+                display_color: None,
+            }],
+            edges: vec![],
+            timeline: vec![],
+        };
+        assert_eq!(
+            Catalog::apply(&mapping, Some(&previous)),
+            Err(SchemaError::IdSpaceExhausted("columns of Customer".into()))
+        );
+    }
+
+    #[test]
+    fn exhausting_edge_type_ids_is_an_error() {
+        let previous = Catalog {
+            version: 1,
+            node_types: vec![
+                NodeType {
+                    id: TypeId(1),
+                    label: "Customer".into(),
+                    columns: vec![],
+                    indexed: vec![],
+                    identifiers: vec![],
+                    display_color: None,
+                },
+                NodeType {
+                    id: TypeId(2),
+                    label: "Company".into(),
+                    columns: vec![],
+                    indexed: vec![],
+                    identifiers: vec![],
+                    display_color: None,
+                },
+            ],
+            edge_types: vec![EdgeType {
+                id: EdgeTypeId(u16::MAX),
+                name: "OLD_EDGE".into(),
+                signatures: vec![(TypeId(1), TypeId(2))],
+                columns: vec![],
+            }],
+            streams: vec![],
+        };
+        let mapping = GraphMapping {
+            version: "2".into(),
+            nodes: vec![
+                NodeSpec {
+                    label: "Customer".into(),
+                    properties: vec![],
+                    er_fields: vec![],
+                    indexed_fields: vec![],
+                    identifier_columns: BTreeMap::new(),
+                    display_color: None,
+                },
+                NodeSpec {
+                    label: "Company".into(),
+                    properties: vec![],
+                    er_fields: vec![],
+                    indexed_fields: vec![],
+                    identifier_columns: BTreeMap::new(),
+                    display_color: None,
+                },
+            ],
+            edges: vec![EdgeSpec {
+                name: "NEW_EDGE".into(),
+                from: EndpointSpec {
+                    label: "Customer".into(),
+                },
+                to: EndpointSpec {
+                    label: "Company".into(),
+                },
+                properties: vec![],
+            }],
+            timeline: vec![],
+        };
+        assert_eq!(
+            Catalog::apply(&mapping, Some(&previous)),
+            Err(SchemaError::IdSpaceExhausted("edge types".into()))
+        );
     }
 }
