@@ -326,10 +326,13 @@ the platform sends today) and [research/bolt.md](../../../research/bolt.md)
 - Versions offered: 5.1 to 5.4, without the 5.7 manifest. Never 5.5, which some
   drivers know but no Neo4j server negotiates. Staying at or below 5.6 also
   keeps the classic `{code, message}` error format.
-- HELLO answers with `server` starting with `Neo4j/`, a hard requirement of
-  driver 5.x (it raises `UnsupportedServerProduct` otherwise), followed by the
-  compatible version, with the Brainwire version in the `hints` and in `CALL
-  dbms.components()`.
+- HELLO answers with `server` set to
+  `Neo4j/5.26.0 compatible graph database server - Brainwire`, the form
+  Memgraph uses (decided with Allan on 2026-09-26). The `Neo4j/` prefix is a
+  hard requirement of driver 5.x (it raises `UnsupportedServerProduct`
+  otherwise; driver 6.x dropped the check), and the rest says the server is
+  not Neo4j itself, whose name is a trademark of Neo4j, Inc. The Brainwire
+  version goes in the `hints` and in `CALL dbms.components()`.
 - LOGON accepts three schemes: `basic` (users in `system`, argon2 hashes),
   `bearer` (the client-identity JWT, validated by JWKS) and `none` only when
   enabled for local development. A token carrying the service capability opens
