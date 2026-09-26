@@ -1,0 +1,33 @@
+{
+  "version": "1",
+  "nodes": [
+    {
+      "label": "Customer",
+      "properties": ["name", "email", "phone", "cpf", "segment", "acl_allow"],
+      "er_fields": ["email", "phone"],
+      "indexed_fields": ["segment", "email"],
+      "identifier_columns": {"email": "email", "cpf": "cpf"},
+      "display_color": "#3B82F6"
+    },
+    {
+      "label": "Company",
+      "properties": ["name", "cnpj", "industry"],
+      "indexed_fields": ["industry"],
+      "identifier_columns": {"cnpj": "cnpj"}
+    },
+    {"label": "Segment", "properties": ["name"]}
+  ],
+  "edges": [
+    {"type": "WORKS_AT", "from": {"label": "Customer"}, "to": {"label": "Company"}, "properties": ["role"]},
+    {"type": "IN_SEGMENT", "from": {"label": "Company"}, "to": {"label": "Segment"}},
+    {"type": "IN_SEGMENT", "from": {"label": "Customer"}, "to": {"label": "Segment"}}
+  ],
+  "timeline": [
+    {
+      "event_type": "interaction",
+      "entity_join": "customer_email -> Customer.email",
+      "timestamp_field": "created_at",
+      "properties": ["ticket_id", "channel", "status"]
+    }
+  ]
+}
