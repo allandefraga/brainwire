@@ -1,16 +1,17 @@
 # Brainwire Observatory: terminal backoffice
 
-Status: visual identity selected by Allan on 2026-09-26; interaction and
-implementation details remain a design proposal. No TUI or new engine features
-are implemented by this document. The user requested planning around the generated
-concept, both graph exploration and Cypher in the first prototype, a cyberpunk
+Status: visual identity selected by Allan on 2026-09-26. An initial interactive
+[terminal demo](../tui-demo.md) now implements Graph, guided Query examples,
+Memory and Disk & Files with synthetic data. Connected behavior, live telemetry
+and the broader interactions below remain a design proposal. The user requested
+planning around the generated concept, both graph exploration and Cypher in the first prototype, a cyberpunk
 palette and logo (then preferred a stronger green with restrained cyan), an
 understandable memory panel, and a backoffice for files
 and storage. Numerical budgets below are initial design targets to validate.
 
 This refines [approved design section 4.3](../superpowers/specs/2026-09-24-brainwire-design.md#43-cli-and-tui).
-The [engine MVP](../superpowers/plans/2026-09-26-brainwire-mvp.md) remains the
-next implementation work: executor, real Bolt transactions, and `serve`.
+After the demo, the [engine MVP](../superpowers/plans/2026-09-26-brainwire-mvp.md)
+remains the next implementation work: executor, real Bolt transactions, and `serve`.
 
 ## 1. Product experience
 
@@ -35,6 +36,18 @@ memory and backoffice images below, together with the green B/W logo, are the
 canonical visual references for future Brainwire screens and brand assets.
 Earlier mint and magenta concepts are retained only as exploration history.
 Implementation refinements should preserve this identity.
+
+During the demo implementation on 2026-09-26, Allan sent the backoffice image
+again and explicitly asked that it not be forgotten. The exact uploaded image
+is preserved as the **primary backoffice composition reference** below. Keep
+its strong green focus, restrained cyan, dense panel hierarchy, folder/file
+browser, graph mini-preview, LSM flow, right-hand file explanation and bottom
+memory explanation. The external image-editor toolbar in the screenshot is
+not part of Brainwire. The clean green-v2 concept remains useful for details
+obscured by that toolbar. A functional demo is an intermediate step, not a
+replacement for this visual target.
+
+![User-confirmed backoffice reference](assets/brainwire-backoffice-user-reference.png)
 
 ![Memory concept](assets/brainwire-memory-green-v2.png)
 

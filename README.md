@@ -10,20 +10,23 @@ adapter; the platform remains the first integration target.
 
 > **Status: local MVP development.** The Rust workspace contains the RocksDB
 > storage foundation, graph operations, the Bolt protocol server, configuration
-> commands and a Cypher subset parser. The durable query server is still under
-> development. The design is in
+> commands, a Cypher subset parser and an interactive terminal demo. The
+> durable query server is still under development. The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
 > the implementation tasks in
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
 > progress in [JOURNAL.md](JOURNAL.md).
 
-The proposed terminal backoffice is documented in
+The terminal backoffice design is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
 graph/query workflows, explained memory settings, disk inspection and concept
 images. Allan selected the latest electric-green identity on 2026-09-26:
 near-black background, restrained cyan and the connected B/W logo. That visual
-identity is the reference for future screens. Interaction and implementation
-details remain a proposal; the TUI has not been implemented yet.
+identity is used by the first interactive TUI: Graph, Query, Memory and
+Disk & Files. Run `brainwire shell --demo` to explore its synthetic scenario.
+It includes guided query examples and contextual explanations; live engine
+queries, real telemetry and real file inspection are still pending. See the
+[terminal demo guide](docs/tui-demo.md) for controls and limitations.
 
 ## Local development
 
@@ -32,10 +35,11 @@ cargo test --workspace --locked --offline
 cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo fmt --all -- --check
 cargo run -p brainwire-server -- config show
+cargo run --locked --offline -p brainwire-server -- shell --demo
 ```
 
 Offline commands require dependencies to have been fetched previously.
-The `brainwire` binary currently provides configuration commands; the
+The `brainwire` binary provides configuration commands and the terminal demo; the
 `brainwire-bolt-dev` binary uses a stub query engine. The executor and durable
 `brainwire serve` integration are the next MVP tasks.
 

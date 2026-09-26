@@ -38,6 +38,50 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-26, extra 30-minute session: runnable terminal demo
+
+- **Requested:** Allan asked for roughly 30 more minutes toward the MVP, with
+  the CLI visibly implementing the selected concept, and authorized autonomous
+  local work. The earlier stop-until-tomorrow instruction was superseded.
+- **Delivered:** `brainwire shell --demo`, integrated with the existing binary.
+  The new Ratatui/Crossterm crate has Graph, Query, Memory and Disk & Files,
+  electric-green styling, pt-BR/en text, keyboard navigation, contextual F1
+  explanations, bounded Unicode editing, plain-text snapshots and NO_COLOR.
+  A shared synthetic fixture has 36 nodes and 64 edges; two guided read
+  examples return its actual values. Other query text is rejected visibly.
+  Memory values distinguish configured budgets and usage, with memtables
+  inside cache. Seven illustrative file types explain the on-disk layout.
+- **Documentation:** [run guide and actual terminal captures](docs/tui-demo.md),
+  [implementation slice](docs/superpowers/plans/2026-09-26-brainwire-tui-demo.md),
+  README and Observatory status updated. Captures render the binary's ANSI
+  output at 120×36; they are separate from the generated concept art.
+- **Scope and decisions:** keep the standalone `codex/brainwire` checkout;
+  deliver the design's synthetic Stage A before returning to the executor.
+  Static graph layout is intentional. There is no live backend, arbitrary
+  Cypher execution, live memory measurement or actual disk inspection yet.
+  The query budget is shown as configuration, not enforced by the demo.
+- **Review/verification:** implementation `c02a9de`, review fixes `71349e6`
+  and `b54b3fe`. Final workspace run passed **233 tests**, all-target clippy
+  with warnings denied and formatting checks. The runnable binary was rebuilt.
+  Review identified small-terminal query clipping and partial terminal-setup
+  cleanup; fixes add separate scrollable editor/results and conservative
+  cleanup for partially written escape sequences. Independent PTY checks
+  covered navigation, help, resize to 80×24, normal exit and exact terminal
+  restoration. A final 80×24 flow reached result 12, kept unsupported status
+  visible after a 512-character paste and preserved `q` while editing.
+  Existing `config show` and CLI negative/snapshot paths were checked.
+- **Next:** executor (engine MVP Task 4), then real Bolt transaction lifecycle
+  and durable `serve` (Task 5). Connect this shell only after those contracts
+  exist; add bounded graph neighborhoods and real telemetry/file metadata.
+- **Reconfirmed visual target:** Allan resent the backoffice image and asked
+  that it not be forgotten. Saved the exact upload as
+  `docs/design/assets/brainwire-backoffice-user-reference.png` with matching
+  SHA-256, marked it the primary composition reference in the design, and
+  added an AGENTS reminder for future UI work. Its external editor toolbar
+  is not part of the product. The runnable demo does not replace this target.
+- **Local only:** code and docs remain in `/Users/fraga/Documents/brainwire`;
+  no push, remote PR or publication.
+
 ### 2026-09-26, visual identity selected; continue tomorrow
 
 - **Decision:** Allan explicitly chose the latest green v2 identity: electric

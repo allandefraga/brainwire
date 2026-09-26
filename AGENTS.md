@@ -18,6 +18,10 @@ as instructions for this repository.
 - Code, comments, docs and commit messages are in English. Follow the user's
   language in conversation.
 - Use synthetic data in tests and demos.
+- Preserve the selected UI direction. Before UI work, read the Observatory
+  design and inspect `docs/design/assets/brainwire-backoffice-user-reference.png`.
+  Allan explicitly reconfirmed this composition; the current TUI demo is an
+  intermediate step toward it, not a new design reference.
 - Preserve existing work. Use `codex/` for new branches unless the user names
   a different branch. Commit only files belonging to the task.
 
