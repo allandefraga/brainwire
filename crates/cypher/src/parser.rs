@@ -44,19 +44,21 @@ use crate::lexer::{tokenize, Spanned, Tok};
 /// many levels deep before parsing gives up; see the module docs.
 const MAX_NESTING: usize = 64;
 
-/// Bound on the depth of the whole expression tree, shared by every bracket
-/// level (parentheses, list, map, `count(...)`) and every `AND`/`OR` term
-/// beyond the first in a chain. Unlike `MAX_NESTING`, this is not about the
-/// parser's own call stack: `parse_and`/`parse_or` build a chained
-/// `Expr::And`/`Expr::Or` tree in a flat loop, so the parser never recurses
-/// for a long chain, but the resulting tree does grow one level per extra
-/// term, and the compiler-derived `Drop` (and `Clone`/`Debug`/`PartialEq`)
-/// for that tree recurses once per level - an unbounded chain crashes the
-/// process when the value is later dropped, not while it is parsed. Fix
-/// round 1 (reviewer finding): `RETURN 1 AND 1 AND ... AND 1` with enough
-/// terms overflowed the stack in `Drop`, past where `catch_unwind` could
-/// help, since a stack overflow aborts the process unconditionally.
+/// Bound on the depth of each completed expression subtree. A leaf has depth
+/// one; each operator, wrapper and parenthesized group adds one level.
+/// This also bounds recursion when the derived `Drop` traverses the AST.
 pub const MAX_EXPR_DEPTH: usize = 1024;
+
+struct ParsedExpr {
+    expr: Expr,
+    depth: usize,
+}
+
+impl ParsedExpr {
+    fn leaf(expr: Expr) -> Self {
+        Self { expr, depth: 1 }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("{message} (at byte {offset})")]
@@ -76,7 +78,6 @@ pub fn parse(query: &str) -> Result<Query, ParseError> {
         toks,
         pos: 0,
         depth: 0,
-        expr_depth: 0,
     };
 
     let mut clauses = Vec::new();
@@ -106,12 +107,6 @@ struct Parser<'a> {
     /// Bracket-only nesting depth (parens/list/map/count-arg), capped at
     /// `MAX_NESTING`. Bounds the parser's own recursion.
     depth: usize,
-    /// Depth of the expression tree along the current parse path: every
-    /// bracket level and every extra `AND`/`OR` term draws from this same
-    /// budget, capped at `MAX_EXPR_DEPTH`. Bounds the tree the parser
-    /// builds, independent of how deeply the parser itself recurses to
-    /// build it.
-    expr_depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -205,33 +200,20 @@ impl<'a> Parser<'a> {
         if self.depth >= MAX_NESTING {
             return Err(self.error_here("nested deeper than 64 levels"));
         }
-        self.enter_expr_depth()?;
         self.depth += 1;
         let result = f(self);
         self.depth -= 1;
-        self.exit_expr_depth();
         result
     }
 
-    /// Consumes one unit of the shared expression-depth budget (see
-    /// `MAX_EXPR_DEPTH`), failing before consuming it once the budget is
-    /// already spent. Every bracket level (`with_nesting`) and every extra
-    /// `AND`/`OR` term draws from this one counter, so a long chain wrapped
-    /// in brackets, or a long chain on its own, are both bounded the same
-    /// way.
-    fn enter_expr_depth(&mut self) -> Result<(), ParseError> {
-        if self.expr_depth >= MAX_EXPR_DEPTH {
-            return Err(self.error_here(format!(
-                "expression nested deeper than {MAX_EXPR_DEPTH} levels"
-            )));
+    fn checked_depth(&self, child_depth: usize, offset: usize) -> Result<usize, ParseError> {
+        if child_depth >= MAX_EXPR_DEPTH {
+            return Err(self.error_at(
+                offset,
+                format!("expression nested deeper than {MAX_EXPR_DEPTH} levels"),
+            ));
         }
-        self.expr_depth += 1;
-        Ok(())
-    }
-
-    /// Gives back one unit of the shared expression-depth budget.
-    fn exit_expr_depth(&mut self) {
-        self.expr_depth -= 1;
+        Ok(child_depth + 1)
     }
 
     // -- clauses ------------------------------------------------------------
@@ -454,22 +436,24 @@ impl<'a> Parser<'a> {
 
     fn parse_optional_map(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
         if self.check(&Tok::LBrace) {
-            self.parse_map()
+            Ok(self.parse_map()?.0)
         } else {
             Ok(Vec::new())
         }
     }
 
-    fn parse_map(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
+    fn parse_map(&mut self) -> Result<(Vec<(String, Expr)>, usize), ParseError> {
         self.with_nesting(|p| {
             p.expect(Tok::LBrace, "'{'")?;
             let mut items = Vec::new();
+            let mut max_depth = 0;
             if !p.check(&Tok::RBrace) {
                 loop {
                     let key = p.expect_ident("a property key")?;
                     p.expect(Tok::Colon, "':'")?;
-                    let value = p.parse_expr()?;
-                    items.push((key, value));
+                    let value = p.parse_expr_depth()?;
+                    max_depth = max_depth.max(value.depth);
+                    items.push((key, value.expr));
                     if p.check(&Tok::Comma) {
                         p.advance();
                         continue;
@@ -478,17 +462,20 @@ impl<'a> Parser<'a> {
                 }
             }
             p.expect(Tok::RBrace, "'}'")?;
-            Ok(items)
+            Ok((items, max_depth))
         })
     }
 
-    fn parse_list(&mut self) -> Result<Vec<Expr>, ParseError> {
+    fn parse_list(&mut self) -> Result<(Vec<Expr>, usize), ParseError> {
         self.with_nesting(|p| {
             p.expect(Tok::LBracket, "'['")?;
             let mut items = Vec::new();
+            let mut max_depth = 0;
             if !p.check(&Tok::RBracket) {
                 loop {
-                    items.push(p.parse_expr()?);
+                    let value = p.parse_expr_depth()?;
+                    max_depth = max_depth.max(value.depth);
+                    items.push(value.expr);
                     if p.check(&Tok::Comma) {
                         p.advance();
                         continue;
@@ -497,66 +484,66 @@ impl<'a> Parser<'a> {
                 }
             }
             p.expect(Tok::RBracket, "']'")?;
-            Ok(items)
+            Ok((items, max_depth))
         })
     }
 
     // -- expressions ------------------------------------------------------
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        Ok(self.parse_expr_depth()?.expr)
+    }
+
+    fn parse_expr_depth(&mut self) -> Result<ParsedExpr, ParseError> {
         self.parse_or()
     }
 
-    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+    fn parse_or(&mut self) -> Result<ParsedExpr, ParseError> {
         let mut left = self.parse_and()?;
-        // parse_and/parse_or build this chain in a flat loop, so the parser
-        // never recurses deeply here - but the tree does grow one level per
-        // extra term, and dropping (or cloning/debug-printing) that tree
-        // does recurse once per level. Each extra term draws one unit from
-        // the shared expression-depth budget (see MAX_EXPR_DEPTH), given
-        // back once this chain is fully built so independent siblings (e.g.
-        // other elements of an enclosing list) don't pay for it too.
-        let mut extra_terms = 0usize;
         while self.check_keyword("OR") {
+            let offset = self.current_span().0;
             self.advance();
-            self.enter_expr_depth()?;
-            extra_terms += 1;
             let right = self.parse_and()?;
-            left = Expr::Or(Box::new(left), Box::new(right));
-        }
-        for _ in 0..extra_terms {
-            self.exit_expr_depth();
+            let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
+            left = ParsedExpr {
+                expr: Expr::Or(Box::new(left.expr), Box::new(right.expr)),
+                depth,
+            };
         }
         Ok(left)
     }
 
-    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+    fn parse_and(&mut self) -> Result<ParsedExpr, ParseError> {
         let mut left = self.parse_not()?;
-        // See the comment in parse_or: same shared-budget accounting.
-        let mut extra_terms = 0usize;
         while self.check_keyword("AND") {
+            let offset = self.current_span().0;
             self.advance();
-            self.enter_expr_depth()?;
-            extra_terms += 1;
             let right = self.parse_not()?;
-            left = Expr::And(Box::new(left), Box::new(right));
-        }
-        for _ in 0..extra_terms {
-            self.exit_expr_depth();
+            let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
+            left = ParsedExpr {
+                expr: Expr::And(Box::new(left.expr), Box::new(right.expr)),
+                depth,
+            };
         }
         Ok(left)
     }
 
-    fn parse_not(&mut self) -> Result<Expr, ParseError> {
+    fn parse_not(&mut self) -> Result<ParsedExpr, ParseError> {
         if self.check_keyword("NOT") {
+            let offset = self.current_span().0;
             self.advance();
-            Ok(Expr::Not(Box::new(self.parse_cmp()?)))
+            let inner = self.parse_cmp()?;
+            let depth = self.checked_depth(inner.depth, offset)?;
+            Ok(ParsedExpr {
+                expr: Expr::Not(Box::new(inner.expr)),
+                depth,
+            })
         } else {
             self.parse_cmp()
         }
     }
 
-    fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
+    fn parse_cmp(&mut self) -> Result<ParsedExpr, ParseError> {
         let left = self.parse_primary()?;
         let op = match self.peek() {
             Tok::Eq => CmpOp::Eq,
@@ -567,12 +554,17 @@ impl<'a> Parser<'a> {
             Tok::Ge => CmpOp::Ge,
             _ => return Ok(left),
         };
+        let offset = self.current_span().0;
         self.advance();
         let right = self.parse_primary()?;
-        Ok(Expr::Cmp(Box::new(left), op, Box::new(right)))
+        let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
+        Ok(ParsedExpr {
+            expr: Expr::Cmp(Box::new(left.expr), op, Box::new(right.expr)),
+            depth,
+        })
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_primary(&mut self) -> Result<ParsedExpr, ParseError> {
         let start = self.current_span().0;
         match self.peek().clone() {
             Tok::Minus => {
@@ -583,44 +575,62 @@ impl<'a> Parser<'a> {
                         let neg = n
                             .checked_neg()
                             .ok_or_else(|| self.error_at(start, "integer literal out of range"))?;
-                        Ok(Expr::Literal(Value::Int(neg)))
+                        Ok(ParsedExpr::leaf(Expr::Literal(Value::Int(neg))))
                     }
                     Tok::Float(f) => {
                         self.advance();
-                        Ok(Expr::Literal(Value::Float(-f)))
+                        Ok(ParsedExpr::leaf(Expr::Literal(Value::Float(-f))))
                     }
                     _ => Err(self.error_at(start, "expected a number after '-'")),
                 }
             }
             Tok::Int(n) => {
                 self.advance();
-                Ok(Expr::Literal(Value::Int(n)))
+                Ok(ParsedExpr::leaf(Expr::Literal(Value::Int(n))))
             }
             Tok::Float(f) => {
                 self.advance();
-                Ok(Expr::Literal(Value::Float(f)))
+                Ok(ParsedExpr::leaf(Expr::Literal(Value::Float(f))))
             }
             Tok::Str(s) => {
                 self.advance();
-                Ok(Expr::Literal(Value::Str(s)))
+                Ok(ParsedExpr::leaf(Expr::Literal(Value::Str(s))))
             }
             Tok::Dollar => {
                 self.advance();
                 let name = self.expect_ident("a parameter name")?;
-                Ok(Expr::Param(name))
+                Ok(ParsedExpr::leaf(Expr::Param(name)))
             }
-            Tok::LBracket => Ok(Expr::List(self.parse_list()?)),
-            Tok::LBrace => Ok(Expr::Map(self.parse_map()?)),
+            Tok::LBracket => {
+                let (items, child_depth) = self.parse_list()?;
+                let depth = self.checked_depth(child_depth, start)?;
+                Ok(ParsedExpr {
+                    expr: Expr::List(items),
+                    depth,
+                })
+            }
+            Tok::LBrace => {
+                let (items, child_depth) = self.parse_map()?;
+                let depth = self.checked_depth(child_depth, start)?;
+                Ok(ParsedExpr {
+                    expr: Expr::Map(items),
+                    depth,
+                })
+            }
             Tok::LParen => self.with_nesting(|p| {
                 p.expect(Tok::LParen, "'('")?;
-                let inner = p.parse_expr()?;
+                let inner = p.parse_expr_depth()?;
                 p.expect(Tok::RParen, "')'")?;
-                Ok(inner)
+                let depth = p.checked_depth(inner.depth, start)?;
+                Ok(ParsedExpr {
+                    expr: inner.expr,
+                    depth,
+                })
             }),
             Tok::Ident(name) => self.parse_ident_primary(start, name),
             Tok::QuotedIdent(name) => {
                 self.advance();
-                self.parse_optional_prop(Expr::Var(name))
+                self.parse_optional_prop(ParsedExpr::leaf(Expr::Var(name)))
             }
             other => Err(self.error_at(
                 start,
@@ -629,18 +639,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_ident_primary(&mut self, start: usize, name: String) -> Result<Expr, ParseError> {
+    fn parse_ident_primary(
+        &mut self,
+        start: usize,
+        name: String,
+    ) -> Result<ParsedExpr, ParseError> {
         if name.eq_ignore_ascii_case("true") {
             self.advance();
-            return Ok(Expr::Literal(Value::Bool(true)));
+            return Ok(ParsedExpr::leaf(Expr::Literal(Value::Bool(true))));
         }
         if name.eq_ignore_ascii_case("false") {
             self.advance();
-            return Ok(Expr::Literal(Value::Bool(false)));
+            return Ok(ParsedExpr::leaf(Expr::Literal(Value::Bool(false))));
         }
         if name.eq_ignore_ascii_case("null") {
             self.advance();
-            return Ok(Expr::Literal(Value::Null));
+            return Ok(ParsedExpr::leaf(Expr::Literal(Value::Null)));
         }
         if self.peek_at(1) == Some(&Tok::LParen) {
             if !name.eq_ignore_ascii_case("count") {
@@ -652,22 +666,31 @@ impl<'a> Parser<'a> {
                 if p.check(&Tok::Star) {
                     p.advance();
                     p.expect(Tok::RParen, "')'")?;
-                    return Ok(Expr::CountStar);
+                    return Ok(ParsedExpr::leaf(Expr::CountStar));
                 }
-                let inner = p.parse_expr()?;
+                let inner = p.parse_expr_depth()?;
                 p.expect(Tok::RParen, "')'")?;
-                Ok(Expr::Count(Box::new(inner)))
+                let depth = p.checked_depth(inner.depth, start)?;
+                Ok(ParsedExpr {
+                    expr: Expr::Count(Box::new(inner.expr)),
+                    depth,
+                })
             });
         }
         self.advance();
-        self.parse_optional_prop(Expr::Var(name))
+        self.parse_optional_prop(ParsedExpr::leaf(Expr::Var(name)))
     }
 
-    fn parse_optional_prop(&mut self, base: Expr) -> Result<Expr, ParseError> {
+    fn parse_optional_prop(&mut self, base: ParsedExpr) -> Result<ParsedExpr, ParseError> {
         if self.check(&Tok::Dot) {
+            let offset = self.current_span().0;
             self.advance();
             let key = self.expect_ident("a property key")?;
-            Ok(Expr::Prop(Box::new(base), key))
+            let depth = self.checked_depth(base.depth, offset)?;
+            Ok(ParsedExpr {
+                expr: Expr::Prop(Box::new(base.expr), key),
+                depth,
+            })
         } else {
             Ok(base)
         }
@@ -1004,25 +1027,56 @@ mod tests {
     }
 
     #[test]
-    fn and_chain_up_to_1024_extra_terms_is_ok_and_1025_is_an_error() {
+    fn and_chain_up_to_1023_extra_terms_is_ok_and_1024_is_an_error() {
         assert!(
-            parse(&format!("RETURN {}", and_chain(1024))).is_ok(),
-            "1024 extra AND terms should parse"
+            parse(&format!("RETURN {}", and_chain(1023))).is_ok(),
+            "a leaf and 1023 AND nodes have depth 1024"
         );
 
-        let e = parse(&format!("RETURN {}", and_chain(1025))).unwrap_err();
+        let e = parse(&format!("RETURN {}", and_chain(1024))).unwrap_err();
         assert_eq!(e.message, "expression nested deeper than 1024 levels");
     }
 
     #[test]
-    fn or_chain_up_to_1024_extra_terms_is_ok_and_1025_is_an_error() {
+    fn or_chain_up_to_1023_extra_terms_is_ok_and_1024_is_an_error() {
         assert!(
-            parse(&format!("RETURN {}", or_chain(1024))).is_ok(),
-            "1024 extra OR terms should parse"
+            parse(&format!("RETURN {}", or_chain(1023))).is_ok(),
+            "a leaf and 1023 OR nodes have depth 1024"
         );
 
-        let e = parse(&format!("RETURN {}", or_chain(1025))).unwrap_err();
+        let e = parse(&format!("RETURN {}", or_chain(1024))).unwrap_err();
         assert_eq!(e.message, "expression nested deeper than 1024 levels");
+    }
+
+    #[test]
+    fn and_subtree_cannot_hide_under_or_chain() {
+        let prefix = format!("RETURN {}", and_chain(1023));
+        assert!(parse(&prefix).is_ok());
+        let query = format!("{prefix} OR 1");
+        let e = parse(&query).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+        assert_eq!(e.offset, prefix.len() + 1);
+    }
+
+    #[test]
+    fn mixed_operators_and_wrappers_share_the_actual_subtree_depth() {
+        let accepted = format!("RETURN count([{{k: NOT a.b = 1 AND {}}}])", and_chain(1016));
+        assert!(parse(&accepted).is_ok());
+        let rejected = format!("RETURN count([{{k: NOT a.b = 1 AND {}}}])", and_chain(1017));
+        let e = parse(&rejected).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+
+        // A completed deep term must count when a later OR wraps it.
+        let query = format!("RETURN {} OR 1", and_chain(1023));
+        let e = parse(&query).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+    }
+
+    #[test]
+    fn independent_siblings_do_not_accumulate_depth() {
+        let chain = and_chain(1023);
+        let query = format!("RETURN {chain}, {chain}");
+        assert!(parse(&query).is_ok());
     }
 
     #[test]
@@ -1037,6 +1091,12 @@ mod tests {
         assert_eq!(e.message, "expression nested deeper than 1024 levels");
 
         let e = parse(&format!("RETURN {}", or_chain(200_000))).unwrap_err();
+        assert_eq!(e.message, "expression nested deeper than 1024 levels");
+
+        // The first OR must reject the completed AND subtree before a long
+        // continuation can grow a deeper tree.
+        let mixed = format!("RETURN {}{}", and_chain(1023), " OR 1".repeat(200_000));
+        let e = parse(&mixed).unwrap_err();
         assert_eq!(e.message, "expression nested deeper than 1024 levels");
     }
 
