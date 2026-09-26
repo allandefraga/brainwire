@@ -418,3 +418,44 @@ fn real_store_conflict_converts_to_public_executor_error() {
         vec![vec![i(1)]]
     );
 }
+
+#[test]
+fn signed_minimum_literal_executes_and_persists_exactly() {
+    let (_dir, db) = db();
+    assert_eq!(
+        values(
+            &db,
+            "RETURN -9223372036854775808, - 0009223372036854775808 = -9223372036854775808.0"
+        ),
+        vec![vec![i(i64::MIN), Out::Value(Value::Bool(true))]]
+    );
+    run(
+        &db,
+        "CREATE (c:Customer {entity_id: 'min', exact: -9223372036854775808})",
+    );
+    assert_eq!(
+        values(&db, "MATCH (c:Customer) RETURN c.exact"),
+        vec![vec![i(i64::MIN)]]
+    );
+}
+
+#[test]
+fn overflowing_float_literals_fail_without_writes() {
+    let (_dir, db) = db();
+    for literal in ["1e309", "-1e309"] {
+        let query =
+            format!("CREATE (c:Customer {{entity_id: 'overflow', amount: {literal}}}) RETURN c");
+        assert!(matches!(
+            execute(&db, &query, &BTreeMap::new()),
+            Err(ExecError::Syntax(_))
+        ));
+    }
+    assert_eq!(
+        values(&db, "MATCH (c:Customer) RETURN count(*)"),
+        vec![vec![i(0)]]
+    );
+    assert_eq!(
+        values(&db, "RETURN 1e308"),
+        vec![vec![Out::Value(Value::Float(1e308))]]
+    );
+}

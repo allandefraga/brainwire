@@ -570,6 +570,10 @@ impl<'a> Parser<'a> {
             Tok::Minus => {
                 self.advance();
                 match self.peek().clone() {
+                    Tok::MinIntMagnitude => {
+                        self.advance();
+                        Ok(ParsedExpr::leaf(Expr::Literal(Value::Int(i64::MIN))))
+                    }
                     Tok::Int(n) => {
                         self.advance();
                         let neg = n
@@ -584,6 +588,7 @@ impl<'a> Parser<'a> {
                     _ => Err(self.error_at(start, "expected a number after '-'")),
                 }
             }
+            Tok::MinIntMagnitude => Err(self.error_at(start, "integer literal out of range")),
             Tok::Int(n) => {
                 self.advance();
                 Ok(ParsedExpr::leaf(Expr::Literal(Value::Int(n))))
@@ -726,6 +731,7 @@ fn tok_desc(t: &Tok) -> String {
         Tok::Ident(s) => format!("identifier '{s}'"),
         Tok::QuotedIdent(s) => format!("identifier `{s}`"),
         Tok::Int(n) => format!("integer {n}"),
+        Tok::MinIntMagnitude => "integer magnitude 9223372036854775808".into(),
         Tok::Float(f) => format!("float {f}"),
         Tok::Str(s) => format!("string {s:?}"),
         Tok::Eof => "end of input".to_string(),
@@ -1146,6 +1152,50 @@ mod tests {
     #[test]
     fn unexpected_character_is_an_error() {
         assert!(parse("RETURN @").is_err());
+    }
+
+    #[test]
+    fn float_literal_boundaries() {
+        for source in ["RETURN 1e309", "RETURN -1e309", "RETURN 1.9e308"] {
+            assert!(parse(source).is_err(), "{source}");
+        }
+        let query = parse("RETURN 1e308, -1e308, 0.0, 1e-308").unwrap();
+        let Clause::Return { items, .. } = &query.clauses[0] else {
+            panic!()
+        };
+        for item in items {
+            let Expr::Literal(Value::Float(f)) = item.expr else {
+                panic!()
+            };
+            assert!(f.is_finite());
+        }
+    }
+    #[test]
+    fn signed_integer_literal_boundaries() {
+        for source in [
+            "RETURN -9223372036854775808",
+            "RETURN - 9223372036854775808",
+            "RETURN -0009223372036854775808",
+        ] {
+            let query = parse(source).unwrap();
+            let Clause::Return { items, .. } = &query.clauses[0] else {
+                panic!()
+            };
+            assert_eq!(items[0].expr, Expr::Literal(Value::Int(i64::MIN)));
+        }
+        for source in [
+            "RETURN 9223372036854775808",
+            "RETURN 0009223372036854775808",
+            "RETURN -9223372036854775809",
+            "RETURN - 0009223372036854775809",
+        ] {
+            assert!(parse(source).is_err(), "{source}");
+        }
+        let query = parse("RETURN 9223372036854775807").unwrap();
+        let Clause::Return { items, .. } = &query.clauses[0] else {
+            panic!()
+        };
+        assert_eq!(items[0].expr, Expr::Literal(Value::Int(i64::MAX)));
     }
 
     #[test]

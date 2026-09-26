@@ -47,6 +47,8 @@ pub(crate) enum Tok {
     /// A backtick-quoted identifier; its text is never treated as a keyword.
     QuotedIdent(String),
     Int(i64),
+    /// Magnitude 2^63: valid only immediately after a unary minus.
+    MinIntMagnitude,
     Float(f64),
     Str(String),
     /// Sentinel end-of-input token; `start == end == source.len()`.
@@ -411,21 +413,29 @@ impl<'a> Lexer<'a> {
                 message: format!("invalid float literal '{text}'"),
                 offset: start,
             })?;
+            if !value.is_finite() {
+                return Err(ParseError {
+                    message: format!("float literal '{text}' out of range"),
+                    offset: start,
+                });
+            }
             Ok(Spanned {
                 tok: Tok::Float(value),
                 start,
                 end,
             })
         } else {
-            let value: i64 = text.parse().map_err(|_| ParseError {
-                message: format!("integer literal '{text}' out of range"),
-                offset: start,
-            })?;
-            Ok(Spanned {
-                tok: Tok::Int(value),
-                start,
-                end,
-            })
+            // Keep the one extra negative magnitude until the parser sees its sign.
+            // Trimming zeros preserves decimal literals with leading zeroes.
+            let tok = if text.trim_start_matches('0') == "9223372036854775808" {
+                Tok::MinIntMagnitude
+            } else {
+                Tok::Int(text.parse().map_err(|_| ParseError {
+                    message: format!("integer literal '{text}' out of range"),
+                    offset: start,
+                })?)
+            };
+            Ok(Spanned { tok, start, end })
         }
     }
 }
@@ -436,4 +446,25 @@ fn is_ident_start(c: char) -> bool {
 
 fn is_ident_continue(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn float_literal_overflow_is_rejected() {
+        for source in ["1e309", "-1e309", "1.9e308"] {
+            assert!(tokenize(source).is_err(), "{source}");
+        }
+        assert!(tokenize("1e308").is_ok());
+    }
+    #[test]
+    fn permits_negative_minimum_magnitude_for_parser_to_resolve() {
+        for source in ["-9223372036854775808", "- 0009223372036854775808"] {
+            let tokens = tokenize(source).unwrap();
+            assert_eq!(tokens[0].tok, Tok::Minus);
+            assert_eq!(tokens.len(), 3);
+        }
+        assert!(tokenize("9223372036854775809").is_err());
+    }
 }
