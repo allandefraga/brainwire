@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 use crate::chunk::{encode_message, ChunkReader};
 use crate::handshake::{negotiate, response, MAGIC};
@@ -106,8 +106,8 @@ fn is_resource_exhausted(err: &std::io::Error) -> bool {
     matches!(err.raw_os_error(), Some(code) if EXHAUSTED.contains(&code))
 }
 
-async fn handle_connection<E: QueryEngine>(
-    mut stream: TcpStream,
+async fn handle_connection<E: QueryEngine, S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
     engine: E,
     max_message_bytes: usize,
 ) -> std::io::Result<()> {
@@ -152,6 +152,7 @@ async fn handle_connection<E: QueryEngine>(
                     // the server goes to DEFUNCT and closes the connection).
                     // Tell the client why, then close instead of carrying on
                     // with a session that never saw the failure.
+                    session.close();
                     write_failure(
                         &mut stream,
                         "Neo.ClientError.Request.Invalid",
@@ -168,6 +169,7 @@ async fn handle_connection<E: QueryEngine>(
         }
         pending += n;
         if pending > max_message_bytes {
+            session.close();
             write_failure(
                 &mut stream,
                 "Neo.ClientError.Request.Invalid",
@@ -181,7 +183,11 @@ async fn handle_connection<E: QueryEngine>(
 }
 
 /// Packs a FAILURE, chunk-encodes it and writes it to `stream`.
-async fn write_failure(stream: &mut TcpStream, code: &str, message: &str) -> std::io::Result<()> {
+async fn write_failure<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    code: &str,
+    message: &str,
+) -> std::io::Result<()> {
     let mut body = Vec::new();
     pack(
         &Response::Failure {
@@ -199,6 +205,7 @@ mod tests {
     use super::*;
     use crate::packstream::PackValue;
     use crate::session::StubEngine;
+    use tokio::net::TcpStream;
 
     // I2 (review finding, 2026-09-25): `is_resource_exhausted` decides
     // whether an `accept()` error is a finite-resource shortage (worth a
@@ -247,7 +254,7 @@ mod tests {
         assert!(!is_resource_exhausted(&err));
     }
 
-    async fn handshake(client: &mut TcpStream) {
+    async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(client: &mut S) {
         let mut hello = MAGIC.to_vec();
         hello.extend_from_slice(&[0, 0, 4, 5]); // propose exactly 5.4
         hello.extend_from_slice(&[0u8; 12]); // remaining proposal slots, unused
@@ -409,5 +416,108 @@ mod tests {
         let (code, message) = decode_failure(&out);
         assert_eq!(code, "Neo.ClientError.Request.Invalid");
         assert_eq!(message, "malformed message");
+    }
+    struct CleanupEngine(Arc<tokio::sync::Notify>);
+    impl QueryEngine for CleanupEngine {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            self.0.notify_one();
+            Ok(())
+        }
+    }
+
+    async fn send_request<S: AsyncWrite + Unpin>(client: &mut S, tag: u8, fields: Vec<PackValue>) {
+        let mut bytes = Vec::new();
+        pack(&PackValue::Struct { tag, fields }, &mut bytes);
+        client.write_all(&encode_message(&bytes)).await.unwrap();
+    }
+
+    async fn read_success<S: AsyncRead + Unpin>(client: &mut S) {
+        let mut body = Vec::new();
+        loop {
+            let n = client.read_u16().await.unwrap() as usize;
+            if n == 0 {
+                break;
+            }
+            let start = body.len();
+            body.resize(start + n, 0);
+            client.read_exact(&mut body[start..]).await.unwrap();
+        }
+        assert!(matches!(
+            unpack(&mut body.as_slice()).unwrap(),
+            PackValue::Struct { tag: 0x70, .. }
+        ));
+    }
+
+    async fn login_and_begin<S: AsyncRead + AsyncWrite + Unpin>(client: &mut S) {
+        handshake(client).await;
+        for tag in [0x01, 0x6a, 0x11] {
+            send_request(client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(client).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_and_oversize_cleanup_precedes_a_blocked_failure_write() {
+        for oversized in [false, true] {
+            // A bounded transport makes the FAILURE write deterministically block
+            // until the peer reads; cleanup must already have happened.
+            let (server, mut client) = tokio::io::duplex(32);
+            let aborted = Arc::new(tokio::sync::Notify::new());
+            let task = tokio::spawn(handle_connection(
+                server,
+                CleanupEngine(aborted.clone()),
+                64,
+            ));
+            login_and_begin(&mut client).await;
+            if oversized {
+                client.write_all(&[0u8; 65]).await.unwrap();
+            } else {
+                client.write_all(&encode_message(&[0xe0])).await.unwrap();
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(2), aborted.notified())
+                .await
+                .expect("abort before peer reads failure");
+            assert!(
+                !task.is_finished(),
+                "failure must still be waiting for the peer"
+            );
+            let mut failure = Vec::new();
+            client.read_to_end(&mut failure).await.unwrap();
+            decode_failure(&failure);
+            task.await.unwrap().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn socket_eof_aborts_a_pending_transaction() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let aborted = Arc::new(tokio::sync::Notify::new());
+        let engine = CleanupEngine(aborted.clone());
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            handle_connection(stream, engine, 1024).await.unwrap();
+        });
+        let mut client = TcpStream::connect(address).await.unwrap();
+        login_and_begin(&mut client).await;
+        drop(client);
+        tokio::time::timeout(std::time::Duration::from_secs(2), aborted.notified())
+            .await
+            .unwrap();
+        task.await.unwrap();
     }
 }

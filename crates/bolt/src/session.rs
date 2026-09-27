@@ -21,6 +21,14 @@ pub struct EngineError {
 }
 
 pub trait QueryEngine {
+    /// Begin one transaction, bound to this database until completion.
+    /// A failure may leave partial state: the session will call `abort`.
+    fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError>;
+    /// Commit and optionally return an engine-owned bookmark.
+    /// Return success only after completion; a failure is followed by `abort`.
+    fn commit(&mut self) -> Result<Option<String>, EngineError>;
+    /// Discard pending work. Implementations must make repeated calls safe.
+    fn abort(&mut self) -> Result<(), EngineError>;
     fn run(
         &mut self,
         db: Option<&str>,
@@ -33,6 +41,16 @@ pub trait QueryEngine {
 pub struct StubEngine;
 
 impl QueryEngine for StubEngine {
+    // Synthetic results have no persistent state or durable bookmark.
+    fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+        Ok(())
+    }
+    fn commit(&mut self) -> Result<Option<String>, EngineError> {
+        Ok(None)
+    }
+    fn abort(&mut self) -> Result<(), EngineError> {
+        Ok(())
+    }
     fn run(
         &mut self,
         _db: Option<&str>,
@@ -81,7 +99,7 @@ pub struct Session<E: QueryEngine> {
     state: State,
     rows: VecDeque<Vec<PackValue>>,
     db: Option<String>,
-    commits: u64,
+    pending: bool,
     _auth: AuthMode,
 }
 
@@ -103,7 +121,7 @@ impl<E: QueryEngine> Session<E> {
             state: State::Connected,
             rows: VecDeque::new(),
             db: None,
-            commits: 0,
+            pending: false,
             _auth: auth,
         }
     }
@@ -112,21 +130,70 @@ impl<E: QueryEngine> Session<E> {
         self.state
     }
 
-    fn fail(&mut self, response: Response) -> Vec<Response> {
-        self.state = State::Failed;
+    fn cleanup(&mut self) -> Result<(), EngineError> {
         self.rows.clear();
-        vec![response]
+        if self.pending {
+            self.engine.abort()?;
+            self.pending = false;
+        }
+        self.db = None;
+        Ok(())
     }
 
-    /// Like [`Session::fail`], but for violations that happen before the
-    /// session ever reached `Ready` (research/bolt.md 3.1, 3.5, 6.6): those
-    /// are fatal, not recoverable with RESET, so the state goes straight to
-    /// `Defunct` instead of `Failed`. The caller (`server::handle_connection`)
-    /// already closes the socket once it observes `Defunct`.
+    fn engine_failure(error: EngineError) -> Response {
+        Response::Failure {
+            code: error.code,
+            message: error.message,
+        }
+    }
+
+    fn fail(&mut self, response: Response) -> Vec<Response> {
+        match self.cleanup() {
+            Ok(()) => {
+                self.state = State::Failed;
+                vec![response]
+            }
+            Err(error) => {
+                self.state = State::Defunct;
+                vec![Self::engine_failure(error)]
+            }
+        }
+    }
+
     fn defunct(&mut self, response: Response) -> Vec<Response> {
+        let out = self.fail(response);
         self.state = State::Defunct;
-        self.rows.clear();
-        vec![response]
+        out
+    }
+
+    /// Release pending engine state before a transport-level failure is written.
+    pub(crate) fn close(&mut self) {
+        let _ = self.cleanup();
+        self.state = State::Defunct;
+    }
+
+    fn database(extra: &PackValue) -> Result<Option<String>, Response> {
+        match extra.get("db") {
+            None => Ok(None),
+            Some(PackValue::String(db)) => Ok(Some(db.clone())),
+            _ => Err(invalid("db must be a string")),
+        }
+    }
+
+    fn begin(&mut self, extra: &PackValue) -> Result<(), Response> {
+        self.db = Self::database(extra)?;
+        // A failed begin may still own partially initialized engine state.
+        self.pending = true;
+        self.engine
+            .begin(self.db.as_deref())
+            .map_err(Self::engine_failure)
+    }
+
+    fn commit(&mut self) -> Result<Option<String>, EngineError> {
+        let bookmark = self.engine.commit()?;
+        self.pending = false;
+        self.db = None;
+        Ok(bookmark)
     }
 
     fn start_query(&mut self, query: &str, params: &PackValue, in_tx: bool) -> Vec<Response> {
@@ -155,27 +222,35 @@ impl<E: QueryEngine> Session<E> {
 
     fn pull(&mut self, extra: &PackValue, discard: bool) -> Vec<Response> {
         let n = match extra.get("n") {
-            Some(PackValue::Int(n)) if *n >= 0 && !discard => *n as usize,
-            _ if discard => 0,
-            _ => usize::MAX,
+            None | Some(PackValue::Int(-1)) => usize::MAX,
+            Some(PackValue::Int(n)) if *n >= 0 => usize::try_from(*n).unwrap_or(usize::MAX),
+            _ => return self.fail(invalid("n must be -1 or a nonnegative integer")),
         };
         let mut out = Vec::new();
-        if discard {
-            self.rows.clear();
-        }
-        while out.len() < n {
-            match self.rows.pop_front() {
-                Some(row) => out.push(Response::Record(row)),
-                None => break,
+        for _ in 0..n.min(self.rows.len()) {
+            let row = self.rows.pop_front().expect("remaining row");
+            if !discard {
+                out.push(Response::Record(row));
             }
         }
         let in_tx = self.state == State::TxStreaming;
         if self.rows.is_empty() {
-            self.state = if in_tx { State::TxReady } else { State::Ready };
-            out.push(meta(vec![
+            let mut pairs = vec![
                 ("type", PackValue::String("r".into())),
                 ("t_last", PackValue::Int(0)),
-            ]));
+            ];
+            if !in_tx {
+                match self.commit() {
+                    Ok(Some(bookmark)) => pairs.push(("bookmark", PackValue::String(bookmark))),
+                    Ok(None) => {}
+                    Err(error) => {
+                        out.extend(self.fail(Self::engine_failure(error)));
+                        return out;
+                    }
+                }
+            }
+            self.state = if in_tx { State::TxReady } else { State::Ready };
+            out.push(meta(pairs));
         } else {
             out.push(meta(vec![("has_more", PackValue::Bool(true))]));
         }
@@ -187,7 +262,7 @@ impl<E: QueryEngine> Session<E> {
         match (self.state, req) {
             (Defunct, _) => vec![],
             (_, Request::Goodbye) => {
-                self.state = Defunct;
+                self.close();
                 vec![]
             }
             (Connected, Request::Hello { .. }) => {
@@ -225,11 +300,16 @@ impl<E: QueryEngine> Session<E> {
             (Connected | Authentication, _) => self.defunct(invalid(
                 "a session that has not logged on accepts only HELLO, LOGON and GOODBYE",
             )),
-            (_, Request::Reset) => {
-                self.rows.clear();
-                self.state = Ready;
-                vec![meta(vec![])]
-            }
+            (_, Request::Reset) => match self.cleanup() {
+                Ok(()) => {
+                    self.state = Ready;
+                    vec![meta(vec![])]
+                }
+                Err(error) => {
+                    self.state = Defunct;
+                    vec![Self::engine_failure(error)]
+                }
+            },
             (Failed, _) => vec![Response::Ignored],
             (_, Request::Route) => self.fail(invalid(
                 "routing arrives with the cluster plan; use bolt://",
@@ -243,40 +323,67 @@ impl<E: QueryEngine> Session<E> {
                     extra,
                 },
             ) => {
-                self.db = match extra.get("db") {
-                    Some(PackValue::String(db)) => Some(db.clone()),
-                    _ => None,
-                };
+                if let Err(response) = self.begin(&extra) {
+                    return self.fail(response);
+                }
                 self.start_query(&query, &params, false)
             }
             (Ready, Request::Begin { extra }) => {
-                self.db = match extra.get("db") {
-                    Some(PackValue::String(db)) => Some(db.clone()),
-                    _ => None,
-                };
+                if let Err(response) = self.begin(&extra) {
+                    return self.fail(response);
+                }
                 self.state = TxReady;
                 vec![meta(vec![])]
             }
-            (TxReady, Request::Run { query, params, .. }) => {
+            (
+                TxReady,
+                Request::Run {
+                    query,
+                    params,
+                    extra,
+                },
+            ) => {
+                match Self::database(&extra) {
+                    Err(response) => return self.fail(response),
+                    Ok(Some(db)) if self.db.as_deref() != Some(db.as_str()) => {
+                        return self.fail(invalid("RUN cannot change the transaction database"))
+                    }
+                    _ => {}
+                }
                 self.start_query(&query, &params, true)
             }
             (Streaming | TxStreaming, Request::Pull { extra }) => self.pull(&extra, false),
             (Streaming | TxStreaming, Request::Discard { extra }) => self.pull(&extra, true),
-            (TxReady, Request::Commit) => {
-                self.commits += 1;
-                self.state = Ready;
-                let db = self.db.clone().unwrap_or_else(|| "default".into());
-                vec![meta(vec![(
-                    "bookmark",
-                    PackValue::String(format!("bw:{db}:{}", self.commits)),
-                )])]
-            }
-            (TxReady, Request::Rollback) => {
-                self.state = Ready;
-                vec![meta(vec![])]
-            }
+            (TxReady, Request::Commit) => match self.commit() {
+                Ok(bookmark) => {
+                    self.state = Ready;
+                    vec![meta(
+                        bookmark
+                            .into_iter()
+                            .map(|b| ("bookmark", PackValue::String(b)))
+                            .collect(),
+                    )]
+                }
+                Err(error) => self.fail(Self::engine_failure(error)),
+            },
+            (TxReady, Request::Rollback) => match self.cleanup() {
+                Ok(()) => {
+                    self.state = Ready;
+                    vec![meta(vec![])]
+                }
+                Err(error) => {
+                    self.state = Defunct;
+                    vec![Self::engine_failure(error)]
+                }
+            },
             (_, _) => self.fail(invalid("message not allowed in the current state")),
         }
+    }
+}
+
+impl<E: QueryEngine> Drop for Session<E> {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
     }
 }
 
@@ -332,6 +439,15 @@ mod tests {
 
     struct ThreeRows;
     impl QueryEngine for ThreeRows {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            Ok(())
+        }
         fn run(
             &mut self,
             _: Option<&str>,
@@ -359,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_transaction_returns_a_bookmark() {
+    fn stub_transaction_does_not_fabricate_a_bookmark() {
         let mut s = ready(StubEngine);
         s.handle(Request::Begin { extra: map(&[]) });
         assert_eq!(s.state(), State::TxReady);
@@ -369,7 +485,7 @@ mod tests {
         assert_eq!(s.state(), State::TxReady);
         let r = s.handle(Request::Commit);
         assert!(
-            matches!(&r[0], Response::Success(meta) if meta.iter().any(|(k, _)| k == "bookmark"))
+            matches!(&r[0], Response::Success(meta) if !meta.iter().any(|(k, _)| k == "bookmark"))
         );
         assert_eq!(s.state(), State::Ready);
     }
