@@ -38,6 +38,32 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-27, product direction: rich data, vectors and recovery
+
+- **Requested:** understand a distributed deployment across containers/machines
+  that recovers after failures, accept rich data including lists, and search
+  documents by vectors in the style of Qdrant.
+  Allan explicitly reinforced that the system must resist failures; recorded
+  fault tolerance as a mandatory acceptance gate, including vector data.
+- **Recorded:** [data and recovery addendum](docs/design/2026-09-27-brainwire-data-and-recovery.md),
+  linked from the main spec. Requirements are distinguished from proposed
+  implementation choices and current capabilities. No engine code changed.
+- **Current evidence:** the value model already supports scalar values, recursive
+  lists and maps. Dedicated vector types/indexes/search and production Raft are
+  absent. The existing sync-write/SIGKILL checks prove process-crash recovery,
+  not a full distributed recovery guarantee.
+- **Direction:** durable authoritative graph/document/vector mutations; rebuildable
+  indexes with explicit visibility; three replicas on separate hosts with retained
+  volumes, quorum commits, safe restart and external backup. Whole-graph sharding
+  remains a distinct capability. No external Qdrant dependency or API parity was
+  selected. Original large document files need their own durable blob/backup path.
+- **Next:** retain real server and bounded-memory work as prerequisites; prepare
+  a focused vector slice with exact-search reference, filtering, update/delete,
+  recall and restart tests. The month estimate must account for the added scope.
+- **Verification:** read the current Value/codec/transaction/crash-test code and
+  primary Qdrant, Raft, Kubernetes and RocksDB documentation. Documentation-only
+  change; validate local links and diff whitespace. All changes stay local.
+
 ### 2026-09-27, 30-minute session: transaction foundation
 
 - **Requested:** work on the graph for 30 minutes and identify the next task.

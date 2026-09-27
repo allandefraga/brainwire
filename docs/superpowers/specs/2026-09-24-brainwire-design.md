@@ -14,6 +14,13 @@ Sections:
 4. Algorithms, AI and CLI
 5. Cluster, operations and tests
 
+Product requirements added by Allan on 2026-09-27: rich property data,
+Qdrant-style document/vector search and recovery across container/machine
+failures. The [data and recovery addendum](../../design/2026-09-27-brainwire-data-and-recovery.md)
+records current support, proposed implementation and acceptance criteria.
+Vector search and production clustering remain unimplemented; the addendum
+does not claim API compatibility with Qdrant or replace the sections below.
+
 ## 1. Storage (approved 2026-09-25)
 
 ### 1.1 One RocksDB per database
