@@ -481,8 +481,10 @@ paths behind each name.
 - Terminals with an image protocol (kitty, iTerm2) also get a high-resolution
   render of the ontology and the neighborhood; the others fall back to braille.
 - `--no-anim` turns motion off, and `NO_COLOR` is respected.
-- User-facing CLI and TUI strings go through a catalog with pt-BR as the source
-  and en next to it, as the repo's i18n rule requires.
+- User-facing CLI and TUI strings support English by default and Portuguese
+  as an option. Internal code, canonical graph/schema identifiers and technical
+  documentation are English; localization does not rewrite stored identifiers
+  or user data (language decision updated by Allan, 2026-09-27).
 
 ### 4.4 Annotations
 

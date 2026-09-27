@@ -104,8 +104,10 @@ item; `/` searches within the focused view; `F1` explains the selection;
 command palette. Inside the editor, Enter inserts a newline and characters
 remain text. Shortcuts must not steal normal typing. Mouse support is optional.
 
-Every user-facing string has pt-BR and English catalog entries, as required by
-the approved spec. The images use English as a design reference.
+Every user-facing string supports English and pt-BR. English is the default;
+Portuguese is selected with `--lang pt-BR`, following Allan's 2026-09-27 language
+decision. Canonical graph/schema names and internals stay English in both modes.
+The images use English as a design reference.
 
 ## 4. Graph and query form one workflow
 

@@ -25,6 +25,8 @@ images. Allan selected the latest electric-green identity on 2026-09-26:
 near-black background, restrained cyan and the connected B/W logo. That visual
 identity is used by the first interactive TUI: Graph, Query, Memory and
 Disk & Files. Run `brainwire shell --demo` to explore its synthetic scenario.
+English is the default; use `--lang pt-BR` for Portuguese. Internal graph/schema
+names remain English in either interface language.
 It includes a clustered graph, guided query examples, explained memory budgets
 and a file inspector with an illustrative LSM storage flow. See the
 [terminal demo guide](docs/tui-demo.md) for controls and actual captures.
@@ -48,8 +50,9 @@ cargo run --locked --offline -p brainwire-server -- shell --demo
 Offline commands require dependencies to have been fetched previously.
 The `brainwire` binary provides configuration commands, local Cypher execution
 and the terminal demo. The `brainwire-bolt-dev` binary uses a stub query engine.
-Real Bolt transaction handling and durable
-`brainwire serve` integration are the next MVP tasks.
+The [shared-query transaction API and Bolt lifecycle hooks](docs/transactions.md)
+provide commit/rollback foundations. The next MVP work is the production
+worker/adapter, database registry and durable `brainwire serve` integration.
 
 The local history was extracted from the platform's Brainwire feature branch.
 Old journal entries retain their original commit IDs and checkout paths; the

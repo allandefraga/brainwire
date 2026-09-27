@@ -585,6 +585,10 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
     `brainwire db list`, `brainwire db create <name> [--ontology <file.json>]`,
     `brainwire db apply-ontology <name> <file.json>`.
 
+The [2026-09-27 transaction slice](2026-09-27-brainwire-transactions.md) covers
+shared-query execution and Bolt lifecycle hooks with test-only integration.
+Production worker/adapter/registry/serve work below remains open.
+
 Read the [transaction integration preflight](2026-09-26-brainwire-bolt-transaction-preflight.md)
 for the current ownership/runtime seams and the next implementation slices.
 

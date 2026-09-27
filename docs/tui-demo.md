@@ -14,13 +14,13 @@ cargo run --locked --offline -p brainwire-server -- shell --demo
 ```
 
 Dependencies must already be downloaded for `--offline`. The default UI is
-Portuguese; add `--lang en` for English. The built binary can also be launched
+English; add `--lang pt-BR` for Portuguese. The built binary can also be launched
 directly with `./target/debug/brainwire shell --demo` after building it.
 
 ## Actual terminal preview
 
 These images render ANSI output captured from the running binary in a 160×48
-pseudo-terminal (pt-BR, color enabled). Text uses Menlo with Apple Symbols for
+pseudo-terminal (default English, color enabled; captured 2026-09-27). Text uses Menlo with Apple Symbols for
 Braille graph cells. They are executable-demo captures,
 separate from the earlier generated design concepts. Font rendering varies
 between terminal emulators.

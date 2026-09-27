@@ -38,6 +38,51 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-27, 30-minute session: transaction foundation
+
+- **Requested:** work on the graph for 30 minutes and identify the next task.
+  Started 06:17:34 UTC; requested end 06:47:34 UTC. All work remains local.
+- **Scope:** first two slices of the transaction preflight: shared-query
+  execution context, then real Bolt lifecycle hooks and cross-layer tests.
+  Production runtime/registry/serve integration remains next.
+- **Plan:** [transaction foundation](docs/superpowers/plans/2026-09-27-brainwire-transactions.md).
+  All three task reviews passed; final integration review is pending.
+- **Embedded transaction:** `34dc1b8` adds `QueryTransaction` with a shared
+  snapshot/catalog and staged changes across queries. A later query error
+  discards all earlier writes; commit/rollback/terminal states are explicit.
+  The existing one-query CLI remains compatible. Task review is clean; its
+  focused suite and a rebuilt CLI's 1,000-row write/reopen/rollback checks pass.
+- **Bolt lifecycle:** `6b6020a` connects BEGIN, RUN, COMMIT, ROLLBACK, RESET and
+  teardown to mandatory engine hooks. Final implicit consumption commits;
+  partial PULL/DISCARD leaves the transaction open. Errors discard pending work,
+  failed cleanup closes the session, and fatal socket paths abort before waiting
+  to send a failure. Database selection stays bound to its transaction. Task
+  review is clean; 62 focused tests pass, including 5 real-store integration
+  cases and deterministic transport cleanup checks. The real-store adapter is
+  deliberately test-only; `brainwire-bolt-dev` still uses the development stub.
+- **Language decision:** English code, schema identifiers, docs and default UI;
+  Portuguese remains available through `--lang pt-BR`. Localization changes
+  display text, never stored identifiers or user data. This agreement is recorded
+  in AGENTS, the design, the spec and the demo guide.
+  `fd3771e` sets the shell default; real binary snapshots confirm English by
+  default, Portuguese with the flag, and rejection of an invalid locale. Updated
+  Graph/Memory/Disk captures show the running English demo at 160×48. The exact
+  user-selected reference image remains unchanged (SHA256
+  `a41830e261f00f05ef247c107f4442db0cf3819e1c7f678103e649866a144237`).
+- **Bookmark decision:** the session must not fabricate a commit counter that
+  looks durable. The storage sequence is process-local; engines may provide a
+  bookmark only when they can honor it. Causal/restart bookmark support remains
+  pending the production adapter.
+- **Handoff:** the [transaction guide](docs/transactions.md) documents the public
+  boundary and the remaining production integration.
+- **Verification:** 291 workspace tests passed; all-target clippy with warnings
+  denied, formatting, locked offline build and diff whitespace checks passed.
+  No test server remains running; the branch stays local without a remote.
+- **Next step:** production ownership/runtime for the borrowed transaction,
+  then registry and PackStream adapter plus `brainwire serve`. Verify real driver
+  multi-query commit/rollback, disconnect/reset cleanup and restart persistence
+  before connecting the TUI. The full MVP Task 5 remains open.
+
 ### 2026-09-26, continued session until 21:30: executor and backoffice
 
 - **Requested:** improve both database and CLI; Allan explicitly extended work

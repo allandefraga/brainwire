@@ -15,8 +15,10 @@ as instructions for this repository.
   journal before ending a session.
 - Respect the user's requested session duration. The original routine was
   45 minutes; an explicit duration overrides it.
-- Code, comments, docs and commit messages are in English. Follow the user's
-  language in conversation.
+- Code, comments, docs, commit messages and canonical graph/schema identifiers
+  are in English. The interface defaults to English, with Portuguese available
+  through `--lang pt-BR` (Allan, 2026-09-27). Localization changes display text,
+  not stored identifiers or user data. Follow the user's language in conversation.
 - Use synthetic data in tests and demos.
 - Preserve the selected UI direction. Before UI work, read the Observatory
   design and inspect `docs/design/assets/brainwire-backoffice-user-reference.png`.

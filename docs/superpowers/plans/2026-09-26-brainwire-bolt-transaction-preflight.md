@@ -1,15 +1,18 @@
 # Next session: durable Bolt transaction integration
 
 Implementation handoff for MVP Task 5, prepared after the local executor and
-backoffice slice on 2026-09-26. This is a preflight checklist, not an implemented
-server contract. Keep all changes local unless Allan explicitly authorizes a
+backoffice slice on 2026-09-26. The [2026-09-27 transaction slice](2026-09-27-brainwire-transactions.md)
+implements the shared-query context and Bolt lifecycle hooks, with a test-only
+real-store adapter. The production worker, registry and durable server contract
+remain pending. The original preflight below records the starting seams; see
+the [transaction guide](../../transactions.md) for the current public APIs. Keep all changes local unless Allan explicitly authorizes a
 remote operation. Use subagent-driven development with sequential implementers,
 focused reviews and one final integration review.
 
-## Start from the actual seams
+## Historical seams (before the transaction slice)
 
-- `crates/cypher/src/exec.rs::execute` parses, opens one `Txn`, reads its catalog,
-  evaluates every clause/result and commits before returning. Preserve this
+- `crates/cypher/src/exec.rs::execute` parsed, opened one `Txn`, read its catalog,
+  evaluated every clause/result and committed before returning. Preserve this
   atomic API for `brainwire cypher`; it cannot implement an explicit Bolt
   transaction by being called independently for every RUN.
 - `crates/store/src/txn.rs::Txn<'db>` borrows `Database` and its RocksDB snapshot.
@@ -17,20 +20,23 @@ focused reviews and one final integration review.
   An engine that holds both an `Arc<Database>` and a transaction borrowing that
   same field would be self-referential. Resolve ownership before building the
   adapter; do not extend lifetimes with transmute or leak databases.
-- `crates/bolt/src/session.rs::QueryEngine` currently exposes only synchronous
-  `run`. BEGIN, COMMIT, ROLLBACK and RESET change session state without engine
-  calls. The existing stub's commit counter is not a durable store bookmark.
+- `crates/bolt/src/session.rs::QueryEngine` originally exposed only synchronous
+  `run`. BEGIN, COMMIT, ROLLBACK and RESET changed session state without engine
+  calls. The original stub's commit counter was not a durable store bookmark.
 - `crates/bolt/src/server.rs` creates a per-connection engine with
   `Send + 'static` bounds and calls `session.handle` inside the async socket
   loop. Real RocksDB work must have an explicit execution boundary rather than
   silently blocking the async runtime. Keep the network and session error paths
   involved in cleanup: malformed messages, EOF, GOODBYE and failed socket writes.
 
-Read these files and `research/bolt.md` before selecting the exact APIs. The
+Read the current files and `research/bolt.md` before the remaining integration. The
 protocol research is already linked to primary sources; verify any new protocol
 claim or version-specific behavior against its source during implementation.
 
 ## Slice 1: safe multi-query execution context
+
+Delivered on 2026-09-27 as `QueryTransaction`; requirements below are retained
+as the acceptance record, not a task to repeat.
 
 First prove the storage-lifetime ownership model in a compiling, focused test.
 A scoped blocking worker that owns the selected database and creates a local
@@ -57,6 +63,9 @@ rollback removes both writes, and a late error prevents the earlier write from
 being committed. Keep the standalone CLI rollback tests passing unchanged.
 
 ## Slice 2: lifecycle hooks and session transitions
+
+Delivered on 2026-09-27, including a test-only real-store adapter and transport
+cleanup tests. The production runtime and value conversion are still Slice 3.
 
 Add real begin/commit/abort hooks at the QueryEngine boundary and decide how
 implicit transactions complete when a result is exhausted or discarded. Check
