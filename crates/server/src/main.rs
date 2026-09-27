@@ -47,8 +47,8 @@ enum Commands {
         /// Use the bounded synthetic demo fixture.
         #[arg(long)]
         demo: bool,
-        /// Interface language: pt-BR or en.
-        #[arg(long, default_value = "pt-BR")]
+        /// Interface language: en (default) or pt-BR.
+        #[arg(long, default_value = "en")]
         lang: String,
         /// Disable animations (the current demo uses a static layout).
         #[arg(long)]
