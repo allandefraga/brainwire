@@ -592,15 +592,13 @@ Production worker/adapter/registry/serve work below remains open.
 Read the [transaction integration preflight](2026-09-26-brainwire-bolt-transaction-preflight.md)
 for the current ownership/runtime seams and the next implementation slices.
 
-**Required transaction integration:** the current Bolt `QueryEngine` only has
-`run`; BEGIN, COMMIT and ROLLBACK currently change session state without
-calling the engine. Directly calling the per-query `execute` helper from each
-RUN would commit writes before COMMIT and falsely acknowledge ROLLBACK.
-Before the managed driver demo, add real transaction ownership and lifecycle
-hooks to the engine/session boundary. Preserve Task 4's atomic standalone
-`execute` API, but provide a way for multiple RUNs to share an uncommitted
-storage transaction. Do not substitute an accepted no-op for a transaction
-operation that has not been implemented.
+**Required production integration:** shared-query `QueryTransaction` and Bolt
+begin/run/commit/abort hooks are implemented. The production worker and adapter
+must connect those APIs while preserving the transaction across RUNs. Calling
+the per-query `execute` helper independently for each RUN would commit before
+COMMIT and break ROLLBACK. Preserve Task 4's atomic standalone `execute` API;
+use the shared transaction context for Bolt. Do not substitute an accepted no-op
+for a production transaction operation that has not been implemented.
 
 Acceptance must cover a multi-query transaction committing all its writes;
 ROLLBACK leaving no writes after reopen; RESET and connection teardown
