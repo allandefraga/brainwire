@@ -1,7 +1,8 @@
 //! Atomic, eager execution of the supported Cypher subset.
 //!
-//! Each call owns one snapshot and write overlay. All output is evaluated before
-//! commit, so an error in a late clause drops every graph write in the call.
+//! A query transaction owns one snapshot and write overlay across its runs.
+//! All output is evaluated before commit; any query error discards every staged
+//! graph write. `execute` provides the same atomic behavior for one query.
 //! Scans, bindings and output are materialized; query memory budgets are not yet
 //! enforced and this is not a streaming executor.
 mod eval;
@@ -82,30 +83,167 @@ struct Context<'a, 'db> {
     params: &'a BTreeMap<String, Value>,
 }
 
+/// Lifecycle of a shared query transaction. Terminal states cannot be reused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryTransactionState {
+    Active,
+    Failed,
+    Committed,
+    RolledBack,
+}
+
+/// A borrowed storage snapshot and write overlay shared by multiple queries.
+///
+/// Each `run` has fresh bindings and parameters, but sees earlier staged writes.
+/// Any query or commit error transitions to `Failed` and drops the storage
+/// transaction immediately. Successful commit transitions to `Committed`;
+/// rollback of an active context transitions to `RolledBack`. Rollback is
+/// idempotent and preserves terminal states. Dropping an active context discards
+/// its writes. No savepoints or streaming execution are provided.
+pub struct QueryTransaction<'db> {
+    txn: Option<Txn<'db>>,
+    catalog: Catalog,
+    wrote: bool,
+    state: QueryTransactionState,
+}
+
+impl<'db> QueryTransaction<'db> {
+    /// Capture one storage snapshot and load its catalog.
+    pub fn begin(db: &'db Database) -> Result<Self, ExecError> {
+        let mut txn = db.begin();
+        // This dependency also rejects a concurrent catalog migration when writing.
+        let catalog = match txn.get_for_update(Cf::Meta, b"catalog")? {
+            Some(bytes) => {
+                serde_json::from_slice(&bytes).map_err(|e| StoreError::Catalog(e.to_string()))?
+            }
+            None => Catalog {
+                version: 0,
+                node_types: vec![],
+                edge_types: vec![],
+                streams: vec![],
+            },
+        };
+        Ok(Self {
+            txn: Some(txn),
+            catalog,
+            wrote: false,
+            state: QueryTransactionState::Active,
+        })
+    }
+
+    pub fn state(&self) -> QueryTransactionState {
+        self.state
+    }
+
+    fn require_active(&self) -> Result<(), ExecError> {
+        if self.state != QueryTransactionState::Active {
+            return Err(ExecError::Semantic(format!(
+                "query transaction is {:?}; begin a new transaction",
+                self.state
+            )));
+        }
+        Ok(())
+    }
+
+    fn fail(&mut self) {
+        self.txn.take();
+        self.state = QueryTransactionState::Failed;
+    }
+
+    /// Evaluate a query without committing. An error discards all prior runs.
+    pub fn run(
+        &mut self,
+        query: &str,
+        params: &BTreeMap<String, Value>,
+    ) -> Result<QueryOutput, ExecError> {
+        self.require_active()?;
+        match parse(query) {
+            Ok(query) => self.run_parsed(&query, params),
+            Err(error) => {
+                self.fail();
+                Err(error.into())
+            }
+        }
+    }
+
+    fn run_parsed(
+        &mut self,
+        query: &Query,
+        params: &BTreeMap<String, Value>,
+    ) -> Result<QueryOutput, ExecError> {
+        let result = execute_clauses(
+            self.txn.as_mut().expect("active transaction"),
+            &self.catalog,
+            query,
+            params,
+        );
+        match result {
+            Ok((output, wrote)) => {
+                self.wrote |= wrote;
+                Ok(output)
+            }
+            Err(error) => {
+                self.fail();
+                Err(error)
+            }
+        }
+    }
+
+    /// Commit once, returning a store sequence for a write transaction, or
+    /// `None` for read-only completion. This is not a restart-stable bookmark.
+    /// Read-only completion drops the snapshot without checking write conflicts,
+    /// preserving the standalone executor's read-only behavior.
+    pub fn commit(&mut self) -> Result<Option<u64>, ExecError> {
+        self.require_active()?;
+        let txn = self.txn.take().expect("active transaction");
+        let result = if self.wrote {
+            txn.commit().map(Some).map_err(ExecError::from)
+        } else {
+            drop(txn);
+            Ok(None)
+        };
+        self.state = if result.is_ok() {
+            QueryTransactionState::Committed
+        } else {
+            QueryTransactionState::Failed
+        };
+        result
+    }
+
+    /// Discard active writes and release the snapshot. Safe to call repeatedly.
+    pub fn rollback(&mut self) {
+        if self.state == QueryTransactionState::Active {
+            self.txn.take();
+            self.state = QueryTransactionState::RolledBack;
+        }
+    }
+}
+
+/// Execute and atomically commit a single query.
 pub fn execute(
     db: &Database,
     query: &str,
     params: &BTreeMap<String, Value>,
 ) -> Result<QueryOutput, ExecError> {
+    // Preserve syntax-error precedence over catalog loading for this API.
     let query = parse(query)?;
-    let mut txn = db.begin();
-    // This dependency also rejects a concurrent catalog migration when writing.
-    let catalog = match txn.get_for_update(Cf::Meta, b"catalog")? {
-        Some(bytes) => {
-            serde_json::from_slice(&bytes).map_err(|e| StoreError::Catalog(e.to_string()))?
-        }
-        None => Catalog {
-            version: 0,
-            node_types: vec![],
-            edge_types: vec![],
-            streams: vec![],
-        },
-    };
+    let mut transaction = QueryTransaction::begin(db)?;
+    let output = transaction.run_parsed(&query, params)?;
+    transaction.commit()?;
+    Ok(output)
+}
+
+fn execute_clauses(
+    txn: &mut Txn<'_>,
+    catalog: &Catalog,
+    query: &Query,
+    params: &BTreeMap<String, Value>,
+) -> Result<(QueryOutput, bool), ExecError> {
     validate::query(
-        &query,
+        query,
         &Context {
-            txn: &txn,
-            catalog: &catalog,
+            txn,
+            catalog,
             params,
         },
     )?;
@@ -117,8 +255,8 @@ pub fn execute(
     let mut wrote = false;
     for clause in &query.clauses {
         let ctx = Context {
-            txn: &txn,
-            catalog: &catalog,
+            txn,
+            catalog,
             params,
         };
         match clause {
@@ -155,14 +293,14 @@ pub fn execute(
             }
             Clause::Merge(pattern) => {
                 for row in &mut rows {
-                    graph::write_pattern(&mut txn, &catalog, params, row, pattern, false)?;
+                    graph::write_pattern(txn, catalog, params, row, pattern, false)?;
                     wrote = true;
                 }
             }
             Clause::Create(patterns) => {
                 for row in &mut rows {
                     for pattern in patterns {
-                        graph::write_pattern(&mut txn, &catalog, params, row, pattern, true)?;
+                        graph::write_pattern(txn, catalog, params, row, pattern, true)?;
                         wrote = true;
                     }
                 }
@@ -171,8 +309,8 @@ pub fn execute(
                 // Evaluate one row's assignments together, then update each node once.
                 for row in &rows {
                     let ctx = Context {
-                        txn: &txn,
-                        catalog: &catalog,
+                        txn,
+                        catalog,
                         params,
                     };
                     let mut changes: BTreeMap<NodeId, BTreeMap<String, Value>> = BTreeMap::new();
@@ -186,8 +324,8 @@ pub fn execute(
                     for (id, props) in changes {
                         let node = graph::node_out(
                             &Context {
-                                txn: &txn,
-                                catalog: &catalog,
+                                txn,
+                                catalog,
                                 params,
                             },
                             id,
@@ -196,8 +334,8 @@ pub fn execute(
                             unreachable!()
                         };
                         brainwire_store::graph::merge_node(
-                            &mut txn,
-                            &catalog,
+                            txn,
+                            catalog,
                             &node.label,
                             entity_id,
                             &props,
@@ -214,7 +352,7 @@ pub fn execute(
                     }
                 }
                 for id in ids {
-                    brainwire_store::graph::detach_delete(&mut txn, id)?;
+                    brainwire_store::graph::detach_delete(txn, id)?;
                     wrote = true;
                 }
             }
@@ -223,8 +361,5 @@ pub fn execute(
             }
         }
     }
-    if wrote {
-        txn.commit()?;
-    }
-    Ok(output)
+    Ok((output, wrote))
 }

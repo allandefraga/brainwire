@@ -13,4 +13,6 @@ pub mod parser;
 pub use parser::{parse, ParseError};
 
 pub mod exec;
-pub use exec::{execute, ExecError, NodeOut, Out, QueryOutput};
+pub use exec::{
+    execute, ExecError, NodeOut, Out, QueryOutput, QueryTransaction, QueryTransactionState,
+};
