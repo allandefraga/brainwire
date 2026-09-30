@@ -1,12 +1,46 @@
 //! Reproducible persisted-graph workload; no network or existing database used.
 //! cargo run --locked --offline -p brainwire-cypher --example sparse_analytics -- 100000
 use brainwire_core::schema::GraphMapping;
+use brainwire_core::value::Value;
 use brainwire_cypher::{execute, Out};
 use brainwire_store::{
     db::{Database, Resources, StoreConfig},
     graph::{merge_edge, merge_node, sparse_projection, ProjectionOptions},
 };
 use std::{collections::BTreeMap, time::Instant};
+
+fn latency_summary(samples: &mut [f64]) -> serde_json::Value {
+    samples.sort_by(f64::total_cmp);
+    let percentile = |p: usize| samples[(samples.len() - 1) * p / 100];
+    serde_json::json!({
+        "samples": samples.len(),
+        "meanMs": samples.iter().sum::<f64>() / samples.len() as f64,
+        "p50Ms": percentile(50),
+        "p95Ms": percentile(95),
+        "p99Ms": percentile(99),
+    })
+}
+
+fn measure_local_query(
+    db: &Database,
+    query: &str,
+    node_count: usize,
+    expected_rows: usize,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut samples = Vec::with_capacity(1000);
+    for i in 0..1100 {
+        let id = (i * 7919) % node_count;
+        let params = BTreeMap::from([("id".into(), Value::Str(format!("synthetic-{id}")))]);
+        let started = Instant::now();
+        let result = execute(db, query, &params)?;
+        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(result.rows.len(), expected_rows);
+        if i >= 100 {
+            samples.push(elapsed_ms);
+        }
+    }
+    Ok(latency_summary(&mut samples))
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let edges: usize = std::env::args()
@@ -97,6 +131,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("expected id")
     };
     assert_eq!(top, "synthetic-0");
+    let point_lookup = measure_local_query(
+        &db,
+        "MATCH (p:Page {entity_id:$id}) RETURN p.entity_id",
+        node_count,
+        1,
+    )?;
+    let one_hop = measure_local_query(
+        &db,
+        "MATCH (p:Page {entity_id:$id})-[:LINK]->(q:Page) RETURN q.entity_id",
+        node_count,
+        10,
+    )?;
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
@@ -105,6 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "nodeImportMs": node_import_ms, "edgeImportMs": edge_import_ms, "reopenMs": reopen_ms,
             "projectionMs": projection_ms, "pagerankMs": pagerank_ms, "cypherTop5Ms": cypher_ms,
             "csrBytes": csr_bytes, "rankMass": mass, "iterations": iterations, "converged": converged,
+            "pointLookup": point_lookup, "oneHopTenNeighbors": one_hop,
             "topEntity": top, "cacheBytes": 64 << 20, "memtableBytes": 16 << 20,
             "note": "local synthetic workload; CSR bytes exclude construction buffers and process RSS"
         }))?

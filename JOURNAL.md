@@ -38,6 +38,33 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-30, single-node latency and commercialization review
+
+- **Done:** extended the reproducible sparse-analytics example with 100 warm-up
+  and 1,000 timed embedded Cypher reads per query, using varied `entity_id`
+  values. Measured point lookup and ten-neighbor expansion on both the 10K/100K
+  and 100K/1M synthetic graphs. The 1M-edge debug run measured 0.043 ms p50 /
+  0.129 ms p95 for a point read, and 0.255 ms p50 / 0.973 ms p95 for ten
+  neighbors. These are single warm-cache local runs without Bolt, concurrency
+  or production workload guarantees; [report](docs/benchmarks/2026-09-30-sparse-analytics.md).
+- **Verified:** both example sizes ran successfully, workspace tests passed,
+  workspace clippy passed with warnings denied, formatting check passed.
+- **Commercial direction discussed:** client can be the first design partner
+  while Brainwire remains a separate product. Recommend a narrow paid pilot
+  before a production subscription, with explicit success criteria and a
+  written ownership/commercial-use arrangement. Repository is currently
+  `UNLICENSED` and `publish = false`; no public license or pricing was chosen.
+- **Deferred at Allan's request:** a live TUI view of the 100K-node graph.
+  The current TUI still uses its 36-node synthetic fixture; no live-preview
+  code was retained. A bounded real sample plus true database counts would be
+  the right first display for a larger graph.
+- **Next:** production Bolt worker/adapter and durable `brainwire serve`, then
+  driver-based restart tests. Benchmark point reads through Bolt under
+  concurrent, cold-cache and high-degree workloads; add secondary property
+  indexes. Clarify IP ownership and licensing before external distribution.
+- **Blockers:** none for local engineering. Product license and first external
+  offer need an explicit business decision.
+
 ### 2026-09-30, Cypher sparse analytics and volume validation
 
 - **Requested:** a substantial session across multiple tasks, minimum ten

@@ -70,6 +70,37 @@ Raw local outputs from this run are in ignored `target/analytics-100k.json`,
 `target/analytics-1m.json` and matching `.log` files. This report preserves the
 numbers independently of build-directory cleanup.
 
+## Single-node Cypher reads
+
+A subsequent run of the same checked-in example measured two queries after the
+database had been reopened and the analytics phases had run. For each query,
+the example issued 100 warm-up reads followed by 1,000 timed reads using
+deterministically varied `entity_id` parameters. Each selected node has ten
+outgoing `LINK` relationships. The timing includes embedded Cypher parsing,
+execution and result creation, but excludes process startup, Bolt transport,
+JSON encoding, and import. It is a single sequential debug-profile run with
+warm OS/database caches; no concurrency or cold-cache control was applied.
+
+```cypher
+MATCH (p:Page {entity_id:$id}) RETURN p.entity_id
+MATCH (p:Page {entity_id:$id})-[:LINK]->(q:Page) RETURN q.entity_id
+```
+
+| Query and dataset | Mean | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: |
+| Point read, 10K nodes / 100K edges | 0.042 ms | 0.038 ms | 0.058 ms | 0.117 ms |
+| Ten-neighbor read, 10K nodes / 100K edges | 0.164 ms | 0.160 ms | 0.187 ms | 0.227 ms |
+| Point read, 100K nodes / 1M edges | 0.060 ms | 0.043 ms | 0.129 ms | 0.276 ms |
+| Ten-neighbor read, 100K nodes / 1M edges | 0.404 ms | 0.255 ms | 0.973 ms | 2.399 ms |
+
+The `entity_id` pattern uses the existing ID lookup; matching an arbitrary
+property without `entity_id` currently scans nodes of that type. Outgoing
+relationships are fetched from the selected node's adjacency keys. These
+results do not establish latency for high-degree hubs, large properties,
+remote clients or a production server. The earlier analytics table above
+comes from a different run and must not be interpreted as the timings of these
+point reads.
+
 ## Remaining scale work
 
 - Compare release builds, repeated runs and multiple graph shapes, including
@@ -77,5 +108,7 @@ numbers independently of build-directory cleanup.
 - Measure peak allocation by phase; avoid treating CSR size as a query budget.
 - Enforce a byte-based query budget and cancellation/deadlines across the engine.
 - Measure concurrent readers/writers and expensive output projections.
+- Measure point reads and neighbor expansion through Bolt, including cold-cache
+  and high-degree cases; add secondary property indexes for selective lookup.
 - Extend to 10M+ edges only after the memory and query execution limits are in
   place. The five-billion-element target is not demonstrated by this workload.
