@@ -153,9 +153,48 @@ fn pattern(
     Ok(())
 }
 pub(super) fn query(query: &Query, ctx: &Context<'_, '_>) -> Result<(), ExecError> {
+    if query
+        .clauses
+        .iter()
+        .any(|c| matches!(c, Clause::Call { .. }))
+        && !(query.clauses.len() == 2
+            && matches!(query.clauses[0], Clause::Call { .. })
+            && matches!(query.clauses[1], Clause::Return { .. }))
+    {
+        return Err(unsupported(
+            "analytics currently requires CALL ... YIELD ... RETURN as the whole query",
+        ));
+    }
     let mut scope = Scope::new();
     for (idx, c) in query.clauses.iter().enumerate() {
         match c {
+            Clause::Call {
+                name,
+                args,
+                yields,
+                where_,
+            } => {
+                for argument in args {
+                    expr(argument, &scope, ctx, false)?;
+                }
+                procedures::validate(name, args, yields, ctx)?;
+                for item in yields {
+                    scope.insert(
+                        item.alias.clone(),
+                        if item.field == "node" {
+                            Kind::Node
+                        } else {
+                            Kind::Value
+                        },
+                    );
+                }
+                if let Some(predicate) = where_ {
+                    expr(predicate, &scope, ctx, false)?;
+                    if !mentions(predicate, None) {
+                        eval::boolean(eval(predicate, &Bindings::new(), ctx)?)?;
+                    }
+                }
+            }
             Clause::Match { patterns, where_ } => {
                 for p in patterns {
                     pattern(p, &mut scope, ctx, false)?;

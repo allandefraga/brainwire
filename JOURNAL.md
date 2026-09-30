@@ -38,6 +38,71 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-09-30, Cypher sparse analytics and volume validation
+
+- **Requested:** a substantial session across multiple tasks, minimum ten
+  minutes, followed by an accurate engine/CLI/TUI status report. Work started
+  at 08:47:36 UTC; no remote actions. Completed the previously deferred Cypher
+  integration, numerical fixes, transaction/recovery tests and volume workload.
+- **Engine:** corrected CSR zero retention, duplicate-weight overflow,
+  impossible-dimension panic and nonfinite matvec handling. PageRank now uses
+  f64 accumulation, precomputed row totals, reusable buffers and convergence
+  diagnostics. Randomized tests compare it with an independent dense reference.
+- **Storage:** added a visitor merging snapshot keys with transaction overlay
+  updates/deletes without materializing all property values. Projections and
+  stats use this path. Projections support relationship filters, catalog/extra
+  weight properties, graph degrees and cardinality limits. Analytics errors
+  stop scans; projections remain ephemeral and use the caller's transaction.
+- **Cypher:** implemented `CALL graph.project`, `graph.degree`, `graph.pagerank`
+  with options/parameters, explicit `YIELD`, aliases, filtering and final
+  `RETURN`/`LIMIT`. Procedures cannot be mixed with other clauses beyond RETURN
+  in the same query; earlier runs in a query transaction remain visible.
+  Unknown options/fields, invalid weights and exceeded limits fail explicitly.
+- **Tests:** 314 workspace tests passed, including CLI process/reopen output,
+  transaction privacy, rollback/error poisoning, external snapshot isolation,
+  node deletion, numeric edge cases and projection rebuilding/ranking after
+  five SIGKILL cycles. Workspace clippy (`-D warnings`), formatting and diff
+  checks passed. Reviewed the new parser/executor/visitor paths locally.
+- **Volume:** imported/reopened 10K nodes/100K relationships and 100K nodes/1M
+  relationships with the normal durable graph API. The million-edge debug run
+  measured 1.20 s CSR construction, 1.13 s PageRank, 3.35 s Cypher top-five,
+  12,800,008 CSR bytes and 160,923,648 bytes whole-process peak RSS. Single local
+  measurements, not production claims; [report](docs/benchmarks/2026-09-30-sparse-analytics.md)
+  and [reproducible example](crates/cypher/examples/sparse_analytics.rs) retained.
+- **Usage:** added [analytics guide](docs/sparse-analytics.md) and synthetic
+  ontology in `examples/analytics/schema.json`; created an ignored local demo
+  database at `data/analytics-demo` and verified the documented CLI queries.
+  TUI Graph/Memory snapshots verified in English/Portuguese. TUI data and file
+  telemetry remain simulated; no live attachment or production serve yet.
+- **Boundaries:** graph/vector search indexes, named persisted projections,
+  hard query-memory enforcement and distributed fault tolerance remain pending.
+  Cardinality limits do not impose a byte-based memory ceiling. Earlier
+  untracked `docs-site/` and `.DS_Store` files were preserved.
+- **Next:** production Bolt worker/adapter + database registry + durable
+  `brainwire serve`, with driver-driven write/kill/restart acceptance, then
+  connect TUI queries and observability to that backend. Improve byte budgets
+  and cancellation before increasing analytics workloads beyond this range.
+- **Blockers:** none for this delivery. All changes and demo data stay local.
+
+### 2026-09-30, sparse graph projection session
+
+- **Done:** added `brainwire_core::sparse::SparseMatrix`, a compact CSR matrix
+  builder with duplicate-edge accumulation, finite-value validation, shape
+  inspection and sparse matrix-vector multiplication. Added
+  `Database::sparse_projection`, which maps persisted NodeIds and optional edge
+  types into a rebuildable CSR adjacency view, plus weighted PageRank over the
+  projection. Added focused core and store tests for graph-like weighted edges,
+  filters and invalid inputs. The persistent RocksDB graph remains the source
+  of truth.
+- **Verified:** `cargo test --workspace --locked --offline` (all workspace
+  tests passed), `cargo clippy --workspace --all-targets --locked --offline --
+  -D warnings`, `cargo fmt --all -- --check`, and `git diff --check`.
+- **Decided:** use sparse matrices for analytics/search projections rather than
+  replacing transactional `out`/`in` adjacency storage.
+- **Next step:** expose the projection through a read-only Cypher procedure,
+  then benchmark rebuild cost on 100K and 1M synthetic edges.
+- **Blockers:** none.
+
 ### 2026-09-27, product direction: rich data, vectors and recovery
 
 - **Requested:** understand a distributed deployment across containers/machines

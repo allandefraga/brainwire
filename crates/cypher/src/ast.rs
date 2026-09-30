@@ -11,6 +11,12 @@ pub struct Query {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Clause {
+    Call {
+        name: String,
+        args: Vec<Expr>,
+        yields: Vec<YieldItem>,
+        where_: Option<Expr>,
+    },
     Match {
         patterns: Vec<Pattern>,
         where_: Option<Expr>,
@@ -27,6 +33,12 @@ pub enum Clause {
         items: Vec<ReturnItem>,
         limit: Option<Expr>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct YieldItem {
+    pub field: String,
+    pub alias: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

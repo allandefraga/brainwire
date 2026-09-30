@@ -37,6 +37,11 @@ atomically to RocksDB and survive reopening. The [local query guide](docs/local-
 walks through ontology initialization, parameters, bulk JSON files and JSON output. Connecting
 the TUI to the engine, real telemetry and real files remains pending.
 
+Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
+and `graph.pagerank`, with weighted CSR projections built from the transaction
+snapshot. See the [analytics guide](docs/sparse-analytics.md) for a complete
+example, options, memory limits and a reproducible volume workload.
+
 ## Local development
 
 ```sh

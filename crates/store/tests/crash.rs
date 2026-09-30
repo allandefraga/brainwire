@@ -83,6 +83,17 @@ fn survives_five_kill_and_reopen_cycles() {
         let customer_type = catalog.node_type("Customer").unwrap().id;
         let company_type = catalog.node_type("Company").unwrap().id;
         let works_at = catalog.edge_type("WORKS_AT").unwrap().id;
+        // A matrix is rebuilt from the recovered authoritative records; there
+        // is no stale projection file or separate analytics recovery path.
+        let projection = db
+            .sparse_projection(Some(works_at))
+            .expect("rebuild projection after SIGKILL");
+        assert!(projection.relationship_count >= (first + count) as usize);
+        let ranks = projection
+            .matrix
+            .pagerank_until(50, 0.85, 1e-8)
+            .expect("rank recovered graph");
+        assert!((ranks.scores.iter().sum::<f64>() - 1.0).abs() < 1e-8);
         let txn = db.begin();
 
         let companies: Vec<_> = (0..100)

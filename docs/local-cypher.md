@@ -92,6 +92,9 @@ does not add streaming or enforce the configured query-memory ceiling.
 - `UNWIND`, node property `SET`, and `DETACH DELETE`.
 - `RETURN` values or nodes, top-level `count` aggregation and grouping,
   nonnegative integer `LIMIT`, parameters and three-valued boolean logic.
+- Read-only `CALL graph.project`, `graph.degree` and `graph.pagerank`, with
+  explicit `YIELD`, aliases, optional `WHERE` and final `RETURN`/`LIMIT`.
+  See [sparse analytics](sparse-analytics.md) for runnable examples and limits.
 
 Unsupported constructs return an explicit error. Relationship variables and
 relationship property filters are not implemented. This is an eager MVP

@@ -223,6 +223,52 @@ impl<'db> Txn<'db> {
         self.writes.insert((cf, key), None);
     }
 
+    /// Visit one prefix in key order, merging the snapshot with this
+    /// transaction's overlay without copying/materializing all stored values.
+    /// Callback errors stop the scan immediately. This is a snapshot read,
+    /// not a serializable range dependency.
+    pub fn visit_prefix<E: From<StoreError>>(
+        &self,
+        cf: Cf,
+        prefix: &[u8],
+        mut visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let mut disk = self.snapshot.raw_iterator_cf(self.db.cf(cf.name())?);
+        disk.seek(prefix);
+        let mut overlay = self
+            .writes
+            .range((cf, prefix.to_vec())..)
+            .take_while(|((family, key), _)| *family == cf && key.starts_with(prefix))
+            .peekable();
+        loop {
+            disk.status().map_err(StoreError::from)?;
+            let disk_key = disk.key().filter(|key| key.starts_with(prefix));
+            let staged = overlay.peek();
+            match (disk_key, staged) {
+                (None, None) => break,
+                (Some(key), Some(((_, staged_key), _))) if key < staged_key.as_slice() => {
+                    visit(key, disk.value().expect("valid iterator"))?;
+                    disk.next();
+                }
+                (Some(key), None) => {
+                    visit(key, disk.value().expect("valid iterator"))?;
+                    disk.next();
+                }
+                (key, Some(((_, staged_key), value))) => {
+                    let replace = key == Some(staged_key.as_slice());
+                    if let Some(value) = value {
+                        visit(staged_key, value)?;
+                    }
+                    overlay.next();
+                    if replace {
+                        disk.next();
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     // The pair-of-byte-vectors return type is the brief's required interface
     // (spec 1.4); factoring it into a named alias is not worth doing for one
     // call site, so the complexity lint is silenced locally instead.
@@ -448,6 +494,42 @@ mod tests {
                 (b"p:3".to_vec(), b"w".to_vec())
             ]
         );
+    }
+
+    #[test]
+    fn visitor_merges_updates_deletes_insertions_and_respects_snapshot_and_prefix() {
+        let (_d, _r, db) = open();
+        let mut seed = db.begin();
+        for key in [b"p:1", b"p:3", b"p:5", b"q:1"] {
+            seed.put(Cf::Out, key.to_vec(), b"old".to_vec());
+        }
+        seed.commit().unwrap();
+        let mut tx = db.begin();
+        let mut external = db.begin();
+        external.put(Cf::Out, b"p:4".to_vec(), b"invisible".to_vec());
+        external.commit().unwrap();
+        tx.delete(Cf::Out, b"p:1".to_vec());
+        tx.put(Cf::Out, b"p:0".to_vec(), b"first".to_vec());
+        tx.put(Cf::Out, b"p:3".to_vec(), b"replacement".to_vec());
+        tx.put(Cf::Out, b"p:9".to_vec(), b"last".to_vec());
+        tx.put(Cf::In, b"p:2".to_vec(), b"other-cf".to_vec());
+        for prefix in [b"p:".as_slice(), b"", b"missing"] {
+            let mut visited = vec![];
+            tx.visit_prefix::<StoreError>(Cf::Out, prefix, |k, v| {
+                visited.push((k.to_vec(), v.to_vec()));
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(visited, tx.scan_prefix(Cf::Out, prefix).unwrap());
+        }
+        let mut visits = 0;
+        assert!(tx
+            .visit_prefix::<StoreError>(Cf::Out, b"", |_, _| {
+                visits += 1;
+                Err(StoreError::Corrupt("stop".into()))
+            })
+            .is_err());
+        assert_eq!(visits, 1);
     }
 
     #[test]

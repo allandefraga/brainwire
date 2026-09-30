@@ -10,6 +10,8 @@
 //!            | SET var '.' key '=' expr (',' var '.' key '=' expr)*
 //!            | DETACH DELETE var (',' var)*
 //!            | UNWIND expr AS var
+//!            | CALL name ('.' name)* '(' [expr (',' expr)*] ')'
+//!              YIELD name [AS name] (',' name [AS name])* [WHERE expr]
 //!            | RETURN item (',' item)* [LIMIT expr]
 //! item      := expr [AS name]
 //! pattern   := node [rel node]
@@ -26,7 +28,7 @@
 //!
 //! Anything else (`OPTIONAL MATCH`, `WITH`, `ORDER BY`, `SKIP`,
 //! variable-length relationships, several labels, several hops, functions
-//! other than `count`, `CALL`, `DELETE` without `DETACH`) is rejected with a
+//! other than `count`, `DELETE` without `DETACH`) is rejected with a
 //! `ParseError` whose message starts with `not supported yet: `.
 //!
 //! Nesting through parentheses, lists and maps (including a `count(...)`
@@ -233,7 +235,7 @@ impl<'a> Parser<'a> {
             "RETURN" => self.parse_return(),
             "OPTIONAL" => Err(self.error_here("not supported yet: OPTIONAL MATCH")),
             "WITH" => Err(self.error_here("not supported yet: WITH")),
-            "CALL" => Err(self.error_here("not supported yet: CALL")),
+            "CALL" => self.parse_call(),
             "DELETE" => Err(self.error_here("not supported yet: DELETE without DETACH")),
             _ => Err(self.error_here(EXPECTED_CLAUSE)),
         }
@@ -253,6 +255,58 @@ impl<'a> Parser<'a> {
             None
         };
         Ok(Clause::Match { patterns, where_ })
+    }
+
+    fn parse_call(&mut self) -> Result<Clause, ParseError> {
+        self.advance();
+        let mut parts = vec![self.expect_ident("a procedure name")?];
+        while self.check(&Tok::Dot) {
+            self.advance();
+            parts.push(self.expect_ident("a procedure name segment")?);
+        }
+        self.expect(Tok::LParen, "'('")?;
+        let mut args = vec![];
+        if !self.check(&Tok::RParen) {
+            loop {
+                args.push(self.parse_expr()?);
+                if !self.check(&Tok::Comma) {
+                    break;
+                }
+                self.advance();
+            }
+        }
+        self.expect(Tok::RParen, "')'")?;
+        if !self.check_keyword("YIELD") {
+            return Err(self.error_here("expected YIELD with explicit procedure fields"));
+        }
+        self.advance();
+        let mut yields = vec![];
+        loop {
+            let field = self.expect_ident("a YIELD field")?;
+            let alias = if self.check_keyword("AS") {
+                self.advance();
+                self.expect_ident("a YIELD alias")?
+            } else {
+                field.clone()
+            };
+            yields.push(YieldItem { field, alias });
+            if !self.check(&Tok::Comma) {
+                break;
+            }
+            self.advance();
+        }
+        let where_ = if self.check_keyword("WHERE") {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        Ok(Clause::Call {
+            name: parts.join("."),
+            args,
+            yields,
+            where_,
+        })
     }
 
     fn parse_merge(&mut self) -> Result<Clause, ParseError> {
@@ -703,7 +757,7 @@ impl<'a> Parser<'a> {
 }
 
 const EXPECTED_CLAUSE: &str =
-    "expected a clause (MATCH, MERGE, CREATE, SET, DETACH DELETE, UNWIND or RETURN)";
+    "expected a clause (MATCH, MERGE, CREATE, SET, DETACH DELETE, UNWIND, CALL or RETURN)";
 
 fn tok_desc(t: &Tok) -> String {
     match t {
@@ -959,13 +1013,38 @@ mod tests {
     }
 
     #[test]
-    fn call_is_unsupported() {
+    fn call_requires_explicit_yield() {
         let e = parse("CALL db.labels()").unwrap_err();
-        assert!(
-            e.message.starts_with("not supported yet: CALL"),
-            "{}",
-            e.message
-        );
+        assert!(e.message.starts_with("expected YIELD"), "{}", e.message);
+    }
+
+    #[test]
+    fn call_parses_names_parameters_aliases_filters_and_utf8() {
+        let query = parse("call graph.pagerank($config) yield node AS `nó`, score where score > 0 return `nó`, score limit 10;").unwrap();
+        let Clause::Call {
+            name,
+            args,
+            yields,
+            where_,
+        } = &query.clauses[0]
+        else {
+            panic!("expected call")
+        };
+        assert_eq!(name, "graph.pagerank");
+        assert_eq!(args, &[Expr::Param("config".into())]);
+        assert_eq!(yields[0].alias, "nó");
+        assert!(where_.is_some());
+        for invalid in [
+            "CALL",
+            "CALL graph.",
+            "CALL graph.project(",
+            "CALL graph.project({})",
+            "CALL graph.project() YIELD",
+            "CALL graph.project() YIELD *",
+            "CALL graph.project() YIELD node AS",
+        ] {
+            assert!(parse(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

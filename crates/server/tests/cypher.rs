@@ -72,6 +72,34 @@ fn initialize_create_parameter_reopen_and_atomic_failure() {
         serde_json::json!([[-9223372036854775808_i64,[true,null,1.5,{"a":"b"}]]])
     );
 }
+
+#[test]
+fn analytics_through_cli_returns_real_nodes_scores_and_projection_counts() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    json(query(&d, "CREATE (c:Customer {entity_id:'c'}), (k:Company {entity_id:'k'}) CREATE (c)-[:WORKS_AT]->(k)", &["--ontology", "schema.json"]));
+    let summary = json(query(&d, "CALL graph.project($opts) YIELD nodeCount, relationshipCount RETURN nodeCount, relationshipCount", &["--params", r#"{"opts":{"relationship":"WORKS_AT"}}"#]));
+    assert_eq!(summary["rows"], serde_json::json!([[2, 1]]));
+    let rank = json(query(
+        &d,
+        "CALL graph.pagerank() YIELD node, score RETURN node, score LIMIT 1",
+        &[],
+    ));
+    assert_eq!(rank["rows"][0][0]["properties"]["entity_id"], "k");
+    assert!(rank["rows"][0][1].as_f64().unwrap() > 0.5);
+    let failure = query(
+        &d,
+        "CALL graph.project({maxNodes:1}) YIELD nodeCount RETURN nodeCount",
+        &[],
+    );
+    assert!(!failure.status.success());
+    assert!(failure.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&failure.stderr).contains("maxNodes"));
+}
 #[test]
 fn invalid_inputs_do_not_create_database() {
     for params in [

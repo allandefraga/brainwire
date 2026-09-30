@@ -4,6 +4,7 @@ pub mod codec;
 pub mod ids;
 pub mod keys;
 pub mod schema;
+pub mod sparse;
 pub mod value;
 
 #[cfg(test)]

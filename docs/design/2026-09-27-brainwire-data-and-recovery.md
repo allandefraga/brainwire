@@ -23,6 +23,23 @@ These requirements extend the product scope. Implementation choices and delivery
 dates below are proposals; this note does not replace the existing approved spec
 or assert that vector search and clustering fit into the current one-month MVP.
 
+## Sparse graph analytics
+
+Brainwire keeps transactional `out` and `in` adjacency records as the
+authoritative graph representation. Analytics can build a disposable CSR
+(compressed sparse row) projection from those records. The projection assigns
+stable row and column positions to sorted `NodeId` values, stores only existing
+relationships, and can be rebuilt after restart or snapshot restore.
+
+The first supported operation is weighted PageRank over a square projection.
+This keeps graph traversal and writes independent from analytics memory, while
+making sparse matrix operations available for later community detection,
+propagation and recommendation workloads. As of 2026-09-30, read-only Cypher
+procedures expose projection summaries, degree counts and weighted PageRank.
+See [sparse analytics](../sparse-analytics.md) for the implemented syntax and
+limits. These projections are ephemeral, rebuilt per call; named persisted
+projections, incremental refresh and distributed analytics remain future work.
+
 ## Current implementation
 
 `crates/core/src/value.rs` supports null, boolean, signed 64-bit integer,

@@ -8,6 +8,7 @@ use brainwire_core::codec::{decode_row, encode_row, Row};
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
 use brainwire_core::schema::{Catalog, Column, GraphMapping};
+use brainwire_core::sparse::{SparseMatrix, SparseMatrixError};
 use brainwire_core::value::Value;
 
 use crate::db::{Database, StoreError};
@@ -41,6 +42,198 @@ pub struct NodeRecord {
     pub row: Row,
 }
 
+/// Lightweight cardinality information for observability and the backoffice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphStats {
+    pub nodes: u64,
+    pub edges: u64,
+}
+
+/// A rebuildable CSR view of one graph (or one relationship type).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SparseGraphProjection {
+    pub nodes: Vec<NodeId>,
+    pub matrix: SparseMatrix,
+    pub relationship_count: usize,
+    pub scanned_relationship_count: usize,
+    pub out_degrees: Vec<u64>,
+    pub in_degrees: Vec<u64>,
+}
+
+impl SparseGraphProjection {
+    /// Returns `(NodeId, score)` pairs in the same stable order as `nodes`.
+    pub fn pagerank(
+        &self,
+        iterations: usize,
+        damping: f32,
+    ) -> Result<Vec<(NodeId, f32)>, SparseMatrixError> {
+        if self.nodes.len() != self.matrix.shape().0 {
+            return Err(SparseMatrixError::VectorLength {
+                expected: self.matrix.shape().0,
+                actual: self.nodes.len(),
+            });
+        }
+        Ok(self
+            .nodes
+            .iter()
+            .copied()
+            .zip(self.matrix.pagerank(iterations, damping)?)
+            .collect())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProjectionError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Matrix(#[from] SparseMatrixError),
+    #[error("edge references a node missing from the node column family")]
+    MissingNode,
+    #[error("projection exceeds {resource} limit ({limit})")]
+    Limit {
+        resource: &'static str,
+        limit: usize,
+    },
+    #[error("invalid projection: {0}")]
+    Invalid(String),
+}
+
+/// Limits bound cardinality, not total process memory. Every node is included;
+/// max_relationships bounds all outgoing records scanned, before type filtering.
+#[derive(Debug, Clone)]
+pub struct ProjectionOptions {
+    pub relationship_type: Option<EdgeTypeId>,
+    pub weight_property: Option<String>,
+    pub max_nodes: usize,
+    pub max_relationships: usize,
+}
+
+impl Default for ProjectionOptions {
+    fn default() -> Self {
+        Self {
+            relationship_type: None,
+            weight_property: None,
+            max_nodes: 100_000,
+            max_relationships: 1_000_000,
+        }
+    }
+}
+
+/// Build an ephemeral projection using the caller's snapshot and write overlay.
+/// Missing weights default to one; explicit weights must be nonnegative finite
+/// numbers representable as f32. Zero-weight edges count toward degrees, but
+/// have no influence in the matrix. No registry or cached state is created.
+pub fn sparse_projection(
+    txn: &Txn<'_>,
+    options: &ProjectionOptions,
+) -> Result<SparseGraphProjection, ProjectionError> {
+    if options.max_nodes == 0 || options.max_relationships == 0 {
+        return Err(ProjectionError::Invalid("limits must be positive".into()));
+    }
+    let catalog: Option<Catalog> = txn
+        .get(Cf::Meta, CATALOG_KEY)?
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(catalog_error))
+        .transpose()?;
+    if options.relationship_type.is_some_and(|id| {
+        catalog
+            .as_ref()
+            .is_none_or(|c| !c.edge_types.iter().any(|t| t.id == id))
+    }) {
+        return Err(ProjectionError::Invalid("unknown relationship type".into()));
+    }
+    let mut nodes = Vec::new();
+    txn.visit_prefix::<ProjectionError>(Cf::Node, &[], |key, _| {
+        if nodes.len() == options.max_nodes {
+            return Err(ProjectionError::Limit {
+                resource: "maxNodes",
+                limit: options.max_nodes,
+            });
+        }
+        nodes.push(node_id_value(key)?);
+        Ok(())
+    })?;
+    let mut out_degrees = vec![0; nodes.len()];
+    let mut in_degrees = vec![0; nodes.len()];
+    let mut entries = Vec::new();
+    let mut scanned = 0;
+    let mut selected = 0;
+    txn.visit_prefix::<ProjectionError>(Cf::Out, &[], |key, value| {
+        if scanned == options.max_relationships {
+            return Err(ProjectionError::Limit {
+                resource: "maxRelationships",
+                limit: options.max_relationships,
+            });
+        }
+        scanned += 1;
+        if key.len() != 26 {
+            return Err(StoreError::Corrupt("edge key length".into()).into());
+        }
+        let (source, edge_type, target, _) = decode_edge_key(key)?;
+        if options
+            .relationship_type
+            .is_some_and(|expected| expected != edge_type)
+        {
+            return Ok(());
+        }
+        let row = nodes
+            .binary_search(&source)
+            .map_err(|_| ProjectionError::MissingNode)?;
+        let col = nodes
+            .binary_search(&target)
+            .map_err(|_| ProjectionError::MissingNode)?;
+        let weight = if let Some(name) = &options.weight_property {
+            let edge_schema = catalog
+                .as_ref()
+                .and_then(|c| c.edge_types.iter().find(|ty| ty.id == edge_type))
+                .ok_or_else(|| StoreError::Corrupt("edge type absent from catalog".into()))?;
+            let record = decode_row(value).map_err(StoreError::from)?;
+            let property = edge_schema
+                .columns
+                .iter()
+                .find(|c| &c.name == name)
+                .and_then(|c| record.columns.get(&c.id))
+                .or_else(|| record.extra.get(name));
+            let number = match property {
+                None => 1.0,
+                Some(Value::Int(v)) => *v as f64,
+                Some(Value::Float(v)) => *v,
+                _ => {
+                    return Err(ProjectionError::Invalid(format!(
+                        "weight property {name} must be numeric"
+                    )))
+                }
+            };
+            let weight = number as f32;
+            if !number.is_finite()
+                || number < 0.0
+                || !weight.is_finite()
+                || (number > 0.0 && weight == 0.0)
+            {
+                return Err(ProjectionError::Invalid(format!(
+                    "weight property {name} must be finite, non-negative and representable as f32"
+                )));
+            }
+            weight
+        } else {
+            1.0
+        };
+        selected += 1;
+        out_degrees[row] += 1;
+        in_degrees[col] += 1;
+        entries.push((row, col, weight));
+        Ok(())
+    })?;
+    Ok(SparseGraphProjection {
+        matrix: SparseMatrix::from_entries(nodes.len(), nodes.len(), entries)?,
+        nodes,
+        relationship_count: selected,
+        scanned_relationship_count: scanned,
+        out_degrees,
+        in_degrees,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EdgeRef {
     pub edge_type: EdgeTypeId,
@@ -53,6 +246,39 @@ fn catalog_error(e: impl std::fmt::Display) -> StoreError {
 }
 
 impl Database {
+    /// Builds an in-memory CSR adjacency projection from the durable graph.
+    /// Node order is stable because RocksDB keys are scanned in NodeId order.
+    /// The projection is disposable and can be rebuilt after a restart.
+    pub fn sparse_projection(
+        &self,
+        relationship_type: Option<EdgeTypeId>,
+    ) -> Result<SparseGraphProjection, ProjectionError> {
+        sparse_projection(
+            &self.begin(),
+            &ProjectionOptions {
+                relationship_type,
+                ..ProjectionOptions::default()
+            },
+        )
+    }
+
+    /// Count persisted graph entities without decoding every node or edge.
+    /// The count runs in a read-only snapshot and therefore does not create a
+    /// commit or participate in conflict detection.
+    pub fn stats(&self) -> Result<GraphStats, StoreError> {
+        let txn = self.begin();
+        let mut stats = GraphStats { nodes: 0, edges: 0 };
+        txn.visit_prefix::<StoreError>(Cf::Node, &[], |_, _| {
+            stats.nodes += 1;
+            Ok(())
+        })?;
+        txn.visit_prefix::<StoreError>(Cf::Out, &[], |_, _| {
+            stats.edges += 1;
+            Ok(())
+        })?;
+        Ok(stats)
+    }
+
     pub fn catalog(&self) -> Result<Option<Catalog>, StoreError> {
         match self.begin().get(Cf::Meta, CATALOG_KEY)? {
             Some(bytes) => serde_json::from_slice(&bytes)
@@ -1194,5 +1420,143 @@ mod tests {
             err.contains("missing endpoint"),
             "unexpected message: {err}"
         );
+    }
+
+    #[test]
+    fn stats_counts_nodes_and_outgoing_edges() {
+        let (_d, _r, db, cat) = setup();
+        assert_eq!(db.stats().unwrap(), GraphStats { nodes: 0, edges: 0 });
+        let (customer, company) = seed_customer_and_company(&db, &cat);
+        let mut txn = db.begin();
+        merge_edge(
+            &mut txn,
+            &cat,
+            customer,
+            "WORKS_AT",
+            company,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        txn.commit().unwrap();
+        assert_eq!(db.stats().unwrap(), GraphStats { nodes: 2, edges: 1 });
+    }
+
+    #[test]
+    fn sparse_projection_maps_persisted_edges_to_csr_rows() {
+        let (_d, _r, db, cat) = setup();
+        let (customer, company) = seed_customer_and_company(&db, &cat);
+        let mut txn = db.begin();
+        merge_edge(
+            &mut txn,
+            &cat,
+            customer,
+            "WORKS_AT",
+            company,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        txn.commit().unwrap();
+
+        let projection = db.sparse_projection(None).unwrap();
+        assert_eq!(projection.nodes, vec![customer, company]);
+        assert_eq!(projection.matrix.non_zero_count(), 1);
+        assert_eq!(projection.matrix.matvec(&[0.0, 2.0]).unwrap(), [2.0, 0.0]);
+        assert_eq!(projection.pagerank(10, 0.85).unwrap().len(), 2);
+        let works_at = cat.edge_type("WORKS_AT").unwrap().id;
+        assert_eq!(
+            db.sparse_projection(Some(works_at))
+                .unwrap()
+                .matrix
+                .non_zero_count(),
+            1
+        );
+    }
+
+    #[test]
+    fn projection_rejects_corrupt_keys_and_missing_endpoints() {
+        let (_d, _r, db, cat) = setup();
+        let (customer, company) = seed_customer_and_company(&db, &cat);
+        let edge_type = cat.edge_type("WORKS_AT").unwrap().id;
+        for key in [
+            vec![0; 25],
+            vec![0; 27],
+            edge_key(customer, edge_type, NodeId(999), EdgeId::MERGED),
+        ] {
+            let mut tx = db.begin();
+            tx.put(Cf::Out, key, encode_row(&Row::default()));
+            assert!(sparse_projection(&tx, &ProjectionOptions::default()).is_err());
+        }
+        let mut tx = db.begin();
+        tx.put(Cf::Node, vec![0; 7], vec![]);
+        assert!(sparse_projection(&tx, &ProjectionOptions::default()).is_err());
+        drop(tx);
+        let mut tx = db.begin();
+        merge_edge(
+            &mut tx,
+            &cat,
+            customer,
+            "WORKS_AT",
+            company,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let projection = sparse_projection(&tx, &ProjectionOptions::default()).unwrap();
+        assert_eq!(projection.relationship_count, 1);
+        assert_eq!(db.sparse_projection(None).unwrap().relationship_count, 0);
+        assert!(matches!(
+            sparse_projection(
+                &tx,
+                &ProjectionOptions {
+                    max_nodes: 1,
+                    ..ProjectionOptions::default()
+                }
+            ),
+            Err(ProjectionError::Limit { .. })
+        ));
+    }
+
+    #[test]
+    fn projection_filters_types_and_aggregates_parallel_coordinates() {
+        let (_d, _r, db, cat) = setup();
+        let (customer, company) = seed_customer_and_company(&db, &cat);
+        let works_at = cat.edge_type("WORKS_AT").unwrap().id;
+        let mut tx = db.begin();
+        merge_edge(
+            &mut tx,
+            &cat,
+            customer,
+            "WORKS_AT",
+            company,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        // Exercise a distinct edge ID at the same source/type/target.
+        tx.put(
+            Cf::Out,
+            edge_key(customer, works_at, company, EdgeId(42)),
+            encode_row(&Row::default()),
+        );
+        let projection = sparse_projection(&tx, &ProjectionOptions::default()).unwrap();
+        assert_eq!(projection.relationship_count, 2);
+        assert_eq!(projection.matrix.non_zero_count(), 1);
+        assert_eq!(projection.matrix.matvec(&[0.0, 3.0]).unwrap(), [6.0, 0.0]);
+        assert_eq!(projection.out_degrees, [2, 0]);
+        assert_eq!(projection.in_degrees, [0, 2]);
+        let options = ProjectionOptions {
+            relationship_type: Some(cat.edge_type("IN_SEGMENT").unwrap().id),
+            ..ProjectionOptions::default()
+        };
+        let filtered = sparse_projection(&tx, &options).unwrap();
+        assert_eq!(filtered.relationship_count, 0);
+        assert_eq!(filtered.scanned_relationship_count, 2);
+        assert_eq!(filtered.nodes.len(), 2);
+        assert!(sparse_projection(
+            &tx,
+            &ProjectionOptions {
+                max_relationships: 1,
+                ..options
+            }
+        )
+        .is_err());
     }
 }

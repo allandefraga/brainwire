@@ -7,6 +7,7 @@
 //! enforced and this is not a streaming executor.
 mod eval;
 mod graph;
+mod procedures;
 mod validate;
 
 use crate::{ast::*, parse, ParseError};
@@ -260,6 +261,23 @@ fn execute_clauses(
             params,
         };
         match clause {
+            Clause::Call {
+                name,
+                args,
+                yields,
+                where_,
+            } => {
+                rows = procedures::run(name, args, yields, &ctx)?;
+                if let Some(predicate) = where_ {
+                    let mut filtered = Vec::new();
+                    for row in rows {
+                        if eval::boolean(eval(predicate, &row, &ctx)?)? == Some(true) {
+                            filtered.push(row);
+                        }
+                    }
+                    rows = filtered;
+                }
+            }
             Clause::Unwind { expr, var } => {
                 let mut next = vec![];
                 for row in rows {

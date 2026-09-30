@@ -3,7 +3,8 @@
 //!
 //! `parser::parse` turns the small Cypher subset the Neo4j driver sends
 //! (CREATE, MERGE, MATCH with one hop, SET, DETACH DELETE, UNWIND, RETURN
-//! with count and LIMIT) into the AST in `ast`. The executor (Task 4) walks
+//! with count and LIMIT, and read-only CALL ... YIELD ... RETURN analytics)
+//! into the AST in `ast`. The executor (Task 4) walks
 //! that AST against one atomic store transaction.
 
 pub mod ast;

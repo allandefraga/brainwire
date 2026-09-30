@@ -1,0 +1,10 @@
+{
+  "version": "1",
+  "nodes": [{"label": "Page", "properties": ["title"]}],
+  "edges": [{
+    "type": "LINK",
+    "from": {"label": "Page"},
+    "to": {"label": "Page"},
+    "properties": ["weight"]
+  }]
+}
