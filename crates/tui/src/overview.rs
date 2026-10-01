@@ -86,19 +86,34 @@ fn render_overview(
         .split(sections[1]);
     let visible = columns[0].height.saturating_sub(3) as usize;
     let start = selected.saturating_sub(visible.saturating_sub(1));
-    let mut lines = vec![Line::styled(
+    let compact = columns[0].width < 48;
+    let heading = if compact {
+        lang.choose(
+            " GRAFO               NÓS ARESTAS",
+            " GRAPH              NODES  EDGES",
+        )
+    } else {
         lang.choose(
             " GRAFO                     NÓS      ARESTAS",
             " GRAPH                     NODES    EDGES",
-        ),
-        text_style(CYAN, no_color),
-    )];
+        )
+    };
+    let mut lines = vec![Line::styled(heading, text_style(CYAN, no_color))];
     for (index, graph) in graphs.iter().enumerate().skip(start).take(visible) {
         let marker = if index == selected { "▶" } else { " " };
-        let line = format!(
-            "{marker} {:<24} {:>8} {:>10}",
-            graph.name, graph.nodes, graph.edges
-        );
+        let line = if compact {
+            format!(
+                "{marker} {:<16} {:>7} {:>8}",
+                graph.name.chars().take(16).collect::<String>(),
+                graph.nodes,
+                graph.edges
+            )
+        } else {
+            format!(
+                "{marker} {:<24} {:>8} {:>10}",
+                graph.name, graph.nodes, graph.edges
+            )
+        };
         lines.push(Line::styled(
             line,
             if index == selected {
@@ -178,10 +193,17 @@ fn render_overview(
         columns[1],
     );
     frame.render_widget(
-        Paragraph::new(lang.choose(
-            " ↑↓ seleciona  •  q/Esc sai  •  snapshot: --snapshot  •  offline: pare o servidor primeiro",
-            " ↑↓ select  •  q/Esc quit  •  snapshot: --snapshot  •  offline: stop the server first",
-        ))
+        Paragraph::new(if frame.area().width < 100 {
+            lang.choose(
+                " ↑↓ seleciona  •  q/Esc sai  •  offline",
+                " ↑↓ select  •  q/Esc quit  •  offline",
+            )
+        } else {
+            lang.choose(
+                " ↑↓ seleciona  •  q/Esc sai  •  snapshot: --snapshot  •  offline: pare o servidor primeiro",
+                " ↑↓ select  •  q/Esc quit  •  snapshot: --snapshot  •  offline: stop the server first",
+            )
+        })
         .block(panel("", GREEN, no_color)),
         sections[2],
     );
