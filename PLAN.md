@@ -30,6 +30,30 @@ the weekly gate.
 | Algorithms (GDS) | the subset in section 7 | more algorithms, graph ML |
 | Visualization | animated CLI/TUI and website | a screen in the console |
 
+### Deployment targets confirmed 2026-10-01
+
+Kubernetes **and** Docker Swarm are product deployment targets. The same
+Brainwire image and data format must work in either environment. These are
+separate acceptance gates; passing one does not imply passing the other.
+
+1. **Single-node durability on each target:** one instance, an explicitly
+   retained volume, startup recovery and a driver write/kill/restart/read test.
+   The local Docker image and named-volume test pass; Kubernetes and Swarm
+   manifests and tests are still open.
+2. **Three-voter replicated cluster on each target:** stable member identity,
+   one durable volume per member, quorum writes, follower catch-up and automatic
+   leader failover across distinct machines. Kill a process, replace a member,
+   restart all members and lose one machine; verify acknowledged writes and
+   graph invariants after every event. This requires Brainwire replication and
+   cannot be supplied by orchestration alone.
+3. **Later graph partitioning:** move one graph across machines only after
+   replicated single-shard behavior is correct. Replicas do not shard a graph.
+
+Both environments need recovery-aware readiness/liveness, explicit storage
+placement, backup/restore, resource limits and upgrade tests. The detailed
+[data and recovery design](docs/design/2026-09-27-brainwire-data-and-recovery.md)
+records the storage and failure contract.
+
 Out of the launch, on purpose: vector index (Qdrant stays), full-text search,
 an object storage tier, changefeed, LDAP/SSO and composite databases.
 

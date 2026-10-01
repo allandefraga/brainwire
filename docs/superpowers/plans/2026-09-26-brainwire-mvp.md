@@ -587,7 +587,11 @@ query wrote; `TxnError::Conflict` becomes `ExecError::Conflict`):
 
 The [2026-09-27 transaction slice](2026-09-27-brainwire-transactions.md) covers
 shared-query execution and Bolt lifecycle hooks with test-only integration.
-Production worker/adapter/registry/serve work below remains open.
+The production worker, registry and `brainwire serve` now exist locally.
+Drivers 5.28.6 and 6.3.0 each passed write/kill/restart/read with 10,000
+bulk Customers. A local Docker image also passed a retained-volume
+kill/recreate/read test. Stronger load/failure tests, health endpoints and
+Kubernetes/Swarm manifests remain open.
 
 Read the [transaction integration preflight](2026-09-26-brainwire-bolt-transaction-preflight.md)
 for the current ownership/runtime seams and the next implementation slices.

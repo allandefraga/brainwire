@@ -150,6 +150,7 @@ dependencies = [
 name = "brainwire-server"
 version = "0.1.0"
 dependencies = [
+ "brainwire-bolt",
  "brainwire-core",
  "brainwire-cypher",
  "brainwire-store",
@@ -159,6 +160,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml",
 ]
 

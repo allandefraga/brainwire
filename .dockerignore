@@ -1,0 +1,6 @@
+.git
+.superpowers
+target
+data
+docs-site
+*.DS_Store

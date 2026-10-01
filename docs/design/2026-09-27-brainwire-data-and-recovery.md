@@ -11,6 +11,8 @@ transaction foundation remains the starting point.
 - Search documents by vector similarity, in the style of Qdrant, while keeping
   their relationships to people, companies and other graph entities.
 - Run across containers and machines, with explicit replication and recovery.
+- Support both Kubernetes and Docker Swarm as deployment targets. Neither
+  orchestrator is the source of graph durability or replication by itself.
 - After a crash, restart from persistent data rather than recreate an empty graph.
   Recovery must include document content, vectors, graph links and metadata.
 - Preserve the English internal model and optional Portuguese interface.
@@ -109,6 +111,40 @@ from a stale index. Metadata and permissions must affect candidate selection,
 not merely remove a few records after an unrestricted top-k search.
 
 ## Proposed distributed deployment
+
+### Orchestrator goals (confirmed 2026-10-01)
+
+Brainwire must have one container image and a documented deployment path for
+both Kubernetes and Docker Swarm. The first milestone is one durable graph
+process with a retained volume and a controlled restart on either orchestrator.
+The second milestone is a replicated Brainwire cluster spanning distinct
+machines/failure domains on each orchestrator. Only after replication and its
+failure tests pass may a multi-container deployment be called highly
+available. A later, separate milestone may partition one graph across machines;
+replicas alone do not distribute one graph's storage or writes.
+
+Kubernetes packaging should use stable member identities and a persistent
+volume per member (for example a StatefulSet). Docker Swarm packaging needs
+equivalent stable member-to-volume mapping and placement constraints; a service
+rescheduled onto another machine must not silently start with a new empty local
+volume. Both targets need readiness that waits for recovery, liveness that does
+not trigger restart loops during slow recovery, configuration and secret
+injection, resource limits, backup/restore, and documented upgrades. The same
+database format and recovery rules must work without either orchestrator.
+
+Acceptance for **each** target: deploy, write and read synthetic graph data;
+kill/restart one process; move or replace a member with its retained or restored
+data; restart all members; lose one machine in a three-voter cluster; verify
+acknowledged writes, graph invariants and quorum behavior after every event.
+Record recovery time, observed data loss and the exact storage/placement
+configuration. Do not present a single-node restart test as proof of
+multi-machine availability.
+
+[Kubernetes StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+provide stable pod identities and persistent-storage patterns;
+[Docker Swarm services](https://docs.docker.com/engine/swarm/services/) expose
+placement constraints and volumes, but the service specification must bind
+members to the correct durable data.
 
 First deliver one durable node, then the existing spec's three-voter Raft
 replication design. Place voters on separate machines/failure domains. Each has

@@ -38,6 +38,56 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, durable Bolt server and orchestrator goals
+
+- **Requested:** continue the longer local Brainwire session, keep all work
+  local, and make distributed deployment on both Kubernetes and Docker Swarm
+  explicit objectives. Started at 06:41 UTC. No push, remote deployment or PR.
+- **Server:** connected the named database registry and Cypher executor to
+  `brainwire serve`. A bounded per-connection worker owns the scoped RocksDB
+  transaction across multiple Bolt RUNs, while request execution stays off
+  Tokio IO threads. The listener caps concurrent connections at 64. PackStream
+  parameters and results include nested values and Bolt node structures;
+  storage conflicts return retryable errors. No restart-unstable bookmark is
+  fabricated.
+- **Validated:** engine tests cover parameter conversion, node output, error
+  mapping, transaction visibility, commit/rollback, query failure, RESET,
+  session drop and concurrent commit conflict. The Python driver acceptance
+  script wrote two Customers, one Company, a relationship and 10,000 bulk
+  Customers. Both Neo4j Python drivers 5.28.6 and 6.3.0 separately passed
+  write, SIGKILL, restart and read checks. The Rust workspace had 328 passing
+  tests, and clippy with warnings denied, formatting and diff checks passed.
+- **Container:** built a local Linux ARM64 `brainwire:local` image with a
+  non-root runtime and explicit `/data` mount. A first smoke attempt exposed a
+  mismatched bundled example ontology; corrected it and rebuilt the cached
+  image. The final test created a named Docker volume, wrote 10,002 Customers
+  and one Company through Bolt, killed the container, started a new container
+  with the same volume and read everything back. The temporary test container
+  and volume were removed; the local image remains. A saved Docker acceptance
+  script then passed five kill/recreate cycles with driver 6.3.0 and two cycles
+  with driver 5.28.6. No image was pushed.
+- **Concurrency:** 16 local driver clients made 1,600 independent autocommit
+  Customer writes. The reopened store contained exactly 1,600 nodes. The
+  synthetic warm-cache run took 0.306 seconds here; it is not a production
+  throughput result.
+- **Deployment goal:** the data/recovery design now specifies a single durable
+  node and then a three-voter replicated cluster on **both** Kubernetes and
+  Docker Swarm. Each target must keep member identity tied to durable storage
+  and pass process, member and machine failure tests. Orchestration alone is
+  not replication or proof of high availability. Sharding is a later separate
+  milestone.
+- **Limits:** this is a single-node local server. Authentication, TLS, query
+  memory enforcement, streaming results, live TUI data and cluster replication
+  remain open. The default listener is loopback; deployments need explicit
+  network controls. The 10K-driver workload is synthetic, not a performance
+  or multi-machine availability claim.
+- **Next:** add recovery-aware health/readiness behavior, then local Kubernetes
+  and Docker Swarm single-node manifests and restart tests. Expand
+  failure/concurrency tests, query budgets and streaming before calling it
+  production-ready. Design and test three-voter replication separately.
+- **Blockers:** none for local single-node work. The remaining distributed
+  milestones require implementation and acceptance tests.
+
 ### 2026-10-01, named database administration and retained volume dataset
 
 - **Requested:** a 15-minute local work session toward next week's test

@@ -19,6 +19,8 @@ brainwire-core = { path = "../core" }
 brainwire-store = { path = "../store" }
 brainwire-cypher = { path = "../cypher" }
 brainwire-tui = { path = "../tui" }
+brainwire-bolt = { path = "../bolt" }
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -4,6 +4,8 @@ mod admin;
 mod config;
 mod cypher;
 mod databases;
+mod engine;
+mod serve;
 mod size;
 
 use std::collections::BTreeMap;
@@ -20,6 +22,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Serve named durable databases over Bolt/Cypher.
+    Serve {
+        /// Config file; otherwise uses ./brainwire.toml. Environment overrides it.
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Execute one atomic query against an embedded local store (exclusive access).
     #[command(
         long_about = "Execute one atomic Cypher query against an embedded local store. Cannot attach to an already-open server database. Output is JSON {fields, rows}; nodes use {type: node, id, label, properties}, including entity_id. Ontology is applied separately before the query. Query memory budgets are loaded but not yet enforced; output errors may follow committed writes."
@@ -136,6 +144,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Serve { config } => serve::run(config.as_deref()),
         Commands::Cypher {
             database,
             query,

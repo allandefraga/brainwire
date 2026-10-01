@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 
 use crate::chunk::{encode_message, ChunkReader};
 use crate::handshake::{negotiate, response, MAGIC};
@@ -21,6 +22,7 @@ use crate::session::{AuthMode, QueryEngine, Session, State};
 /// so 256 MiB leaves headroom above that while still bounding memory. Use
 /// [`serve_with_limit`] to override it.
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
+pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
 
 pub async fn serve<E, F>(listener: TcpListener, make_engine: F) -> std::io::Result<()>
 where
@@ -44,6 +46,7 @@ where
     F: Fn() -> E + Send + Sync + 'static,
 {
     let make_engine = Arc::new(make_engine);
+    let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(accepted) => accepted,
@@ -65,8 +68,13 @@ where
                 continue;
             }
         };
+        let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
+            drop(stream);
+            continue;
+        };
         let make = Arc::clone(&make_engine);
         tokio::spawn(async move {
+            let _permit = permit;
             let _ = handle_connection(stream, make(), max_message_bytes).await;
         });
     }
@@ -106,7 +114,7 @@ fn is_resource_exhausted(err: &std::io::Error) -> bool {
     matches!(err.raw_os_error(), Some(code) if EXHAUSTED.contains(&code))
 }
 
-async fn handle_connection<E: QueryEngine, S: AsyncRead + AsyncWrite + Unpin>(
+async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     engine: E,
     max_message_bytes: usize,
@@ -132,7 +140,15 @@ async fn handle_connection<E: QueryEngine, S: AsyncRead + AsyncWrite + Unpin>(
             let mut input = payload.as_slice();
             match unpack(&mut input).ok().and_then(|v| parse_request(v).ok()) {
                 Some(req) => {
-                    let responses = session.handle(req);
+                    // RocksDB calls are synchronous. Keep them off Tokio's IO workers.
+                    let (next, responses) = tokio::task::spawn_blocking(move || {
+                        let mut session = session;
+                        let responses = session.handle(req);
+                        (session, responses)
+                    })
+                    .await
+                    .map_err(|err| std::io::Error::other(format!("query worker failed: {err}")))?;
+                    session = next;
                     let mut out = Vec::new();
                     for r in responses {
                         let mut body = Vec::new();

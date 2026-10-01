@@ -15,6 +15,7 @@ pub struct QueryResult {
     pub rows: Vec<Vec<PackValue>>,
 }
 
+#[derive(Debug)]
 pub struct EngineError {
     pub code: String,
     pub message: String,

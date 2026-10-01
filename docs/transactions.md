@@ -1,9 +1,9 @@
 # Transaction lifecycle
 
 Brainwire's embedded Cypher executor supports a transaction shared by several
-queries. The Bolt session owns matching lifecycle hooks; the production worker,
-database registry and durable `serve` adapter remain separate work. The existing
-`brainwire cypher` command still executes one atomic query per invocation.
+queries. The Bolt session routes those lifecycle hooks through a scoped query
+worker in `brainwire serve`. The existing `brainwire cypher` command still
+executes one atomic query per invocation.
 
 ## Embedded queries
 
@@ -44,8 +44,8 @@ ID allocation intentionally reserves durable blocks independently of graph write
 The public context borrows its database. An owning worker can hold the database
 and create the context inside its own scope; the context must end before the
 database is dropped. Do not create a self-referential owner/borrower struct or
-extend the snapshot lifetime artificially. The test worker proves this scoped
-ownership path, not the eventual async scheduling design.
+extend the snapshot lifetime artificially. The production Bolt worker follows
+this ownership path; Bolt request handling runs outside Tokio's IO workers.
 
 ## Bolt session boundary
 
@@ -64,15 +64,14 @@ describes the corresponding terminal and recovery states.
 Bookmarks are optional engine-provided output; the session no longer invents
 commit counters. The development stub has no durable graph state and does not
 promise causal progress. A test-only adapter verifies session lifecycle with a
-real temporary store; it is not the production protocol/registry adapter.
+real temporary store. The production adapter in `brainwire serve` adds value
+conversion and named-database selection.
 
-## Remaining integration
+## Remaining work
 
-- Production ownership and bounded worker/runtime scheduling for RocksDB calls.
-- PackStream value/node conversion, error mapping and `serve`. The named local
-  database registry and `brainwire db` administration commands now exist, but
-  no production Bolt adapter uses them yet.
-- Durable bookmark handling and driver restart/managed-transaction checks.
+- Define a restart-stable causal bookmark, if the replication model needs it.
+- Expand driver concurrency and fault tests beyond the current 10K-record
+  write/SIGKILL/restart/read check with Python drivers 5.28.6 and 6.3.0.
 - Jump-ahead cancellation while synchronous query work is running; processed
   RESET cleanup alone does not implement that guarantee.
 - Multiple concurrent result streams, full protocol metadata, query memory
@@ -80,5 +79,5 @@ real temporary store; it is not the production protocol/registry adapter.
 
 The [implementation slice](superpowers/plans/2026-09-27-brainwire-transactions.md)
 and [next-session preflight](superpowers/plans/2026-09-26-brainwire-bolt-transaction-preflight.md)
-record the delivery boundary. The full engine MVP Task 5 is not complete until
-the real server/driver integration passes.
+record the original delivery boundary. The [server guide](serve.md) describes
+the current local runtime and its limits.
