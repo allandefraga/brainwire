@@ -116,6 +116,7 @@ configured and no code has been pushed.
 | ACL | The client model (`AclPredicate`, ADR-016/017), evaluated inside the engine (plan, section 5). |
 | Ontology | The platform's `graph_mapping.yaml` becomes the engine's schema. |
 | Python | SDK with bulk, merge, index creation and delete, in the style of the port. |
+| Ingestion sources | DuckLake first for client; DuckDB, Parquet and Delta Lake also targeted. Native Arrow batches into Rust, resumable incremental synchronization and TUI progress are planned; the current working path is Python/Bolt. |
 | Surfaces | Animated CLI/TUI (graphs, queries, charts, disk, ontology, admin) and a website at the end, in the spirit of the HydraDB site. |
 | Intelligence | Graph algorithms (depth, Dijkstra, proximity, similarity, centrality, community) and AI questions about a node ("quais são os concorrentes?", "who are the competitors?"). |
 | Acceptance | The `GraphRepository` port (ADR-023) and the `client-core/tests/test_graph_repository_contract.py` suite. |

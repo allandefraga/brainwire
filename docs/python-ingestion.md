@@ -126,3 +126,75 @@ isolation, SIGKILL with an uncommitted indexed overwrite, restart and the final
 offline consistency audit. The [measured results](benchmarks/2026-10-01-python-ingestion.md)
 include 5K, 50K and 100K inputs. It always
 stops its child process and removes its temporary directory.
+
+
+## Next integration: DuckLake first, Arrow into Rust
+
+Priority confirmed by Allan on 2026-10-01: client reads primarily from DuckLake;
+DuckDB, Parquet and Delta Lake should share the ingestion interface. This section
+is a proposed next implementation, not an installed connector or scheduled job.
+The approved design already proposes Arrow Flight; the workspace does not yet
+include Arrow dependencies or a Flight server.
+
+Proposed remote path: source reader -> Arrow RecordBatch stream -> Flight DoPut
+-> Rust schema/mapping validation -> existing graph transactions -> RocksDB.
+Python controls jobs and mapping, while native readers and Rust handle batches.
+Cypher/Bolt remains the query and general-write interface. The bulk path must
+share identity, index maintenance, ontology checks, conflicts and synced-WAL
+commit semantics rather than implement a separate writer.
+
+DuckDB can export results through an [Arrow batch reader](https://duckdb.org/docs/stable/clients/python/relational_api).
+Rust Arrow provides [RecordBatch](https://arrow.apache.org/rust/arrow/record_batch/struct.RecordBatch.html)
+and [Flight streaming](https://arrow.apache.org/rust/arrow_flight/client/struct.FlightClient.html).
+This can avoid constructing a Python dictionary for every source row and the
+Bolt parameter conversion used by the current example. Actual end-to-end gains
+must be measured; graph identity resolution, key encoding, indexes, WAL sync,
+source I/O and compaction remain costs. Arrow does not replace RocksDB.
+
+Within one process, the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html)
+can share buffers without copying. Across containers/machines use Flight/IPC;
+network transfer and graph-row encoding mean this is not end-to-end zero-copy.
+
+Source-specific synchronization contracts:
+
+- **DuckLake:** pin an initial snapshot, load its mapped columns, then consume
+  [table_changes](https://ducklake.select/docs/stable/duckdb/advanced_features/data_change_feed)
+  beginning after the fully acknowledged snapshot (range bounds are inclusive).
+  Preserve snapshot ordering and process preimages when identities or edge
+  endpoints change. A source rowid is not the business entity_id.
+- **Delta Lake:** use a Delta-aware snapshot reader, not a raw Parquet glob.
+  [Change Data Feed](https://docs.delta.io/delta-change-data-feed/) requires
+  enablement and retained history for the interval being consumed. Validate
+  the deployed reader's supported table features and schema-change behavior.
+- **DuckDB:** query a consistent source view; incremental ingestion needs an
+  explicit change log or reliable cursor with tie-breaking. Timestamps alone
+  do not identify hard deletes.
+- **Parquet:** use an immutable file manifest/version for each run. Append-only
+  file discovery can ingest new data, but replacements and row deletions need
+  explicit metadata or reconciliation; a missing file is not automatically a
+  graph deletion.
+
+Bound batches by rows and bytes, limit queued/in-flight batches, and pause source
+reads when the graph cannot keep up. Validate Arrow-to-Value conversions, overflow,
+time zones, decimals, nested values, and null versus omitted fields explicitly;
+Arrow's richer type system does not automatically extend Brainwire's Value enum.
+
+Checkpoint by source identity, target graph and mapping version, advancing only
+after the graph acknowledges durable commit. Prefer an atomic batch-receipt token
+in the graph transaction; that requires new engine support. Until then, ordered
+at-least-once delivery plus deterministic upserts/deletes is the intended model.
+Fence concurrent workers for one stream so an old replay cannot overwrite newer
+state. Do not claim whole-snapshot atomic visibility when committing in batches.
+If retained source history no longer covers the checkpoint, stop and perform a
+controlled rebuild/reconciliation; never silently skip the missing interval.
+
+Initial synchronization should load node identities before dependent edges.
+Changes to derived joins require tracking and recomputing affected relationships.
+Source deletion must follow mapping ownership and retention policy: removing a
+source record must not delete an entity still supported by another source.
+
+Planned TUI ingestion view: source/target, selected snapshot, applied checkpoint,
+lag, records and bytes per second, batch queue/memory, retries and error details.
+First acceptance gate: compare Python/Bolt against Arrow/Rust on the same source,
+data, mappings, indexes and durability settings, including restart during a batch,
+commit-before-checkpoint crash, update/delete replay and missing-history recovery.

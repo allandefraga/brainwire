@@ -38,6 +38,23 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, DuckLake-first Arrow ingestion direction
+
+- **Requested:** automate fast client ingestion, primarily DuckLake, also
+  DuckDB, Parquet and Delta; assess Arrow in Rust.
+- **Checked:** official DuckLake change-feed/time-travel, Delta CDF, DuckDB Arrow
+  output and Rust Arrow/Flight documentation; local code has Python/Bolt but no
+  Arrow/Flight implementation. Existing approved spec already proposes Flight.
+- **Recorded:** priority in README and a concrete integration contract in
+  `docs/python-ingestion.md`: bounded columnar batches, shared transactional
+  writer, source-specific change detection, durable checkpoints, ordered replay,
+  source-history retention, mapping ownership and TUI ingestion metrics.
+- **Next:** implement and benchmark one DuckLake snapshot-to-Arrow-to-Rust path
+  against the existing Bolt baseline, then add incremental recovery. No throughput
+  gain is measured yet, no connector is installed and no recurring job was created.
+- **Verification:** documentation-only diff reviewed; all changes kept local.
+
+
 ### 2026-10-01, Python ingestion, index consistency and real TUI storage panels
 
 - **Requested:** 20-minute integration session, starting 08:46:59 UTC, covering
