@@ -51,6 +51,19 @@ operation: a later query error does not undo the ontology update. RocksDB's
 exclusive lock prevents this command from attaching to a directory already
 open by another process. Stop that process or choose another local directory.
 
+The ontology is a versioned catalog of labels, property column IDs, edge
+signatures and event streams. Reapplying it preserves existing type and column
+IDs and appends newly declared columns, so old rows remain decodable. Use
+`brainwire db schema NAME --json` to inspect a named database's persisted
+catalog while the server is stopped. `indexed_fields`, `er_fields` and
+`identifier_columns` are currently declarations only: secondary index storage,
+backfill and indexed query plans are still pending. `entity_id` has a working
+primary-key lookup.
+Catalog versions are schema revisions, not a history of each node. Timeline
+declarations do not yet record ticket revisions or support as-of queries.
+Retention and ontology-driven cleanup are specified in the
+[temporal graph and maintenance design](design/2026-10-01-temporal-graph-and-maintenance.md).
+
 ## Bulk parameters from a file
 
 For larger imports, write the same parameter object to JSON and pass
@@ -99,5 +112,6 @@ does not add streaming or enforce the configured query-memory ceiling.
 Unsupported constructs return an explicit error. Relationship variables and
 relationship property filters are not implemented. This is an eager MVP
 executor: query results are materialized, and `memory.query` does not enforce
-a query memory ceiling yet. Full Cypher, authorization, server transactions,
-Bolt integration and the connected TUI remain separate work.
+a query memory ceiling yet. Full Cypher, authorization,
+indexed property search and the connected TUI remain separate work. The
+durable Bolt server uses the same executor and store.

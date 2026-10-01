@@ -1,6 +1,7 @@
 //! One RocksDB per database, with process-wide cache and memtable budget
 //! (spec 1.1, 1.2, 1.5).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use brainwire_core::codec::CodecError;
@@ -124,6 +125,29 @@ impl Database {
             .cf_handle(name)
             .ok_or(StoreError::MissingColumnFamily(name))
     }
+
+    /// Point-in-time RocksDB estimates per column family. These are engine
+    /// properties, not exact graph counts or a complete process-RSS budget.
+    pub fn storage_metrics(
+        &self,
+    ) -> Result<BTreeMap<&'static str, BTreeMap<&'static str, Option<u64>>>, StoreError> {
+        const PROPERTIES: [(&str, &str); 4] = [
+            ("estimated_keys", "rocksdb.estimate-num-keys"),
+            ("live_data_bytes", "rocksdb.estimate-live-data-size"),
+            ("memtable_bytes", "rocksdb.cur-size-all-mem-tables"),
+            ("level0_files", "rocksdb.num-files-at-level0"),
+        ];
+        let mut families = BTreeMap::new();
+        for name in COLUMN_FAMILIES {
+            let cf = self.cf(name)?;
+            let mut metrics = BTreeMap::new();
+            for (label, property) in PROPERTIES {
+                metrics.insert(label, self.db.property_int_value_cf(cf, property)?);
+            }
+            families.insert(name, metrics);
+        }
+        Ok(families)
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +206,21 @@ mod tests {
         let db = Database::open(b.path(), &res).unwrap();
         da.db.put_cf(da.cf("meta").unwrap(), b"x", b"1").unwrap();
         assert_eq!(db.db.get_cf(db.cf("meta").unwrap(), b"x").unwrap(), None);
+    }
+
+    #[test]
+    fn storage_metrics_report_every_column_family_without_claiming_exact_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(dir.path(), &res).unwrap();
+        let metrics = db.storage_metrics().unwrap();
+        assert_eq!(metrics.len(), COLUMN_FAMILIES.len());
+        for name in COLUMN_FAMILIES {
+            assert!(metrics[name].contains_key("estimated_keys"));
+            assert!(metrics[name].contains_key("live_data_bytes"));
+            assert!(metrics[name].contains_key("memtable_bytes"));
+            assert!(metrics[name].contains_key("level0_files"));
+        }
     }
 
     // Additional tests beyond the brief: the plan's carried-over review rule

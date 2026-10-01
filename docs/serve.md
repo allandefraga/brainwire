@@ -36,6 +36,17 @@ Storage sequence numbers are not exposed as restart-stable Bolt bookmarks.
 Database selection uses an existing named database; `brainwire db create` is
 an offline administration command.
 
+`brainwire probe --mode ready` performs a full read-only Bolt query and exits
+successfully only after a default database is serving it. `--mode live` stops
+after the handshake and login, so it does not put query load on the store.
+Use `--address` and `--timeout-ms` to target another local listener. Offline
+`brainwire db schema NAME --json` shows the persisted ontology catalog and
+reports `secondary_index_status: declared_only`; property indexes declared in
+the ontology are not yet physically built or used by queries.
+`brainwire db metrics NAME --json` reports per-column-family RocksDB estimates
+for keys, live data, memtables and level-0 files. These are offline snapshots,
+not exact graph counts or total process memory.
+
 Each connection has one scoped query worker, with at most 64 concurrent
 connections. RocksDB execution runs outside Tokio's IO threads. Results are
 still fully materialized in memory, and the configured query-memory budget is

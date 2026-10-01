@@ -53,6 +53,64 @@ pub fn stats(name: &str, json: bool, config: Option<&Path>) -> Result<(), String
     Ok(())
 }
 
+pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), String> {
+    let registry = open_registry(config)?;
+    let db = registry
+        .get(name)
+        .ok_or_else(|| format!("database {name:?} does not exist"))?;
+    let catalog = db
+        .catalog()
+        .map_err(|e| format!("cannot read catalog: {e}"))?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "database": name,
+                "catalog": catalog,
+                "secondary_index_status": "declared_only"
+            })
+        );
+    } else if let Some(catalog) = catalog {
+        println!("database={name} catalog_version={}", catalog.version);
+        for node in &catalog.node_types {
+            println!("node {} indexed_declared={:?}", node.label, node.indexed);
+        }
+        for edge in &catalog.edge_types {
+            println!("edge {}", edge.name);
+        }
+        println!("secondary indexes: declared only; property scans are used");
+    } else {
+        println!("database={name} has no ontology catalog");
+    }
+    Ok(())
+}
+
+pub fn metrics(name: &str, json: bool, config: Option<&Path>) -> Result<(), String> {
+    let registry = open_registry(config)?;
+    let db = registry
+        .get(name)
+        .ok_or_else(|| format!("database {name:?} does not exist"))?;
+    let families = db
+        .storage_metrics()
+        .map_err(|e| format!("cannot read RocksDB metrics: {e}"))?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "database": name,
+                "kind": "rocksdb_estimates",
+                "column_families": families
+            })
+        );
+    } else {
+        println!("database={name} RocksDB estimates (not total process memory)");
+        for (family, metrics) in families {
+            println!("{family}: {metrics:?}");
+        }
+    }
+    Ok(())
+}
+
 pub fn create(name: &str, ontology: Option<&Path>, config: Option<&Path>) -> Result<(), String> {
     let mapping = ontology.map(read_ontology).transpose()?;
     let registry = open_registry(config)?;

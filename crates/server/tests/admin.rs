@@ -64,11 +64,44 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
         value,
         serde_json::json!({"database":"research","nodes":1,"edges":0})
     );
+    let schema = command(&dir)
+        .args(["db", "schema", "research", "--json"])
+        .output()
+        .unwrap();
+    assert!(schema.status.success(), "{:?}", schema);
+    let schema: serde_json::Value = serde_json::from_slice(&schema.stdout).unwrap();
+    assert_eq!(schema["database"], "research");
+    assert_eq!(schema["catalog"]["version"], 1);
+    assert_eq!(schema["catalog"]["node_types"][0]["label"], "Customer");
+    assert_eq!(schema["secondary_index_status"], "declared_only");
+    let metrics = command(&dir)
+        .args(["db", "metrics", "research", "--json"])
+        .output()
+        .unwrap();
+    assert!(metrics.status.success(), "{:?}", metrics);
+    let metrics: serde_json::Value = serde_json::from_slice(&metrics.stdout).unwrap();
+    assert_eq!(metrics["kind"], "rocksdb_estimates");
+    assert!(metrics["column_families"]["node"]["estimated_keys"].is_number());
     let applied = command(&dir)
         .args(["db", "apply-ontology", "research", "schema.json"])
         .output()
         .unwrap();
     assert!(applied.status.success(), "{:?}", applied);
+    let revised = command(&dir)
+        .args(["db", "schema", "research", "--json"])
+        .output()
+        .unwrap();
+    assert!(revised.status.success(), "{:?}", revised);
+    let revised: serde_json::Value = serde_json::from_slice(&revised.stdout).unwrap();
+    assert_eq!(revised["catalog"]["version"], 2);
+    assert_eq!(
+        revised["catalog"]["node_types"][0]["id"],
+        schema["catalog"]["node_types"][0]["id"]
+    );
+    assert_eq!(
+        revised["catalog"]["node_types"][0]["columns"],
+        schema["catalog"]["node_types"][0]["columns"]
+    );
     let reopened = command(&dir)
         .args([
             "cypher",

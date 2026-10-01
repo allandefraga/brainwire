@@ -57,10 +57,11 @@ cargo run --locked --offline -p brainwire-server -- shell --demo
 
 Offline commands require dependencies to have been fetched previously.
 The `brainwire` binary provides configuration commands, durable Bolt serving,
-local Cypher execution and the terminal demo. The `brainwire-bolt-dev` binary
+local Cypher execution, `brainwire probe` health checks and the terminal demo.
+The `brainwire-bolt-dev` binary
 uses a stub query engine.
-It now also has local `brainwire db create`, `db list`, `db stats` and
-`db apply-ontology` commands. They operate on the named RocksDB directories
+It now also has local `brainwire db create`, `db list`, `db stats`, `db schema`,
+`db metrics` and `db apply-ontology` commands. They operate on the named RocksDB directories
 under `server.data_dir` and require exclusive access; `db stats` scans nodes
 and relationships and accepts `--json` for scripts. For example:
 
@@ -80,6 +81,12 @@ The [shared-query transaction API and Bolt lifecycle hooks](docs/transactions.md
 now back `brainwire serve`. The next MVP work is stronger driver, failure and
 concurrency testing, orchestrator manifests with recovery-aware health checks,
 and live TUI integration.
+The [RocksDB/query/ontology audit](docs/benchmarks/2026-10-01-query-ontology-audit.md)
+records what is implemented and why secondary property indexes are the next
+scale-critical task.
+The [temporal graph and maintenance design](docs/design/2026-10-01-temporal-graph-and-maintenance.md)
+defines the next steps for ticket history, node and edge weights, retention
+and safe cleanup after ontology changes.
 
 The local history was extracted from the platform's Brainwire feature branch.
 Old journal entries retain their original commit IDs and checkout paths; the

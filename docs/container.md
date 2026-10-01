@@ -34,6 +34,13 @@ must explicitly name or mount its durable storage. A fresh local volume is a
 fresh database. Do not treat a container restart on a different machine with a
 new local volume as recovery of the old member.
 
+The image has a Docker health check that runs `brainwire probe --mode ready`.
+That command negotiates Bolt, logs on and executes `RETURN 1` against the
+default database. `brainwire probe --mode live` checks the session path without
+running a query. The health check has a 180-second startup grace period; larger
+recovery tests may need a longer one. The default probe targets
+`127.0.0.1:7687`; override it if the container listener port changes.
+
 For a restart check, write synthetic data, kill the container, then start a new
 container with the **same** `brainwire-data` volume and read it back. The
 [driver acceptance script](../crates/server/tests/mvp_demo.py) has `write` and
@@ -50,8 +57,8 @@ This tests process/container recovery, not machine loss. The example ontology
 is bundled only to make local test setup reproducible; use an appropriate
 ontology for real graphs.
 
-Before Kubernetes or Docker Swarm deployment, add a recovery-aware health
-endpoint and explicit readiness/liveness behavior. Package stable member
+Before Kubernetes or Docker Swarm deployment, configure explicit startup,
+readiness and liveness probes using these modes. Package stable member
 identities and durable per-member volumes; run the failure matrix in the
 [data and recovery design](design/2026-09-27-brainwire-data-and-recovery.md).
 On Docker Swarm, service placement must keep each member bound to the correct

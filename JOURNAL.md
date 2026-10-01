@@ -38,6 +38,46 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, recovery probe and query/ontology audit
+
+- **Requested:** continue the local feature/test session for about 20 minutes,
+  verify RocksDB's role in queries and ontology, then account for temporal
+  history, different node/edge weights and graph maintenance. Started around
+  07:20 UTC. No push, remote deployment or PR.
+- **Recovery health:** added `brainwire probe` with Bolt session (`live`) and
+  read-only query (`ready`) modes, bounded network operations and response
+  parsing, plus a Docker health check. Integration tests cover down/up/down
+  server states. The local ARM64 image became healthy and a one-cycle
+  container kill/recreate test passed with a retained volume.
+- **Admin visibility:** `brainwire db schema NAME --json` exposes the persisted
+  ontology catalog and explicitly reports `declared_only` secondary indexes.
+  `brainwire db metrics NAME --json` reports per-family RocksDB estimates.
+  The retained 100K-node/1M-edge fixture shows `idx` and `ident` at zero keys.
+- **Query finding:** `entity_id` uses the `pk` prefix; edge traversal uses
+  `out`/`in` prefixes. Other property predicates scan their label; index
+  declarations do not yet create keys or change plans. On a temporary warm
+  50K-Customer fixture, median Bolt lookup was 3.31 ms by `entity_id` and
+  514.22 ms by declared-index `email`. These are local synthetic figures.
+  The audit and a concrete physical-index gate are in `docs/benchmarks/` and
+  `docs/design/`.
+- **Temporal/maintenance decision:** catalog versions are schema versions, not
+  entity revisions. Existing edge properties can drive weighted CSR/PageRank,
+  but node weighting, historical/as-of reads, revision retention and cleanup
+  jobs are not implemented. The temporal design separates recorded and valid
+  time, keeps current Ticket rows independent of expiring old revisions, and
+  requires dry-run, auditable, restartable cleanup after ontology deprecation.
+  Applying an ontology must never implicitly delete graph data.
+- **Validated:** full Rust workspace tests, warning-free clippy and formatting
+  passed after the final probe fix. Docker health and restart behavior were
+  checked locally. No claim of 5B-element/16-GiB query performance or
+  multi-machine recovery is established.
+- **Next:** implement atomic physical scalar secondary indexes plus backfill
+  and query-plan selection. Then add bounded streaming and the first durable
+  entity-revision/history slice. Follow with maintenance dry-run and resumable
+  retention jobs; validate under larger, less compressible graphs.
+- **Blockers:** none for local implementation. Production scale and cluster
+  recovery remain unproven.
+
 ### 2026-10-01, durable Bolt server and orchestrator goals
 
 - **Requested:** continue the longer local Brainwire session, keep all work

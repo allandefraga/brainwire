@@ -5,6 +5,7 @@ mod config;
 mod cypher;
 mod databases;
 mod engine;
+mod probe;
 mod serve;
 mod size;
 
@@ -22,6 +23,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Check whether a local Bolt server accepts sessions and queries.
+    Probe {
+        /// Bolt listen address to check from this machine or container.
+        #[arg(long, default_value = "127.0.0.1:7687")]
+        address: String,
+        /// Live checks a Bolt session; ready also runs a read-only query.
+        #[arg(long, value_enum, default_value_t = probe::Mode::Ready)]
+        mode: probe::Mode,
+        /// Deadline for each network operation in milliseconds.
+        #[arg(long, default_value_t = 2000)]
+        timeout_ms: u64,
+    },
     /// Serve named durable databases over Bolt/Cypher.
     Serve {
         /// Config file; otherwise uses ./brainwire.toml. Environment overrides it.
@@ -123,6 +136,24 @@ enum DbCommands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Show the persisted ontology catalog and current index implementation status.
+    Schema {
+        name: String,
+        /// Emit the full catalog as JSON.
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Show per-column-family RocksDB estimates (offline administration).
+    Metrics {
+        name: String,
+        /// Emit metrics as JSON.
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Create a database and optionally apply its ontology.
     Create {
         name: String,
@@ -144,6 +175,11 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Probe {
+            address,
+            mode,
+            timeout_ms,
+        } => probe::run(&address, mode, timeout_ms),
         Commands::Serve { config } => serve::run(config.as_deref()),
         Commands::Cypher {
             database,
@@ -181,6 +217,12 @@ fn main() {
             DbCommands::List { config } => admin::list(config.as_deref()),
             DbCommands::Stats { name, json, config } => {
                 admin::stats(&name, json, config.as_deref())
+            }
+            DbCommands::Schema { name, json, config } => {
+                admin::schema(&name, json, config.as_deref())
+            }
+            DbCommands::Metrics { name, json, config } => {
+                admin::metrics(&name, json, config.as_deref())
             }
             DbCommands::Create {
                 name,
