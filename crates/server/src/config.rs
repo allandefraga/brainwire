@@ -282,6 +282,12 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if !crate::databases::valid_name(&config.server.default_database) {
+        return Err(ConfigError::Invalid(format!(
+            "server.default_database must use 1..128 ASCII letters, digits, hyphens or underscores, got {:?}",
+            config.server.default_database
+        )));
+    }
     if config.memory.memtables.0 >= config.memory.cache.0 {
         return Err(ConfigError::Invalid(format!(
             "memory.memtables ({}) must be smaller than memory.cache ({}); the memtables are charged inside the cache",
@@ -409,6 +415,18 @@ mod tests {
         assert_eq!(loaded.config.memory.query.0, 2 << 30);
         assert_eq!(loaded.config.server.default_database, "client_memory");
         assert!(matches!(loaded.sources["memory.cache"], Source::Default));
+    }
+
+    #[test]
+    fn default_database_cannot_escape_the_data_directory() {
+        let error = load(
+            None,
+            &env(&[("BRAINWIRE_SERVER_DEFAULT_DATABASE", "../outside")]),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, ConfigError::Invalid(message) if message.contains("server.default_database"))
+        );
     }
 
     #[test]

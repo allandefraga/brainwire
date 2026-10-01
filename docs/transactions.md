@@ -69,7 +69,9 @@ real temporary store; it is not the production protocol/registry adapter.
 ## Remaining integration
 
 - Production ownership and bounded worker/runtime scheduling for RocksDB calls.
-- Database registry, PackStream value/node conversion, error mapping and `serve`.
+- PackStream value/node conversion, error mapping and `serve`. The named local
+  database registry and `brainwire db` administration commands now exist, but
+  no production Bolt adapter uses them yet.
 - Durable bookmark handling and driver restart/managed-transaction checks.
 - Jump-ahead cancellation while synchronous query work is running; processed
   RESET cleanup alone does not implement that guarantee.

@@ -70,6 +70,12 @@ Raw local outputs from this run are in ignored `target/analytics-100k.json`,
 `target/analytics-1m.json` and matching `.log` files. This report preserves the
 numbers independently of build-directory cleanup.
 
+To retain a fresh synthetic database for local inspection, append
+`--database data/staging-100k` after `1000000`. The example refuses an existing
+path, so use a new directory for each import. Without this option the database
+is temporary and removed after the run. The retained dataset is local and
+ignored by Git; it is not a deployment or a production workload.
+
 ## Single-node Cypher reads
 
 A subsequent run of the same checked-in example measured two queries after the

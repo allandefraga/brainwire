@@ -38,6 +38,39 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, named database administration and retained volume dataset
+
+- **Requested:** a 15-minute local work session toward next week's test
+  deployment. Started at 06:03 UTC. No push, publish, remote deployment or PR.
+- **Done:** added a named database registry with one shared RocksDB resource
+  budget, a default database, existing-database discovery and `get/create/names`.
+  Names cannot contain paths; symlinked or unrelated directories are refused,
+  and a corrupt named database stops startup rather than disappearing from the
+  registry. Added `brainwire db create`, `db list`, `db stats [--json]` and
+  `db apply-ontology` for offline administration.
+- **Volume:** extended the existing synthetic workload example with an optional
+  fresh `--database` path that refuses overwrites. Generated an ignored local
+  `data/staging-100k` store with 100,000 Page nodes and 1,000,000 LINK edges;
+  `db stats` confirmed both counts after reopen. A direct Cypher read from
+  `synthetic-99999` returned its ten neighbors. The generated store occupies
+  about 8.6 MiB on this host because the data is highly compressible; this is
+  not representative of a production document graph.
+- **Verified:** workspace tests, workspace clippy with warnings denied,
+  formatting and diff checks passed. Process-level tests cover create/list,
+  ontology, Cypher write/reopen/read, stats text/JSON, invalid names and invalid
+  ontology. Registry tests cover reopening, symlinks, unrelated directories
+  and corrupt database refusal. The retained example also refused to overwrite
+  its existing destination.
+- **Next:** implement the production Bolt adapter with scoped transaction
+  ownership and bounded blocking execution, then `brainwire serve` and driver
+  write/kill/restart tests. `db` administration is offline and needs exclusive
+  access. Add container packaging only after that end-to-end server path works.
+  The local client Python environment has Neo4j driver 6.3.0; the historical
+  temporary 5.x environment exists but no longer imports `neo4j`, so refresh
+  that test environment when the server is ready.
+- **Blockers:** none for local work. This is not yet a networked deployment;
+  the Bolt production worker, value conversion and serve command remain open.
+
 ### 2026-09-30, single-node latency and commercialization review
 
 - **Done:** extended the reproducible sparse-analytics example with 100 warm-up

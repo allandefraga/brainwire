@@ -55,9 +55,27 @@ cargo run --locked --offline -p brainwire-server -- shell --demo
 Offline commands require dependencies to have been fetched previously.
 The `brainwire` binary provides configuration commands, local Cypher execution
 and the terminal demo. The `brainwire-bolt-dev` binary uses a stub query engine.
+It now also has local `brainwire db create`, `db list`, `db stats` and
+`db apply-ontology` commands. They operate on the named RocksDB directories
+under `server.data_dir` and require exclusive access; `db stats` scans nodes
+and relationships and accepts `--json` for scripts. For example:
+
+```sh
+brainwire db create research --ontology examples/analytics/schema.json
+brainwire db stats research
+brainwire db list
+```
+
+`brainwire serve` is not connected yet; these commands prepare and inspect
+databases for the upcoming Bolt server integration.
+For a fresh 100K-node / 1M-relationship synthetic database, run the
+[volume example](crates/cypher/examples/sparse_analytics.rs) with
+`1000000 --database data/staging-100k`, then inspect it with
+`brainwire db stats staging-100k`. The example refuses to overwrite an
+existing path. Local database files under `data/` are ignored by Git.
 The [shared-query transaction API and Bolt lifecycle hooks](docs/transactions.md)
 provide commit/rollback foundations. The next MVP work is the production
-worker/adapter, database registry and durable `brainwire serve` integration.
+worker/adapter and durable `brainwire serve` integration.
 
 The local history was extracted from the platform's Brainwire feature branch.
 Old journal entries retain their original commit IDs and checkout paths; the

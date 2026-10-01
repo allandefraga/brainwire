@@ -1,7 +1,9 @@
 //! Brainwire configuration, synthetic observatory and embedded Cypher CLI.
 
+mod admin;
 mod config;
 mod cypher;
+mod databases;
 mod size;
 
 use std::collections::BTreeMap;
@@ -66,6 +68,11 @@ enum Commands {
         #[arg(long, default_value_t = 48)]
         height: u16,
     },
+    /// Manage named local databases (requires exclusive access to each store).
+    Db {
+        #[command(subcommand)]
+        command: DbCommands,
+    },
     /// Inspect or create the config file.
     Config {
         #[command(subcommand)]
@@ -87,6 +94,39 @@ enum ConfigCommands {
     /// Print the effective config: each key's value and where it came from.
     Show {
         /// Config file to load. Defaults to ./brainwire.toml if it exists.
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbCommands {
+    /// List databases in the configured data directory.
+    List {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Count persisted nodes and relationships (scans the database).
+    Stats {
+        name: String,
+        /// Emit one JSON object for scripts and future backoffice integration.
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Create a database and optionally apply its ontology.
+    Create {
+        name: String,
+        #[arg(long)]
+        ontology: Option<PathBuf>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Apply an additive graph-mapping JSON ontology.
+    ApplyOntology {
+        name: String,
+        file: PathBuf,
         #[arg(long)]
         config: Option<PathBuf>,
     },
@@ -128,6 +168,20 @@ fn main() {
             width,
             height,
         }),
+        Commands::Db { command } => match command {
+            DbCommands::List { config } => admin::list(config.as_deref()),
+            DbCommands::Stats { name, json, config } => {
+                admin::stats(&name, json, config.as_deref())
+            }
+            DbCommands::Create {
+                name,
+                ontology,
+                config,
+            } => admin::create(&name, ontology.as_deref(), config.as_deref()),
+            DbCommands::ApplyOntology { name, file, config } => {
+                admin::apply_ontology(&name, &file, config.as_deref())
+            }
+        },
         Commands::Config { command } => match command {
             ConfigCommands::Init { path, force } => run_config_init(&path, force),
             ConfigCommands::Show { config } => run_config_show(config.as_deref()),

@@ -1,5 +1,6 @@
-//! Reproducible persisted-graph workload; no network or existing database used.
+//! Reproducible graph workload; no network or existing database used.
 //! cargo run --locked --offline -p brainwire-cypher --example sparse_analytics -- 100000
+//! Append `--database data/staging-100k` to retain a fresh generated database.
 use brainwire_core::schema::GraphMapping;
 use brainwire_core::value::Value;
 use brainwire_cypher::{execute, Out};
@@ -7,7 +8,7 @@ use brainwire_store::{
     db::{Database, Resources, StoreConfig},
     graph::{merge_edge, merge_node, sparse_projection, ProjectionOptions},
 };
-use std::{collections::BTreeMap, time::Instant};
+use std::{collections::BTreeMap, path::PathBuf, time::Instant};
 
 fn latency_summary(samples: &mut [f64]) -> serde_json::Value {
     samples.sort_by(f64::total_cmp);
@@ -43,22 +44,43 @@ fn measure_local_query(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let edges: usize = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "100000".into())
-        .parse()?;
+    let mut args = std::env::args().skip(1);
+    let edges: usize = args.next().unwrap_or_else(|| "100000".into()).parse()?;
     if !(100..=1_000_000).contains(&edges) || !edges.is_multiple_of(10) {
         return Err("edge count must be a multiple of 10 between 100 and 1000000".into());
     }
+    let persisted = match args.next().as_deref() {
+        Some("--database") => Some(PathBuf::from(args.next().ok_or("missing database path")?)),
+        None => None,
+        _ => return Err("expected --database PATH after edge count".into()),
+    };
+    if args.next().is_some() {
+        return Err("unexpected extra arguments".into());
+    }
+    if let Some(path) = &persisted {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => return Err(format!("refusing to overwrite {}", path.display()).into()),
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            Err(_) => {}
+        }
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
     let node_count = edges / 10;
-    let dir = tempfile::tempdir()?;
+    let tempdir = if persisted.is_none() {
+        Some(tempfile::tempdir()?)
+    } else {
+        None
+    };
+    let path = persisted.unwrap_or_else(|| tempdir.as_ref().unwrap().path().to_path_buf());
     let resources = Resources::new(StoreConfig {
         cache_bytes: 64 << 20,
         memtable_bytes: 16 << 20,
         id_block: 1024,
         conflict_history_keys: 50_000,
     });
-    let db = Database::open(dir.path(), &resources)?;
+    let db = Database::open(&path, &resources)?;
     let mapping: GraphMapping = serde_json::from_str(
         r#"{"version":"1","nodes":[{"label":"Page"}],"edges":[{"type":"LINK","from":{"label":"Page"},"to":{"label":"Page"}}]}"#,
     )?;
@@ -105,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(db.stats()?.edges, expected_edges as u64);
     drop(db);
     let started = Instant::now();
-    let db = Database::open(dir.path(), &resources)?;
+    let db = Database::open(&path, &resources)?;
     let reopen_ms = started.elapsed().as_secs_f64() * 1000.0;
     let started = Instant::now();
     let projection = sparse_projection(&db.begin(), &ProjectionOptions::default())?;
@@ -152,6 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "projectionMs": projection_ms, "pagerankMs": pagerank_ms, "cypherTop5Ms": cypher_ms,
             "csrBytes": csr_bytes, "rankMass": mass, "iterations": iterations, "converged": converged,
             "pointLookup": point_lookup, "oneHopTenNeighbors": one_hop,
+            "databasePath": if tempdir.is_some() { None } else { Some(path.display().to_string()) },
             "topEntity": top, "cacheBytes": 64 << 20, "memtableBytes": 16 << 20,
             "note": "local synthetic workload; CSR bytes exclude construction buffers and process RSS"
         }))?
