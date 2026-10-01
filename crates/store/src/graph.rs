@@ -631,9 +631,10 @@ pub fn find_by_indexed_property(
     prefix.extend(encoded);
     let mut found = Vec::new();
     txn.visit_prefix::<GraphError>(Cf::Idx, &prefix, |key, _| {
-        let tail = key
-            .get(key.len().saturating_sub(8)..)
-            .ok_or_else(|| StoreError::Corrupt("scalar index key".into()))?;
+        if key.len() != prefix.len() + 8 {
+            return Err(StoreError::Corrupt("scalar index key length".into()).into());
+        }
+        let tail = &key[prefix.len()..];
         found.push(node_id_value(tail)?);
         Ok(())
     })?;

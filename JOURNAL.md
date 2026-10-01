@@ -56,7 +56,8 @@ No line of code before the end of phase 2.
   delete, reopen, added declaration, old unmarked catalog, removed/re-added
   declaration, Boolean/string type separation, numeric fallback, rollback and
   concurrent writer conflict. Admin schema now reports
-  `string_boolean_ready` or `declared_only` as appropriate. All 340 Rust
+  `string_boolean_ready` or `declared_only` as appropriate. A malformed index
+  key fails closed. All 341 Rust
   workspace tests passed, as did denied-warning clippy, formatting and diff
   checks.
 - **Measured:** on a temporary 10K-Customer graph, five separate local CLI

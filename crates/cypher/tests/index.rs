@@ -252,3 +252,27 @@ fn rollback_and_conflicting_writers_never_publish_uncommitted_index_keys() {
         );
     }
 }
+
+#[test]
+fn malformed_index_key_fails_closed_instead_of_returning_a_wrong_node() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping = serde_json::from_str(
+        r#"{"version":"1","nodes":[{"label":"Customer","properties":["email"],"indexed_fields":["email"]}]}"#,
+    )
+    .unwrap();
+    let catalog = db.apply_ontology(&mapping).unwrap();
+    run(&db, "CREATE (c:Customer {entity_id:'a', email:'value'})");
+    let mut tx = db.begin();
+    let mut bad_key = tx.scan_prefix(Cf::Idx, &[]).unwrap()[0].0.clone();
+    bad_key.pop();
+    tx.put(Cf::Idx, bad_key, vec![]);
+    tx.commit().unwrap();
+    assert!(find_by_indexed_property(
+        &db.begin(),
+        catalog.node_type("Customer").unwrap(),
+        "email",
+        &Value::Str("value".into()),
+    )
+    .is_err());
+}
