@@ -43,6 +43,33 @@ to the applicable policy. Historical edge changes require their own revisions
 if an as-of traversal is promised; node history alone cannot reconstruct an
 old graph neighborhood.
 
+A possible future mapping extension (not implemented by the current catalog) is:
+
+```json
+{
+  "version": "3",
+  "nodes": [{
+    "label": "Ticket",
+    "history": { "enabled": true, "retention": "P6M" },
+    "weights": [{ "property": "priority_score", "meaning": "importance", "default": 1.0 }]
+  }],
+  "edges": [{
+    "type": "BLOCKS",
+    "from": { "label": "Ticket" },
+    "to": { "label": "Ticket" },
+    "history": { "enabled": true, "retention": "P6M" },
+    "weights": [{ "property": "impact", "meaning": "strength", "default": 1.0 }]
+  }]
+}
+```
+
+The first implementation needs explicit validation of the retention format,
+weight units and allowed values. A missing policy means no automatic history
+or expiry. Today Serde may ignore those proposed fields; until the policy
+parser exists, the CLI must not suggest that such a declaration is active.
+The future parser must reject unknown policy fields rather than silently
+creating an unprotected graph.
+
 ## Weights
 
 An edge already supports a numeric `weight` property in ephemeral sparse CSR
