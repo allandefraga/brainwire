@@ -74,6 +74,8 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
     assert_eq!(schema["catalog"]["version"], 1);
     assert_eq!(schema["catalog"]["node_types"][0]["label"], "Customer");
     assert_eq!(schema["secondary_index_status"], "declared_only");
+    assert_eq!(schema["temporal_history_status"], "not_implemented");
+    assert_eq!(schema["maintenance_status"], "not_implemented");
     let metrics = command(&dir)
         .args(["db", "metrics", "research", "--json"])
         .output()
@@ -114,6 +116,56 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
         .unwrap();
     assert!(reopened.status.success(), "{:?}", reopened);
     assert!(String::from_utf8_lossy(&reopened.stdout).contains("Ada"));
+}
+
+#[test]
+fn applying_an_ontology_without_a_previous_label_preserves_existing_graph_data() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    let created = command(&dir)
+        .args(["db", "create", "research", "--ontology", "schema.json"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    let written = command(&dir)
+        .args([
+            "cypher",
+            "--database",
+            "data/research",
+            "--query",
+            "CREATE (c:Customer {entity_id:'ticket-history-1', name:'Retained'}) RETURN c.name",
+        ])
+        .output()
+        .unwrap();
+    assert!(written.status.success(), "{written:?}");
+    std::fs::write(
+        dir.path().join("empty.json"),
+        r#"{"version":"2","nodes":[]}"#,
+    )
+    .unwrap();
+    let applied = command(&dir)
+        .args(["db", "apply-ontology", "research", "empty.json"])
+        .output()
+        .unwrap();
+    assert!(applied.status.success(), "{applied:?}");
+    let schema = command(&dir)
+        .args(["db", "schema", "research", "--json"])
+        .output()
+        .unwrap();
+    assert!(schema.status.success(), "{schema:?}");
+    let catalog: serde_json::Value = serde_json::from_slice(&schema.stdout).unwrap();
+    assert_eq!(catalog["catalog"]["node_types"][0]["label"], "Customer");
+    let stats = command(&dir)
+        .args(["db", "stats", "research", "--json"])
+        .output()
+        .unwrap();
+    assert!(stats.status.success(), "{stats:?}");
+    let stats: serde_json::Value = serde_json::from_slice(&stats.stdout).unwrap();
+    assert_eq!(stats["nodes"], 1);
 }
 
 #[test]

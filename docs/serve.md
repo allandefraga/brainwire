@@ -43,6 +43,8 @@ Use `--address` and `--timeout-ms` to target another local listener. Offline
 `brainwire db schema NAME --json` shows the persisted ontology catalog and
 reports `secondary_index_status: declared_only`; property indexes declared in
 the ontology are not yet physically built or used by queries.
+It also reports temporal history and maintenance as `not_implemented` so
+timeline metadata cannot be mistaken for stored ticket revisions or cleanup.
 `brainwire db metrics NAME --json` reports per-column-family RocksDB estimates
 for keys, live data, memtables and level-0 files. These are offline snapshots,
 not exact graph counts or total process memory.

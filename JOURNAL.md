@@ -67,6 +67,10 @@ No line of code before the end of phase 2.
   time, keeps current Ticket rows independent of expiring old revisions, and
   requires dry-run, auditable, restartable cleanup after ontology deprecation.
   Applying an ontology must never implicitly delete graph data.
+  `db schema --json` now labels temporal history and maintenance as
+  `not_implemented`, and the text view lists declared timeline streams. An
+  integration test verifies that applying an ontology omitting a former label
+  retains its catalog type and stored node.
 - **Validated:** full Rust workspace tests, warning-free clippy and formatting
   passed after the final probe fix. Docker health and restart behavior were
   checked locally. No claim of 5B-element/16-GiB query performance or

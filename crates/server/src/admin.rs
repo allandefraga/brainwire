@@ -67,7 +67,9 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
             serde_json::json!({
                 "database": name,
                 "catalog": catalog,
-                "secondary_index_status": "declared_only"
+                "secondary_index_status": "declared_only",
+                "temporal_history_status": "not_implemented",
+                "maintenance_status": "not_implemented"
             })
         );
     } else if let Some(catalog) = catalog {
@@ -78,7 +80,14 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
         for edge in &catalog.edge_types {
             println!("edge {}", edge.name);
         }
+        for stream in &catalog.streams {
+            println!(
+                "timeline {} timestamp={}",
+                stream.event_type, stream.timestamp_field
+            );
+        }
         println!("secondary indexes: declared only; property scans are used");
+        println!("temporal history and maintenance jobs: not implemented");
     } else {
         println!("database={name} has no ontology catalog");
     }
