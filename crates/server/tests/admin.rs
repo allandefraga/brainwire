@@ -169,6 +169,96 @@ fn applying_an_ontology_without_a_previous_label_preserves_existing_graph_data()
 }
 
 #[test]
+fn overview_reports_multiple_independent_graphs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    for name in ["tickets", "knowledge"] {
+        let created = command(&dir)
+            .args(["db", "create", name, "--ontology", "schema.json"])
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{created:?}");
+    }
+    let written = command(&dir)
+        .args([
+            "cypher",
+            "--database",
+            "data/tickets",
+            "--query",
+            "CREATE (c:Customer {entity_id:'ticket-1', name:'Only tickets'}) RETURN c.name",
+        ])
+        .output()
+        .unwrap();
+    assert!(written.status.success(), "{written:?}");
+    let output = command(&dir)
+        .args(["db", "overview", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let graphs = value["graphs"].as_array().unwrap();
+    assert_eq!(graphs.len(), 3); // Includes the configured default graph.
+    assert_eq!(graphs[0]["name"], "knowledge");
+    assert_eq!(graphs[0]["nodes"], 0);
+    assert_eq!(graphs[0]["ontology_version"], 1);
+    assert_eq!(graphs[1]["name"], "client_memory");
+    assert_eq!(graphs[1]["ontology_version"], serde_json::Value::Null);
+    assert_eq!(graphs[2]["name"], "tickets");
+    assert_eq!(graphs[2]["nodes"], 1);
+    assert_eq!(graphs[2]["ontology_version"], 1);
+    assert_eq!(graphs[2]["count_kind"], "exact");
+    let fast = command(&dir)
+        .args(["db", "overview", "--estimated", "--json"])
+        .output()
+        .unwrap();
+    assert!(fast.status.success(), "{fast:?}");
+    let fast: serde_json::Value = serde_json::from_slice(&fast.stdout).unwrap();
+    assert_eq!(fast["graphs"][2]["count_kind"], "rocksdb_estimate");
+    assert!(fast["graphs"][2]["nodes"].is_number());
+    let snapshot = command(&dir)
+        .args([
+            "shell",
+            "--overview",
+            "--snapshot",
+            "--graph",
+            "tickets",
+            "--width",
+            "100",
+            "--height",
+            "24",
+        ])
+        .output()
+        .unwrap();
+    assert!(snapshot.status.success(), "{snapshot:?}");
+    let screen = String::from_utf8(snapshot.stdout).unwrap();
+    assert!(screen.contains("real data"));
+    assert!(screen.contains("Nodes: 1"));
+    assert!(screen.contains("Selected graph"));
+    let fast_snapshot = command(&dir)
+        .args(["shell", "--overview", "--estimated", "--snapshot"])
+        .output()
+        .unwrap();
+    assert!(fast_snapshot.status.success(), "{fast_snapshot:?}");
+    assert!(String::from_utf8_lossy(&fast_snapshot.stdout).contains("RocksDB estimates"));
+    let missing = command(&dir)
+        .args(["shell", "--overview", "--snapshot", "--graph", "missing"])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("does not exist"));
+    let wrong_view = command(&dir)
+        .args(["shell", "--overview", "--snapshot", "--view", "memory"])
+        .output()
+        .unwrap();
+    assert!(!wrong_view.status.success());
+    assert!(String::from_utf8_lossy(&wrong_view.stderr).contains("only available with --demo"));
+}
+
+#[test]
 fn invalid_name_never_escapes_configured_data_directory() {
     let dir = tempfile::tempdir().unwrap();
     let result = command(&dir)

@@ -30,6 +30,9 @@ names remain English in either interface language.
 It includes a clustered graph, guided query examples, explained memory budgets
 and a file inspector with an illustrative LSM storage flow. See the
 [terminal demo guide](docs/tui-demo.md) for controls and actual captures.
+`brainwire shell --overview` is a separate read-only view of the real named
+graphs on local disk. The [multi-graph backoffice guide](docs/multi-graph-backoffice.md)
+shows current counts, commands and which TUI operations are live or synthetic.
 
 For real graph reads and writes, run `brainwire serve` to connect over Bolt, or
 use the embedded `brainwire cypher --database <directory> --query <text>` command
@@ -60,7 +63,7 @@ The `brainwire` binary provides configuration commands, durable Bolt serving,
 local Cypher execution, `brainwire probe` health checks and the terminal demo.
 The `brainwire-bolt-dev` binary
 uses a stub query engine.
-It now also has local `brainwire db create`, `db list`, `db stats`, `db schema`,
+It now also has local `brainwire db create`, `db list`, `db overview`, `db stats`, `db schema`,
 `db metrics` and `db apply-ontology` commands. They operate on the named RocksDB directories
 under `server.data_dir` and require exclusive access; `db stats` scans nodes
 and relationships and accepts `--json` for scripts. For example:

@@ -38,6 +38,42 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, real multi-graph backoffice overview
+
+- **Requested:** about 15 more minutes on useful MVP work, with current data,
+  execution instructions, UI state and TUI operations. Allan emphasized that
+  Brainwire must manage multiple graphs, not a single graph. Started at 07:46
+  UTC. All work remained local; no push, deployment or PR.
+- **Done:** added `brainwire db overview [--json]`, which summarizes every
+  named graph with exact node/edge counts, ontology version, label and edge
+  type names, index declaration count and timeline stream count. Added
+  `brainwire shell --overview` as a read-only TUI over real local RocksDB data,
+  with Up/Down selection, a selected-graph inspector, `--graph` initial
+  selection, `--snapshot`, English and pt-BR. It remains offline because the
+  local process needs exclusive RocksDB access; it is separate from the four
+  synthetic Graph/Query/Memory/Disk demo views.
+- **Measured:** local `db overview --json` showed `analytics-demo` 3 nodes/2
+  edges, `staging-100k` 100,000 nodes/1,000,000 edges, and
+  `client_memory` empty. The 100K fixture's directory was 9.5 MiB on this
+  machine because its data are synthetic and highly compressible. An actual
+  pt-BR TUI snapshot selected `staging-100k` and showed `Page`/`LINK` from its
+  ontology. The small PageRank graph yielded Storage 0.4069, Recovery 0.3333
+  and Introduction 0.2597 through the real Cypher executor.
+- **Validated:** tests cover two independent named graphs, their ontology and
+  count isolation, snapshot selection and a missing graph. All 335 Rust
+  workspace tests passed; clippy with denied warnings, formatting and diff
+  checks passed. A
+  quick `--estimated` mode now reads RocksDB key-count estimates instead of
+  scanning; a single warm local measurement was 0.078 s versus 1.053 s for
+  exact counts on the retained graphs. These are not production benchmarks.
+- **Next:** use persisted exact counters or an explicit cache before assuming
+  the exact overview scales to billion-element graphs. Connect bounded
+  graph/query exploration to the server, then
+  live telemetry and storage files. Physical indexes and temporal history
+  remain higher-priority engine work.
+- **Blockers:** no local blocker. Real overview requires the server to be
+  stopped; live server-side backoffice access needs an API.
+
 ### 2026-10-01, recovery probe and query/ontology audit
 
 - **Requested:** continue the local feature/test session for about 20 minutes,

@@ -123,10 +123,11 @@ algorithm buffers, result rows, allocator overhead and RocksDB. It is not RSS.
 On a 64-bit target, packed CSR with N nodes and E nonzero coordinates needs
 approximately `8 * (N + 1) + 12 * E` bytes. Building it has a higher peak.
 
-This is single-process analytics with exclusive local database access. There is
-no distributed execution, persistent projection registry, vector similarity
-index, permission filtering or live TUI integration yet. Production deployment
-still needs the real Bolt worker/registry/server and enforced memory budgets.
+This is single-process analytics. The embedded CLI needs exclusive database
+access; the Bolt server can run the same procedures against a selected named
+database. There is no distributed execution, persistent projection registry,
+vector similarity index, permission filtering or live graph TUI integration
+yet. Production deployment still needs enforced memory budgets.
 
 ## Reproduce the volume workload
 

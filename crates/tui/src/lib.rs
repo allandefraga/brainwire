@@ -10,7 +10,9 @@ use crossterm::terminal::{
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::style::Color;
 use ratatui::Terminal;
+mod overview;
 mod ui;
+pub use overview::{run_overview, GraphSummary};
 pub use ui::render;
 
 const GREEN: Color = Color::Rgb(0x57, 0xff, 0x48);

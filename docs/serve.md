@@ -53,7 +53,9 @@ Each connection has one scoped query worker, with at most 64 concurrent
 connections. RocksDB execution runs outside Tokio's IO threads. Results are
 still fully materialized in memory, and the configured query-memory budget is
 not yet enforced. The supported Cypher subset is documented in
-[local queries](local-cypher.md). The TUI remains synthetic.
+[local queries](local-cypher.md). The Graph/Query/Memory/Disk TUI demo remains
+synthetic; `shell --overview` reads real named local graphs while the server is
+stopped.
 
 This is a single-node server. Kubernetes and Docker Swarm packaging are
 explicit deployment goals; durable volumes and restarts on either orchestrator

@@ -65,11 +65,23 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
-    /// Open the graph observatory. Live backend is not yet connected.
+    /// Open the synthetic observatory or the read-only local graph overview.
     Shell {
         /// Use the bounded synthetic demo fixture.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "overview")]
         demo: bool,
+        /// Inspect every named local graph (requires exclusive database access).
+        #[arg(long, conflicts_with = "demo")]
+        overview: bool,
+        /// Config file for --overview; otherwise uses ./brainwire.toml.
+        #[arg(long, requires = "overview")]
+        config: Option<PathBuf>,
+        /// Initially select this named graph in --overview.
+        #[arg(long, requires = "overview")]
+        graph: Option<String>,
+        /// Use quick RocksDB key-count estimates instead of full scans.
+        #[arg(long, requires = "overview")]
+        estimated: bool,
         /// Interface language: en (default) or pt-BR.
         #[arg(long, default_value = "en")]
         lang: String,
@@ -124,6 +136,17 @@ enum ConfigCommands {
 enum DbCommands {
     /// List databases in the configured data directory.
     List {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Summarize every named graph, including exact node and relationship counts.
+    Overview {
+        /// Emit one JSON document for the backoffice.
+        #[arg(long)]
+        json: bool,
+        /// Use quick RocksDB key-count estimates instead of full scans.
+        #[arg(long)]
+        estimated: bool,
         #[arg(long)]
         config: Option<PathBuf>,
     },
@@ -198,23 +221,48 @@ fn main() {
         ),
         Commands::Shell {
             demo,
+            overview,
+            config,
+            graph,
+            estimated,
             lang,
             no_anim,
             snapshot,
             view,
             width,
             height,
-        } => brainwire_tui::run(brainwire_tui::Options {
-            demo,
-            lang,
-            no_anim,
-            snapshot,
-            view,
-            width,
-            height,
-        }),
+        } => {
+            let options = brainwire_tui::Options {
+                demo,
+                lang,
+                no_anim,
+                snapshot,
+                view,
+                width,
+                height,
+            };
+            if overview {
+                if options.view != "graph" {
+                    Err(
+                        "--view is only available with --demo; --overview has its own graph list"
+                            .into(),
+                    )
+                } else {
+                    admin::graph_summaries(config.as_deref(), estimated).and_then(|graphs| {
+                        brainwire_tui::run_overview(&options, graphs, graph.as_deref())
+                    })
+                }
+            } else {
+                brainwire_tui::run(options)
+            }
+        }
         Commands::Db { command } => match command {
             DbCommands::List { config } => admin::list(config.as_deref()),
+            DbCommands::Overview {
+                json,
+                estimated,
+                config,
+            } => admin::overview(json, estimated, config.as_deref()),
             DbCommands::Stats { name, json, config } => {
                 admin::stats(&name, json, config.as_deref())
             }

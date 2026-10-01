@@ -5,6 +5,9 @@ the Graph, Query, Memory and Disk & Files workflow. It uses synthetic data.
 It does not connect to a running database, inspect real files or execute
 arbitrary Cypher. For real local queries, use the separate
 [`brainwire cypher` command](local-cypher.md).
+For a separate read-only TUI showing **real named local graphs**, use
+`brainwire shell --overview` as described in the
+[multi-graph backoffice guide](multi-graph-backoffice.md).
 
 From the standalone repository:
 
@@ -81,9 +84,9 @@ for the green palette; the application deliberately honors that preference.
 
 ## Toward the connected MVP
 
-The atomic Cypher executor is implemented. The next engine work is real Bolt
-transaction handling and `brainwire serve`. A connected explorer additionally
-needs bounded neighborhood results, and live memory/file views need the
-server telemetry and storage-inspection contracts. The
+The atomic Cypher executor and durable Bolt server are implemented. The
+read-only multi-graph overview is connected to local storage. A connected
+graph explorer still needs bounded neighborhood results, and live memory/file
+views need server telemetry and storage-inspection contracts. The
 [Observatory design](design/2026-09-26-brainwire-observatory.md) records those
 interfaces and the selected identity.

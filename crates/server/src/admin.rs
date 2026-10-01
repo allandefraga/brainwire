@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use brainwire_core::schema::{Catalog, GraphMapping};
+use brainwire_tui::GraphSummary;
 
 use crate::config;
 use crate::databases::Databases;
@@ -29,6 +30,105 @@ fn read_ontology(path: &Path) -> Result<GraphMapping, String> {
 pub fn list(config: Option<&Path>) -> Result<(), String> {
     for name in open_registry(config)?.names() {
         println!("{name}");
+    }
+    Ok(())
+}
+
+pub fn graph_summaries(
+    config: Option<&Path>,
+    estimated: bool,
+) -> Result<Vec<GraphSummary>, String> {
+    let registry = open_registry(config)?;
+    let mut graphs = Vec::new();
+    for name in registry.names() {
+        let db = registry
+            .get(&name)
+            .ok_or_else(|| format!("database {name:?} disappeared from registry"))?;
+        let (nodes, edges) = if estimated {
+            let metrics = db
+                .storage_metrics()
+                .map_err(|e| format!("cannot estimate graph {name}: {e}"))?;
+            let count = |family: &str| {
+                metrics
+                    .get(family)
+                    .and_then(|properties| properties.get("estimated_keys"))
+                    .copied()
+                    .flatten()
+                    .ok_or_else(|| format!("RocksDB did not provide {family} key estimate"))
+            };
+            (count("node")?, count("out")?)
+        } else {
+            let counts = db
+                .stats()
+                .map_err(|e| format!("cannot count graph {name}: {e}"))?;
+            (counts.nodes, counts.edges)
+        };
+        let catalog = db
+            .catalog()
+            .map_err(|e| format!("cannot read ontology of {name}: {e}"))?;
+        graphs.push(GraphSummary {
+            name,
+            nodes,
+            edges,
+            estimated,
+            ontology_version: catalog.as_ref().map(|c| c.version),
+            node_types: catalog.as_ref().map_or(0, |c| c.node_types.len()),
+            edge_types: catalog.as_ref().map_or(0, |c| c.edge_types.len()),
+            node_labels: catalog.as_ref().map_or_else(Vec::new, |c| {
+                c.node_types.iter().map(|ty| ty.label.clone()).collect()
+            }),
+            edge_labels: catalog.as_ref().map_or_else(Vec::new, |c| {
+                c.edge_types.iter().map(|ty| ty.name.clone()).collect()
+            }),
+            index_declarations: catalog
+                .as_ref()
+                .map_or(0, |c| c.node_types.iter().map(|ty| ty.indexed.len()).sum()),
+            timeline_streams: catalog.as_ref().map_or(0, |c| c.streams.len()),
+        });
+    }
+    Ok(graphs)
+}
+
+pub fn overview(json: bool, estimated: bool, config: Option<&Path>) -> Result<(), String> {
+    let graphs = graph_summaries(config, estimated)?;
+    if json {
+        let graphs: Vec<_> = graphs
+            .iter()
+            .map(|g| {
+                serde_json::json!({
+                    "name": g.name,
+                    "nodes": g.nodes,
+                    "edges": g.edges,
+                    "count_kind": if g.estimated { "rocksdb_estimate" } else { "exact" },
+                    "ontology_version": g.ontology_version,
+                    "node_types": g.node_types,
+                    "edge_types": g.edge_types,
+                    "node_labels": g.node_labels,
+                    "edge_labels": g.edge_labels,
+                    "index_declarations": g.index_declarations,
+                    "timeline_streams": g.timeline_streams,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::json!({ "graphs": graphs }));
+    } else {
+        println!(
+            "Brainwire graphs ({})",
+            if estimated {
+                "RocksDB key estimates; quick"
+            } else {
+                "exact counts; full scan"
+            }
+        );
+        for graph in graphs {
+            let ontology = graph
+                .ontology_version
+                .map_or_else(|| "none".to_string(), |v| format!("v{v}"));
+            println!(
+                "{}: nodes={} edges={} ontology={ontology} node_types={} edge_types={}",
+                graph.name, graph.nodes, graph.edges, graph.node_types, graph.edge_types
+            );
+        }
     }
     Ok(())
 }
