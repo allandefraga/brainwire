@@ -56,9 +56,12 @@ signatures and event streams. Reapplying it preserves existing type and column
 IDs and appends newly declared columns, so old rows remain decodable. Use
 `brainwire db schema NAME --json` to inspect a named database's persisted
 catalog while the server is stopped. `indexed_fields`, `er_fields` and
-`identifier_columns` are currently declarations only: secondary index storage,
-backfill and indexed query plans are still pending. `entity_id` has a working
-primary-key lookup.
+`identifier_columns` remain declarations only. `indexed_fields` and
+`er_fields` now create physical equality indexes for string and Boolean
+values in `idx`, with a bounded atomic backfill on ontology application.
+Numeric, list and map predicates still scan the label. `entity_id` has its
+separate primary-key lookup. `db schema --json` reports whether a legacy
+database's scalar index is ready.
 Catalog versions are schema revisions, not a history of each node. Timeline
 declarations do not yet record ticket revisions or support as-of queries.
 Retention and ontology-driven cleanup are specified in the

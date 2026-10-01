@@ -38,6 +38,39 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, first physical scalar property index
+
+- **Requested:** 15 minutes on an index feature. Started at 08:27 UTC. All
+  work remained local; no push, remote deployment or PR.
+- **Implemented:** ontology-declared `indexed_fields`/`er_fields` now create
+  type-tagged string and Boolean equality keys in the RocksDB `idx` family.
+  Node create/MERGE/SET and DETACH DELETE update keys in the same transaction
+  as the row. `MATCH` chooses a ready index before a label scan, with remaining
+  predicates checked on the row. `entity_id` still uses `pk` first.
+- **Migration:** ontology application atomically backfills a new declaration
+  and persists a ready marker. Legacy catalogs without the marker scan safely
+  until reapplied. Removing and re-adding a declaration clears stale keys
+  before rebuilding. A migration above 100,000 old/new keys is rejected
+  without changing the catalog; a resumable batched migration remains open.
+- **Correctness:** new tests cover duplicate values, updates, NULL removal,
+  delete, reopen, added declaration, old unmarked catalog, removed/re-added
+  declaration, Boolean/string type separation, numeric fallback, rollback and
+  concurrent writer conflict. Admin schema now reports
+  `string_boolean_ready` or `declared_only` as appropriate. All 340 Rust
+  workspace tests passed, as did denied-warning clippy, formatting and diff
+  checks.
+- **Measured:** on a temporary 10K-Customer graph, five separate local CLI
+  processes per lookup had median 90.14 ms for indexed email and 244.98 ms
+  for unindexed name. The [report](docs/benchmarks/2026-10-01-scalar-index.md)
+  explains that process-open time dominates and this is not a production
+  benchmark. The temporary database was removed.
+- **Next:** add resumable indexed backfill and index statistics/EXPLAIN, then
+  canonical numeric equality, range and vector indexes. Verify cold/warm Bolt
+  latency and write amplification at larger heterogeneous volumes. Streaming
+  query results and memory ceilings remain separate priorities.
+- **Blockers:** no local blocker; the large-graph migration design is not yet
+  implemented.
+
 ### 2026-10-01, real multi-graph backoffice overview
 
 - **Requested:** about 15 more minutes on useful MVP work, with current data,

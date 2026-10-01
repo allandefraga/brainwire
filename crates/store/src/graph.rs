@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use brainwire_core::codec::{decode_row, encode_row, Row};
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
-use brainwire_core::schema::{Catalog, Column, GraphMapping};
+use brainwire_core::schema::{Catalog, Column, GraphMapping, NodeType};
 use brainwire_core::sparse::{SparseMatrix, SparseMatrixError};
 use brainwire_core::value::Value;
 
@@ -15,6 +15,8 @@ use crate::db::{Database, StoreError};
 use crate::txn::{Cf, Txn, TxnError};
 
 const CATALOG_KEY: &[u8] = b"catalog";
+const INDEX_READY_KEY: &[u8] = b"scalar-index-v1-ready";
+const MAX_ATOMIC_BACKFILL_KEYS: usize = 100_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GraphError {
@@ -28,6 +30,10 @@ pub enum GraphError {
     ReservedProperty(String),
     #[error("node {0:?} not found")]
     NodeNotFound(NodeId),
+    #[error(
+        "scalar index backfill exceeds {MAX_ATOMIC_BACKFILL_KEYS} keys; use a bounded migration"
+    )]
+    IndexBackfillTooLarge,
     #[error(transparent)]
     Id(#[from] IdError),
     #[error(transparent)]
@@ -288,6 +294,10 @@ impl Database {
         }
     }
 
+    pub fn scalar_indexes_ready(&self) -> Result<bool, StoreError> {
+        Ok(self.begin().get(Cf::Meta, INDEX_READY_KEY)?.is_some())
+    }
+
     pub fn apply_ontology(&self, mapping: &GraphMapping) -> Result<Catalog, GraphError> {
         let mut txn = self.begin();
         let previous: Option<Catalog> = match txn.get_for_update(Cf::Meta, CATALOG_KEY)? {
@@ -295,11 +305,65 @@ impl Database {
             None => None,
         };
         let next = Catalog::apply(mapping, previous.as_ref()).map_err(catalog_error)?;
+        let was_ready = txn.get(Cf::Meta, INDEX_READY_KEY)?.is_some();
+        let mut backfilled = 0;
+        // A new declaration is backfilled in the same atomic batch as the
+        // catalog. Old databases have no marker, so their entire declaration
+        // set is rebuilt before a query may trust the index.
+        for ty in &next.node_types {
+            for field in &ty.indexed {
+                let already_indexed = was_ready
+                    && previous
+                        .as_ref()
+                        .and_then(|old| old.node_type(&ty.label))
+                        .is_some_and(|old| old.indexed.contains(field));
+                if already_indexed {
+                    continue;
+                }
+                let prefix = index_field_prefix(ty.id, field);
+                // A declaration may have been removed and later reintroduced.
+                // Clear that field's old keys before rebuilding; otherwise a
+                // deleted/changed node could reappear as a stale candidate.
+                let mut obsolete = Vec::new();
+                txn.visit_prefix::<GraphError>(Cf::Idx, &prefix, |key, _| {
+                    if backfilled + obsolete.len() == MAX_ATOMIC_BACKFILL_KEYS {
+                        return Err(GraphError::IndexBackfillTooLarge);
+                    }
+                    obsolete.push(key.to_vec());
+                    Ok(())
+                })?;
+                backfilled += obsolete.len();
+                for key in obsolete {
+                    txn.delete(Cf::Idx, key);
+                }
+                let mut keys = Vec::new();
+                txn.visit_prefix::<GraphError>(Cf::Node, &[], |key, bytes| {
+                    let id = node_id_value(key)?;
+                    if id.type_id() == ty.id {
+                        let (_, row) = decode_node(bytes)?;
+                        if let Some(index_key) = property_value(&row, ty, field)
+                            .and_then(|value| index_key(&prefix, value, id))
+                        {
+                            if backfilled + keys.len() == MAX_ATOMIC_BACKFILL_KEYS {
+                                return Err(GraphError::IndexBackfillTooLarge);
+                            }
+                            keys.push(index_key);
+                        }
+                    }
+                    Ok(())
+                })?;
+                backfilled += keys.len();
+                for key in keys {
+                    txn.put(Cf::Idx, key, Vec::new());
+                }
+            }
+        }
         txn.put(
             Cf::Meta,
             CATALOG_KEY.to_vec(),
             serde_json::to_vec(&next).map_err(catalog_error)?,
         );
+        txn.put(Cf::Meta, INDEX_READY_KEY.to_vec(), vec![1]);
         txn.commit()?;
         Ok(next)
     }
@@ -307,6 +371,55 @@ impl Database {
 
 fn node_key(id: NodeId) -> Vec<u8> {
     id.0.to_be_bytes().to_vec()
+}
+
+fn index_field_prefix(ty: TypeId, field: &str) -> Vec<u8> {
+    let mut key = Vec::new();
+    put_u16(&mut key, ty.0);
+    put_bytes(&mut key, field.as_bytes());
+    key
+}
+
+fn index_value(value: &Value) -> Option<Vec<u8>> {
+    match value {
+        Value::Bool(value) => Some(vec![b'b', u8::from(*value)]),
+        Value::Str(value) => {
+            let mut encoded = vec![b's'];
+            put_bytes(&mut encoded, value.as_bytes());
+            Some(encoded)
+        }
+        _ => None,
+    }
+}
+
+fn index_key(field_prefix: &[u8], value: &Value, id: NodeId) -> Option<Vec<u8>> {
+    let mut key = field_prefix.to_vec();
+    key.extend(index_value(value)?);
+    put_u64(&mut key, id.0);
+    Some(key)
+}
+
+fn property_value<'a>(row: &'a Row, ty: &NodeType, field: &str) -> Option<&'a Value> {
+    ty.column(field)
+        .and_then(|id| row.columns.get(&id))
+        .or_else(|| row.extra.get(field))
+}
+
+fn update_node_indexes(txn: &mut Txn<'_>, ty: &NodeType, id: NodeId, old: &Row, new: &Row) {
+    for field in &ty.indexed {
+        let prefix = index_field_prefix(ty.id, field);
+        let old_key = property_value(old, ty, field).and_then(|v| index_key(&prefix, v, id));
+        let new_key = property_value(new, ty, field).and_then(|v| index_key(&prefix, v, id));
+        if old_key == new_key {
+            continue;
+        }
+        if let Some(key) = old_key {
+            txn.delete(Cf::Idx, key);
+        }
+        if let Some(key) = new_key {
+            txn.put(Cf::Idx, key, Vec::new());
+        }
+    }
 }
 
 fn pk_prefix(entity_id: &str) -> Vec<u8> {
@@ -453,8 +566,10 @@ pub fn merge_node(
             (id, Row::default())
         }
     };
+    let old = row.clone();
     row.schema_version = catalog.version;
     apply_props(&mut row, &ty.columns, props);
+    update_node_indexes(txn, ty, id, &old, &row);
     txn.put(Cf::Node, node_key(id), encode_node(entity_id, &row));
     Ok(id)
 }
@@ -495,6 +610,34 @@ pub fn find_by_entity_id(
         }
     }
     Ok(found)
+}
+
+/// Returns None when this property cannot safely use the ready scalar index.
+/// The caller must then retain the normal label-scan plan.
+pub fn find_by_indexed_property(
+    txn: &Txn<'_>,
+    ty: &NodeType,
+    field: &str,
+    value: &Value,
+) -> Result<Option<Vec<NodeId>>, GraphError> {
+    if !ty.indexed.iter().any(|name| name == field) || txn.get(Cf::Meta, INDEX_READY_KEY)?.is_none()
+    {
+        return Ok(None);
+    }
+    let Some(encoded) = index_value(value) else {
+        return Ok(None);
+    };
+    let mut prefix = index_field_prefix(ty.id, field);
+    prefix.extend(encoded);
+    let mut found = Vec::new();
+    txn.visit_prefix::<GraphError>(Cf::Idx, &prefix, |key, _| {
+        let tail = key
+            .get(key.len().saturating_sub(8)..)
+            .ok_or_else(|| StoreError::Corrupt("scalar index key".into()))?;
+        found.push(node_id_value(tail)?);
+        Ok(())
+    })?;
+    Ok(Some(found))
 }
 
 pub fn merge_edge(
@@ -581,7 +724,13 @@ fn edges_for_update(txn: &mut Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>,
 }
 
 pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
-    let (entity_id, _) = read_node(txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
+    let (entity_id, row) = read_node(txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
+    if let Some(bytes) = txn.get(Cf::Meta, CATALOG_KEY)? {
+        let catalog: Catalog = serde_json::from_slice(&bytes).map_err(catalog_error)?;
+        if let Some(ty) = catalog.node_types.iter().find(|ty| ty.id == id.type_id()) {
+            update_node_indexes(txn, ty, id, &row, &Row::default());
+        }
+    }
     for e in edges_for_update(txn, Cf::Out, id)? {
         txn.delete(Cf::Out, edge_key(id, e.edge_type, e.other, e.id));
         txn.delete(Cf::In, edge_key(e.other, e.edge_type, id, e.id));

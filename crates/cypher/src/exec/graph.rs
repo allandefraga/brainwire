@@ -99,7 +99,21 @@ pub(super) fn match_pattern(
                 }
             }
         } else {
-            nodes_of_type(ctx.txn, ty.id)?
+            let mut indexed = None;
+            for (field, expr) in &pat.start.props {
+                if validate::mentions(expr, pat.start.var.as_deref()) {
+                    continue;
+                }
+                let value = scalar(eval(expr, &row, ctx)?)?;
+                if let Some(found) = find_by_indexed_property(ctx.txn, ty, field, &value)? {
+                    indexed = Some(found);
+                    break;
+                }
+            }
+            match indexed {
+                Some(found) => found,
+                None => nodes_of_type(ctx.txn, ty.id)?,
+            }
         };
         for id in candidates {
             let Some(row) = matches(ctx, &row, &pat.start, id)? else {

@@ -24,7 +24,8 @@ cannot predict production storage size. RocksDB's `node` and `pk` families
 each estimated 100,000 keys; `out` and `in` each estimated 1,000,000; `idx`
 and `ident` were empty. These key counts and bytes are estimates, not process
 RAM usage. The [query/ontology audit](benchmarks/2026-10-01-query-ontology-audit.md)
-explains why declared secondary indexes are still unused.
+records the pre-index baseline. New string/Boolean equality indexes populate
+`idx` on indexed graph types; `staging-100k` declares no indexed fields.
 
 ## Run and inspect
 

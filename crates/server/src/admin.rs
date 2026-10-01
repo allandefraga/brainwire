@@ -161,13 +161,26 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
     let catalog = db
         .catalog()
         .map_err(|e| format!("cannot read catalog: {e}"))?;
+    let declared = catalog
+        .as_ref()
+        .is_some_and(|catalog| catalog.node_types.iter().any(|ty| !ty.indexed.is_empty()));
+    let index_status = if !declared {
+        "none"
+    } else if db
+        .scalar_indexes_ready()
+        .map_err(|e| format!("cannot read index state: {e}"))?
+    {
+        "string_boolean_ready"
+    } else {
+        "declared_only"
+    };
     if json {
         println!(
             "{}",
             serde_json::json!({
                 "database": name,
                 "catalog": catalog,
-                "secondary_index_status": "declared_only",
+                "secondary_index_status": index_status,
                 "temporal_history_status": "not_implemented",
                 "maintenance_status": "not_implemented"
             })
@@ -186,7 +199,7 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
                 stream.event_type, stream.timestamp_field
             );
         }
-        println!("secondary indexes: declared only; property scans are used");
+        println!("secondary indexes: {index_status}");
         println!("temporal history and maintenance jobs: not implemented");
     } else {
         println!("database={name} has no ontology catalog");

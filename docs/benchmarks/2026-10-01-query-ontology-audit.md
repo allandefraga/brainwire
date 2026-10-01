@@ -1,5 +1,9 @@
 # RocksDB, query and ontology audit — 2026-10-01
 
+This is the baseline measured **before** the first physical string/Boolean
+equality index was implemented later on 2026-10-01. The `idx` findings and
+lookup times below describe that earlier code state, not the current planner.
+
 Brainwire uses RocksDB as a durable ordered key/value foundation, not as a
 complete graph query engine. The current single-node implementation can store
 and recover a synthetic graph, but the **5-billion-element/16-GiB target is

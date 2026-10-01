@@ -85,8 +85,11 @@ now back `brainwire serve`. The next MVP work is stronger driver, failure and
 concurrency testing, orchestrator manifests with recovery-aware health checks,
 and live TUI integration.
 The [RocksDB/query/ontology audit](docs/benchmarks/2026-10-01-query-ontology-audit.md)
-records what is implemented and why secondary property indexes are the next
-scale-critical task.
+records the pre-index baseline. The first physical secondary-index slice now
+accelerates string and Boolean equality; numeric, range and vector indexes,
+large backfills and streaming queries remain scale-critical work.
+The [first scalar-index measurement](docs/benchmarks/2026-10-01-scalar-index.md)
+records the local test and the 100,000-key atomic backfill limit.
 The [temporal graph and maintenance design](docs/design/2026-10-01-temporal-graph-and-maintenance.md)
 defines the next steps for ticket history, node and edge weights, retention
 and safe cleanup after ontology changes.

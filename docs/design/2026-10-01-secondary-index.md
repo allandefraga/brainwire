@@ -2,17 +2,23 @@
 
 This is the next query-scale slice after the
 [2026-10-01 audit](../benchmarks/2026-10-01-query-ontology-audit.md).
-The ontology already records `indexed_fields`, `er_fields` and
-`identifier_columns`, but only `entity_id` currently has a physical lookup.
-`brainwire db schema --json` therefore reports `declared_only`.
+The ontology records `indexed_fields`, `er_fields` and
+`identifier_columns`. The first implementation slice now stores string and
+Boolean equality keys in `idx`, updates them with node writes, selects them
+for `MATCH`, and atomically backfills at most 100,000 index keys during an
+offline ontology application. `identifier_columns`, numeric/range indexes and
+larger resumable backfills remain pending. `db schema --json` distinguishes
+`string_boolean_ready` from a legacy `declared_only` catalog.
 
 ## Correctness contract
 
-- Start with exact equality on non-null scalar values (Boolean, integer,
-  finite float and string). Define a stable type-tagged encoding so distinct
-  types and values cannot collide. Defer list/map membership and vector search
-  to separate index designs; never use a scalar index for them silently.
-- An `idx` key identifies `(node type, column ID, encoded value, node ID)`.
+- Start with exact equality on non-null Boolean and string values. Integer
+  and float need a shared encoding consistent with Cypher's cross-type numeric
+  equality; until then both retain a scan. Defer list/map membership and vector
+  search to separate index designs.
+- An `idx` key identifies `(node type, property name, type-tagged encoded
+  value, node ID)`. Property names, rather than column IDs, also cover
+  indexed properties stored in a row's flexible map.
   The common prefix through `encoded value` yields all matching node IDs.
   Duplicate values are permitted. `ident` needs its own semantics for
   cross-type identifiers; do not infer uniqueness from `indexed_fields`.
@@ -21,10 +27,11 @@ The ontology already records `indexed_fields`, `er_fields` and
   the node row and primary-key change. A failed commit changes neither side.
   Reads from a snapshot must see matching rows and index entries.
 - Adding an indexed field to an existing ontology requires backfill. The
-  current administration path holds exclusive database access, so the first
-  implementation can backfill offline in bounded batches. Persist a generation
-  and `building/ready` state; the planner must ignore `building`. On crash,
-  resume or discard and rebuild that generation before marking it ready.
+  first slice uses one atomic transaction capped at 100,000 keys and refuses
+  larger migrations without changing the catalog. The next step is bounded
+  batches with a persisted generation and `building/ready` state; the planner
+  must ignore `building`. On crash, resume or discard and rebuild that
+  generation before marking it ready.
   Removing an index declaration must not leave the planner using stale keys.
 - Plan `MATCH` with `entity_id` through `pk` first, then one ready exact scalar
   property index, else a label scan. Apply remaining predicates after the

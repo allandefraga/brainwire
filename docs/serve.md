@@ -41,8 +41,10 @@ successfully only after a default database is serving it. `--mode live` stops
 after the handshake and login, so it does not put query load on the store.
 Use `--address` and `--timeout-ms` to target another local listener. Offline
 `brainwire db schema NAME --json` shows the persisted ontology catalog and
-reports `secondary_index_status: declared_only`; property indexes declared in
-the ontology are not yet physically built or used by queries.
+reports `secondary_index_status: string_boolean_ready` when string/Boolean
+equality indexes are built. A legacy database with declarations but no ready
+marker reports `declared_only` and uses safe label scans until its ontology is
+reapplied and backfilled. Numeric, list, map and vector indexes are pending.
 It also reports temporal history and maintenance as `not_implemented` so
 timeline metadata cannot be mistaken for stored ticket revisions or cleanup.
 `brainwire db metrics NAME --json` reports per-column-family RocksDB estimates

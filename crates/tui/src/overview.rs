@@ -168,13 +168,13 @@ fn render_overview(
             graph.timeline_streams,
             if graph.estimated {
                 lang.choose(
-                    "Contagens estimadas pelo RocksDB. Índices e histórico ainda não estão implementados.",
-                    "RocksDB estimated counts. Indexes and history are not implemented yet."
+                    "Contagens estimadas. Índice texto/booleano: ver db schema. Histórico pendente.",
+                    "Estimated counts. String/Boolean index: see db schema. History pending.",
                 )
             } else {
                 lang.choose(
-                    "Contagens exatas. Índices secundários e histórico temporal ainda não estão implementados.",
-                    "Exact counts. Secondary indexes and temporal history are not implemented yet."
+                    "Contagens exatas. Índice texto/booleano: ver db schema. Histórico pendente.",
+                    "Exact counts. String/Boolean index: see db schema. History pending.",
                 )
             }
         )

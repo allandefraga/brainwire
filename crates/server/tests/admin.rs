@@ -73,7 +73,7 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
     assert_eq!(schema["database"], "research");
     assert_eq!(schema["catalog"]["version"], 1);
     assert_eq!(schema["catalog"]["node_types"][0]["label"], "Customer");
-    assert_eq!(schema["secondary_index_status"], "declared_only");
+    assert_eq!(schema["secondary_index_status"], "string_boolean_ready");
     assert_eq!(schema["temporal_history_status"], "not_implemented");
     assert_eq!(schema["maintenance_status"], "not_implemented");
     let metrics = command(&dir)
