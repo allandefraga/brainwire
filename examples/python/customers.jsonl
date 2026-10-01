@@ -1,0 +1,2 @@
+{"entity_id":"customer-001","email":"ada@example.test","active":true,"tags":["synthetic","python"],"embedding":[0.25,0.5,0.75]}
+{"entity_id":"customer-002","email":"ben@example.test","active":false,"tags":["synthetic"],"embedding":[0.5,0.25,0.0]}

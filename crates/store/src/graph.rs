@@ -300,6 +300,16 @@ impl Database {
 
     pub fn apply_ontology(&self, mapping: &GraphMapping) -> Result<Catalog, GraphError> {
         let mut txn = self.begin();
+        let next = self.stage_ontology(&mut txn, mapping)?;
+        txn.commit()?;
+        Ok(next)
+    }
+
+    fn stage_ontology(
+        &self,
+        txn: &mut Txn<'_>,
+        mapping: &GraphMapping,
+    ) -> Result<Catalog, GraphError> {
         let previous: Option<Catalog> = match txn.get_for_update(Cf::Meta, CATALOG_KEY)? {
             Some(bytes) => Some(serde_json::from_slice(&bytes).map_err(catalog_error)?),
             None => None,
@@ -325,7 +335,7 @@ impl Database {
                 // Clear that field's old keys before rebuilding; otherwise a
                 // deleted/changed node could reappear as a stale candidate.
                 let mut obsolete = Vec::new();
-                txn.visit_prefix::<GraphError>(Cf::Idx, &prefix, |key, _| {
+                txn.visit_prefix_for_update::<GraphError>(Cf::Idx, &prefix, |key, _| {
                     if backfilled + obsolete.len() == MAX_ATOMIC_BACKFILL_KEYS {
                         return Err(GraphError::IndexBackfillTooLarge);
                     }
@@ -337,7 +347,7 @@ impl Database {
                     txn.delete(Cf::Idx, key);
                 }
                 let mut keys = Vec::new();
-                txn.visit_prefix::<GraphError>(Cf::Node, &[], |key, bytes| {
+                txn.visit_prefix_for_update::<GraphError>(Cf::Node, &[], |key, bytes| {
                     let id = node_id_value(key)?;
                     if id.type_id() == ty.id {
                         let (_, row) = decode_node(bytes)?;
@@ -364,7 +374,6 @@ impl Database {
             serde_json::to_vec(&next).map_err(catalog_error)?,
         );
         txn.put(Cf::Meta, INDEX_READY_KEY.to_vec(), vec![1]);
-        txn.commit()?;
         Ok(next)
     }
 }
@@ -752,6 +761,16 @@ pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
 pub fn check_invariants(db: &Database) -> Result<(), String> {
     let txn = db.begin();
     let err = |e: &dyn std::fmt::Display| e.to_string();
+    let catalog: Option<Catalog> = txn
+        .get(Cf::Meta, CATALOG_KEY)
+        .map_err(|e| err(&e))?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()
+        .map_err(|e| err(&e))?;
+    let ready = txn
+        .get(Cf::Meta, INDEX_READY_KEY)
+        .map_err(|e| err(&e))?
+        .is_some();
     let mut seen = HashSet::new();
     for (key, value) in txn.scan_prefix(Cf::Pk, &[]).map_err(|e| err(&e))? {
         let mut input = key.as_slice();
@@ -771,7 +790,26 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
     }
     for (key, value) in txn.scan_prefix(Cf::Node, &[]).map_err(|e| err(&e))? {
         let id = node_id_value(&key).map_err(|e| err(&e))?;
-        let (entity_id, _) = decode_node(&value).map_err(|e| err(&e))?;
+        let (entity_id, row) = decode_node(&value).map_err(|e| err(&e))?;
+        if ready {
+            if let Some(ty) = catalog
+                .as_ref()
+                .and_then(|c| c.node_types.iter().find(|ty| ty.id == id.type_id()))
+            {
+                for field in &ty.indexed {
+                    if let Some(key) = property_value(&row, ty, field)
+                        .and_then(|v| index_key(&index_field_prefix(ty.id, field), v, id))
+                    {
+                        if txn.get(Cf::Idx, &key).map_err(|e| err(&e))?.is_none() {
+                            return Err(format!(
+                                "missing index entry for {}.{field} node {id:?}",
+                                ty.label
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         let pk = txn
             .get(Cf::Pk, &pk_key(&entity_id, id.type_id()))
             .map_err(|e| err(&e))?;
@@ -790,6 +828,34 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
         );
         if id.seq() >= end {
             return Err(format!("node {id:?} is above its counter {end}"));
+        }
+    }
+    if ready {
+        if let Some(catalog) = &catalog {
+            for ty in &catalog.node_types {
+                for field in &ty.indexed {
+                    let prefix = index_field_prefix(ty.id, field);
+                    txn.visit_prefix::<StoreError>(Cf::Idx, &prefix, |key, _| {
+                        let bad = || {
+                            StoreError::Corrupt(format!(
+                                "stale index entry for {}.{field}",
+                                ty.label
+                            ))
+                        };
+                        let tail = key.get(key.len().saturating_sub(8)..).ok_or_else(bad)?;
+                        let id = node_id_value(tail)?;
+                        let bytes = txn.get(Cf::Node, &node_key(id))?.ok_or_else(bad)?;
+                        let (_, row) = decode_node(&bytes)?;
+                        let expected =
+                            property_value(&row, ty, field).and_then(|v| index_key(&prefix, v, id));
+                        if id.type_id() != ty.id || expected.as_deref() != Some(key) {
+                            return Err(bad());
+                        }
+                        Ok(())
+                    })
+                    .map_err(|e| err(&e))?;
+                }
+            }
         }
     }
     for (cf, mirror) in [(Cf::Out, Cf::In), (Cf::In, Cf::Out)] {
@@ -839,6 +905,42 @@ mod tests {
                 .unwrap();
         let cat = db.apply_ontology(&mapping).unwrap();
         (dir, res, db, cat)
+    }
+
+    #[test]
+    fn index_backfill_conflicts_if_a_writer_commits_after_its_snapshot() {
+        let (_dir, _res, db, cat) = setup();
+        let mut mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        mapping.nodes[0].indexed_fields.push("name".into());
+        let mut migration = db.begin();
+        db.stage_ontology(&mut migration, &mapping).unwrap();
+        let mut writer = db.begin();
+        merge_node(
+            &mut writer,
+            &cat,
+            "Customer",
+            "new",
+            &props(&[("name", Value::Str("Alice".into()))]),
+        )
+        .unwrap();
+        writer.commit().unwrap();
+        assert!(matches!(migration.commit(), Err(TxnError::Conflict)));
+        assert_eq!(db.catalog().unwrap().unwrap(), cat);
+        let next = db.apply_ontology(&mapping).unwrap();
+        assert_eq!(
+            find_by_indexed_property(
+                &db.begin(),
+                next.node_type("Customer").unwrap(),
+                "name",
+                &Value::Str("Alice".into())
+            )
+            .unwrap()
+            .unwrap()
+            .len(),
+            1
+        );
     }
 
     fn props(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {

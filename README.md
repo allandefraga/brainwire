@@ -41,7 +41,10 @@ reopening. The [server guide](docs/serve.md) covers configuration, driver access
 and current limits; the [single-node container guide](docs/container.md) covers
 the local image and retained-volume test. The [local query guide](docs/local-cypher.md)
 walks through ontology initialization, parameters, bulk JSON files and JSON output. Connecting
-the TUI to the engine, real telemetry and real files remains pending.
+the TUI to the running server and real file browsing remains pending. Offline
+index readiness, RocksDB counters and shared memory accounting are available
+in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a
+bounded JSONL importer, MERGE/SET semantics and crash-recovery acceptance.
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
 and `graph.pagerank`, with weighted CSR projections built from the transaction
@@ -64,7 +67,7 @@ local Cypher execution, `brainwire probe` health checks and the terminal demo.
 The `brainwire-bolt-dev` binary
 uses a stub query engine.
 It now also has local `brainwire db create`, `db list`, `db overview`, `db stats`, `db schema`,
-`db metrics` and `db apply-ontology` commands. They operate on the named RocksDB directories
+`db metrics`, `db check` and `db apply-ontology` commands. They operate on the named RocksDB directories
 under `server.data_dir` and require exclusive access; `db stats` scans nodes
 and relationships and accepts `--json` for scripts. For example:
 

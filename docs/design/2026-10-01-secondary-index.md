@@ -7,7 +7,9 @@ The ontology records `indexed_fields`, `er_fields` and
 Boolean equality keys in `idx`, updates them with node writes, selects them
 for `MATCH`, and atomically backfills at most 100,000 index keys during an
 offline ontology application. `identifier_columns`, numeric/range indexes and
-larger resumable backfills remain pending. `db schema --json` distinguishes
+larger resumable backfills remain pending. Backfill now records prefix
+dependencies so concurrent node/index writes cannot publish a stale ready index.
+`db check` audits missing and stale entries for ready active declarations. `db schema --json` distinguishes
 `string_boolean_ready` from a legacy `declared_only` catalog.
 
 ## Correctness contract

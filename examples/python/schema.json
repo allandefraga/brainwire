@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "nodes": [{
+    "label": "Customer",
+    "properties": ["email", "active", "tags", "embedding"],
+    "indexed_fields": ["email", "active"]
+  }]
+}

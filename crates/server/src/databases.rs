@@ -58,6 +58,10 @@ impl Databases {
         Ok(registry)
     }
 
+    pub fn memory_usage(&self) -> (usize, usize) {
+        self.resources.memory_usage()
+    }
+
     pub fn get(&self, name: &str) -> Option<Arc<Database>> {
         self.databases.lock().ok()?.get(name).cloned()
     }

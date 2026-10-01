@@ -38,6 +38,53 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-01, Python ingestion, index consistency and real TUI storage panels
+
+- **Requested:** 20-minute integration session, starting 08:46:59 UTC, covering
+  Python, Cypher, MERGE/SET, indexes, RocksDB/memtables and TUI visibility. Allan
+  also requested captures of every TUI panel. All work stayed local.
+- **Correctness:** reproduced a concurrent index-backfill bug with a failing test:
+  a node could commit after the migration snapshot yet escape its new index.
+  Backfill now streams node/index prefixes with conflict dependencies; it aborts
+  atomically when the writer wins. Existing Cypher catalog dependencies cover
+  the opposite commit order. Added mixed-type overwrite differential tests
+  (indexed versus scan paths), including embedded NUL and Unicode strings.
+- **Audit:** extended graph invariants to catch missing/stale active scalar index
+  entries and exposed `db check NAME [--json]`. Legacy unready indexes are
+  explicitly skipped; retired prefixes are not audited. Full scans remain
+  expensive and are not a repair mechanism.
+- **Python:** added `examples/python/ingest_customers.py`, schema and JSONL fixture,
+  plus a self-contained Bolt acceptance harness. Tests cover duplicate CREATE
+  rollback within a batch, bounded MERGE replay, SET overwrite, null removal,
+  delete, rollback, graph isolation, lists/vectors, and two SIGKILL cycles.
+  The extended case kills an open uncommitted indexed overwrite and proves it
+  disappears while acknowledged rows/indices survive. The importer itself was
+  run twice and survived restart without duplicate nodes.
+- **Measured:** 50K input rows took 5.880 s to ingest / 5.215 s to replay in
+  250-row batches; 100K took 12.064 / 13.943 s in 500-row batches. The extended
+  100K crash run took 10.838 / 14.079 s, recovered 99,999 rows after deliberate
+  deletion, passed `db check`, and had 21/12 SST files before its two kills.
+  Individual development-build observations, not an SLA; see
+  `docs/benchmarks/2026-10-01-python-ingestion.md`.
+- **TUI:** offline overview now cycles through Graph, Write pipeline, Memory and
+  Disk panels with Tab. Shows persisted index readiness/fields, shared budgets,
+  cache/write-buffer accounting and CF estimates/memtable bytes/L0 file counts.
+  Memory is labeled as the offline process, not running-server RSS; query budget
+  remains explicitly unenforced. PgUp/PgDn reaches long explanations. Both
+  English and Portuguese are supported. Real 120×30 ANSI captures and text are
+  in `docs/design/assets/2026-10-01-ingestion/`; inspected all four PNGs.
+- **Verification:** 345 workspace tests passed; clippy all targets with warnings
+  denied passed; formatting passed. Driver 5.28.6 accepted 5K/50K/100K workloads.
+  Interactive 80×24 PTY navigation restored the terminal on exit. Test servers
+  and capture processes were stopped; temporary databases were removed.
+- **Limits / next:** connect read-only observability to the running server;
+  bounded query results and enforced execution budgets; resumable index builds;
+  planner diagnostics and WHERE index selection. Vector storage is not ANN search,
+  property SET is not whole-map replacement, and local crash recovery is not
+  replicated failover. The selected rich graph/file-browser composition still
+  belongs to the demo/design until those connected backends exist.
+
+
 ### 2026-10-01, first physical scalar property index
 
 - **Requested:** 15 minutes on an index feature. Started at 08:27 UTC. All

@@ -250,12 +250,40 @@ fn overview_reports_multiple_independent_graphs() {
         .unwrap();
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("does not exist"));
-    let wrong_view = command(&dir)
-        .args(["shell", "--overview", "--snapshot", "--view", "memory"])
+    for view in ["memory", "disk", "query"] {
+        let screen = command(&dir)
+            .args([
+                "shell",
+                "--overview",
+                "--snapshot",
+                "--view",
+                view,
+                "--width",
+                "80",
+                "--height",
+                "24",
+            ])
+            .output()
+            .unwrap();
+        assert!(screen.status.success(), "{screen:?}");
+        let text = String::from_utf8_lossy(&screen.stdout);
+        assert!(text.contains(match view {
+            "memory" => "not reserved RAM",
+            "disk" => "memtables",
+            _ => "Python -> Bolt",
+        }));
+    }
+    assert_eq!(graphs[2]["secondary_index_status"], "string_boolean_ready");
+    assert_eq!(graphs[2]["cache_budget_bytes"], 64 << 20);
+    assert_eq!(graphs[2]["query_budget_enforced"], false);
+    assert!(graphs[2]["storage"]["idx"]["memtable_bytes"].is_number());
+    let checked = command(&dir)
+        .args(["db", "check", "tickets", "--json"])
         .output()
         .unwrap();
-    assert!(!wrong_view.status.success());
-    assert!(String::from_utf8_lossy(&wrong_view.stderr).contains("only available with --demo"));
+    assert!(checked.status.success(), "{checked:?}");
+    let checked: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+    assert_eq!(checked["scalar_indexes"], "checked_active_declarations");
 }
 
 #[test]

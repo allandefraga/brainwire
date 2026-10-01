@@ -9,13 +9,17 @@ use brainwire_tui::GraphSummary;
 use crate::config;
 use crate::databases::Databases;
 
-fn open_registry(explicit_config: Option<&Path>) -> Result<Databases, String> {
+fn load_config(explicit_config: Option<&Path>) -> Result<config::Config, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("config: {e}"))?;
     let implicit = config::find_file(&cwd);
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let loaded = config::load(explicit_config.or(implicit.as_deref()), &env)
         .map_err(|e| format!("config: {e}"))?;
-    Databases::open_all(&loaded.config)
+    Ok(loaded.config)
+}
+
+fn open_registry(explicit_config: Option<&Path>) -> Result<Databases, String> {
+    Databases::open_all(&load_config(explicit_config)?)
 }
 
 fn read_ontology(path: &Path) -> Result<GraphMapping, String> {
@@ -38,16 +42,17 @@ pub fn graph_summaries(
     config: Option<&Path>,
     estimated: bool,
 ) -> Result<Vec<GraphSummary>, String> {
-    let registry = open_registry(config)?;
+    let config = load_config(config)?;
+    let registry = Databases::open_all(&config)?;
     let mut graphs = Vec::new();
     for name in registry.names() {
         let db = registry
             .get(&name)
             .ok_or_else(|| format!("database {name:?} disappeared from registry"))?;
+        let metrics = db
+            .storage_metrics()
+            .map_err(|e| format!("cannot inspect graph {name}: {e}"))?;
         let (nodes, edges) = if estimated {
-            let metrics = db
-                .storage_metrics()
-                .map_err(|e| format!("cannot estimate graph {name}: {e}"))?;
             let count = |family: &str| {
                 metrics
                     .get(family)
@@ -84,7 +89,33 @@ pub fn graph_summaries(
                 .as_ref()
                 .map_or(0, |c| c.node_types.iter().map(|ty| ty.indexed.len()).sum()),
             timeline_streams: catalog.as_ref().map_or(0, |c| c.streams.len()),
+            indexes_ready: db.scalar_indexes_ready().map_err(|e| e.to_string())?,
+            indexed_fields: catalog.as_ref().map_or_else(Vec::new, |c| {
+                c.node_types
+                    .iter()
+                    .flat_map(|ty| ty.indexed.iter().map(|f| format!("{}.{}", ty.label, f)))
+                    .collect()
+            }),
+            storage: metrics
+                .into_iter()
+                .map(|(cf, props)| {
+                    (
+                        cf.to_string(),
+                        props.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+                    )
+                })
+                .collect(),
+            cache_budget: config.memory.cache.0,
+            memtable_budget: config.memory.memtables.0,
+            query_budget: config.memory.query.0,
+            cache_accounted: 0,
+            memtables_allocated: 0,
         });
+    }
+    let (cache, memtables) = registry.memory_usage();
+    for graph in &mut graphs {
+        graph.cache_accounted = cache as u64;
+        graph.memtables_allocated = memtables as u64;
     }
     Ok(graphs)
 }
@@ -107,6 +138,16 @@ pub fn overview(json: bool, estimated: bool, config: Option<&Path>) -> Result<()
                     "edge_labels": g.edge_labels,
                     "index_declarations": g.index_declarations,
                     "timeline_streams": g.timeline_streams,
+                    "secondary_index_status": if g.index_declarations == 0 { "none" } else if g.indexes_ready { "string_boolean_ready" } else { "declared_only" },
+                    "indexed_fields": g.indexed_fields,
+                    "storage": g.storage,
+                    "memory_scope": "shared_offline_inspection_process",
+                    "cache_budget_bytes": g.cache_budget,
+                    "memtable_budget_bytes": g.memtable_budget,
+                    "query_budget_bytes": g.query_budget,
+                    "query_budget_enforced": false,
+                    "cache_accounted_bytes": g.cache_accounted,
+                    "memtables_allocated_bytes": g.memtables_allocated,
                 })
             })
             .collect();
@@ -254,5 +295,29 @@ pub fn apply_ontology(name: &str, file: &Path, config: Option<&Path>) -> Result<
     db.apply_ontology(&mapping)
         .map_err(|e| format!("cannot apply ontology: {e}"))?;
     println!("ontology applied to {name}");
+    Ok(())
+}
+
+/// Deliberate offline audit, never part of a cheap metrics refresh.
+pub fn check(name: &str, json: bool, config: Option<&Path>) -> Result<(), String> {
+    let registry = open_registry(config)?;
+    let db = registry
+        .get(name)
+        .ok_or_else(|| format!("database {name:?} does not exist"))?;
+    brainwire_store::graph::check_invariants(&db)?;
+    let ready = db.scalar_indexes_ready().map_err(|e| e.to_string())?;
+    let index_status = if ready {
+        "checked_active_declarations"
+    } else {
+        "skipped_not_ready"
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"database": name, "status": "ok", "scalar_indexes": index_status})
+        );
+    } else {
+        println!("database={name} consistency=ok scalar_indexes={index_status}");
+    }
     Ok(())
 }

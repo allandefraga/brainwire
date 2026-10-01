@@ -52,6 +52,11 @@ pub struct Resources {
 }
 
 impl Resources {
+    /// Process-wide accounting; memtable reservations are included in cache usage.
+    pub fn memory_usage(&self) -> (usize, usize) {
+        (self.cache.get_usage(), self.write_buffers.get_usage())
+    }
+
     pub fn new(config: StoreConfig) -> Resources {
         let cache = Cache::new_hyper_clock_cache(config.cache_bytes, 0);
         // allow_stall = false: one full family must not stall the other databases (spec 1.5).

@@ -46,7 +46,11 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
 
 `shell --overview` is a **real, read-only, offline** TUI. Up/Down chooses a
 graph and the inspector shows its exact node/edge counts, ontology version,
-node labels and edge types; `q` or Esc exits. `--graph` sets the initial
+node labels and edge types. Tab changes to the write pipeline, Memory and
+Disk panels; PgUp/PgDn scroll long explanations. `--view query|memory|disk`
+chooses the initial panel; `q` or Esc exits. See the
+[Python ingestion guide](python-ingestion.md) for memory semantics and the
+new offline `db check` consistency audit. `--graph` sets the initial
 selection, including in `--snapshot` mode. It opens the RocksDB directories
 exclusively and scans every graph for counts, so stop `brainwire serve` first
 and expect cost on large datasets. Add `--estimated` to use quick RocksDB
@@ -88,10 +92,10 @@ covers configuration and transaction behavior.
 
 | Surface | Operations now | Data source |
 | --- | --- | --- |
-| `shell --overview` | Select named graph; inspect counts and ontology summary | Real local RocksDB, read only |
+| `shell --overview` | Select named graph; inspect counts, ontology, index readiness, shared offline memory and CF counters | Real local RocksDB, read only |
 | `shell --demo` | Explore Graph, Query, Memory, Disk & Files; select nodes/files; run two guided queries; read F1 explanations | Synthetic fixture, no real writes |
 | `db create/apply-ontology` | Create and update a named graph's catalog | Real local RocksDB, offline |
-| `db stats/schema/metrics/overview` | Inspect counts, ontology and storage estimates | Real local RocksDB, offline |
+| `db stats/schema/metrics/overview/check` | Inspect counts, ontology and storage estimates | Real local RocksDB, offline |
 | `cypher --database` | Execute the supported Cypher subset against one graph | Real local RocksDB, offline |
 | `serve` | Query multiple named graphs over Bolt, selected by session | Real local RocksDB, online |
 
@@ -101,3 +105,14 @@ backoffice slice should expose a bounded per-graph neighborhood and read-only
 query results through the server, then live storage and memory telemetry. Any
 mutation from the TUI needs explicit scope to the selected graph and an
 auditable operation; ontology changes must never implicitly delete old data.
+
+## Captured offline panels
+
+These are actual terminal captures against an isolated synthetic 10K-node graph
+with 20K scalar index entries. The [capture notes](design/assets/2026-10-01-ingestion/README.md)
+record dimensions, provenance and the memory scope.
+
+![Graph overview](design/assets/2026-10-01-ingestion/graph-120x30.png)
+![Python write pipeline](design/assets/2026-10-01-ingestion/pipeline-120x30.png)
+![Offline memory accounting](design/assets/2026-10-01-ingestion/memory-120x30.png)
+![RocksDB column families](design/assets/2026-10-01-ingestion/disk-120x30.png)

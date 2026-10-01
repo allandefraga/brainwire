@@ -269,6 +269,17 @@ impl<'db> Txn<'db> {
         Ok(())
     }
 
+    /// Stream a prefix while tracking concurrent inserts, updates and deletes.
+    pub fn visit_prefix_for_update<E: From<StoreError>>(
+        &mut self,
+        cf: Cf,
+        prefix: &[u8],
+        visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.depends_prefix.insert((cf, prefix.to_vec()));
+        self.visit_prefix(cf, prefix, visit)
+    }
+
     // The pair-of-byte-vectors return type is the brief's required interface
     // (spec 1.4); factoring it into a named alias is not worth doing for one
     // call site, so the complexity lint is silenced locally instead.

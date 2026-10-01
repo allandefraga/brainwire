@@ -276,3 +276,83 @@ fn malformed_index_key_fails_closed_instead_of_returning_a_wrong_node() {
     )
     .is_err());
 }
+
+#[test]
+fn invariant_audit_detects_missing_and_stale_active_index_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping = serde_json::from_str(
+        r#"{"version":"1","nodes":[{"label":"Customer","properties":["email"],"indexed_fields":["email"]}]}"#,
+    ).unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    run(&db, "CREATE (c:Customer {entity_id:'a', email:'old'})");
+    let key = db.begin().scan_prefix(Cf::Idx, &[]).unwrap()[0].0.clone();
+    let mut tx = db.begin();
+    tx.delete(Cf::Idx, key.clone());
+    tx.commit().unwrap();
+    assert!(check_invariants(&db).unwrap_err().contains("missing index"));
+    let mut tx = db.begin();
+    tx.put(Cf::Idx, key.clone(), vec![]);
+    tx.commit().unwrap();
+    check_invariants(&db).unwrap();
+    run(&db, "MATCH (c:Customer {entity_id:'a'}) SET c.email='new'");
+    let mut tx = db.begin();
+    tx.put(Cf::Idx, key, vec![]);
+    tx.commit().unwrap();
+    assert!(check_invariants(&db).unwrap_err().contains("stale index"));
+}
+
+#[test]
+fn indexed_and_scan_paths_agree_across_mixed_type_overwrites() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping = serde_json::from_str(
+        r#"{"version":"1","nodes":[{"label":"Customer","properties":["email"],"indexed_fields":["email"]}]}"#,
+    ).unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    let values = [
+        Value::Str("prefix".into()),
+        Value::Str("prefix\0suffix".into()),
+        Value::Str("ação/東京".into()),
+        Value::Bool(true),
+        Value::Bool(false),
+        Value::Int(1),
+        Value::Float(1.0),
+        Value::Null,
+        Value::List(vec![Value::Int(1)]),
+    ];
+    for phase in 0..4 {
+        for i in 0..64 {
+            let params = BTreeMap::from([
+                ("id".into(), Value::Str(format!("customer-{i}"))),
+                (
+                    "value".into(),
+                    values[(i + phase * 3) % values.len()].clone(),
+                ),
+            ]);
+            execute(
+                &db,
+                "MERGE (c:Customer {entity_id:$id}) SET c.email=$value",
+                &params,
+            )
+            .unwrap();
+        }
+        for value in &values {
+            let params = BTreeMap::from([("value".into(), value.clone())]);
+            let indexed = execute(
+                &db,
+                "MATCH (c:Customer {email:$value}) RETURN count(*)",
+                &params,
+            )
+            .unwrap();
+            let scanned = execute(
+                &db,
+                "MATCH (c:Customer) WHERE c.email=$value RETURN count(*)",
+                &params,
+            )
+            .unwrap();
+            assert_eq!(indexed.rows, scanned.rows, "phase {phase}, {value:?}");
+        }
+        check_invariants(&db).unwrap();
+    }
+}

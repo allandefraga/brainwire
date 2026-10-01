@@ -6,3 +6,6 @@
 
 # Optional Python driver acceptance scripts.
 __pycache__/
+
+# Local Python client environment.
+/.venv/

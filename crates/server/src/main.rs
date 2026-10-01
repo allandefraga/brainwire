@@ -150,6 +150,14 @@ enum DbCommands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Audit graph and ready scalar-index consistency (full offline scan).
+    Check {
+        name: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Count persisted nodes and relationships (scans the database).
     Stats {
         name: String,
@@ -242,16 +250,9 @@ fn main() {
                 height,
             };
             if overview {
-                if options.view != "graph" {
-                    Err(
-                        "--view is only available with --demo; --overview has its own graph list"
-                            .into(),
-                    )
-                } else {
-                    admin::graph_summaries(config.as_deref(), estimated).and_then(|graphs| {
-                        brainwire_tui::run_overview(&options, graphs, graph.as_deref())
-                    })
-                }
+                admin::graph_summaries(config.as_deref(), estimated).and_then(|graphs| {
+                    brainwire_tui::run_overview(&options, graphs, graph.as_deref())
+                })
             } else {
                 brainwire_tui::run(options)
             }
@@ -263,6 +264,9 @@ fn main() {
                 estimated,
                 config,
             } => admin::overview(json, estimated, config.as_deref()),
+            DbCommands::Check { name, json, config } => {
+                admin::check(&name, json, config.as_deref())
+            }
             DbCommands::Stats { name, json, config } => {
                 admin::stats(&name, json, config.as_deref())
             }
