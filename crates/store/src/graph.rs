@@ -295,7 +295,7 @@ impl Database {
     }
 
     pub fn scalar_indexes_ready(&self) -> Result<bool, StoreError> {
-        Ok(self.begin().get(Cf::Meta, INDEX_READY_KEY)?.is_some())
+        scalar_indexes_ready(&self.begin())
     }
 
     pub fn apply_ontology(&self, mapping: &GraphMapping) -> Result<Catalog, GraphError> {
@@ -621,6 +621,11 @@ pub fn find_by_entity_id(
     Ok(found)
 }
 
+/// Read index readiness from the caller's snapshot, including its write overlay.
+pub fn scalar_indexes_ready(txn: &Txn<'_>) -> Result<bool, StoreError> {
+    Ok(txn.get(Cf::Meta, INDEX_READY_KEY)?.is_some())
+}
+
 /// Returns None when this property cannot safely use the ready scalar index.
 /// The caller must then retain the normal label-scan plan.
 pub fn find_by_indexed_property(
@@ -629,8 +634,7 @@ pub fn find_by_indexed_property(
     field: &str,
     value: &Value,
 ) -> Result<Option<Vec<NodeId>>, GraphError> {
-    if !ty.indexed.iter().any(|name| name == field) || txn.get(Cf::Meta, INDEX_READY_KEY)?.is_none()
-    {
+    if !ty.indexed.iter().any(|name| name == field) || !scalar_indexes_ready(txn)? {
         return Ok(None);
     }
     let Some(encoded) = index_value(value) else {

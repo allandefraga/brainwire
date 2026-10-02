@@ -1,5 +1,8 @@
 # Single-node test container
 
+The [Compose/Kubernetes/Swarm guide](orchestrators.md) now includes runnable
+single-writer templates and their local validation commands.
+
 The local image packages the **single-node** Bolt server. It is a test
 deployment step toward Kubernetes and Docker Swarm; it does not implement
 replication, failover, authentication or TLS. Use it only on a trusted test
@@ -47,7 +50,8 @@ container with the **same** `brainwire-data` volume and read it back. The
 `read` modes for this purpose. The repeatable
 [container restart test](../crates/server/tests/container_restart.py) creates
 its own temporary volume, writes 10,000 synthetic Customers, performs five
-kill/recreate cycles and removes its test resources:
+kill/recreate cycles, interrupts uncommitted indexed overwrites, checks stale
+index removal and runs an offline audit before removing its test resources:
 
 ```sh
 python crates/server/tests/container_restart.py

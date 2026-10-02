@@ -44,10 +44,14 @@ def verify(session, rows):
     record = session.run("MATCH (c:Customer {entity_id:'id-0'}) RETURN c").single()["c"]
     assert record["tags"] == ["synthetic", "python"]
     assert record["embedding"] == [0.25, 0.5, 0.75]
-    # Compare indexed lookup with the scan path for a remaining email.
+    # Pattern and WHERE must agree; both can now seek the same ready index.
     indexed = count(session, "{email:'user-3@example.test'}")
     scanned = session.run("MATCH (c:Customer) WHERE c.email='user-3@example.test' RETURN count(*) AS n").single()["n"]
     assert indexed == scanned == 1
+    state = session.run("CALL db.indexes() YIELD label, property, state WHERE label='Customer' AND property='email' RETURN state").single()["state"]
+    assert state == "string_boolean_ready", state
+    reachable = session.run("CALL graph.reachable({source:'id-0', sourceLabel:'Customer', maxDepth:1}) YIELD node, depth RETURN node.entity_id AS id, depth").single()
+    assert reachable["id"] == "id-0" and reachable["depth"] == 0
 
 
 def run(binary, rows, batch_size):

@@ -8,6 +8,7 @@ fn semantic(message: impl Into<String>) -> ExecError {
 
 pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
     match name {
+        "db.indexes" => Ok(&["label", "property", "state"]),
         "graph.project" => Ok(&[
             "nodeCount",
             "relationshipCount",
@@ -16,6 +17,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "csrBytes",
         ]),
         "graph.degree" => Ok(&["node", "outDegree", "inDegree"]),
+        "graph.reachable" => Ok(&["node", "depth"]),
         "graph.pagerank" => Ok(&["node", "score", "iterations", "converged", "residual"]),
         _ => Err(ExecError::Unsupported(format!("unknown procedure {name}"))),
     }
@@ -26,6 +28,8 @@ struct Options {
     iterations: usize,
     damping: f64,
     tolerance: f64,
+    source: Option<(String, String)>,
+    max_depth: usize,
 }
 
 fn integer(
@@ -72,10 +76,13 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
     };
     for key in map.keys() {
         let common = ["relationship", "maxNodes", "maxRelationships"];
-        let weighted = name != "graph.degree" && key == "weightProperty";
+        let weighted =
+            ["graph.project", "graph.pagerank"].contains(&name) && key == "weightProperty";
+        let reachable = name == "graph.reachable"
+            && ["source", "sourceLabel", "maxDepth"].contains(&key.as_str());
         let pagerank = name == "graph.pagerank"
             && ["maxIterations", "dampingFactor", "tolerance"].contains(&key.as_str());
-        if !common.contains(&key.as_str()) && !weighted && !pagerank {
+        if !common.contains(&key.as_str()) && !weighted && !pagerank && !reachable {
             return Err(semantic(format!("unknown option {key} for {name}")));
         }
     }
@@ -95,6 +102,17 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
     if tolerance < 0.0 {
         return Err(semantic("tolerance must be non-negative"));
     }
+    let source = if name == "graph.reachable" {
+        let id = text(&map, "source")?.ok_or_else(|| semantic("source is required"))?;
+        let label =
+            text(&map, "sourceLabel")?.ok_or_else(|| semantic("sourceLabel is required"))?;
+        if ctx.catalog.node_type(&label).is_none() {
+            return Err(semantic(format!("unknown source label {label}")));
+        }
+        Some((id, label))
+    } else {
+        None
+    };
     Ok(Options {
         projection: ProjectionOptions {
             relationship_type,
@@ -105,6 +123,8 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
         iterations: integer(&map, "maxIterations", 100, 1000)?,
         damping,
         tolerance,
+        source,
+        max_depth: integer(&map, "maxDepth", 10, 1000)?,
     })
 }
 
@@ -115,7 +135,13 @@ pub(super) fn validate(
     ctx: &Context<'_, '_>,
 ) -> Result<(), ExecError> {
     let available = fields(name)?;
-    options(name, args, ctx)?;
+    if name == "db.indexes" {
+        if !args.is_empty() {
+            return Err(semantic("db.indexes takes no arguments"));
+        }
+    } else {
+        options(name, args, ctx)?;
+    }
     let mut aliases = BTreeSet::new();
     for item in yields {
         if !available.contains(&item.field.as_str()) {
@@ -153,8 +179,6 @@ pub(super) fn run(
     yields: &[YieldItem],
     ctx: &Context<'_, '_>,
 ) -> Result<Vec<Bindings>, ExecError> {
-    let opts = options(name, args, ctx)?;
-    let projection = sparse_projection(ctx.txn, &opts.projection).map_err(projection_error)?;
     let available = fields(name)?;
     let bind = |values: Vec<Binding>| -> Bindings {
         yields
@@ -168,6 +192,30 @@ pub(super) fn run(
             })
             .collect()
     };
+    if name == "db.indexes" {
+        let ready = brainwire_store::graph::scalar_indexes_ready(ctx.txn)?;
+        let state = if ready {
+            "string_boolean_ready"
+        } else {
+            "declared_only"
+        };
+        return Ok(ctx
+            .catalog
+            .node_types
+            .iter()
+            .flat_map(|ty| {
+                ty.indexed.iter().map(|field| {
+                    bind(vec![
+                        value(Value::Str(ty.label.clone())),
+                        value(Value::Str(field.clone())),
+                        value(Value::Str(state.into())),
+                    ])
+                })
+            })
+            .collect());
+    }
+    let opts = options(name, args, ctx)?;
+    let projection = sparse_projection(ctx.txn, &opts.projection).map_err(projection_error)?;
     match name {
         "graph.project" => Ok(vec![bind(vec![
             int(projection.nodes.len()),
@@ -188,6 +236,30 @@ pub(super) fn run(
                 ])
             })
             .collect()),
+        "graph.reachable" => {
+            let (entity_id, label) = opts.source.as_ref().expect("validated source");
+            let ty = ctx.catalog.node_type(label).expect("validated label");
+            let ids = brainwire_store::graph::find_by_entity_id(ctx.txn, entity_id, Some(ty.id))?;
+            let node = ids
+                .first()
+                .ok_or_else(|| semantic("source node not found"))?;
+            let source = projection
+                .nodes
+                .binary_search(node)
+                .map_err(|_| semantic("source node absent from projection"))?;
+            let depths = projection
+                .matrix
+                .breadth_first(source, opts.max_depth)
+                .map_err(|e| semantic(e.to_string()))?;
+            Ok(projection
+                .nodes
+                .iter()
+                .zip(depths)
+                .filter_map(|(node, depth)| {
+                    depth.map(|depth| bind(vec![Binding::Node(*node), int(depth)]))
+                })
+                .collect())
+        }
         "graph.pagerank" => {
             let result = projection
                 .matrix

@@ -59,8 +59,8 @@ fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
             lang.choose("Índice texto/bool", "String/bool index"),
             if g.index_declarations == 0 { lang.choose("nenhum", "none") } else if g.indexes_ready { lang.choose("pronto", "ready") } else { lang.choose("pendente (scan)", "pending (scan)") },
             g.indexed_fields.join(", "),
-            lang.choose("MERGE usa entity_id estável. SET troca campos; null remove. Padrão {campo:$v} usa índice; WHERE ainda faz scan. Painel explicativo; não executa consultas.",
-                "MERGE uses stable entity_id. SET replaces fields; null removes. Pattern {field:$v} uses index; WHERE still scans. Explanation panel; no query execution.")),
+            lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice texto/bool pronto. AND mantém filtros restantes. OR/NOT/faixa: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable.\nPainel explicativo; não executa consultas.",
+                "MERGE uses stable entity_id. SET replaces fields; null removes.\n\nREADS\nWHERE c.email=$email: ready string/bool index. AND keeps residual filters. OR/NOT/range: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable.\nExplanation panel; no query execution.")),
         View::Graph => unreachable!(),
     }
 }

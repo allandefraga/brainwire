@@ -297,7 +297,7 @@ fn execute_clauses(
             }
             Clause::Match { patterns, where_ } => {
                 for pattern in patterns {
-                    rows = graph::match_pattern(&ctx, rows, pattern)?;
+                    rows = graph::match_pattern(&ctx, rows, pattern, where_.as_ref())?;
                 }
                 if let Some(expr) = where_ {
                     let mut next = vec![];

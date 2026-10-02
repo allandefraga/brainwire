@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "image": "brainwire:20261002-test",
+  "project": "brainwire-compose-4b52a531d813",
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  }
+}

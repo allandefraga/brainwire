@@ -1,0 +1,24 @@
+{
+  "cacheMiB": 64,
+  "importMs": 1593.717667,
+  "measurements": {
+    "patternIndex": {
+      "p50Ms": 0.06404199999999999,
+      "p95Ms": 0.08349999999999999,
+      "samples": 25
+    },
+    "whereIndex": {
+      "p50Ms": 0.059750000000000004,
+      "p95Ms": 0.065209,
+      "samples": 25
+    },
+    "whereScan": {
+      "p50Ms": 1941.593792,
+      "p95Ms": 2477.324875,
+      "samples": 25
+    }
+  },
+  "memtableMiB": 16,
+  "mode": "warm embedded, excludes database open, 5 warmups per query",
+  "nodes": 100000
+}

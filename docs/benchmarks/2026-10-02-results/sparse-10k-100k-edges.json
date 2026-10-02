@@ -1,0 +1,37 @@
+{
+  "attemptedRelationships": 100000,
+  "bfsDepth10Ms": 0.034375,
+  "cacheBytes": 67108864,
+  "converged": true,
+  "csrBytes": 1280008,
+  "cypherTop5Ms": 341.97225,
+  "databasePath": null,
+  "edgeImportMs": 1530.2717910000001,
+  "iterations": 64,
+  "memtableBytes": 16777216,
+  "nodeImportMs": 101.919792,
+  "nodes": 10000,
+  "note": "local synthetic workload; CSR bytes exclude construction buffers and process RSS",
+  "oneHopTenNeighbors": {
+    "meanMs": 0.16721827099999984,
+    "p50Ms": 0.163792,
+    "p95Ms": 0.17725,
+    "p99Ms": 0.24612499999999998,
+    "samples": 1000
+  },
+  "pagerankMs": 192.118292,
+  "pointLookup": {
+    "meanMs": 0.03904488300000009,
+    "p50Ms": 0.038709,
+    "p95Ms": 0.042083999999999996,
+    "p99Ms": 0.049875,
+    "samples": 1000
+  },
+  "profile": "debug",
+  "projectionMs": 143.257,
+  "rankMass": 0.9999999999997904,
+  "reachableNodes": 91,
+  "relationships": 100000,
+  "reopenMs": 410.598166,
+  "topEntity": "synthetic-0"
+}

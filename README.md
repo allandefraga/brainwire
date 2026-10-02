@@ -47,7 +47,7 @@ in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a
 bounded JSONL importer, MERGE/SET semantics and crash-recovery acceptance.
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
-and `graph.pagerank`, with weighted CSR projections built from the transaction
+and `graph.pagerank`, plus directed `graph.reachable` hop distances, with CSR projections built from the transaction
 snapshot. See the [analytics guide](docs/sparse-analytics.md) for a complete
 example, options, memory limits and a reproducible volume workload.
 
@@ -85,7 +85,7 @@ For a fresh 100K-node / 1M-relationship synthetic database, run the
 existing path. Local database files under `data/` are ignored by Git.
 The [shared-query transaction API and Bolt lifecycle hooks](docs/transactions.md)
 now back `brainwire serve`. The next MVP work is stronger driver, failure and
-concurrency testing, orchestrator manifests with recovery-aware health checks,
+concurrency testing, orchestrator recovery acceptance with retained volumes,
 and live TUI integration.
 The [RocksDB/query/ontology audit](docs/benchmarks/2026-10-01-query-ontology-audit.md)
 records the pre-index baseline. The first physical secondary-index slice now
@@ -93,6 +93,11 @@ accelerates string and Boolean equality; numeric, range and vector indexes,
 large backfills and streaming queries remain scale-critical work.
 The [first scalar-index measurement](docs/benchmarks/2026-10-01-scalar-index.md)
 records the local test and the 100,000-key atomic backfill limit.
+Equality in `WHERE` can now seek the same ready scalar indexes as pattern
+properties; `CALL db.indexes()` exposes readiness through Cypher. See
+[index lookup](docs/indexes.md) and the reproducible warm benchmark example.
+[Docker Compose, Kubernetes and Swarm templates](docs/orchestrators.md) package
+a retained single-writer volume and recovery probes; replication remains pending.
 The [temporal graph and maintenance design](docs/design/2026-10-01-temporal-graph-and-maintenance.md)
 defines the next steps for ticket history, node and edge weights, retention
 and safe cleanup after ontology changes.

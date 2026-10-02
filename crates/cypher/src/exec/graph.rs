@@ -72,23 +72,59 @@ fn matches(
     }
     Ok(Some(row))
 }
+
+/// Only equality conjuncts with row-independent values can seed a lookup.
+/// OR/NOT and variable-dependent comparisons remain residual predicates.
+fn lookup_props(pat: &NodePat, predicate: Option<&Expr>) -> Vec<(String, Expr)> {
+    fn collect(expr: &Expr, var: Option<&str>, props: &mut Vec<(String, Expr)>) {
+        match expr {
+            Expr::And(left, right) => {
+                collect(left, var, props);
+                collect(right, var, props);
+            }
+            Expr::Cmp(left, CmpOp::Eq, right) => {
+                for (property, value) in [
+                    (left.as_ref(), right.as_ref()),
+                    (right.as_ref(), left.as_ref()),
+                ] {
+                    if let Expr::Prop(base, field) = property {
+                        if matches!(base.as_ref(), Expr::Var(name) if Some(name.as_str()) == var)
+                            && matches!(value, Expr::Literal(_) | Expr::Param(_))
+                        {
+                            props.push((field.clone(), value.clone()));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut props = pat.props.clone();
+    if let Some(predicate) = predicate {
+        collect(predicate, pat.var.as_deref(), &mut props);
+    }
+    props
+}
+
 pub(super) fn match_pattern(
     ctx: &Context<'_, '_>,
     rows: Vec<Bindings>,
     pat: &Pattern,
+    predicate: Option<&Expr>,
 ) -> Result<Vec<Bindings>, ExecError> {
     let mut next = vec![];
     let ty = ctx
         .catalog
         .node_type(pat.start.label.as_deref().expect("validated label"))
         .expect("validated type");
+    let lookup = lookup_props(&pat.start, predicate);
     for row in rows {
         let candidates = if let Some(existing) = pat.start.var.as_ref().and_then(|v| row.get(v)) {
             match existing {
                 Binding::Node(id) => vec![*id],
                 _ => return Err(ExecError::Semantic("MATCH variable must be a node".into())),
             }
-        } else if let Some((_, e)) = pat.start.props.iter().find(|(name, _)| name == "entity_id") {
+        } else if let Some((_, e)) = lookup.iter().find(|(name, _)| name == "entity_id") {
             // A reference to the pattern's own variable cannot seed the index lookup.
             if validate::mentions(e, pat.start.var.as_deref()) {
                 nodes_of_type(ctx.txn, ty.id)?
@@ -100,7 +136,7 @@ pub(super) fn match_pattern(
             }
         } else {
             let mut indexed = None;
-            for (field, expr) in &pat.start.props {
+            for (field, expr) in &lookup {
                 if validate::mentions(expr, pat.start.var.as_deref()) {
                     continue;
                 }

@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: brainwire
+spec:
+  clusterIP: None
+  selector:
+    app: brainwire
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: bolt
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: brainwire
+spec:
+  serviceName: brainwire
+  # Each replica would be an independent database, not a replicated member.
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: brainwire
+  template:
+    metadata:
+      labels:
+        app: brainwire
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: brainwire
+          image: brainwire:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: bolt
+              containerPort: 7687
+          env:
+            - name: BRAINWIRE_SERVER_DATA_DIR
+              value: /data
+            - name: BRAINWIRE_SERVER_LISTEN
+              value: 0.0.0.0:7687
+            - name: BRAINWIRE_MEMORY_CACHE
+              value: 256MiB
+            - name: BRAINWIRE_MEMORY_MEMTABLES
+              value: 32MiB
+            - name: BRAINWIRE_MEMORY_QUERY
+              value: 256MiB
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          startupProbe:
+            exec:
+              command: ["brainwire", "probe", "--mode", "ready", "--timeout-ms", "500"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 90
+          readinessProbe:
+            exec:
+              command: ["brainwire", "probe", "--mode", "ready", "--timeout-ms", "500"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["brainwire", "probe", "--mode", "live", "--timeout-ms", "500"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        volumeMode: Filesystem
+        resources:
+          requests:
+            storage: 10Gi

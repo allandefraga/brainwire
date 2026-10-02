@@ -24,6 +24,36 @@ fn int(n: i64) -> Out {
 }
 
 #[test]
+fn reachable_uses_csr_with_depth_relationship_limits_and_transaction_snapshot() {
+    let (_dir, db) = setup();
+    let query = "CALL graph.reachable({source:'a', sourceLabel:'Page', relationship:'LINK', maxDepth:1}) YIELD node, depth RETURN node.entity_id, depth";
+    let mut tx = QueryTransaction::begin(&db).unwrap();
+    seed(&mut tx);
+    let expected = vec![
+        vec![Out::Value(Value::Str("a".into())), int(0)],
+        vec![Out::Value(Value::Str("b".into())), int(1)],
+        vec![Out::Value(Value::Str("c".into())), int(1)],
+    ];
+    assert_eq!(tx.run(query, &BTreeMap::new()).unwrap().rows, expected);
+    assert!(execute(&db, query, &BTreeMap::new()).is_err());
+    tx.commit().unwrap();
+    assert_eq!(run(&db, query).rows, expected);
+    assert_eq!(run(&db, "CALL graph.reachable({source:'a', sourceLabel:'Page', relationship:'OTHER'}) YIELD node, depth RETURN node.entity_id, depth").rows, vec![expected[0].clone()]);
+    for options in [
+        "{}",
+        "{source:'a'}",
+        "{source:'missing', sourceLabel:'Page'}",
+        "{source:'a', sourceLabel:'Unknown'}",
+        "{source:'a', sourceLabel:'Page', maxDepth:0}",
+        "{source:'a', sourceLabel:'Page', maxNodes:2}",
+        "{source:'a', sourceLabel:'Page', weightProperty:'weight'}",
+    ] {
+        let query = format!("CALL graph.reachable({options}) YIELD node RETURN node");
+        assert!(execute(&db, &query, &BTreeMap::new()).is_err(), "{options}");
+    }
+}
+
+#[test]
 fn project_degree_and_weighted_pagerank_use_cypher() {
     let (_dir, db) = setup();
     let mut tx = QueryTransaction::begin(&db).unwrap();

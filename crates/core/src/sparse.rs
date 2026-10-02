@@ -93,6 +93,44 @@ impl SparseMatrix {
             + self.values.capacity() * std::mem::size_of::<f32>()
     }
 
+    /// Directed, unweighted shortest hop depths over nonzero CSR entries.
+    /// O(rows + visited entries) time and O(rows) temporary storage.
+    pub fn breadth_first(
+        &self,
+        source: usize,
+        max_depth: usize,
+    ) -> Result<Vec<Option<usize>>, SparseMatrixError> {
+        if self.rows != self.cols {
+            return Err(SparseMatrixError::NotSquare {
+                rows: self.rows,
+                cols: self.cols,
+            });
+        }
+        if source >= self.rows {
+            return Err(SparseMatrixError::IndexOutOfBounds {
+                row: source,
+                col: source,
+            });
+        }
+        let mut depths = vec![None; self.rows];
+        let mut queue = std::collections::VecDeque::from([source]);
+        depths[source] = Some(0);
+        while let Some(row) = queue.pop_front() {
+            let depth = depths[row].expect("queued node has a depth");
+            if depth >= max_depth {
+                continue;
+            }
+            for index in self.row_offsets[row]..self.row_offsets[row + 1] {
+                let target = self.column_indices[index];
+                if depths[target].is_none() {
+                    depths[target] = Some(depth + 1);
+                    queue.push_back(target);
+                }
+            }
+        }
+        Ok(depths)
+    }
+
     /// Multiplies the sparse matrix by a dense vector without materializing
     /// zero entries.
     pub fn matvec(&self, vector: &[f32]) -> Result<Vec<f32>, SparseMatrixError> {
@@ -236,7 +274,7 @@ pub enum SparseMatrixError {
     NonFiniteValue,
     #[error("vector length {actual} does not match matrix columns {expected}")]
     VectorLength { expected: usize, actual: usize },
-    #[error("matrix must be square for PageRank, got {rows}x{cols}")]
+    #[error("matrix must be square for graph algorithms, got {rows}x{cols}")]
     NotSquare { rows: usize, cols: usize },
     #[error("PageRank damping must be finite and between 0 and 1")]
     InvalidDamping,
@@ -249,7 +287,67 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    #[test]
+    fn breadth_first_finds_shortest_directed_depths_and_stops_at_limit() {
+        let graph = SparseMatrix::from_entries(
+            6,
+            6,
+            [
+                (0, 1, 1.0),
+                (0, 2, 1.0),
+                (1, 3, 1.0),
+                (2, 3, 1.0),
+                (3, 0, 1.0),
+                (3, 4, 1.0),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            graph.breadth_first(0, 10).unwrap(),
+            vec![Some(0), Some(1), Some(1), Some(2), Some(3), None]
+        );
+        assert_eq!(
+            graph.breadth_first(0, 1).unwrap(),
+            vec![Some(0), Some(1), Some(1), None, None, None]
+        );
+        assert_eq!(
+            graph.breadth_first(0, 0).unwrap(),
+            vec![Some(0), None, None, None, None, None]
+        );
+        assert_eq!(
+            graph.breadth_first(5, 10).unwrap(),
+            vec![None, None, None, None, None, Some(0)]
+        );
+        assert!(graph.breadth_first(6, 10).is_err());
+        assert!(SparseMatrix::from_entries(2, 3, [])
+            .unwrap()
+            .breadth_first(0, 10)
+            .is_err());
+    }
+
     proptest! {
+        #[test]
+        fn breadth_first_matches_independent_all_pairs_shortest_hops(
+            entries in prop::collection::vec((0usize..7, 0usize..7, 0u8..3), 0..50),
+            source in 0usize..7, max_depth in 0usize..8,
+        ) {
+            let mut hops = [[16usize; 7]; 7];
+            for (node, row) in hops.iter_mut().enumerate() { row[node] = 0; }
+            for &(from, to, weight) in &entries {
+                if weight > 0 { hops[from][to] = hops[from][to].min(1); }
+            }
+            for via in 0..7 {
+                for from in 0..7 {
+                    for to in 0..7 {
+                        hops[from][to] = hops[from][to].min(hops[from][via] + hops[via][to]);
+                    }
+                }
+            }
+            let sparse = SparseMatrix::from_entries(7, 7, entries.iter().map(|&(from, to, weight)| (from, to, f32::from(weight)))).unwrap();
+            let expected: Vec<_> = hops[source].iter().map(|depth| (*depth <= max_depth).then_some(*depth)).collect();
+            prop_assert_eq!(sparse.breadth_first(source, max_depth).unwrap(), expected);
+        }
+
         #[test]
         fn pagerank_matches_independent_dense_reference(entries in prop::collection::vec((0usize..7, 0usize..7, 0u8..20), 0..60)) {
             let mut dense = [[0.0_f64; 7]; 7];

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use brainwire_core::{schema::GraphMapping, value::Value};
-use brainwire_cypher::{execute, Out};
+use brainwire_cypher::{execute, Out, QueryTransaction};
 use brainwire_store::{
     db::{Database, Resources, StoreConfig},
     graph::{check_invariants, find_by_indexed_property, merge_node},
@@ -17,6 +17,206 @@ fn count(db: &Database, predicate: &str) -> Vec<Vec<Out>> {
         db,
         &format!("MATCH (c:Customer {{{predicate}}}) RETURN count(*)"),
     )
+}
+
+#[test]
+fn index_catalog_is_queryable_without_scanning_graph_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping =
+        serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json")).unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    let query = "CALL db.indexes() YIELD label, property, state WHERE label='Customer' AND property='email' RETURN label, property, state";
+    let mut old_snapshot = QueryTransaction::begin(&db).unwrap();
+    assert_eq!(
+        run(&db, query),
+        vec![vec![
+            Out::Value(Value::Str("Customer".into())),
+            Out::Value(Value::Str("email".into())),
+            Out::Value(Value::Str("string_boolean_ready".into())),
+        ]]
+    );
+    let mut txn = db.begin();
+    txn.delete(Cf::Meta, b"scalar-index-v1-ready".to_vec());
+    txn.commit().unwrap();
+    assert_eq!(
+        old_snapshot.run(query, &BTreeMap::new()).unwrap().rows[0][2],
+        Out::Value(Value::Str("string_boolean_ready".into()))
+    );
+    assert_eq!(
+        run(&db, query)[0][2],
+        Out::Value(Value::Str("declared_only".into()))
+    );
+    assert!(execute(
+        &db,
+        "CALL db.indexes({}) YIELD label RETURN label",
+        &BTreeMap::new()
+    )
+    .is_err());
+}
+
+#[test]
+fn where_index_reads_own_overlay_and_retains_older_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping =
+        serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json")).unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    run(&db, "CREATE (c:Customer {entity_id:'a', email:'old'})");
+    let mut snapshot = QueryTransaction::begin(&db).unwrap();
+    let mut writer = QueryTransaction::begin(&db).unwrap();
+    writer
+        .run(
+            "MATCH (c:Customer) WHERE c.email='old' SET c.email='new'",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    let query = "MATCH (c:Customer) WHERE c.email='new' RETURN count(*)";
+    assert_eq!(
+        writer.run(query, &BTreeMap::new()).unwrap().rows,
+        vec![vec![Out::Value(Value::Int(1))]]
+    );
+    assert_eq!(
+        snapshot.run(query, &BTreeMap::new()).unwrap().rows,
+        vec![vec![Out::Value(Value::Int(0))]]
+    );
+    writer.commit().unwrap();
+    assert_eq!(
+        snapshot.run(query, &BTreeMap::new()).unwrap().rows,
+        vec![vec![Out::Value(Value::Int(0))]]
+    );
+    assert_eq!(run(&db, query), vec![vec![Out::Value(Value::Int(1))]]);
+    assert_eq!(
+        run(
+            &db,
+            "MATCH (c:Customer) WHERE c.email='old' RETURN count(*)"
+        ),
+        vec![vec![Out::Value(Value::Int(0))]]
+    );
+    check_invariants(&db).unwrap();
+}
+
+#[test]
+fn where_equality_uses_index_without_reading_unrelated_nodes() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping =
+        serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json")).unwrap();
+    let catalog = db.apply_ontology(&mapping).unwrap();
+    let mut txn = db.begin();
+    merge_node(
+        &mut txn,
+        &catalog,
+        "Customer",
+        "target",
+        &BTreeMap::from([
+            ("email".into(), Value::Str("wanted".into())),
+            ("segment".into(), Value::Bool(true)),
+        ]),
+    )
+    .unwrap();
+    let unrelated = merge_node(
+        &mut txn,
+        &catalog,
+        "Customer",
+        "unrelated",
+        &BTreeMap::from([("email".into(), Value::Str("other".into()))]),
+    )
+    .unwrap();
+    txn.commit().unwrap();
+    // Deliberately corrupt only a synthetic non-candidate: a scan must fail,
+    // while a physical seek must never decode this row.
+    let mut txn = db.begin();
+    txn.put(Cf::Node, unrelated.0.to_be_bytes().to_vec(), vec![0xff]);
+    txn.commit().unwrap();
+    let params = BTreeMap::from([("email".into(), Value::Str("wanted".into()))]);
+    for predicate in [
+        "c.email=$email",
+        "$email=c.email",
+        "c.email=$email AND c.segment=true",
+        "c.entity_id='target'",
+    ] {
+        assert_eq!(
+            execute(
+                &db,
+                &format!("MATCH (c:Customer) WHERE {predicate} RETURN c.entity_id"),
+                &params
+            )
+            .unwrap()
+            .rows,
+            vec![vec![Out::Value(Value::Str("target".into()))]]
+        );
+    }
+    assert!(execute(&db, "MATCH (c:Customer) RETURN c.entity_id", &params).is_err());
+}
+
+#[test]
+fn where_seeks_keep_hop_filters_cartesian_patterns_and_existing_bindings() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let mapping: GraphMapping =
+        serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json")).unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    run(&db, "CREATE (a:Customer {entity_id:'a', email:'x'}), (b:Customer {entity_id:'b', email:'y'}), (k:Company {entity_id:'k', industry:'tech'}) CREATE (a)-[:WORKS_AT]->(k) CREATE (b)-[:WORKS_AT]->(k)");
+    for query in [
+        "MATCH (c:Customer)-[:WORKS_AT]->(k:Company) WHERE c.email='x' AND k.industry='tech' RETURN c.entity_id, k.entity_id",
+        "MATCH (c:Customer), (k:Company) WHERE c.email='x' AND k.industry='tech' RETURN c.entity_id, k.entity_id",
+    ] {
+        assert_eq!(run(&db, query), vec![vec![Out::Value(Value::Str("a".into())), Out::Value(Value::Str("k".into()))]]);
+    }
+    for query in [
+        "MATCH (c:Customer) WHERE c.email='x' MATCH (c:Customer) WHERE c.email='y' RETURN count(*)",
+        "MATCH (c:Customer {email:'y'}) WHERE c.email='x' RETURN count(*)",
+    ] {
+        assert_eq!(run(&db, query), vec![vec![Out::Value(Value::Int(0))]]);
+    }
+}
+
+#[test]
+fn where_seek_matches_scan_for_conjunctions_or_null_and_numeric_fallback() {
+    let indexed_dir = tempfile::tempdir().unwrap();
+    let scan_dir = tempfile::tempdir().unwrap();
+    let resources = Resources::new(StoreConfig::for_tests());
+    let indexed = Database::open(indexed_dir.path(), &resources).unwrap();
+    let scan = Database::open(scan_dir.path(), &resources).unwrap();
+    let mut mapping: GraphMapping =
+        serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json")).unwrap();
+    indexed.apply_ontology(&mapping).unwrap();
+    for node in &mut mapping.nodes {
+        node.indexed_fields.clear();
+        node.er_fields.clear();
+    }
+    scan.apply_ontology(&mapping).unwrap();
+    for db in [&indexed, &scan] {
+        run(db, "CREATE (a:Customer {entity_id:'a', email:'x', segment:true, name:'A'}), (b:Customer {entity_id:'b', email:'y', segment:false, name:'B'}), (c:Customer {entity_id:'c', email:42}), (d:Customer {entity_id:'d'})");
+    }
+    for predicate in [
+        "c.email='x'",
+        "'x'=c.email",
+        "c.entity_id='b'",
+        "c.email='x' AND c.name='A'",
+        "c.email='x' AND c.email='y'",
+        "c.email='x' OR c.email='y'",
+        "NOT c.email='x'",
+        "c.email=null",
+        "c.email=42",
+        "c.email=42.0",
+        "c.email=c.name",
+        "c.segment=false",
+        "c.segment=true AND (c.email='x' OR c.email='y')",
+    ] {
+        let query = format!("MATCH (c:Customer) WHERE {predicate} RETURN c.entity_id");
+        assert_eq!(run(&indexed, &query), run(&scan, &query), "{predicate}");
+    }
+    for db in [&indexed, &scan] {
+        run(db, "MATCH (c:Customer) WHERE c.email='x' SET c.email='z'");
+        assert_eq!(
+            run(db, "MATCH (c:Customer) WHERE c.email='z' RETURN count(*)"),
+            vec![vec![Out::Value(Value::Int(1))]]
+        );
+        run(db, "MATCH (c:Customer) WHERE c.email='z' DETACH DELETE c");
+        check_invariants(db).unwrap();
+    }
 }
 
 #[test]

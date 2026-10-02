@@ -38,6 +38,49 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-02, WHERE index seeks, CSR reachability and retained-volume deployments
+
+- **Requested:** a 20-minute local session starting 06:33:18 UTC (08:33:18
+  Amsterdam), covering Cypher, storage, TUI, indexes, algorithms, performance,
+  Kubernetes and Docker. No push or image publication.
+- **Duration:** closed at 06:53:29 UTC, after at least 20 minutes.
+- **Cypher/indexes:** safe literal/parameter equality conjuncts in WHERE now use
+  existing primary/string/Boolean indexes, with full residual filtering. Tests
+  first reproduced unnecessary scanning and cover reversed equality, OR/NOT,
+  NULL/numeric fallbacks, contradictions, hops, bound variables, staged writes,
+  snapshot isolation and index audit. `CALL db.indexes()` reports the caller's
+  snapshot readiness without constructing a graph projection.
+- **Algorithms:** directed unweighted CSR BFS and `graph.reachable` return
+  minimum hop depths with source label/entity_id, relationship filter and depth
+  bound. Snapshot/overlay tests and randomized independent shortest-hop checks
+  passed. Projection remains rebuilt per call, within existing graph-size guards.
+- **Storage/deployment:** added Compose, single-writer retained-PVC Kubernetes
+  and storage-node-pinned Swarm templates, documented recovery/fencing limits.
+  Current release Docker image passed six kills with pending indexed overwrites,
+  six recoveries and final offline audit. The actual Compose template passed
+  ontology setup, kill/recreation, indexed reads and audit. Native Python/Bolt
+  ingestion/replay and two kill cycles also passed. Owned test resources removed.
+- **TUI:** English/Portuguese pipeline explanations now expose WHERE index
+  behavior and the index/CSR procedures. Captured Graph, Pipeline, Memory and
+  Disk panels from a real 10,000-node synthetic store under
+  `docs/design/assets/2026-10-02-session/`; panels remain offline/read-only.
+- **Measurements:** warm embedded development queries on 100,000 nodes after
+  Docker compilation: indexed WHERE p50 0.0598 ms, equivalent unindexed field
+  p50 1,941.594 ms. Timing excludes opening/network and is not an SLA. CSR
+  workload covered 10,000 nodes/100,000 edges; full methodology and raw JSON
+  are in `docs/benchmarks/2026-10-02-index-analytics-recovery.md`.
+- **Verification:** 353 Rust tests passed; workspace fmt and clippy with denied
+  warnings passed. Compose/Swarm parsing passed; Kubernetes render passed strict
+  1.36 schema validation (2 valid resources). No live Kubernetes context or
+  Swarm deployment was available; those runtime tests remain pending.
+- **Next:** enforce query-memory bounds and benchmark end-to-end mixed workloads;
+  execute retained-volume recovery in a real Kubernetes test cluster before
+  promising failover. Replication, resumable large index builds and connected
+  TUI execution remain future work. DuckLake/Arrow requirements from October 1
+  remain recorded; no connector implementation was added in this session.
+- **Blockers:** live cluster recovery needs a configured test cluster and durable
+  volume driver. No local implementation blocker.
+
 ### 2026-10-01, DuckLake-first Arrow ingestion direction
 
 - **Requested:** automate fast client ingestion, primarily DuckLake, also

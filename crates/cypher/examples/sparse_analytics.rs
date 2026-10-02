@@ -138,6 +138,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let ranks = projection.matrix.pagerank_until(100, 0.85, 1e-8)?;
     let pagerank_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let started = Instant::now();
+    let depths = projection.matrix.breadth_first(0, 10)?;
+    let bfs_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let reachable_nodes = depths.iter().flatten().count();
+    assert_eq!(depths[0], Some(0));
+    assert_eq!(depths[1], Some(1));
     let mass: f64 = ranks.scores.iter().sum();
     assert!((mass - 1.0).abs() < 1e-8);
     let iterations = ranks.iterations;
@@ -172,6 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "nodes": node_count, "attemptedRelationships": edges, "relationships": expected_edges,
             "nodeImportMs": node_import_ms, "edgeImportMs": edge_import_ms, "reopenMs": reopen_ms,
             "projectionMs": projection_ms, "pagerankMs": pagerank_ms, "cypherTop5Ms": cypher_ms,
+            "bfsDepth10Ms": bfs_ms, "reachableNodes": reachable_nodes,
             "csrBytes": csr_bytes, "rankMass": mass, "iterations": iterations, "converged": converged,
             "pointLookup": point_lookup, "oneHopTenNeighbors": one_hop,
             "databasePath": if tempdir.is_some() { None } else { Some(path.display().to_string()) },
