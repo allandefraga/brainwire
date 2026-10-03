@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, time::Instant};
 
 use brainwire_core::{schema::GraphMapping, value::Value};
-use brainwire_cypher::{execute, Out};
+use brainwire_cypher::{execute_with_limits, ExecutionLimits, Out};
 use brainwire_store::{
     db::{Database, Resources, StoreConfig},
     graph::{check_invariants, merge_node},
@@ -17,6 +17,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !(1..=1_000_000).contains(&count) {
         return Err("node count must be between 1 and 1000000".into());
     }
+    let kind = std::env::args().nth(2).unwrap_or_else(|| "string".into());
+    if kind != "string" && kind != "number" {
+        return Err("key type must be string or number".into());
+    }
+    let key_for = |index: usize| {
+        if kind == "number" {
+            Value::Int(index as i64)
+        } else {
+            Value::Str(format!("customer-{index}@example.test"))
+        }
+    };
+    let limits = ExecutionLimits {
+        memory_bytes: 256 << 20,
+    };
     let dir = tempfile::tempdir()?;
     let resources = Resources::new(StoreConfig {
         cache_bytes: 64 << 20,
@@ -33,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for start in (0..count).step_by(500) {
         let mut txn = db.begin();
         for index in start..(start + 500).min(count) {
-            let key = Value::Str(format!("customer-{index}@example.test"));
+            let key = key_for(index);
             merge_node(
                 &mut txn,
                 &catalog,
@@ -58,12 +72,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut samples = Vec::new();
         for sample in 0..30 {
             let index = (sample * 7919) % count;
-            let params = BTreeMap::from([(
-                "key".into(),
-                Value::Str(format!("customer-{index}@example.test")),
-            )]);
+            let params = BTreeMap::from([("key".into(), key_for(index))]);
             let started = Instant::now();
-            let result = execute(&db, &query, &params)?;
+            let result = execute_with_limits(&db, &query, &params, limits)?;
             let elapsed = started.elapsed().as_secs_f64() * 1000.0;
             assert_eq!(
                 result.rows,
@@ -85,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "nodes": count, "importMs": import_ms, "cacheMiB": 64, "memtableMiB": 16,
+            "nodes": count, "keyType": kind, "allocationGuardBytes": limits.memory_bytes, "importMs": import_ms, "cacheMiB": 64, "memtableMiB": 16,
             "mode": "warm embedded, excludes database open, 5 warmups per query",
             "measurements": measurements,
         }))?

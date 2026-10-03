@@ -15,7 +15,7 @@ use crate::db::{Database, StoreError};
 use crate::txn::{Cf, Txn, TxnError};
 
 const CATALOG_KEY: &[u8] = b"catalog";
-const INDEX_READY_KEY: &[u8] = b"scalar-index-v1-ready";
+const INDEX_READY_KEY: &[u8] = b"scalar-index-v2-ready";
 const MAX_ATOMIC_BACKFILL_KEYS: usize = 100_000;
 
 #[derive(Debug, thiserror::Error)]
@@ -101,6 +101,10 @@ pub enum ProjectionError {
         resource: &'static str,
         limit: usize,
     },
+    #[error(
+        "projection allocation guard exceeded: attempted {attempted} bytes, limit {limit} bytes"
+    )]
+    MemoryLimit { limit: usize, attempted: usize },
     #[error("invalid projection: {0}")]
     Invalid(String),
 }
@@ -113,6 +117,8 @@ pub struct ProjectionOptions {
     pub weight_property: Option<String>,
     pub max_nodes: usize,
     pub max_relationships: usize,
+    /// Conservative construction allocation guard, not process RSS.
+    pub max_bytes: usize,
 }
 
 impl Default for ProjectionOptions {
@@ -122,6 +128,7 @@ impl Default for ProjectionOptions {
             weight_property: None,
             max_nodes: 100_000,
             max_relationships: 1_000_000,
+            max_bytes: usize::MAX,
         }
     }
 }
@@ -148,6 +155,18 @@ pub fn sparse_projection(
     }) {
         return Err(ProjectionError::Invalid("unknown relationship type".into()));
     }
+    let mut estimated_bytes = 0usize;
+    let mut reserve = |bytes: usize| {
+        estimated_bytes = estimated_bytes.saturating_add(bytes);
+        if estimated_bytes > options.max_bytes {
+            Err(ProjectionError::MemoryLimit {
+                limit: options.max_bytes,
+                attempted: estimated_bytes,
+            })
+        } else {
+            Ok(())
+        }
+    };
     let mut nodes = Vec::new();
     txn.visit_prefix::<ProjectionError>(Cf::Node, &[], |key, _| {
         if nodes.len() == options.max_nodes {
@@ -156,6 +175,7 @@ pub fn sparse_projection(
                 limit: options.max_nodes,
             });
         }
+        reserve(128)?;
         nodes.push(node_id_value(key)?);
         Ok(())
     })?;
@@ -193,6 +213,7 @@ pub fn sparse_projection(
                 .as_ref()
                 .and_then(|c| c.edge_types.iter().find(|ty| ty.id == edge_type))
                 .ok_or_else(|| StoreError::Corrupt("edge type absent from catalog".into()))?;
+            reserve(value.len().saturating_mul(4))?;
             let record = decode_row(value).map_err(StoreError::from)?;
             let property = edge_schema
                 .columns
@@ -227,6 +248,7 @@ pub fn sparse_projection(
         selected += 1;
         out_degrees[row] += 1;
         in_degrees[col] += 1;
+        reserve(128)?;
         entries.push((row, col, weight));
         Ok(())
     })?;
@@ -315,7 +337,7 @@ impl Database {
             None => None,
         };
         let next = Catalog::apply(mapping, previous.as_ref()).map_err(catalog_error)?;
-        let was_ready = txn.get(Cf::Meta, INDEX_READY_KEY)?.is_some();
+        let was_ready = scalar_indexes_ready(txn)?;
         let mut backfilled = 0;
         // A new declaration is backfilled in the same atomic batch as the
         // catalog. Old databases have no marker, so their entire declaration
@@ -373,7 +395,8 @@ impl Database {
             CATALOG_KEY.to_vec(),
             serde_json::to_vec(&next).map_err(catalog_error)?,
         );
-        txn.put(Cf::Meta, INDEX_READY_KEY.to_vec(), vec![1]);
+        txn.put(Cf::Meta, INDEX_READY_KEY.to_vec(), vec![2]);
+        txn.delete(Cf::Meta, b"scalar-index-v1-ready".to_vec());
         Ok(next)
     }
 }
@@ -391,6 +414,25 @@ fn index_field_prefix(ty: TypeId, field: &str) -> Vec<u8> {
 
 fn index_value(value: &Value) -> Option<Vec<u8>> {
     match value {
+        // Integral finite floats share the exact i64 key when representable.
+        // This matches Cypher's precise int/float comparison, including -0.0.
+        Value::Int(value) => {
+            let mut key = vec![b'i'];
+            key.extend(value.to_be_bytes());
+            Some(key)
+        }
+        Value::Float(value) if value.is_finite() => {
+            if value.fract() == 0.0
+                && *value >= -9223372036854775808.0
+                && *value < 9223372036854775808.0
+            {
+                index_value(&Value::Int(*value as i64))
+            } else {
+                let mut key = vec![b'f'];
+                key.extend(value.to_bits().to_be_bytes());
+                Some(key)
+            }
+        }
         Value::Bool(value) => Some(vec![b'b', u8::from(*value)]),
         Value::Str(value) => {
             let mut encoded = vec![b's'];
@@ -589,20 +631,29 @@ pub fn get_node(txn: &Txn, id: NodeId) -> Result<Option<NodeRecord>, GraphError>
 
 /// Lists nodes of one type in partition zero by their encoded id order.
 pub fn nodes_of_type(txn: &Txn, ty: TypeId) -> Result<Vec<NodeId>, GraphError> {
-    let (lo, inclusive_hi) = NodeId::type_range(0, ty)?;
-    // Partition zero leaves room above even type 4095, so the inclusive
-    // type_range endpoint can safely become a half-open scan bound.
-    let exclusive_hi = inclusive_hi.0 + 1;
-    txn.scan_range(Cf::Node, &lo.0.to_be_bytes(), &exclusive_hi.to_be_bytes())?
-        .into_iter()
-        .map(|(key, _)| {
-            let raw: [u8; 8] = key
-                .as_slice()
-                .try_into()
-                .map_err(|_| StoreError::Corrupt("node key".into()))?;
-            Ok(NodeId(u64::from_be_bytes(raw)))
-        })
-        .collect()
+    let mut nodes = Vec::new();
+    visit_nodes_of_type::<GraphError>(txn, ty, |id| {
+        nodes.push(id);
+        Ok(())
+    })?;
+    Ok(nodes)
+}
+
+/// Stream matching IDs without copying every node's stored properties.
+pub fn visit_nodes_of_type<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    ty: TypeId,
+    mut visit: impl FnMut(NodeId) -> Result<(), E>,
+) -> Result<(), E> {
+    let (lo, inclusive_hi) = NodeId::type_range(0, ty).map_err(GraphError::from)?;
+    let hi = inclusive_hi.0 + 1;
+    // Callback errors must propagate in the caller's error type.
+    txn.visit_range::<E>(
+        Cf::Node,
+        &lo.0.to_be_bytes(),
+        &hi.to_be_bytes(),
+        |key, _| visit(node_id_value(key).map_err(GraphError::from)?),
+    )
 }
 
 pub fn find_by_entity_id(
@@ -610,6 +661,17 @@ pub fn find_by_entity_id(
     entity_id: &str,
     label: Option<TypeId>,
 ) -> Result<Vec<NodeId>, GraphError> {
+    if let Some(ty) = label {
+        return txn
+            .get(Cf::Pk, &pk_key(entity_id, ty))?
+            .map(|value| {
+                node_id_value(&value)
+                    .map(|id| vec![id])
+                    .map_err(GraphError::from)
+            })
+            .transpose()
+            .map(|found| found.unwrap_or_default());
+    }
     let mut found = Vec::new();
     for (key, value) in txn.scan_prefix(Cf::Pk, &pk_prefix(entity_id))? {
         let mut input = &key[key.len() - 2..];
@@ -623,7 +685,7 @@ pub fn find_by_entity_id(
 
 /// Read index readiness from the caller's snapshot, including its write overlay.
 pub fn scalar_indexes_ready(txn: &Txn<'_>) -> Result<bool, StoreError> {
-    Ok(txn.get(Cf::Meta, INDEX_READY_KEY)?.is_some())
+    Ok(txn.get(Cf::Meta, INDEX_READY_KEY)?.as_deref() == Some(&[2][..]))
 }
 
 /// Returns None when this property cannot safely use the ready scalar index.
@@ -634,24 +696,37 @@ pub fn find_by_indexed_property(
     field: &str,
     value: &Value,
 ) -> Result<Option<Vec<NodeId>>, GraphError> {
+    let mut found = Vec::new();
+    let ready = visit_by_indexed_property::<GraphError>(txn, ty, field, value, |id| {
+        found.push(id);
+        Ok(())
+    })?;
+    Ok(ready.then_some(found))
+}
+
+/// Returns false when no ready index supports the value; otherwise streams IDs.
+pub fn visit_by_indexed_property<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn<'_>,
+    ty: &NodeType,
+    field: &str,
+    value: &Value,
+    mut visit: impl FnMut(NodeId) -> Result<(), E>,
+) -> Result<bool, E> {
     if !ty.indexed.iter().any(|name| name == field) || !scalar_indexes_ready(txn)? {
-        return Ok(None);
+        return Ok(false);
     }
     let Some(encoded) = index_value(value) else {
-        return Ok(None);
+        return Ok(false);
     };
     let mut prefix = index_field_prefix(ty.id, field);
     prefix.extend(encoded);
-    let mut found = Vec::new();
-    txn.visit_prefix::<GraphError>(Cf::Idx, &prefix, |key, _| {
+    txn.visit_prefix::<E>(Cf::Idx, &prefix, |key, _| {
         if key.len() != prefix.len() + 8 {
             return Err(StoreError::Corrupt("scalar index key length".into()).into());
         }
-        let tail = &key[prefix.len()..];
-        found.push(node_id_value(tail)?);
-        Ok(())
+        visit(node_id_value(&key[prefix.len()..]).map_err(GraphError::from)?)
     })?;
-    Ok(Some(found))
+    Ok(true)
 }
 
 pub fn merge_edge(
@@ -695,23 +770,38 @@ pub fn merge_edge(
     Ok(())
 }
 
-fn edges(txn: &Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
-    let mut found = Vec::new();
-    for (key, _) in txn.scan_prefix(cf, &node.0.to_be_bytes())? {
-        let (_, edge_type, other, id) = decode_edge_key(&key)?;
-        found.push(EdgeRef {
+/// Stream directional adjacency without copying stored edge property values.
+pub fn visit_edges<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    cf: Cf,
+    node: NodeId,
+    mut visit: impl FnMut(EdgeRef) -> Result<(), E>,
+) -> Result<(), E> {
+    if !matches!(cf, Cf::Out | Cf::In) {
+        return Err(
+            StoreError::Corrupt("adjacency requires out or in column family".into()).into(),
+        );
+    }
+    txn.visit_prefix::<E>(cf, &node.0.to_be_bytes(), |key, _| {
+        let (_, edge_type, other, id) = decode_edge_key(key).map_err(GraphError::from)?;
+        visit(EdgeRef {
             edge_type,
             other,
             id,
-        });
-    }
+        })
+    })
+}
+fn edges(txn: &Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
+    let mut found = Vec::new();
+    visit_edges::<GraphError>(txn, cf, node, |edge| {
+        found.push(edge);
+        Ok(())
+    })?;
     Ok(found)
 }
-
 pub fn out_edges(txn: &Txn, src: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
     edges(txn, Cf::Out, src)
 }
-
 pub fn in_edges(txn: &Txn, dst: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
     edges(txn, Cf::In, dst)
 }
@@ -771,10 +861,7 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
         .map(|bytes| serde_json::from_slice(&bytes))
         .transpose()
         .map_err(|e| err(&e))?;
-    let ready = txn
-        .get(Cf::Meta, INDEX_READY_KEY)
-        .map_err(|e| err(&e))?
-        .is_some();
+    let ready = scalar_indexes_ready(&txn).map_err(|e| err(&e))?;
     let mut seen = HashSet::new();
     for (key, value) in txn.scan_prefix(Cf::Pk, &[]).map_err(|e| err(&e))? {
         let mut input = key.as_slice();

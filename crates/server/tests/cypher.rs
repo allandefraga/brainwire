@@ -286,3 +286,36 @@ fn exclusive_lock_and_nonfinite_stored_output_are_actionable() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("output: nonfinite stored float"));
     }
 }
+
+#[test]
+fn configured_allocation_guard_fails_before_committing_bulk_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    json(query(&dir, "RETURN 1", &["--ontology", "schema.json"]));
+    let params =
+        serde_json::json!({"ids": (0..100).map(|i| format!("bulk-{i}")).collect::<Vec<_>>()})
+            .to_string();
+    let failed = command(&dir)
+        .env("BRAINWIRE_MEMORY_QUERY", "8KiB")
+        .args([
+            "cypher",
+            "--database",
+            "db",
+            "--query",
+            "UNWIND $ids AS id CREATE (c:Customer {entity_id:id})",
+            "--params",
+            &params,
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("resource"));
+    assert_eq!(
+        json(query(&dir, "MATCH (c:Customer) RETURN count(*)", &[]))["rows"],
+        serde_json::json!([[0]])
+    );
+}

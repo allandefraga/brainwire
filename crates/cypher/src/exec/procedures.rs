@@ -17,7 +17,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "csrBytes",
         ]),
         "graph.degree" => Ok(&["node", "outDegree", "inDegree"]),
-        "graph.reachable" => Ok(&["node", "depth"]),
+        "graph.reachable" | "graph.shortestPath" => Ok(&["node", "depth"]),
         "graph.pagerank" => Ok(&["node", "score", "iterations", "converged", "residual"]),
         _ => Err(ExecError::Unsupported(format!("unknown procedure {name}"))),
     }
@@ -30,6 +30,7 @@ struct Options {
     tolerance: f64,
     source: Option<(String, String)>,
     max_depth: usize,
+    target: Option<(String, String)>,
 }
 
 fn integer(
@@ -78,11 +79,13 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
         let common = ["relationship", "maxNodes", "maxRelationships"];
         let weighted =
             ["graph.project", "graph.pagerank"].contains(&name) && key == "weightProperty";
-        let reachable = name == "graph.reachable"
+        let reachable = ["graph.reachable", "graph.shortestPath"].contains(&name)
             && ["source", "sourceLabel", "maxDepth"].contains(&key.as_str());
         let pagerank = name == "graph.pagerank"
             && ["maxIterations", "dampingFactor", "tolerance"].contains(&key.as_str());
-        if !common.contains(&key.as_str()) && !weighted && !pagerank && !reachable {
+        let target =
+            name == "graph.shortestPath" && ["target", "targetLabel"].contains(&key.as_str());
+        if !common.contains(&key.as_str()) && !weighted && !pagerank && !reachable && !target {
             return Err(semantic(format!("unknown option {key} for {name}")));
         }
     }
@@ -102,12 +105,23 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
     if tolerance < 0.0 {
         return Err(semantic("tolerance must be non-negative"));
     }
-    let source = if name == "graph.reachable" {
+    let source = if ["graph.reachable", "graph.shortestPath"].contains(&name) {
         let id = text(&map, "source")?.ok_or_else(|| semantic("source is required"))?;
         let label =
             text(&map, "sourceLabel")?.ok_or_else(|| semantic("sourceLabel is required"))?;
         if ctx.catalog.node_type(&label).is_none() {
             return Err(semantic(format!("unknown source label {label}")));
+        }
+        Some((id, label))
+    } else {
+        None
+    };
+    let target = if name == "graph.shortestPath" {
+        let id = text(&map, "target")?.ok_or_else(|| semantic("target is required"))?;
+        let label =
+            text(&map, "targetLabel")?.ok_or_else(|| semantic("targetLabel is required"))?;
+        if ctx.catalog.node_type(&label).is_none() {
+            return Err(semantic(format!("unknown target label {label}")));
         }
         Some((id, label))
     } else {
@@ -119,12 +133,14 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
             weight_property: text(&map, "weightProperty")?,
             max_nodes: integer(&map, "maxNodes", 100_000, 1_000_000)?,
             max_relationships: integer(&map, "maxRelationships", 1_000_000, 10_000_000)?,
+            max_bytes: ctx.budget.remaining(),
         },
         iterations: integer(&map, "maxIterations", 100, 1000)?,
         damping,
         tolerance,
         source,
         max_depth: integer(&map, "maxDepth", 10, 1000)?,
+        target,
     })
 }
 
@@ -160,6 +176,9 @@ pub(super) fn validate(
 fn projection_error(error: ProjectionError) -> ExecError {
     match error {
         ProjectionError::Store(error) => error.into(),
+        ProjectionError::MemoryLimit { limit, attempted } => {
+            ExecError::MemoryLimit { limit, attempted }
+        }
         ProjectionError::MissingNode => {
             StoreError::Corrupt("projection found an edge with a missing endpoint".into()).into()
         }
@@ -180,8 +199,8 @@ pub(super) fn run(
     ctx: &Context<'_, '_>,
 ) -> Result<Vec<Bindings>, ExecError> {
     let available = fields(name)?;
-    let bind = |values: Vec<Binding>| -> Bindings {
-        yields
+    let bind = |values: Vec<Binding>| -> Result<Bindings, ExecError> {
+        let row = yields
             .iter()
             .map(|item| {
                 let index = available
@@ -190,16 +209,18 @@ pub(super) fn run(
                     .expect("validated field");
                 (item.alias.clone(), values[index].clone())
             })
-            .collect()
+            .collect();
+        ctx.budget.bindings(&row)?;
+        Ok(row)
     };
     if name == "db.indexes" {
         let ready = brainwire_store::graph::scalar_indexes_ready(ctx.txn)?;
         let state = if ready {
-            "string_boolean_ready"
+            "scalar_equality_ready"
         } else {
             "declared_only"
         };
-        return Ok(ctx
+        return ctx
             .catalog
             .node_types
             .iter()
@@ -212,10 +233,17 @@ pub(super) fn run(
                     ])
                 })
             })
-            .collect());
+            .collect();
     }
     let opts = options(name, args, ctx)?;
     let projection = sparse_projection(ctx.txn, &opts.projection).map_err(projection_error)?;
+    ctx.budget.charge(
+        projection
+            .nodes
+            .len()
+            .saturating_mul(128)
+            .saturating_add(projection.relationship_count.saturating_mul(128)),
+    )?;
     match name {
         "graph.project" => Ok(vec![bind(vec![
             int(projection.nodes.len()),
@@ -223,8 +251,8 @@ pub(super) fn run(
             int(projection.scanned_relationship_count),
             int(projection.matrix.non_zero_count()),
             int(projection.matrix.allocated_bytes()),
-        ])]),
-        "graph.degree" => Ok(projection
+        ])?]),
+        "graph.degree" => projection
             .nodes
             .iter()
             .enumerate()
@@ -235,8 +263,8 @@ pub(super) fn run(
                     value(Value::Int(projection.in_degrees[index] as i64)),
                 ])
             })
-            .collect()),
-        "graph.reachable" => {
+            .collect(),
+        "graph.reachable" | "graph.shortestPath" => {
             let (entity_id, label) = opts.source.as_ref().expect("validated source");
             let ty = ctx.catalog.node_type(label).expect("validated label");
             let ids = brainwire_store::graph::find_by_entity_id(ctx.txn, entity_id, Some(ty.id))?;
@@ -247,18 +275,45 @@ pub(super) fn run(
                 .nodes
                 .binary_search(node)
                 .map_err(|_| semantic("source node absent from projection"))?;
+            if let Some((entity_id, label)) = &opts.target {
+                let ty = ctx
+                    .catalog
+                    .node_type(label)
+                    .expect("validated target label");
+                let target =
+                    brainwire_store::graph::find_by_entity_id(ctx.txn, entity_id, Some(ty.id))?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| semantic("target node not found"))?;
+                let target = projection
+                    .nodes
+                    .binary_search(&target)
+                    .map_err(|_| semantic("target node absent from projection"))?;
+                let path = projection
+                    .matrix
+                    .shortest_path(source, target, opts.max_depth)
+                    .map_err(|e| semantic(e.to_string()))?;
+                return path
+                    .unwrap_or_default()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(depth, index)| {
+                        bind(vec![Binding::Node(projection.nodes[index]), int(depth)])
+                    })
+                    .collect();
+            }
             let depths = projection
                 .matrix
                 .breadth_first(source, opts.max_depth)
                 .map_err(|e| semantic(e.to_string()))?;
-            Ok(projection
+            projection
                 .nodes
                 .iter()
                 .zip(depths)
                 .filter_map(|(node, depth)| {
                     depth.map(|depth| bind(vec![Binding::Node(*node), int(depth)]))
                 })
-                .collect())
+                .collect()
         }
         "graph.pagerank" => {
             let result = projection
@@ -267,7 +322,7 @@ pub(super) fn run(
                 .map_err(|e| semantic(e.to_string()))?;
             let mut scores: Vec<_> = projection.nodes.into_iter().zip(result.scores).collect();
             scores.sort_by(|(a, sa), (b, sb)| sb.total_cmp(sa).then(a.cmp(b)));
-            Ok(scores
+            scores
                 .into_iter()
                 .map(|(node, score)| {
                     bind(vec![
@@ -278,7 +333,7 @@ pub(super) fn run(
                         value(Value::Float(result.residual)),
                     ])
                 })
-                .collect())
+                .collect()
         }
         _ => unreachable!("validated procedure"),
     }

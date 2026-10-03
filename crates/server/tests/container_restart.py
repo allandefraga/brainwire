@@ -98,7 +98,7 @@ def run(image, rows, cycles):
                             for previous in range(min(cycle - 1, cycles)):
                                 assert session.run("MATCH (c:Customer {email:$email}) RETURN count(*) AS n", email=f"cycle-{previous}@example.test").single()["n"] == 0
                             state = session.run("CALL db.indexes() YIELD label, property, state WHERE label='Customer' AND property='email' RETURN state").single()["state"]
-                            assert state == "string_boolean_ready", state
+                            assert state == "scalar_equality_ready", state
                             if cycle <= cycles:
                                 session.run(
                                     "CREATE (c:Customer {entity_id: $id})",

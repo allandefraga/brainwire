@@ -73,7 +73,7 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
     assert_eq!(schema["database"], "research");
     assert_eq!(schema["catalog"]["version"], 1);
     assert_eq!(schema["catalog"]["node_types"][0]["label"], "Customer");
-    assert_eq!(schema["secondary_index_status"], "string_boolean_ready");
+    assert_eq!(schema["secondary_index_status"], "scalar_equality_ready");
     assert_eq!(schema["temporal_history_status"], "not_implemented");
     assert_eq!(schema["maintenance_status"], "not_implemented");
     let metrics = command(&dir)
@@ -273,9 +273,10 @@ fn overview_reports_multiple_independent_graphs() {
             _ => "Python -> Bolt",
         }));
     }
-    assert_eq!(graphs[2]["secondary_index_status"], "string_boolean_ready");
+    assert_eq!(graphs[2]["secondary_index_status"], "scalar_equality_ready");
     assert_eq!(graphs[2]["cache_budget_bytes"], 64 << 20);
     assert_eq!(graphs[2]["query_budget_enforced"], false);
+    assert_eq!(graphs[2]["query_allocation_guard_enforced"], true);
     assert!(graphs[2]["storage"]["idx"]["memtable_bytes"].is_number());
     let checked = command(&dir)
         .args(["db", "check", "tickets", "--json"])
@@ -309,4 +310,120 @@ fn invalid_ontology_does_not_create_database() {
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("invalid ontology"));
     assert!(!dir.path().join("data/research").exists());
+}
+
+#[test]
+fn file_inventory_classifies_actual_engine_files_and_bounds_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    let created = command(&dir)
+        .args(["db", "create", "files-test", "--ontology", "schema.json"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        "/nonexistent-brainwire-fixture",
+        dir.path().join("data/files-test/external-link"),
+    )
+    .unwrap();
+    let inspected = command(&dir)
+        .args(["db", "files", "files-test", "--json"])
+        .output()
+        .unwrap();
+    assert!(inspected.status.success(), "{inspected:?}");
+    let result: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    let files = result["files"].as_array().unwrap();
+    assert!(files
+        .iter()
+        .any(|f| f["name"] == "CURRENT" && f["kind"] == "pointer"));
+    assert!(files.iter().any(|f| f["kind"] == "manifest"));
+    assert!(files.iter().any(|f| f["kind"] == "lock"));
+    assert!(files
+        .iter()
+        .all(|f| f["name"].as_str().unwrap().find('/').is_none()));
+    assert!(files.iter().any(|f| f["kind"] == "sst"
+        && f["state"] == "live_sst_metadata"
+        && f["column_family"].is_string()
+        && f["level"].is_number()
+        && f["entries"].is_number()));
+    #[cfg(unix)]
+    assert!(files.iter().any(|f| f["name"] == "external-link"
+        && f["kind"] == "symlink"
+        && f["state"] == "not_followed"));
+    let bounded = command(&dir)
+        .args(["db", "files", "files-test", "--limit", "1", "--json"])
+        .output()
+        .unwrap();
+    assert!(bounded.status.success());
+    let bounded: serde_json::Value = serde_json::from_slice(&bounded.stdout).unwrap();
+    assert_eq!(bounded["files"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["truncated"], true);
+}
+
+#[test]
+fn checkpoint_cli_refuses_overwrite_and_reopens_independent_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    let created = command(&dir)
+        .args(["db", "create", "backup-source", "--ontology", "schema.json"])
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let inserted = command(&dir)
+        .args([
+            "cypher",
+            "--database",
+            "data/backup-source",
+            "--query",
+            "CREATE (c:Customer {entity_id:'one',email:'backup@example.test'})",
+        ])
+        .output()
+        .unwrap();
+    assert!(inserted.status.success());
+    let checkpoint = command(&dir)
+        .args([
+            "db",
+            "checkpoint",
+            "backup-source",
+            "--destination",
+            "saved-graph",
+        ])
+        .output()
+        .unwrap();
+    assert!(checkpoint.status.success(), "{checkpoint:?}");
+    let repeated = command(&dir)
+        .args([
+            "db",
+            "checkpoint",
+            "backup-source",
+            "--destination",
+            "saved-graph",
+        ])
+        .output()
+        .unwrap();
+    assert!(!repeated.status.success());
+    let reopened = command(&dir)
+        .args([
+            "cypher",
+            "--database",
+            "saved-graph",
+            "--query",
+            "MATCH (c:Customer) WHERE c.email='backup@example.test' RETURN c.entity_id",
+        ])
+        .output()
+        .unwrap();
+    assert!(reopened.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&reopened.stdout).unwrap()["rows"],
+        serde_json::json!([["one"]])
+    );
 }

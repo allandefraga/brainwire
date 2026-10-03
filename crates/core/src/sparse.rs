@@ -100,18 +100,52 @@ impl SparseMatrix {
         source: usize,
         max_depth: usize,
     ) -> Result<Vec<Option<usize>>, SparseMatrixError> {
-        if self.rows != self.cols {
-            return Err(SparseMatrixError::NotSquare {
-                rows: self.rows,
-                cols: self.cols,
-            });
-        }
-        if source >= self.rows {
+        self.breadth_first_with(source, max_depth, |_, _| false)
+    }
+
+    /// One minimum-hop directed path; weights do not affect the chosen route.
+    /// Ties follow CSR column order. No path within max_depth returns None.
+    pub fn shortest_path(
+        &self,
+        source: usize,
+        target: usize,
+        max_depth: usize,
+    ) -> Result<Option<Vec<usize>>, SparseMatrixError> {
+        if target >= self.rows {
             return Err(SparseMatrixError::IndexOutOfBounds {
-                row: source,
-                col: source,
+                row: target,
+                col: target,
             });
         }
+        self.validate_bfs_source(source)?;
+        if source == target {
+            return Ok(Some(vec![source]));
+        }
+        let mut parents = vec![None; self.rows];
+        let depths = self.breadth_first_with(source, max_depth, |parent, node| {
+            parents[node] = Some(parent);
+            node == target
+        })?;
+        if depths[target].is_none() {
+            return Ok(None);
+        }
+        let mut path = vec![target];
+        let mut node = target;
+        while node != source {
+            node = parents[node].expect("visited non-source node has parent");
+            path.push(node);
+        }
+        path.reverse();
+        Ok(Some(path))
+    }
+
+    fn breadth_first_with(
+        &self,
+        source: usize,
+        max_depth: usize,
+        mut discover: impl FnMut(usize, usize) -> bool,
+    ) -> Result<Vec<Option<usize>>, SparseMatrixError> {
+        self.validate_bfs_source(source)?;
         let mut depths = vec![None; self.rows];
         let mut queue = std::collections::VecDeque::from([source]);
         depths[source] = Some(0);
@@ -124,11 +158,30 @@ impl SparseMatrix {
                 let target = self.column_indices[index];
                 if depths[target].is_none() {
                     depths[target] = Some(depth + 1);
+                    if discover(row, target) {
+                        return Ok(depths);
+                    }
                     queue.push_back(target);
                 }
             }
         }
         Ok(depths)
+    }
+
+    fn validate_bfs_source(&self, source: usize) -> Result<(), SparseMatrixError> {
+        if self.rows != self.cols {
+            return Err(SparseMatrixError::NotSquare {
+                rows: self.rows,
+                cols: self.cols,
+            });
+        }
+        if source >= self.rows {
+            return Err(SparseMatrixError::IndexOutOfBounds {
+                row: source,
+                col: source,
+            });
+        }
+        Ok(())
     }
 
     /// Multiplies the sparse matrix by a dense vector without materializing
@@ -288,6 +341,31 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
+    fn shortest_path_returns_minimum_hops_and_handles_cycles_bounds_and_isolation() {
+        let matrix = SparseMatrix::from_entries(
+            5,
+            5,
+            [
+                (0, 1, 2.0),
+                (1, 2, 1.0),
+                (0, 3, 1.0),
+                (3, 2, 1.0),
+                (2, 0, 1.0),
+            ],
+        )
+        .unwrap();
+        assert_eq!(matrix.shortest_path(0, 2, 2).unwrap(), Some(vec![0, 1, 2]));
+        assert_eq!(matrix.shortest_path(0, 0, 0).unwrap(), Some(vec![0]));
+        assert_eq!(matrix.shortest_path(0, 2, 1).unwrap(), None);
+        assert_eq!(matrix.shortest_path(0, 4, 10).unwrap(), None);
+        assert!(matrix.shortest_path(0, 5, 2).is_err());
+        assert!(SparseMatrix::from_entries(2, 3, [])
+            .unwrap()
+            .shortest_path(0, 1, 1)
+            .is_err());
+    }
+
+    #[test]
     fn breadth_first_finds_shortest_directed_depths_and_stops_at_limit() {
         let graph = SparseMatrix::from_entries(
             6,
@@ -345,7 +423,14 @@ mod tests {
             }
             let sparse = SparseMatrix::from_entries(7, 7, entries.iter().map(|&(from, to, weight)| (from, to, f32::from(weight)))).unwrap();
             let expected: Vec<_> = hops[source].iter().map(|depth| (*depth <= max_depth).then_some(*depth)).collect();
-            prop_assert_eq!(sparse.breadth_first(source, max_depth).unwrap(), expected);
+            prop_assert_eq!(sparse.breadth_first(source, max_depth).unwrap(), expected.clone());
+            for (target,depth) in expected.iter().enumerate() {
+                let path=sparse.shortest_path(source,target,max_depth).unwrap();
+                prop_assert_eq!(path.as_ref().map(|p|p.len()-1),*depth);
+                if let Some(path)=path { prop_assert_eq!(path[0],source); prop_assert_eq!(*path.last().unwrap(),target);
+                    for pair in path.windows(2) { prop_assert!(entries.iter().any(|&(from,to,weight)|from==pair[0]&&to==pair[1]&&weight>0)); }
+                }
+            }
         }
 
         #[test]

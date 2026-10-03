@@ -9,6 +9,19 @@ pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, Exe
         .iter()
         .find(|t| t.id == id.type_id())
         .ok_or_else(|| ExecError::Semantic("node type absent from catalog".into()))?;
+    ctx.budget.charge(
+        record.entity_id.len().saturating_add(
+            record
+                .row
+                .columns
+                .values()
+                .chain(record.row.extra.values())
+                .fold(128usize, |sum, value| {
+                    sum.saturating_add(128)
+                        .saturating_add(budget::value_bytes(value))
+                }),
+        ),
+    )?;
     let mut props = BTreeMap::new();
     for column in &ty.columns {
         if let Some(v) = record.row.columns.get(&column.id) {
@@ -118,6 +131,15 @@ pub(super) fn match_pattern(
         .node_type(pat.start.label.as_deref().expect("validated label"))
         .expect("validated type");
     let lookup = lookup_props(&pat.start, predicate);
+    let scan = || {
+        let mut found = Vec::new();
+        visit_nodes_of_type::<ExecError>(ctx.txn, ty.id, |id| {
+            ctx.budget.charge(16)?;
+            found.push(id);
+            Ok(())
+        })?;
+        Ok::<_, ExecError>(found)
+    };
     for row in rows {
         let candidates = if let Some(existing) = pat.start.var.as_ref().and_then(|v| row.get(v)) {
             match existing {
@@ -127,7 +149,7 @@ pub(super) fn match_pattern(
         } else if let Some((_, e)) = lookup.iter().find(|(name, _)| name == "entity_id") {
             // A reference to the pattern's own variable cannot seed the index lookup.
             if validate::mentions(e, pat.start.var.as_deref()) {
-                nodes_of_type(ctx.txn, ty.id)?
+                scan()?
             } else {
                 match scalar(eval(e, &row, ctx)?)? {
                     Value::Str(s) => find_by_entity_id(ctx.txn, &s, Some(ty.id))?,
@@ -141,14 +163,19 @@ pub(super) fn match_pattern(
                     continue;
                 }
                 let value = scalar(eval(expr, &row, ctx)?)?;
-                if let Some(found) = find_by_indexed_property(ctx.txn, ty, field, &value)? {
+                let mut found = Vec::new();
+                if visit_by_indexed_property::<ExecError>(ctx.txn, ty, field, &value, |id| {
+                    ctx.budget.charge(16)?;
+                    found.push(id);
+                    Ok(())
+                })? {
                     indexed = Some(found);
                     break;
                 }
             }
             match indexed {
                 Some(found) => found,
-                None => nodes_of_type(ctx.txn, ty.id)?,
+                None => scan()?,
             }
         };
         for id in candidates {
@@ -161,18 +188,21 @@ pub(super) fn match_pattern(
                     .edge_type(&rel.rel_type)
                     .expect("validated edge type")
                     .id;
-                let edges = match rel.direction {
-                    Direction::Out => out_edges(ctx.txn, id)?,
-                    Direction::In => in_edges(ctx.txn, id)?,
+                let cf = match rel.direction {
+                    Direction::Out => Cf::Out,
+                    Direction::In => Cf::In,
                 };
-                for edge in edges {
+                visit_edges::<ExecError>(ctx.txn, cf, id, |edge| {
                     if edge.edge_type == edge_type {
                         if let Some(row) = matches(ctx, &row, end, edge.other)? {
+                            ctx.budget.bindings(&row)?;
                             next.push(row);
                         }
                     }
-                }
+                    Ok(())
+                })?;
             } else {
+                ctx.budget.bindings(&row)?;
                 next.push(row);
             }
         }
@@ -186,11 +216,13 @@ pub(super) fn write_pattern(
     row: &mut Bindings,
     pat: &Pattern,
     create: bool,
+    budget: &Budget,
 ) -> Result<(), ExecError> {
     let ctx = Context {
         txn,
         catalog,
         params,
+        budget,
     };
     if let Some((rel, end)) = &pat.hop {
         let a = bound_node(row, pat.start.var.as_deref().expect("validated endpoint"))?;

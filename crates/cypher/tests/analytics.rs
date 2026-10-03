@@ -24,6 +24,51 @@ fn int(n: i64) -> Out {
 }
 
 #[test]
+fn shortest_path_returns_ordered_nodes_in_the_transaction_overlay() {
+    let (_dir, db) = setup();
+    let mut tx = QueryTransaction::begin(&db).unwrap();
+    seed(&mut tx);
+    tx.run(
+        "CREATE (b:Page {entity_id:'d'}) MATCH (c:Page {entity_id:'c'}) CREATE (c)-[:LINK]->(b)",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let query="CALL graph.shortestPath({source:'a', sourceLabel:'Page', target:'d', targetLabel:'Page', relationship:'LINK', maxDepth:2}) YIELD node, depth RETURN node.entity_id, depth";
+    let expected = vec![
+        vec![Out::Value(Value::Str("a".into())), int(0)],
+        vec![Out::Value(Value::Str("c".into())), int(1)],
+        vec![Out::Value(Value::Str("d".into())), int(2)],
+    ];
+    assert_eq!(tx.run(query, &BTreeMap::new()).unwrap().rows, expected);
+    assert!(execute(&db, query, &BTreeMap::new()).is_err());
+    tx.commit().unwrap();
+    assert_eq!(run(&db, query).rows, expected);
+    assert!(run(&db, &query.replace("maxDepth:2", "maxDepth:1"))
+        .rows
+        .is_empty());
+    assert!(run(
+        &db,
+        &query
+            .replace("source:'a'", "source:'d'")
+            .replace("target:'d'", "target:'a'")
+    )
+    .rows
+    .is_empty());
+    assert!(execute(
+        &db,
+        &query.replace("target:'d'", "target:'missing'"),
+        &BTreeMap::new()
+    )
+    .is_err());
+    assert!(execute(
+        &db,
+        &query.replace("maxDepth:2", "weightProperty:'weight'"),
+        &BTreeMap::new()
+    )
+    .is_err());
+}
+
+#[test]
 fn reachable_uses_csr_with_depth_relationship_limits_and_transaction_snapshot() {
     let (_dir, db) = setup();
     let query = "CALL graph.reachable({source:'a', sourceLabel:'Page', relationship:'LINK', maxDepth:1}) YIELD node, depth RETURN node.entity_id, depth";

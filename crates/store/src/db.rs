@@ -85,6 +85,8 @@ pub enum StoreError {
     Key(#[from] KeyError),
     #[error("catalog: {0}")]
     Catalog(String),
+    #[error("checkpoint: {0}")]
+    Checkpoint(String),
     #[error("corrupt data: {0}")]
     Corrupt(String),
 }
@@ -123,6 +125,48 @@ impl Database {
             alloc: crate::alloc::IdAllocator::default(),
             id_block: res.config.id_block,
         })
+    }
+
+    /// Native consistent checkpoint of committed data. Never overwrites a path.
+    /// Parent must exist; destination cannot be nested inside the live database.
+    /// SST hardlinks are immutable; this is not an off-machine backup.
+    pub fn checkpoint(&self, destination: &Path) -> Result<(), StoreError> {
+        let error = |e: std::io::Error| StoreError::Checkpoint(e.to_string());
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let parent = std::fs::canonicalize(parent).map_err(error)?;
+        let source = std::fs::canonicalize(self.directory()).map_err(error)?;
+        if parent.starts_with(&source) {
+            return Err(StoreError::Checkpoint(
+                "destination must be outside the source database".into(),
+            ));
+        }
+        let name = destination.file_name().ok_or_else(|| {
+            StoreError::Checkpoint("destination needs a new directory name".into())
+        })?;
+        let destination = parent.join(name);
+        match std::fs::symlink_metadata(&destination) {
+            Ok(_) => {
+                return Err(StoreError::Checkpoint(
+                    "destination already exists; refusing overwrite".into(),
+                ))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(error(e)),
+        }
+        rocksdb::checkpoint::Checkpoint::new(&self.db)?.create_checkpoint(destination)?;
+        Ok(())
+    }
+
+    pub fn directory(&self) -> &Path {
+        self.db.path()
+    }
+
+    /// Current SST metadata from RocksDB; no graph records are scanned.
+    pub fn live_sst_files(&self) -> Result<Vec<rocksdb::LiveFile>, StoreError> {
+        Ok(self.db.live_files()?)
     }
 
     pub(crate) fn cf(&self, name: &'static str) -> Result<&rocksdb::ColumnFamily, StoreError> {
@@ -176,6 +220,76 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_reopens_committed_schema_indexes_and_counter_without_pending_writes() {
+        use crate::graph::{check_invariants, find_by_indexed_property, merge_node};
+        use brainwire_core::{schema::GraphMapping, value::Value};
+        let dir = tempfile::tempdir().unwrap();
+        let resources = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(&dir.path().join("source"), &resources).unwrap();
+        let mapping:GraphMapping=serde_json::from_str(r#"{"version":"1","nodes":[{"label":"Item","properties":["n"],"indexed_fields":["n"]}],"edges":[]}"#).unwrap();
+        let catalog = db.apply_ontology(&mapping).unwrap();
+        let mut tx = db.begin();
+        merge_node(
+            &mut tx,
+            &catalog,
+            "Item",
+            "committed",
+            &BTreeMap::from([("n".into(), Value::Int(7))]),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let mut pending = db.begin();
+        merge_node(&mut pending, &catalog, "Item", "pending", &BTreeMap::new()).unwrap();
+        let destination = dir.path().join("checkpoint");
+        db.checkpoint(&destination).unwrap();
+        assert!(db.checkpoint(&destination).is_err());
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("broken-link");
+            std::os::unix::fs::symlink(dir.path().join("missing"), &link).unwrap();
+            assert!(db.checkpoint(&link).is_err());
+            assert!(std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+        assert!(db.checkpoint(&db.directory().join("nested")).is_err());
+        let mut tx = db.begin();
+        merge_node(
+            &mut tx,
+            &catalog,
+            "Item",
+            "committed",
+            &BTreeMap::from([("n".into(), Value::Int(8))]),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        drop(pending);
+        drop(db);
+        let restored = Database::open(&destination, &resources).unwrap();
+        assert_eq!(restored.stats().unwrap().nodes, 1);
+        let catalog = restored.catalog().unwrap().unwrap();
+        assert_eq!(
+            find_by_indexed_property(
+                &restored.begin(),
+                &catalog.node_types[0],
+                "n",
+                &Value::Int(7)
+            )
+            .unwrap()
+            .unwrap()
+            .len(),
+            1
+        );
+        check_invariants(&restored).unwrap();
+        let mut tx = restored.begin();
+        merge_node(&mut tx, &catalog, "Item", "restored-new", &BTreeMap::new()).unwrap();
+        tx.commit().unwrap();
+        check_invariants(&restored).unwrap();
+        assert_eq!(restored.stats().unwrap().nodes, 2);
+    }
 
     #[test]
     fn creates_every_column_family() {

@@ -43,7 +43,7 @@ enum Commands {
     },
     /// Execute one atomic query against an embedded local store (exclusive access).
     #[command(
-        long_about = "Execute one atomic Cypher query against an embedded local store. Cannot attach to an already-open server database. Output is JSON {fields, rows}; nodes use {type: node, id, label, properties}, including entity_id. Ontology is applied separately before the query. Query memory budgets are loaded but not yet enforced; output errors may follow committed writes."
+        long_about = "Execute one atomic Cypher query against an embedded local store. Cannot attach to an already-open server database. Output is JSON {fields, rows}; nodes use {type: node, id, label, properties}, including entity_id. Ontology is applied separately before the query. memory.query bounds conservative per-RUN allocation accounting, not process RSS; output errors may follow committed writes."
     )]
     Cypher {
         /// Directory holding the local database; RocksDB requires exclusive access.
@@ -176,6 +176,24 @@ enum DbCommands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Create one graph's consistent local checkpoint (offline; destination must be new).
+    Checkpoint {
+        name: String,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Inspect database file metadata and native SST families/levels (offline).
+    Files {
+        name: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 256)]
+        limit: usize,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Show per-column-family RocksDB estimates (offline administration).
     Metrics {
         name: String,
@@ -273,6 +291,17 @@ fn main() {
             DbCommands::Schema { name, json, config } => {
                 admin::schema(&name, json, config.as_deref())
             }
+            DbCommands::Checkpoint {
+                name,
+                destination,
+                config,
+            } => admin::checkpoint(&name, &destination, config.as_deref()),
+            DbCommands::Files {
+                name,
+                json,
+                limit,
+                config,
+            } => admin::files(&name, json, limit, config.as_deref()),
             DbCommands::Metrics { name, json, config } => {
                 admin::metrics(&name, json, config.as_deref())
             }

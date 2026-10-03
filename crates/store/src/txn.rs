@@ -176,6 +176,7 @@ pub struct Txn<'db> {
     /// that did not exist yet when this transaction scanned (a phantom).
     depends_prefix: BTreeSet<Key>,
     done: bool,
+    estimated_bytes: usize,
 }
 
 impl Database {
@@ -194,6 +195,7 @@ impl Database {
             depends: BTreeSet::new(),
             depends_prefix: BTreeSet::new(),
             done: false,
+            estimated_bytes: 0,
         }
     }
 }
@@ -201,6 +203,11 @@ impl Database {
 impl<'db> Txn<'db> {
     pub fn database(&self) -> &'db Database {
         self.db
+    }
+
+    /// Conservative O(1) overlay/dependency estimate, excluding RocksDB internals.
+    pub fn estimated_memory_bytes(&self) -> usize {
+        self.estimated_bytes
     }
 
     pub fn get(&self, cf: Cf, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
@@ -211,16 +218,42 @@ impl<'db> Txn<'db> {
     }
 
     pub fn get_for_update(&mut self, cf: Cf, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
-        self.depends.insert((cf, key.to_vec()));
+        if self.depends.insert((cf, key.to_vec())) {
+            self.estimated_bytes = self.estimated_bytes.saturating_add(128 + key.len());
+        }
         self.get(cf, key)
     }
 
     pub fn put(&mut self, cf: Cf, key: Vec<u8>, value: Vec<u8>) {
-        self.writes.insert((cf, key), Some(value));
+        self.stage(cf, key, Some(value));
     }
 
     pub fn delete(&mut self, cf: Cf, key: Vec<u8>) {
-        self.writes.insert((cf, key), None);
+        self.stage(cf, key, None);
+    }
+
+    fn stage(&mut self, cf: Cf, key: Vec<u8>, value: Option<Vec<u8>>) {
+        let bytes = value.as_ref().map_or(0, Vec::len);
+        let key_bytes = key.len();
+        match self.writes.insert((cf, key), value) {
+            Some(old) => {
+                self.estimated_bytes = self
+                    .estimated_bytes
+                    .saturating_sub(old.as_ref().map_or(0, Vec::len))
+                    .saturating_add(bytes);
+            }
+            None => {
+                self.estimated_bytes = self
+                    .estimated_bytes
+                    .saturating_add(192 + key_bytes)
+                    .saturating_add(bytes);
+            }
+        }
+    }
+    fn depend_prefix(&mut self, cf: Cf, prefix: &[u8]) {
+        if self.depends_prefix.insert((cf, prefix.to_vec())) {
+            self.estimated_bytes = self.estimated_bytes.saturating_add(128 + prefix.len());
+        }
     }
 
     /// Visit one prefix in key order, merging the snapshot with this
@@ -231,18 +264,42 @@ impl<'db> Txn<'db> {
         &self,
         cf: Cf,
         prefix: &[u8],
+        visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.visit_matching(cf, prefix, |key| key.starts_with(prefix), visit)
+    }
+
+    /// Stream a half-open key range, including this snapshot's pending writes.
+    pub fn visit_range<E: From<StoreError>>(
+        &self,
+        cf: Cf,
+        lo: &[u8],
+        hi: &[u8],
+        visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        if lo >= hi {
+            return Ok(());
+        }
+        self.visit_matching(cf, lo, |key| key < hi, visit)
+    }
+
+    fn visit_matching<E: From<StoreError>>(
+        &self,
+        cf: Cf,
+        lo: &[u8],
+        in_range: impl Fn(&[u8]) -> bool,
         mut visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
         let mut disk = self.snapshot.raw_iterator_cf(self.db.cf(cf.name())?);
-        disk.seek(prefix);
+        disk.seek(lo);
         let mut overlay = self
             .writes
-            .range((cf, prefix.to_vec())..)
-            .take_while(|((family, key), _)| *family == cf && key.starts_with(prefix))
+            .range((cf, lo.to_vec())..)
+            .take_while(|((family, key), _)| *family == cf && in_range(key))
             .peekable();
         loop {
             disk.status().map_err(StoreError::from)?;
-            let disk_key = disk.key().filter(|key| key.starts_with(prefix));
+            let disk_key = disk.key().filter(|key| in_range(key));
             let staged = overlay.peek();
             match (disk_key, staged) {
                 (None, None) => break,
@@ -276,7 +333,7 @@ impl<'db> Txn<'db> {
         prefix: &[u8],
         visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
-        self.depends_prefix.insert((cf, prefix.to_vec()));
+        self.depend_prefix(cf, prefix);
         self.visit_prefix(cf, prefix, visit)
     }
 
@@ -359,7 +416,7 @@ impl<'db> Txn<'db> {
         cf: Cf,
         prefix: &[u8],
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
-        self.depends_prefix.insert((cf, prefix.to_vec()));
+        self.depend_prefix(cf, prefix);
         self.scan_prefix(cf, prefix)
     }
 
@@ -437,6 +494,68 @@ mod tests {
         let res = Resources::new(StoreConfig::for_tests());
         let db = Database::open(dir.path(), &res).unwrap();
         (dir, res, db)
+    }
+
+    #[test]
+    fn memory_estimate_tracks_replacement_tombstones_and_unique_dependencies() {
+        let (_dir, _res, db) = open();
+        let mut tx = db.begin();
+        assert_eq!(tx.estimated_memory_bytes(), 0);
+        tx.put(Cf::Node, b"key".to_vec(), vec![0; 100]);
+        let initial = tx.estimated_memory_bytes();
+        tx.put(Cf::Node, b"key".to_vec(), vec![0; 20]);
+        assert_eq!(tx.estimated_memory_bytes(), initial - 80);
+        tx.delete(Cf::Node, b"key".to_vec());
+        assert_eq!(tx.estimated_memory_bytes(), initial - 100);
+        tx.get_for_update(Cf::Node, b"key").unwrap();
+        let dependent = tx.estimated_memory_bytes();
+        tx.get_for_update(Cf::Node, b"key").unwrap();
+        assert_eq!(tx.estimated_memory_bytes(), dependent);
+        tx.visit_prefix_for_update::<StoreError>(Cf::Out, b"x", |_, _| Ok(()))
+            .unwrap();
+        let range = tx.estimated_memory_bytes();
+        tx.scan_prefix_for_update(Cf::Out, b"x").unwrap();
+        assert_eq!(tx.estimated_memory_bytes(), range);
+        assert!(range > dependent);
+    }
+
+    #[test]
+    fn range_visitor_matches_eager_scan_with_overlay_and_stops_on_error() {
+        let (_dir, _res, db) = open();
+        let mut seed = db.begin();
+        for key in [b"a", b"b", b"d", b"z"] {
+            seed.put(Cf::Node, key.to_vec(), vec![1; 1024]);
+        }
+        seed.commit().unwrap();
+        let mut tx = db.begin();
+        tx.delete(Cf::Node, b"b".to_vec());
+        tx.put(Cf::Node, b"c".to_vec(), b"new".to_vec());
+        tx.put(Cf::Node, b"d".to_vec(), b"replacement".to_vec());
+        tx.put(Cf::Pk, b"c".to_vec(), b"other-cf".to_vec());
+        let mut external = db.begin();
+        external.put(Cf::Node, b"e".to_vec(), b"invisible".to_vec());
+        external.commit().unwrap();
+        for (lo, hi) in [
+            (b"b".as_slice(), b"z".as_slice()),
+            (b"b", b"b"),
+            (b"z", b"a"),
+        ] {
+            let mut found = Vec::new();
+            tx.visit_range::<StoreError>(Cf::Node, lo, hi, |k, v| {
+                found.push((k.to_vec(), v.to_vec()));
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(found, tx.scan_range(Cf::Node, lo, hi).unwrap());
+        }
+        let mut visits = 0;
+        assert!(tx
+            .visit_range::<StoreError>(Cf::Node, b"a", b"z", |_, _| {
+                visits += 1;
+                Err(StoreError::Corrupt("stop".into()))
+            })
+            .is_err());
+        assert_eq!(visits, 1);
     }
 
     #[test]

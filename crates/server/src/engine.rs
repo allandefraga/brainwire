@@ -92,7 +92,10 @@ fn worker(receiver: mpsc::Receiver<Command>, databases: Arc<Databases>, default_
                     )));
                     continue;
                 };
-                let mut transaction = match QueryTransaction::begin(&database) {
+                let mut transaction = match QueryTransaction::begin_with_limits(
+                    &database,
+                    databases.query_limits(),
+                ) {
                     Ok(transaction) => transaction,
                     Err(err) => {
                         let _ = reply.send(Err(execution_error(err)));
@@ -269,6 +272,7 @@ fn error_code(error: &ExecError) -> &'static str {
         ExecError::Semantic(_) => "Neo.ClientError.Statement.SemanticError",
         ExecError::ParameterMissing(_) => "Neo.ClientError.Statement.ParameterMissing",
         ExecError::ConstraintViolation(_) => "Neo.ClientError.Schema.ConstraintValidationFailed",
+        ExecError::MemoryLimit { .. } => "Neo.ClientError.Statement.MemoryLimitExceeded",
         ExecError::Conflict => "Neo.TransientError.Transaction.Outdated",
         ExecError::Graph(_) => "Neo.DatabaseError.General.UnknownError",
     }
@@ -381,6 +385,50 @@ mod tests {
             error_code(&ExecError::Unsupported("x".into())),
             "Neo.ClientError.Statement.SyntaxError"
         );
+    }
+
+    #[test]
+    fn configured_query_guard_rejects_large_runs_and_discards_prior_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = dir.path().join("data");
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        config.memory.query = crate::size::ByteSize(32_768);
+        let dbs = Arc::new(Databases::open_all(&config).unwrap());
+        let db = dbs.get("client_memory").unwrap();
+        let mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        db.apply_ontology(&mapping).unwrap();
+        let mut engine = DbEngine::new(dbs, "client_memory".into()).unwrap();
+        let empty = PackValue::Map(vec![]);
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "CREATE (c:Customer {entity_id:'pending-limit'})",
+                &empty,
+            )
+            .unwrap();
+        let params = PackValue::Map(vec![(
+            "large".into(),
+            PackValue::String("x".repeat(40_000)),
+        )]);
+        let error = engine
+            .run(None, "RETURN $large", &params)
+            .err()
+            .expect("guard must reject oversized parameter");
+        assert_eq!(error.code, "Neo.ClientError.Statement.MemoryLimitExceeded");
+        assert!(engine.commit().is_err());
+        engine.abort().unwrap();
+        assert_eq!(db.stats().unwrap().nodes, 0);
+        engine.begin(None).unwrap();
+        assert_eq!(
+            engine.run(None, "RETURN 1", &empty).unwrap().rows,
+            vec![vec![PackValue::Int(1)]]
+        );
+        engine.commit().unwrap();
     }
 
     #[test]

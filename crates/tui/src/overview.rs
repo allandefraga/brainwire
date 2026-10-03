@@ -10,6 +10,18 @@ use ratatui::{
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageFileSummary {
+    pub name: String,
+    pub kind: String,
+    pub size_bytes: u64,
+    pub column_family: Option<String>,
+    pub level: Option<i32>,
+    pub entries: Option<u64>,
+    pub deletions: Option<u64>,
+    pub state: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GraphSummary {
     pub name: String,
     pub nodes: u64,
@@ -31,6 +43,9 @@ pub struct GraphSummary {
     pub query_budget: u64,
     pub cache_accounted: u64,
     pub memtables_allocated: u64,
+    pub directory: String,
+    pub files: Vec<StorageFileSummary>,
+    pub files_truncated: bool,
 }
 
 fn mib(bytes: u64) -> String {
@@ -43,8 +58,8 @@ fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
             lang.choose("PROCESSO OFFLINE • TODOS OS GRAFOS", "OFFLINE PROCESS • ALL GRAPHS"),
             mib(g.cache_budget), lang.choose("Contabilizado", "Accounted"), mib(g.cache_accounted),
             mib(g.memtable_budget), lang.choose("Alocado", "Allocated"), mib(g.memtables_allocated), mib(g.query_budget),
-            lang.choose("Memtables estão dentro do cache. Orçamento não é RAM reservada. Query: limite ainda não aplicado. Estes valores não são do servidor parado, nem RSS.",
-                "Memtables are inside cache. Budget is not reserved RAM. Query limit is not enforced. These are not stopped-server values or RSS.")),
+            lang.choose("Memtables estão dentro do cache. Orçamento não é RAM reservada. Query: proteção conservadora por RUN; não é limite de RSS. Estes valores não são do servidor parado, nem RSS.",
+                "Memtables are inside cache. Budget is not reserved RAM. Query: conservative per-RUN allocation guard; not an RSS cap. These are not stopped-server values or RSS.")),
         View::Disk => {
             let mut text = lang.choose("ROCKSDB • GRAFO SELECIONADO\nCF       ~keys   mem KiB  L0\n", "ROCKSDB • SELECTED GRAPH\nCF       ~keys   mem KiB  L0\n").to_string();
             for (cf, metrics) in &g.storage {
@@ -56,13 +71,237 @@ fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
         }
         View::Query => format!("Python -> Bolt -> Cypher\nUNWIND $rows -> MERGE -> SET\n\n{}\n\n{}: {}\n{}\n\n{}",
             lang.choose("Nó + índices: um WriteBatch.\nCOMMIT sincroniza o WAL.\nFlush cria SST depois.", "Node + indexes: one WriteBatch.\nCOMMIT syncs the WAL.\nFlush creates SST later."),
-            lang.choose("Índice texto/bool", "String/bool index"),
+            lang.choose("Índice escalar", "Scalar equality index"),
             if g.index_declarations == 0 { lang.choose("nenhum", "none") } else if g.indexes_ready { lang.choose("pronto", "ready") } else { lang.choose("pendente (scan)", "pending (scan)") },
             g.indexed_fields.join(", "),
-            lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice texto/bool pronto. AND mantém filtros restantes. OR/NOT/faixa: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable.\nPainel explicativo; não executa consultas.",
-                "MERGE uses stable entity_id. SET replaces fields; null removes.\n\nREADS\nWHERE c.email=$email: ready string/bool index. AND keeps residual filters. OR/NOT/range: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable.\nExplanation panel; no query execution.")),
+            lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes. OR/NOT/faixa sozinhos: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nPainel explicativo; não executa consultas.",
+                "MERGE uses stable entity_id. SET replaces fields; null removes.\n\nREADS\nWHERE c.email=$email: ready scalar equality index. AND keeps residual filters. Standalone OR/NOT/range: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nExplanation panel; no query execution.")),
         View::Graph => unreachable!(),
     }
+}
+
+#[derive(Default)]
+struct OverviewSelection {
+    graph: usize,
+    scroll: u16,
+    file: usize,
+    explain: bool,
+}
+
+fn first_data_file(graph: Option<&GraphSummary>) -> usize {
+    graph
+        .and_then(|g| {
+            g.files
+                .iter()
+                .position(|f| f.kind == "sst" && f.column_family.as_deref() == Some("node"))
+                .or_else(|| g.files.iter().position(|f| f.kind == "sst"))
+        })
+        .unwrap_or(0)
+}
+
+fn terminal_text(text: &str) -> String {
+    text.chars()
+        .flat_map(|c| {
+            if c.is_control() {
+                c.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
+}
+
+fn file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < (1 << 20) {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        mib(bytes)
+    }
+}
+
+fn file_explanation(file: &StorageFileSummary, lang: Language) -> String {
+    let meaning = match file.kind.as_str() {
+        "sst" => lang.choose("Dados chave/valor ordenados no disco. Criado por flush ou compactação; preserva registros além da RAM.", "Sorted key/value data on disk. Created by flush or compaction; preserves records beyond RAM."),
+        "wal" => lang.choose("Log de escrita antecipada. COMMIT sincroniza o WAL antes de confirmar; reinício recupera dados ainda não enviados a SST.", "Write-ahead log. COMMIT syncs the WAL before acknowledgment; restart recovers data not yet flushed to SST."),
+        "manifest" => lang.choose("Histórico da organização dos arquivos SST e níveis do engine. Ajuda a reabrir uma versão consistente.", "Engine history of SST files and levels. Used to reopen a consistent storage version."),
+        "pointer" => lang.choose("Aponta para o MANIFEST ativo. Não contém nós ou arestas.", "Points to the active MANIFEST. Contains no nodes or edges."),
+        "options" => lang.choose("Configuração persistida do RocksDB. Não é o arquivo brainwire.toml.", "Persisted RocksDB configuration. Separate from brainwire.toml."),
+        "lock" => lang.choose("Arquivo de exclusividade. Sua presença sozinha não prova que há um processo ativo.", "Ownership lock file. Its presence alone does not prove an active process."),
+        "diagnostic" => lang.choose("Diagnósticos do engine. Diferente dos arquivos WAL numerados.", "Engine diagnostics. Separate from numbered WAL files."),
+        "symlink" => lang.choose("Link simbólico: apenas metadados. O destino não foi seguido nem lido.", "Symbolic link: metadata only. Target was neither followed nor read."),
+        _ => lang.choose("Arquivo sem classificação conhecida. Conteúdo não foi lido.", "File with no recognized classification. Contents were not read."),
+    };
+    let family = file.column_family.as_deref().unwrap_or("?");
+    let level = file.level.map_or_else(|| "?".into(), |v| format!("L{v}"));
+    let counter = |v: Option<u64>| v.map_or_else(|| "?".into(), |n| n.to_string());
+    format!("{}\n\n{}: {}\n{}: {}\nCF: {}\n{}: {}\n{}: {}\n{}: {}\n\n{}\n\n{}\n\n{}",
+        terminal_text(&file.name), lang.choose("Tipo", "Type"), file.kind,
+        lang.choose("Tamanho", "Size"), file_size(file.size_bytes), terminal_text(family),
+        lang.choose("Nível LSM", "LSM level"), level,
+        lang.choose("Entradas SST", "SST entries"), counter(file.entries),
+        lang.choose("Tombstones", "Tombstones"), counter(file.deletions),
+        meaning, lang.choose("Entradas SST incluem versões e tombstones; não são contagens de nós vivos.", "SST entries include versions and tombstones; not live node counts."),
+        lang.choose("Metadados offline, não atômicos. CF/nível vêm do RocksDB; ? significa indisponível. Não edite ou apague arquivos do engine.", "Offline, non-atomic metadata. CF/level come from RocksDB; ? means unavailable. Do not edit or delete engine files."))
+}
+
+fn render_disk(
+    frame: &mut Frame,
+    graphs: &[GraphSummary],
+    state: &mut OverviewSelection,
+    area: ratatui::layout::Rect,
+    lang: Language,
+    no_color: bool,
+) {
+    let Some(graph) = graphs.get(state.graph) else {
+        return;
+    };
+    state.file = state.file.min(graph.files.len().saturating_sub(1));
+    let narrow = area.width < 100;
+    let parts = Layout::vertical([
+        Constraint::Min(8),
+        Constraint::Length(if narrow { 5 } else { 6 }),
+    ])
+    .split(area);
+    let cols = if narrow {
+        vec![parts[0], parts[0], parts[0]]
+    } else {
+        Layout::horizontal([
+            Constraint::Length(26),
+            Constraint::Percentage(43),
+            Constraint::Min(24),
+        ])
+        .split(parts[0])
+        .to_vec()
+    };
+    if !narrow {
+        let visible = cols[0].height.saturating_sub(2) as usize;
+        let start = state.graph.saturating_sub(visible.saturating_sub(1));
+        let lines = graphs
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(visible)
+            .map(|(i, g)| {
+                Line::styled(
+                    format!(
+                        "{} {}",
+                        if i == state.graph { ">" } else { " " },
+                        terminal_text(&g.name)
+                    ),
+                    text_style(if i == state.graph { GREEN } else { PALE }, no_color),
+                )
+            })
+            .collect::<Vec<_>>();
+        frame.render_widget(
+            Paragraph::new(lines).block(panel(
+                lang.choose("Grafos • ←→", "Graphs • ←→"),
+                GREEN,
+                no_color,
+            )),
+            cols[0],
+        );
+    }
+    if !narrow || !state.explain {
+        let visible = cols[1].height.saturating_sub(3) as usize;
+        let start = state.file.saturating_sub(visible.saturating_sub(1));
+        let mut lines = vec![Line::styled(
+            lang.choose(
+                " ARQUIVO                   TIPO       TAMANHO",
+                " FILE                      TYPE         SIZE",
+            ),
+            text_style(CYAN, no_color),
+        )];
+        for (i, file) in graph.files.iter().enumerate().skip(start).take(visible) {
+            let name = terminal_text(&file.name)
+                .chars()
+                .take(24)
+                .collect::<String>();
+            let size = file_size(file.size_bytes);
+            lines.push(Line::styled(
+                format!(
+                    "{} {name:<24} {:<10} {size:>10}",
+                    if i == state.file { ">" } else { " " },
+                    file.kind
+                ),
+                text_style(if i == state.file { GREEN } else { PALE }, no_color),
+            ));
+        }
+        if graph.files.is_empty() {
+            lines.push(Line::raw(lang.choose(
+                "Nenhum arquivo nesta amostra.",
+                "No files in this sample.",
+            )));
+        }
+        let title = format!(
+            "{} / {}{}",
+            lang.choose("DISCO E ARQUIVOS", "DISK & FILES"),
+            terminal_text(&graph.name),
+            if graph.files_truncated {
+                lang.choose(" • truncado", " • truncated")
+            } else {
+                ""
+            }
+        );
+        frame.render_widget(
+            Paragraph::new(lines).block(panel("", GREEN, no_color).title(title)),
+            cols[1],
+        );
+    }
+    if !narrow || state.explain {
+        let detail = graph.files.get(state.file).map_or_else(
+            || {
+                lang.choose("Nenhum arquivo selecionado.", "No file selected.")
+                    .to_string()
+            },
+            |f| file_explanation(f, lang),
+        );
+        let paragraph = Paragraph::new(detail).wrap(Wrap { trim: false });
+        let max = paragraph
+            .line_count(cols[2].width.saturating_sub(2))
+            .saturating_sub(cols[2].height.saturating_sub(2) as usize)
+            .min(u16::MAX as usize) as u16;
+        state.scroll = state.scroll.min(max);
+        frame.render_widget(
+            paragraph.scroll((state.scroll, 0)).block(panel(
+                lang.choose("EXPLICAR • F1 • PgUp/PgDn", "EXPLAIN • F1 • PgUp/PgDn"),
+                CYAN,
+                no_color,
+            )),
+            cols[2],
+        );
+    }
+    let explanation = format!(
+        "{}\n{}\n{}\n{}",
+        terminal_text(&graph.directory),
+        lang.choose(
+            "ESCRITA: WAL + memtables (RAM) -> flush -> SST L0 -> compactação L1+",
+            "WRITE: WAL + memtables (RAM) -> flush -> SST L0 -> compaction L1+"
+        ),
+        lang.choose(
+            "LEITURA: cache -> memtables/SST. Índices também são registros persistidos.",
+            "READ: cache -> memtables/SST. Indexes are persisted records too."
+        ),
+        if narrow {
+            lang.choose(
+                "F1 explica • ←→ grafo • arquivos: metadados offline",
+                "F1 explains • ←→ graph • files: offline metadata",
+            )
+        } else {
+            lang.choose("RAM configurada ≠ reservada. Query: proteção por RUN, não RSS. Valores ? são desconhecidos.", "Configured RAM is not reserved. Query: per-RUN guard, not RSS. ? values are unknown.")
+        }
+    );
+    frame.render_widget(
+        Paragraph::new(explanation)
+            .wrap(Wrap { trim: false })
+            .block(panel(
+                lang.choose("FLUXO DE ARMAZENAMENTO", "STORAGE FLOW"),
+                GREEN,
+                no_color,
+            )),
+        parts[1],
+    );
 }
 
 fn panel(title: &'static str, color: Color, no_color: bool) -> Block<'static> {
@@ -87,11 +326,10 @@ fn text_style(color: Color, no_color: bool) -> Style {
 fn render_overview(
     frame: &mut Frame,
     graphs: &[GraphSummary],
-    selected: usize,
+    state: &mut OverviewSelection,
     view: View,
     lang: Language,
     no_color: bool,
-    scroll: &mut u16,
 ) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -123,6 +361,20 @@ fn render_overview(
         sections[0],
     );
 
+    if view == View::Disk {
+        render_disk(frame, graphs, state, sections[1], lang, no_color);
+        frame.render_widget(
+            Paragraph::new(lang.choose(
+                " ←→ grafo • ↑↓ arquivo • F1 explica • Tab painel • q sai",
+                " ←→ graph • ↑↓ file • F1 explain • Tab panel • q quit",
+            ))
+            .block(panel("", GREEN, no_color)),
+            sections[2],
+        );
+        return;
+    }
+    let selected = state.graph;
+    let scroll = &mut state.scroll;
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
@@ -278,16 +530,17 @@ pub fn run_overview(
     graph: Option<&str>,
 ) -> Result<(), String> {
     let lang = Language::parse(&options.lang)?;
-    let mut scroll = 0;
+    let mut state = OverviewSelection::default();
     let mut view = View::parse(&options.view)?;
     let no_color = std::env::var_os("NO_COLOR").is_some();
-    let mut selected = match graph {
+    state.graph = match graph {
         Some(name) => graphs
             .iter()
             .position(|g| g.name == name)
             .ok_or_else(|| format!("graph {name:?} does not exist"))?,
         None => 0,
     };
+    state.file = first_data_file(graphs.get(state.graph));
     if options.snapshot {
         if !(80..=240).contains(&options.width) || !(24..=80).contains(&options.height) {
             return Err("snapshot size must be 80..240 columns and 24..80 rows".into());
@@ -295,7 +548,7 @@ pub fn run_overview(
         let backend = TestBackend::new(options.width, options.height);
         let mut terminal = Terminal::new(backend).map_err(|e| e.to_string())?;
         terminal
-            .draw(|f| render_overview(f, &graphs, selected, view, lang, no_color, &mut scroll))
+            .draw(|f| render_overview(f, &graphs, &mut state, view, lang, no_color))
             .map_err(|e| e.to_string())?;
         let buffer = terminal.backend().buffer();
         for y in 0..options.height {
@@ -316,7 +569,7 @@ pub fn run_overview(
         Terminal::new(backend).map_err(|e| e.to_string())?;
     loop {
         terminal
-            .draw(|f| render_overview(f, &graphs, selected, view, lang, no_color, &mut scroll))
+            .draw(|f| render_overview(f, &graphs, &mut state, view, lang, no_color))
             .map_err(|e| e.to_string())?;
         if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
             if key.kind != event::KeyEventKind::Press {
@@ -325,18 +578,46 @@ pub fn run_overview(
             match key.code {
                 KeyCode::Tab => {
                     view = View::from_index(view.index() + 1);
-                    scroll = 0;
+                    state.scroll = 0;
                 }
-                KeyCode::PageDown => scroll = scroll.saturating_add(5),
-                KeyCode::PageUp => scroll = scroll.saturating_sub(5),
+                KeyCode::PageDown => state.scroll = state.scroll.saturating_add(5),
+                KeyCode::PageUp => state.scroll = state.scroll.saturating_sub(5),
                 KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::F(1) if view == View::Disk => {
+                    state.explain = !state.explain;
+                    state.scroll = 0;
+                }
+                KeyCode::Down if view == View::Disk => {
+                    state.file = (state.file + 1).min(
+                        graphs
+                            .get(state.graph)
+                            .map_or(0, |g| g.files.len().saturating_sub(1)),
+                    );
+                    state.scroll = 0;
+                }
+                KeyCode::Up if view == View::Disk => {
+                    state.file = state.file.saturating_sub(1);
+                    state.scroll = 0;
+                }
+                KeyCode::Left if view == View::Disk => {
+                    state.graph = state.graph.saturating_sub(1);
+                    state.file = first_data_file(graphs.get(state.graph));
+                    state.scroll = 0;
+                }
+                KeyCode::Right if view == View::Disk => {
+                    state.graph = (state.graph + 1).min(graphs.len().saturating_sub(1));
+                    state.file = first_data_file(graphs.get(state.graph));
+                    state.scroll = 0;
+                }
                 KeyCode::Down if !graphs.is_empty() => {
-                    selected = (selected + 1).min(graphs.len() - 1);
-                    scroll = 0;
+                    state.graph = (state.graph + 1).min(graphs.len() - 1);
+                    state.file = first_data_file(graphs.get(state.graph));
+                    state.scroll = 0;
                 }
                 KeyCode::Up => {
-                    selected = selected.saturating_sub(1);
-                    scroll = 0;
+                    state.graph = state.graph.saturating_sub(1);
+                    state.file = first_data_file(graphs.get(state.graph));
+                    state.scroll = 0;
                 }
                 _ => {}
             }
@@ -360,11 +641,14 @@ mod tests {
         }];
         for lang in [Language::En, Language::PtBr] {
             let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            let mut scroll = u16::MAX;
+            let mut state = OverviewSelection {
+                scroll: u16::MAX,
+                ..OverviewSelection::default()
+            };
             terminal
-                .draw(|f| render_overview(f, &graphs, 0, View::Query, lang, true, &mut scroll))
+                .draw(|f| render_overview(f, &graphs, &mut state, View::Query, lang, true))
                 .unwrap();
-            assert!(scroll > 0 && scroll < u16::MAX);
+            assert!(state.scroll > 0 && state.scroll < u16::MAX);
             let buffer = terminal.backend().buffer();
             let text = (0..24)
                 .map(|y| (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>())
@@ -373,10 +657,56 @@ mod tests {
             assert!(text.contains("PgUp/PgDn"));
             assert!(text.contains(lang.choose("consultas.", "execution.")));
             let memory = storage_details(&graphs[0], View::Memory, lang);
-            assert!(
-                memory.contains(lang.choose("limite ainda não aplicado", "limit is not enforced"))
-            );
+            assert!(memory.contains(lang.choose("proteção conservadora", "conservative per-RUN")));
         }
+    }
+
+    #[test]
+    fn disk_panel_uses_real_file_metadata_and_explains_selected_files() {
+        let graphs = vec![GraphSummary {
+            name: "storage-test".into(),
+            directory: "/tmp/synthetic".into(),
+            files_truncated: true,
+            files: vec![StorageFileSummary {
+                name: "000012.sst".into(),
+                kind: "sst".into(),
+                size_bytes: 4096,
+                column_family: Some("node".into()),
+                level: Some(2),
+                entries: Some(15),
+                deletions: Some(3),
+                state: "live_sst_metadata".into(),
+            }],
+            ..GraphSummary::default()
+        }];
+        for (width, height) in [(80, 24), (120, 36), (160, 48), (240, 48)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut state = OverviewSelection::default();
+            terminal
+                .draw(|f| render_overview(f, &graphs, &mut state, View::Disk, Language::En, true))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let text = (0..height)
+                .map(|y| {
+                    (0..width)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join(
+                    "
+",
+                );
+            assert!(text.contains("000012.sst"));
+            assert!(text.contains("F1"));
+            assert!(text.contains("truncated"));
+        }
+        let detail = file_explanation(&graphs[0].files[0], Language::En);
+        assert!(detail.contains("node"));
+        assert!(detail.contains("L2"));
+        assert!(detail.contains("Sorted key/value"));
+        assert!(detail.contains("not live node counts"));
+        assert!(!terminal_text("x\u{1b}[31m\n").contains('\u{1b}'));
     }
 
     #[test]
@@ -413,7 +743,19 @@ mod tests {
         ];
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         terminal
-            .draw(|f| render_overview(f, &graphs, 1, View::Graph, Language::En, false, &mut 0))
+            .draw(|f| {
+                render_overview(
+                    f,
+                    &graphs,
+                    &mut OverviewSelection {
+                        graph: 1,
+                        ..OverviewSelection::default()
+                    },
+                    View::Graph,
+                    Language::En,
+                    false,
+                )
+            })
             .unwrap();
         let buffer = terminal.backend().buffer();
         let text = (0..24)

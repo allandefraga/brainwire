@@ -3,7 +3,7 @@
 //! Append `--database data/staging-100k` to retain a fresh generated database.
 use brainwire_core::schema::GraphMapping;
 use brainwire_core::value::Value;
-use brainwire_cypher::{execute, Out};
+use brainwire_cypher::{execute_with_limits, ExecutionLimits, Out};
 use brainwire_store::{
     db::{Database, Resources, StoreConfig},
     graph::{merge_edge, merge_node, sparse_projection, ProjectionOptions},
@@ -33,7 +33,14 @@ fn measure_local_query(
         let id = (i * 7919) % node_count;
         let params = BTreeMap::from([("id".into(), Value::Str(format!("synthetic-{id}")))]);
         let started = Instant::now();
-        let result = execute(db, query, &params)?;
+        let result = execute_with_limits(
+            db,
+            query,
+            &params,
+            ExecutionLimits {
+                memory_bytes: 256 << 20,
+            },
+        )?;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(result.rows.len(), expected_rows);
         if i >= 100 {
@@ -130,7 +137,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Database::open(&path, &resources)?;
     let reopen_ms = started.elapsed().as_secs_f64() * 1000.0;
     let started = Instant::now();
-    let projection = sparse_projection(&db.begin(), &ProjectionOptions::default())?;
+    let projection = sparse_projection(
+        &db.begin(),
+        &ProjectionOptions {
+            max_bytes: 256 << 20,
+            ..ProjectionOptions::default()
+        },
+    )?;
     let projection_ms = started.elapsed().as_secs_f64() * 1000.0;
     assert_eq!(projection.nodes.len(), node_count);
     assert_eq!(projection.relationship_count, expected_edges);
@@ -144,6 +157,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reachable_nodes = depths.iter().flatten().count();
     assert_eq!(depths[0], Some(0));
     assert_eq!(depths[1], Some(1));
+    let started = Instant::now();
+    let shortest_path = projection
+        .matrix
+        .shortest_path(node_count - 1, 0, 10)?
+        .unwrap();
+    let shortest_path_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(shortest_path, vec![node_count - 1, 0]);
     let mass: f64 = ranks.scores.iter().sum();
     assert!((mass - 1.0).abs() < 1e-8);
     let iterations = ranks.iterations;
@@ -152,13 +172,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(ranks);
     let started = Instant::now();
     let query = "CALL graph.pagerank({relationship:'LINK', maxIterations:100, tolerance:0.00000001}) YIELD node, score RETURN node.entity_id AS id, score LIMIT 5";
-    let result = execute(&db, query, &empty)?;
+    let result = execute_with_limits(
+        &db,
+        query,
+        &empty,
+        ExecutionLimits {
+            memory_bytes: 256 << 20,
+        },
+    )?;
     let cypher_ms = started.elapsed().as_secs_f64() * 1000.0;
     assert_eq!(result.rows.len(), 5);
     let Out::Value(brainwire_core::value::Value::Str(top)) = &result.rows[0][0] else {
         panic!("expected id")
     };
     assert_eq!(top, "synthetic-0");
+    let started = Instant::now();
+    let path_result = execute_with_limits(&db,
+        "CALL graph.shortestPath({source:$source,sourceLabel:'Page',target:'synthetic-0',targetLabel:'Page',relationship:'LINK'}) YIELD node,depth RETURN node.entity_id,depth",
+        &BTreeMap::from([("source".into(),Value::Str(format!("synthetic-{}",node_count-1)))]),
+        ExecutionLimits { memory_bytes: 256 << 20 })?;
+    let cypher_path_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(path_result.rows.len(), 2);
+    assert_eq!(
+        path_result.rows[1],
+        vec![
+            Out::Value(Value::Str("synthetic-0".into())),
+            Out::Value(Value::Int(1))
+        ]
+    );
     let point_lookup = measure_local_query(
         &db,
         "MATCH (p:Page {entity_id:$id}) RETURN p.entity_id",
@@ -178,7 +219,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "nodes": node_count, "attemptedRelationships": edges, "relationships": expected_edges,
             "nodeImportMs": node_import_ms, "edgeImportMs": edge_import_ms, "reopenMs": reopen_ms,
             "projectionMs": projection_ms, "pagerankMs": pagerank_ms, "cypherTop5Ms": cypher_ms,
-            "bfsDepth10Ms": bfs_ms, "reachableNodes": reachable_nodes,
+            "bfsDepth10Ms": bfs_ms, "shortestPathMs": shortest_path_ms, "cypherShortestPathMs": cypher_path_ms, "allocationGuardBytes": 256 << 20, "reachableNodes": reachable_nodes,
             "csrBytes": csr_bytes, "rankMass": mass, "iterations": iterations, "converged": converged,
             "pointLookup": point_lookup, "oneHopTenNeighbors": one_hop,
             "databasePath": if tempdir.is_some() { None } else { Some(path.display().to_string()) },

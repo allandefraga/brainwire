@@ -33,15 +33,15 @@ fn index_catalog_is_queryable_without_scanning_graph_data() {
         vec![vec![
             Out::Value(Value::Str("Customer".into())),
             Out::Value(Value::Str("email".into())),
-            Out::Value(Value::Str("string_boolean_ready".into())),
+            Out::Value(Value::Str("scalar_equality_ready".into())),
         ]]
     );
     let mut txn = db.begin();
-    txn.delete(Cf::Meta, b"scalar-index-v1-ready".to_vec());
+    txn.delete(Cf::Meta, b"scalar-index-v2-ready".to_vec());
     txn.commit().unwrap();
     assert_eq!(
         old_snapshot.run(query, &BTreeMap::new()).unwrap().rows[0][2],
-        Out::Value(Value::Str("string_boolean_ready".into()))
+        Out::Value(Value::Str("scalar_equality_ready".into()))
     );
     assert_eq!(
         run(&db, query)[0][2],
@@ -303,7 +303,7 @@ fn applying_new_index_backfills_and_old_unmarked_catalog_still_scans() {
     );
     // Simulate an older store with a declaration but no ready index marker.
     let mut tx = db.begin();
-    tx.delete(Cf::Meta, b"scalar-index-v1-ready".to_vec());
+    tx.delete(Cf::Meta, b"scalar-index-v2-ready".to_vec());
     for (key, _) in tx.scan_prefix(Cf::Idx, &[]).unwrap() {
         tx.delete(Cf::Idx, key);
     }
@@ -362,7 +362,7 @@ fn removing_and_readding_a_declaration_discards_stale_keys() {
 }
 
 #[test]
-fn boolean_index_is_type_tagged_and_numeric_equality_falls_back_to_scan() {
+fn boolean_and_numeric_indexes_keep_type_and_precise_equality() {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
     let mapping: GraphMapping = serde_json::from_str(
@@ -389,7 +389,7 @@ fn boolean_index_is_type_tagged_and_numeric_equality_falls_back_to_scan() {
     assert!(
         find_by_indexed_property(&db.begin(), ty, "score", &Value::Int(1))
             .unwrap()
-            .is_none()
+            .is_some()
     );
     assert_eq!(
         count(&db, "active:true"),

@@ -24,17 +24,23 @@ pub(super) fn eval(
     ctx: &Context<'_, '_>,
 ) -> Result<Binding, ExecError> {
     let v = match expr {
-        Expr::Literal(v) => v.clone(),
+        Expr::Literal(v) => {
+            ctx.budget.charge(budget::value_bytes(v))?;
+            v.clone()
+        }
         Expr::Param(name) => ctx
             .params
             .get(name)
             .cloned()
             .ok_or_else(|| ExecError::ParameterMissing(name.clone()))?,
         Expr::Var(name) => {
-            return row
+            let binding = row
                 .get(name)
-                .cloned()
-                .ok_or_else(|| ExecError::Semantic(format!("unknown variable {name}")))
+                .ok_or_else(|| ExecError::Semantic(format!("unknown variable {name}")))?;
+            if let Binding::Value(value) = binding {
+                ctx.budget.charge(budget::value_bytes(value))?;
+            }
+            return Ok(binding.clone());
         }
         Expr::Prop(base, name) => match eval(base, row, ctx)? {
             Binding::Node(id) => graph::node_out(ctx, id)?
@@ -88,6 +94,7 @@ pub(super) fn eval(
             ))
         }
     };
+    ctx.budget.charge(budget::value_bytes(&v))?;
     Ok(Binding::Value(v))
 }
 
@@ -201,13 +208,13 @@ pub(super) fn project(
     let mut output = vec![];
     let aggregate = |e: &Expr| matches!(e, Expr::CountStar | Expr::Count(_));
     if !items.iter().any(|i| aggregate(&i.expr)) {
-        for row in rows {
-            output.push(
-                items
-                    .iter()
-                    .map(|i| out(eval(&i.expr, row, ctx)?, ctx))
-                    .collect::<Result<_, _>>()?,
-            );
+        for row in rows.iter().take(max) {
+            let result = items
+                .iter()
+                .map(|i| out(eval(&i.expr, row, ctx)?, ctx))
+                .collect::<Result<Vec<_>, _>>()?;
+            ctx.budget.output(&result)?;
+            output.push(result);
         }
     } else {
         // First-seen group order. Linear lookup is intentionally simple for this eager MVP.
@@ -221,15 +228,25 @@ pub(super) fn project(
                 .filter(|i| !aggregate(&i.expr))
                 .map(|i| eval(&i.expr, row, ctx))
                 .collect::<Result<Vec<_>, _>>()?;
-            let idx = groups
-                .iter()
-                .position(|(k, _)| {
-                    k.len() == key.len() && k.iter().zip(&key).all(|(a, b)| group_equal(a, b))
-                })
-                .unwrap_or_else(|| {
+            let idx = groups.iter().position(|(k, _)| {
+                k.len() == key.len() && k.iter().zip(&key).all(|(a, b)| group_equal(a, b))
+            });
+            let idx = match idx {
+                Some(idx) => idx,
+                None => {
+                    ctx.budget.charge(key.iter().fold(
+                        items.len().saturating_mul(8) + 64,
+                        |sum, b| {
+                            sum.saturating_add(match b {
+                                Binding::Node(_) => 16,
+                                Binding::Value(v) => budget::value_bytes(v),
+                            })
+                        },
+                    ))?;
                     groups.push((key, vec![0; items.len()]));
                     groups.len() - 1
-                });
+                }
+            };
             for (j, item) in items.iter().enumerate() {
                 let add = match &item.expr {
                     Expr::CountStar => true,
@@ -243,7 +260,7 @@ pub(super) fn project(
                 }
             }
         }
-        for (key, counts) in groups {
+        for (key, counts) in groups.into_iter().take(max) {
             let mut key = key.into_iter();
             let mut result = vec![];
             for (j, item) in items.iter().enumerate() {
@@ -253,6 +270,7 @@ pub(super) fn project(
                     out(key.next().expect("group key per nonaggregate item"), ctx)?
                 });
             }
+            ctx.budget.output(&result)?;
             output.push(result);
         }
     }

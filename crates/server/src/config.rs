@@ -282,6 +282,9 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if config.memory.query.0 == 0 {
+        return Err(ConfigError::Invalid("memory.query must be positive".into()));
+    }
     if !crate::databases::valid_name(&config.server.default_database) {
         return Err(ConfigError::Invalid(format!(
             "server.default_database must use 1..128 ASCII letters, digits, hyphens or underscores, got {:?}",
@@ -337,7 +340,7 @@ pub fn default_file() -> String {
          cache = \"{cache}\"\n\
          # Total memtable budget across all open databases, charged inside `cache`.\n\
          memtables = \"{memtables}\"\n\
-         # Ceiling for a single query's execution memory.\n\
+         # Conservative per-RUN allocation guard (not process RSS or a shared pool).\n\
          query = \"{query}\"\n",
         listen = d.server.listen,
         data_dir = d.server.data_dir.display(),
@@ -464,6 +467,12 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn query_allocation_guard_must_be_positive() {
+        let err = load(None, &env(&[("BRAINWIRE_MEMORY_QUERY", "0")])).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(message) if message.contains("memory.query")));
     }
 
     #[test]

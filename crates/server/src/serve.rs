@@ -31,7 +31,7 @@ pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
         let databases = Arc::new(Databases::open_all(&loaded.config)?);
         let default_name = loaded.config.server.default_database.clone();
         println!(
-            "brainwire serve {} databases={:?} cache={} memtables={} query={} (query budget not enforced)",
+            "brainwire serve {} databases={:?} cache={} memtables={} query={} (per-RUN allocation guard; not RSS)",
             listener.local_addr().map_err(|e| e.to_string())?,
             databases.names(),
             loaded.config.memory.cache,

@@ -3,9 +3,12 @@
 //! A query transaction owns one snapshot and write overlay across its runs.
 //! All output is evaluated before commit; any query error discards every staged
 //! graph write. `execute` provides the same atomic behavior for one query.
-//! Scans, bindings and output are materialized; query memory budgets are not yet
-//! enforced and this is not a streaming executor.
+//! Scans, bindings and output are materialized. Optional conservative allocation
+//! guardrails reject excessive work; this is not a streaming executor or RSS cap.
+mod budget;
 mod eval;
+use budget::Budget;
+pub use budget::ExecutionLimits;
 mod graph;
 mod procedures;
 mod validate;
@@ -48,6 +51,8 @@ pub enum ExecError {
     ParameterMissing(String),
     #[error("constraint violation: {0}")]
     ConstraintViolation(String),
+    #[error("query allocation guard exceeded: attempted {attempted} bytes, limit {limit} bytes")]
+    MemoryLimit { limit: usize, attempted: usize },
     #[error("transaction conflict")]
     Conflict,
     #[error(transparent)]
@@ -82,6 +87,7 @@ struct Context<'a, 'db> {
     txn: &'a Txn<'db>,
     catalog: &'a Catalog,
     params: &'a BTreeMap<String, Value>,
+    budget: &'a Budget,
 }
 
 /// Lifecycle of a shared query transaction. Terminal states cannot be reused.
@@ -106,11 +112,24 @@ pub struct QueryTransaction<'db> {
     catalog: Catalog,
     wrote: bool,
     state: QueryTransactionState,
+    limits: ExecutionLimits,
 }
 
 impl<'db> QueryTransaction<'db> {
     /// Capture one storage snapshot and load its catalog.
     pub fn begin(db: &'db Database) -> Result<Self, ExecError> {
+        Self::begin_with_limits(db, ExecutionLimits::default())
+    }
+
+    pub fn begin_with_limits(
+        db: &'db Database,
+        limits: ExecutionLimits,
+    ) -> Result<Self, ExecError> {
+        if limits.memory_bytes == 0 {
+            return Err(ExecError::Semantic(
+                "query allocation limit must be positive".into(),
+            ));
+        }
         let mut txn = db.begin();
         // This dependency also rejects a concurrent catalog migration when writing.
         let catalog = match txn.get_for_update(Cf::Meta, b"catalog")? {
@@ -129,6 +148,7 @@ impl<'db> QueryTransaction<'db> {
             catalog,
             wrote: false,
             state: QueryTransactionState::Active,
+            limits,
         })
     }
 
@@ -158,8 +178,17 @@ impl<'db> QueryTransaction<'db> {
         params: &BTreeMap<String, Value>,
     ) -> Result<QueryOutput, ExecError> {
         self.require_active()?;
+        if query.len() > self.limits.memory_bytes {
+            let error = ExecError::MemoryLimit {
+                limit: self.limits.memory_bytes,
+                attempted: query.len(),
+            };
+            self.fail();
+            return Err(error);
+        }
+        let source_bytes = query.len();
         match parse(query) {
-            Ok(query) => self.run_parsed(&query, params),
+            Ok(query) => self.run_parsed(&query, params, source_bytes),
             Err(error) => {
                 self.fail();
                 Err(error.into())
@@ -171,12 +200,15 @@ impl<'db> QueryTransaction<'db> {
         &mut self,
         query: &Query,
         params: &BTreeMap<String, Value>,
+        source_bytes: usize,
     ) -> Result<QueryOutput, ExecError> {
         let result = execute_clauses(
             self.txn.as_mut().expect("active transaction"),
             &self.catalog,
             query,
             params,
+            self.limits,
+            source_bytes,
         );
         match result {
             Ok((output, wrote)) => {
@@ -226,10 +258,27 @@ pub fn execute(
     query: &str,
     params: &BTreeMap<String, Value>,
 ) -> Result<QueryOutput, ExecError> {
+    execute_with_limits(db, query, params, ExecutionLimits::default())
+}
+
+/// Conservative per-RUN allocation guard; limits are not a hard RSS ceiling.
+pub fn execute_with_limits(
+    db: &Database,
+    query: &str,
+    params: &BTreeMap<String, Value>,
+    limits: ExecutionLimits,
+) -> Result<QueryOutput, ExecError> {
+    if query.len() > limits.memory_bytes {
+        return Err(ExecError::MemoryLimit {
+            limit: limits.memory_bytes,
+            attempted: query.len(),
+        });
+    }
     // Preserve syntax-error precedence over catalog loading for this API.
+    let source_bytes = query.len();
     let query = parse(query)?;
-    let mut transaction = QueryTransaction::begin(db)?;
-    let output = transaction.run_parsed(&query, params)?;
+    let mut transaction = QueryTransaction::begin_with_limits(db, limits)?;
+    let output = transaction.run_parsed(&query, params, source_bytes)?;
     transaction.commit()?;
     Ok(output)
 }
@@ -239,13 +288,20 @@ fn execute_clauses(
     catalog: &Catalog,
     query: &Query,
     params: &BTreeMap<String, Value>,
+    limits: ExecutionLimits,
+    source_bytes: usize,
 ) -> Result<(QueryOutput, bool), ExecError> {
+    let budget = Budget::new(limits);
+    budget.charge(source_bytes)?;
+    budget.charge(budget::map_bytes(params))?;
+    budget.charge(txn.estimated_memory_bytes())?;
     validate::query(
         query,
         &Context {
             txn,
             catalog,
             params,
+            budget: &budget,
         },
     )?;
     let mut rows = vec![Bindings::new()];
@@ -254,11 +310,13 @@ fn execute_clauses(
         rows: vec![],
     };
     let mut wrote = false;
+    let mut overlay_bytes = txn.estimated_memory_bytes();
     for clause in &query.clauses {
         let ctx = Context {
             txn,
             catalog,
             params,
+            budget: &budget,
         };
         match clause {
             Clause::Call {
@@ -287,6 +345,7 @@ fn execute_clauses(
                             for value in values {
                                 let mut row = row.clone();
                                 row.insert(var.clone(), Binding::Value(value));
+                                budget.bindings(&row)?;
                                 next.push(row);
                             }
                         }
@@ -311,14 +370,19 @@ fn execute_clauses(
             }
             Clause::Merge(pattern) => {
                 for row in &mut rows {
-                    graph::write_pattern(txn, catalog, params, row, pattern, false)?;
+                    graph::write_pattern(txn, catalog, params, row, pattern, false, &budget)?;
+                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                    overlay_bytes = txn.estimated_memory_bytes();
                     wrote = true;
                 }
             }
             Clause::Create(patterns) => {
                 for row in &mut rows {
                     for pattern in patterns {
-                        graph::write_pattern(txn, catalog, params, row, pattern, true)?;
+                        graph::write_pattern(txn, catalog, params, row, pattern, true, &budget)?;
+                        budget
+                            .charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                        overlay_bytes = txn.estimated_memory_bytes();
                         wrote = true;
                     }
                 }
@@ -330,6 +394,7 @@ fn execute_clauses(
                         txn,
                         catalog,
                         params,
+                        budget: &budget,
                     };
                     let mut changes: BTreeMap<NodeId, BTreeMap<String, Value>> = BTreeMap::new();
                     for item in items {
@@ -345,6 +410,7 @@ fn execute_clauses(
                                 txn,
                                 catalog,
                                 params,
+                                budget: &budget,
                             },
                             id,
                         )?;
@@ -358,6 +424,9 @@ fn execute_clauses(
                             entity_id,
                             &props,
                         )?;
+                        budget
+                            .charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                        overlay_bytes = txn.estimated_memory_bytes();
                         wrote = true;
                     }
                 }
@@ -371,6 +440,8 @@ fn execute_clauses(
                 }
                 for id in ids {
                     brainwire_store::graph::detach_delete(txn, id)?;
+                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                    overlay_bytes = txn.estimated_memory_bytes();
                     wrote = true;
                 }
             }

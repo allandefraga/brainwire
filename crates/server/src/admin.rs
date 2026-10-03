@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use brainwire_core::schema::{Catalog, GraphMapping};
-use brainwire_tui::GraphSummary;
+use brainwire_tui::{GraphSummary, StorageFileSummary};
 
 use crate::config;
 use crate::databases::Databases;
@@ -36,6 +36,135 @@ pub fn list(config: Option<&Path>) -> Result<(), String> {
         println!("{name}");
     }
     Ok(())
+}
+
+fn file_kind(name: &str) -> &'static str {
+    match name {
+        "CURRENT" => "pointer",
+        "LOCK" => "lock",
+        "LOG" => "diagnostic",
+        _ if name.starts_with("MANIFEST-") => "manifest",
+        _ if name.starts_with("OPTIONS-") => "options",
+        _ if name.starts_with("LOG.old.") => "diagnostic",
+        _ if name.ends_with(".sst") => "sst",
+        _ if name.ends_with(".log") => "wal",
+        _ => "other",
+    }
+}
+
+/// Metadata-only, non-atomic inventory; never follows symlinks or reads file contents.
+fn inventory(
+    db: &brainwire_store::db::Database,
+    limit: usize,
+) -> Result<(Vec<StorageFileSummary>, bool), String> {
+    let live: BTreeMap<_, _> = db
+        .live_sst_files()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|f| {
+            (
+                Path::new(&f.name)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                f,
+            )
+        })
+        .collect();
+    let mut files = BTreeMap::new();
+    let mut total = 0usize;
+    for entry in
+        std::fs::read_dir(db.directory()).map_err(|e| format!("cannot list database files: {e}"))?
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let metadata = match std::fs::symlink_metadata(entry.path()) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("cannot inspect file metadata: {e}")),
+        };
+        if metadata.is_dir() {
+            continue;
+        }
+        total += 1;
+        if files.len() == limit && files.last_key_value().is_some_and(|(last, _)| &name > last) {
+            continue;
+        }
+        let symlink = metadata.file_type().is_symlink();
+        let table = if symlink { None } else { live.get(&name) };
+        files.insert(
+            name.clone(),
+            StorageFileSummary {
+                name: name.clone(),
+                kind: if symlink { "symlink" } else { file_kind(&name) }.into(),
+                size_bytes: metadata.len(),
+                column_family: table.map(|f| f.column_family_name.clone()),
+                level: table.map(|f| f.level),
+                entries: table.map(|f| f.num_entries),
+                deletions: table.map(|f| f.num_deletions),
+                state: if symlink {
+                    "not_followed"
+                } else if table.is_some() {
+                    "live_sst_metadata"
+                } else {
+                    "filesystem_metadata"
+                }
+                .into(),
+            },
+        );
+        if files.len() > limit {
+            files.pop_last();
+        }
+    }
+    Ok((files.into_values().collect(), total > limit))
+}
+fn file_json(file: &StorageFileSummary) -> serde_json::Value {
+    serde_json::json!({"name": file.name, "kind": file.kind, "size_bytes": file.size_bytes,
+        "column_family": file.column_family, "level": file.level, "entries": file.entries,
+        "deletions": file.deletions, "state": file.state})
+}
+pub fn files(name: &str, json: bool, limit: usize, config: Option<&Path>) -> Result<(), String> {
+    if !(1..=10_000).contains(&limit) {
+        return Err("file limit must be between 1 and 10000".into());
+    }
+    let registry = open_registry(config)?;
+    let db = registry
+        .get(name)
+        .ok_or_else(|| format!("database {name:?} not found"))?;
+    let (files, truncated) = inventory(&db, limit)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"database": name, "scope":"offline_metadata_nonatomic", "files": files.iter().map(file_json).collect::<Vec<_>>(), "truncated": truncated})
+        );
+    } else {
+        for file in files {
+            println!(
+                "{} kind={} bytes={} cf={} level={}",
+                safe_text(&file.name),
+                file.kind,
+                file.size_bytes,
+                file.column_family.as_deref().unwrap_or("?"),
+                file.level.map_or_else(|| "?".into(), |v| v.to_string())
+            );
+        }
+        if truncated {
+            println!("Inventory truncated; increase --limit to inspect more metadata.");
+        }
+    }
+    Ok(())
+}
+fn safe_text(text: &str) -> String {
+    text.chars()
+        .flat_map(|c| {
+            if c.is_control() {
+                c.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
 }
 
 pub fn graph_summaries(
@@ -71,6 +200,7 @@ pub fn graph_summaries(
         let catalog = db
             .catalog()
             .map_err(|e| format!("cannot read ontology of {name}: {e}"))?;
+        let (files, files_truncated) = inventory(&db, 256)?;
         graphs.push(GraphSummary {
             name,
             nodes,
@@ -110,6 +240,9 @@ pub fn graph_summaries(
             query_budget: config.memory.query.0,
             cache_accounted: 0,
             memtables_allocated: 0,
+            directory: db.directory().display().to_string(),
+            files,
+            files_truncated,
         });
     }
     let (cache, memtables) = registry.memory_usage();
@@ -138,14 +271,19 @@ pub fn overview(json: bool, estimated: bool, config: Option<&Path>) -> Result<()
                     "edge_labels": g.edge_labels,
                     "index_declarations": g.index_declarations,
                     "timeline_streams": g.timeline_streams,
-                    "secondary_index_status": if g.index_declarations == 0 { "none" } else if g.indexes_ready { "string_boolean_ready" } else { "declared_only" },
+                    "secondary_index_status": if g.index_declarations == 0 { "none" } else if g.indexes_ready { "scalar_equality_ready" } else { "declared_only" },
                     "indexed_fields": g.indexed_fields,
                     "storage": g.storage,
+                    "files": g.files.iter().map(file_json).collect::<Vec<_>>(),
+                    "files_truncated": g.files_truncated,
+                    "file_inventory_scope": "offline_metadata_nonatomic",
                     "memory_scope": "shared_offline_inspection_process",
                     "cache_budget_bytes": g.cache_budget,
                     "memtable_budget_bytes": g.memtable_budget,
                     "query_budget_bytes": g.query_budget,
                     "query_budget_enforced": false,
+                    "query_allocation_guard_enforced": true,
+                    "query_allocation_guard_scope": "conservative_per_run",
                     "cache_accounted_bytes": g.cache_accounted,
                     "memtables_allocated_bytes": g.memtables_allocated,
                 })
@@ -211,7 +349,7 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
         .scalar_indexes_ready()
         .map_err(|e| format!("cannot read index state: {e}"))?
     {
-        "string_boolean_ready"
+        "scalar_equality_ready"
     } else {
         "declared_only"
     };
@@ -223,7 +361,8 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
                 "catalog": catalog,
                 "secondary_index_status": index_status,
                 "temporal_history_status": "not_implemented",
-                "maintenance_status": "not_implemented"
+                "maintenance_status": "not_implemented",
+                "checkpoint_status": "offline_native"
             })
         );
     } else if let Some(catalog) = catalog {
@@ -295,6 +434,19 @@ pub fn apply_ontology(name: &str, file: &Path, config: Option<&Path>) -> Result<
     db.apply_ontology(&mapping)
         .map_err(|e| format!("cannot apply ontology: {e}"))?;
     println!("ontology applied to {name}");
+    Ok(())
+}
+
+pub fn checkpoint(name: &str, destination: &Path, config: Option<&Path>) -> Result<(), String> {
+    let registry = open_registry(config)?;
+    let db = registry
+        .get(name)
+        .ok_or_else(|| format!("database {name:?} does not exist"))?;
+    db.checkpoint(destination).map_err(|e| e.to_string())?;
+    println!(
+        "{}",
+        serde_json::json!({"database":name,"status":"checkpoint_created","destination":destination,"scope":"single_graph_committed_native_checkpoint"})
+    );
     Ok(())
 }
 

@@ -23,7 +23,7 @@ UPSERT = """
 UNWIND $rows AS row
 MERGE (c:Customer {entity_id: row.id})
 SET c.email = row.email, c.active = row.active, c.tags = row.tags,
-    c.embedding = row.embedding
+    c.embedding = row.embedding, c.segment = row.segment
 """
 
 
@@ -49,12 +49,16 @@ def verify(session, rows):
     scanned = session.run("MATCH (c:Customer) WHERE c.email='user-3@example.test' RETURN count(*) AS n").single()["n"]
     assert indexed == scanned == 1
     state = session.run("CALL db.indexes() YIELD label, property, state WHERE label='Customer' AND property='email' RETURN state").single()["state"]
-    assert state == "string_boolean_ready", state
+    assert state == "scalar_equality_ready", state
+    assert session.run("MATCH (c:Customer) WHERE c.segment=0.0 RETURN count(*) AS n").single()["n"] == (rows + 6) // 7
+    assert session.run("MATCH (c:Customer) WHERE c.segment=999999 RETURN count(*) AS n").single()["n"] == 0
+    path = session.run("CALL graph.shortestPath({source:'id-0',sourceLabel:'Customer',target:'id-0',targetLabel:'Customer'}) YIELD node,depth RETURN node.entity_id AS id,depth").single()
+    assert path["id"] == "id-0" and path["depth"] == 0
     reachable = session.run("CALL graph.reachable({source:'id-0', sourceLabel:'Customer', maxDepth:1}) YIELD node, depth RETURN node.entity_id AS id, depth").single()
     assert reachable["id"] == "id-0" and reachable["depth"] == 0
 
 
-def run(binary, rows, batch_size):
+def run(binary, rows, batch_size, query_mib):
     with tempfile.TemporaryDirectory(prefix="brainwire-python-ingestion-") as temporary:
         root = Path(temporary)
         with socket.socket() as sock:
@@ -70,12 +74,12 @@ default_database = "ingestion"
 [memory]
 cache = "64MiB"
 memtables = "4MiB"
-query = "32MiB"
+query = "{query_mib}MiB"
 ''')
         ontology = root / "ontology.json"
         ontology.write_text(json.dumps({"version": "1", "nodes": [{
-            "label": "Customer", "properties": ["email", "active", "tags", "embedding"],
-            "indexed_fields": ["email", "active"],
+            "label": "Customer", "properties": ["email", "active", "tags", "embedding", "segment"],
+            "indexed_fields": ["email", "active", "segment"],
         }]}))
 
         def cli(*args):
@@ -85,6 +89,7 @@ query = "32MiB"
             cli("db", "create", graph, "--ontology", str(ontology))
         process = None
         durations = []
+        read_timings = {}
         sst_before_crash = []
         try:
             with (root / "server.log").open("w") as log:
@@ -126,11 +131,21 @@ query = "32MiB"
                                     started = time.perf_counter()
                                     for first in range(0, rows, batch_size):
                                         batch = [{"id": f"id-{i}", "email": f"user-{i}@example.test", "active": i % 2 == 0,
-                                                  "tags": ["synthetic", "python"], "embedding": [0.25, 0.5, 0.75]}
+                                                  "tags": ["synthetic", "python"], "embedding": [0.25, 0.5, 0.75], "segment": i % 7}
                                                  for i in range(first, min(first + batch_size, rows))]
                                         session.execute_write(lambda tx, values: tx.run(UPSERT, rows=values).consume(), batch)
                                     durations.append(time.perf_counter() - started)
                                     assert count(session, "") == rows, repetition
+                                try:
+                                    with session.begin_transaction() as tx:
+                                        tx.run("MATCH (c:Customer {entity_id:'id-0'}) SET c.email='guard-rollback', c.segment=999999").consume()
+                                        tx.run("UNWIND $values AS a UNWIND $values AS b UNWIND $values AS c RETURN a,b,c LIMIT 1", values=list(range(400))).consume()
+                                except Neo4jError as error:
+                                    assert error.code == "Neo.ClientError.Statement.MemoryLimitExceeded", error
+                                else:
+                                    raise AssertionError("fanout must exceed the per-RUN allocation guard")
+                                assert count(session,"{email:'guard-rollback'}") == 0
+                                assert count(session,"{segment:999999}") == 0
                                 with session.begin_transaction() as tx:
                                     tx.run("MATCH (c:Customer {entity_id:'id-0'}) SET c.email='rolled-back'").consume()
                                     assert count(tx, "{email:'rolled-back'}") == 1
@@ -139,6 +154,26 @@ query = "32MiB"
                                 session.run("MATCH (c:Customer {entity_id:'id-1'}) SET c.email=null").consume()
                                 session.run("MATCH (c:Customer {entity_id:'id-2'}) DETACH DELETE c").consume()
                             verify(session, rows)
+                            if cycle == 0:
+                                for name, query in (
+                                    ("primaryPoint", "MATCH (c:Customer {entity_id:$id}) RETURN c.entity_id AS id"),
+                                    ("textPoint", "MATCH (c:Customer) WHERE c.email=$email RETURN c.entity_id AS id"),
+                                    ("numericGroupCount", "MATCH (c:Customer) WHERE c.segment=0.0 RETURN count(*) AS n"),
+                                ):
+                                    samples = []
+                                    for sample in range(30):
+                                        i = 3 + (sample * 7919) % (rows - 3)
+                                        started = time.perf_counter()
+                                        record = session.run(query, id=f"id-{i}", email=f"user-{i}@example.test").single()
+                                        elapsed = (time.perf_counter() - started) * 1000
+                                        if name == "numericGroupCount":
+                                            assert record["n"] == (rows + 6) // 7
+                                        else:
+                                            assert record["id"] == f"id-{i}"
+                                        if sample >= 5:
+                                            samples.append(elapsed)
+                                    samples.sort()
+                                    read_timings[name] = {"samples": len(samples), "p50Ms": samples[len(samples)//2], "p95Ms": samples[(len(samples)-1)*95//100]}
                         with driver.session(database="example") as session:
                             assert count(session, "") == 2
                             assert count(session, "{email:'ada@example.test'}") == 1
@@ -147,7 +182,7 @@ query = "32MiB"
                         # Kill with an explicitly open, uncommitted indexed overwrite.
                         pending_session = driver.session(database="ingestion")
                         pending = pending_session.begin_transaction()
-                        pending.run("MATCH (c:Customer {entity_id:'id-3'}) SET c.email='uncommitted-crash'").consume()
+                        pending.run("MATCH (c:Customer {entity_id:'id-3'}) SET c.email='uncommitted-crash', c.segment=999999").consume()
                         assert count(pending, "{email:'uncommitted-crash'}") == 1
                         sst_before_crash.append(len(list((root / "data" / "ingestion").glob("*.sst"))))
                         process.kill()  # No graceful flush; acknowledged commits must recover from WAL.
@@ -161,13 +196,13 @@ query = "32MiB"
             assert checked["scalar_indexes"] == "checked_active_declarations"
             overview = json.loads(cli("db", "overview", "--json"))
             graph = next(g for g in overview["graphs"] if g["name"] == "ingestion")
-            assert graph["secondary_index_status"] == "string_boolean_ready"
+            assert graph["secondary_index_status"] == "scalar_equality_ready"
             assert graph["nodes"] == rows - 1
             assert "idx" in graph["storage"]
-            print(json.dumps({"rows": rows, "batch_size": batch_size, "insert_seconds": durations[0],
+            print(json.dumps({"rows": rows, "batch_size": batch_size, "query_guard_mib": query_mib, "insert_seconds": durations[0],
                               "replay_seconds": durations[1], "recovered_nodes": graph["nodes"],
                               "sst_files_before_crash": sst_before_crash,
-                              "driver": __import__("neo4j").__version__, "result": "PASS"}, indent=2))
+                              "read_timings": read_timings, "driver": __import__("neo4j").__version__, "query_guard_rollback": "PASS", "numeric_index_recovery": "PASS", "result": "PASS"}, indent=2))
         finally:
             if process is not None and process.poll() is None:
                 process.kill()
@@ -179,7 +214,10 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path, default=Path("target/debug/brainwire"))
     parser.add_argument("--rows", type=int, default=5000)
     parser.add_argument("--batch-size", type=int, default=250)
+    parser.add_argument("--query-mib", type=int, default=32)
     args = parser.parse_args()
     if args.rows < 4 or args.batch_size < 1:
         parser.error("rows must be >= 4 and batch-size must be positive")
-    run(args.binary.resolve(), args.rows, args.batch_size)
+    if not 1 <= args.query_mib <= 256:
+        parser.error("query-mib must be between 1 and 256")
+    run(args.binary.resolve(), args.rows, args.batch_size, args.query_mib)

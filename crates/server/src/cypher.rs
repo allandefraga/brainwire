@@ -1,7 +1,7 @@
 //! Embedded, exclusive local-store execution. JSON output is {fields, rows};
 //! scalars/lists/maps are ordinary JSON, nodes are {type:"node", id, label,
 //! properties}, including virtual entity_id. The executor is eager; the loaded
-//! query-memory setting is not enforced. Ontology application precedes the query
+//! query-memory setting enables conservative allocation guardrails, not an RSS cap. Ontology application precedes the query
 //! in its own transaction. An output/I/O error can occur after a write committed.
 use brainwire_core::{
     schema::{Catalog, GraphMapping},
@@ -60,8 +60,16 @@ pub fn run(
         db.apply_ontology(&mapping)
             .map_err(|e| format!("ontology: {e}"))?;
     }
-    let output = brainwire_cypher::execute(&db, query, &params)
-        .map_err(|e| format!("{}: {e}", category(&e)))?;
+    let output = brainwire_cypher::execute_with_limits(
+        &db,
+        query,
+        &params,
+        brainwire_cypher::ExecutionLimits {
+            memory_bytes: usize::try_from(memory.query.0)
+                .map_err(|_| "config: query exceeds platform address size")?,
+        },
+    )
+    .map_err(|e| format!("{}: {e}", category(&e)))?;
     let rows = output
         .rows
         .iter()
@@ -78,6 +86,7 @@ fn category(e: &ExecError) -> &'static str {
         ExecError::Semantic(_) => "semantic",
         ExecError::ParameterMissing(_) => "parameter",
         ExecError::ConstraintViolation(_) => "constraint",
+        ExecError::MemoryLimit { .. } => "resource",
         ExecError::Conflict => "conflict",
         ExecError::Graph(_) => "storage",
     }

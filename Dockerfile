@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
-RUN cargo build --release --locked -p brainwire-server
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    cargo build --release --locked -p brainwire-server && \
+    cp target/release/brainwire /src/brainwire
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     useradd --uid 10001 --gid brainwire --home-dir /nonexistent --no-create-home brainwire && \
     mkdir /data && chown brainwire:brainwire /data
 
-COPY --from=builder /src/target/release/brainwire /usr/local/bin/brainwire
+COPY --from=builder /src/brainwire /usr/local/bin/brainwire
 COPY crates/core/tests/fixtures/graph_mapping.json /opt/brainwire/example-schema.json
 
 ENV BRAINWIRE_SERVER_DATA_DIR=/data \

@@ -14,6 +14,7 @@ pub struct Databases {
     databases: Mutex<BTreeMap<String, Arc<Database>>>,
     // One cache and write-buffer budget is shared by every opened database.
     resources: Resources,
+    query_limits: brainwire_cypher::ExecutionLimits,
 }
 
 pub(crate) fn valid_name(name: &str) -> bool {
@@ -41,6 +42,10 @@ impl Databases {
             data_dir,
             databases: Mutex::new(BTreeMap::new()),
             resources,
+            query_limits: brainwire_cypher::ExecutionLimits {
+                memory_bytes: usize::try_from(config.memory.query.0)
+                    .map_err(|_| "memory.query exceeds platform address size")?,
+            },
         };
         for entry in fs::read_dir(&registry.data_dir)
             .map_err(|e| format!("cannot list {}: {e}", registry.data_dir.display()))?
@@ -56,6 +61,10 @@ impl Databases {
         }
         registry.create(&config.server.default_database)?;
         Ok(registry)
+    }
+
+    pub fn query_limits(&self) -> brainwire_cypher::ExecutionLimits {
+        self.query_limits
     }
 
     pub fn memory_usage(&self) -> (usize, usize) {
