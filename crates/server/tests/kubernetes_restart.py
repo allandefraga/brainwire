@@ -122,23 +122,11 @@ def run(kind_binary, image, rows, node_image):
                     assert session.run("MATCH (c:Customer) WHERE c.segment=0.0 RETURN count(*) AS n").single()["n"] == (rows + 6) // 7
                     assert session.run("MATCH (c:Customer) WHERE c.segment=999999 RETURN count(*) AS n").single()["n"] == 0
 
+        # Fail before allocating a cluster when the required local build is absent.
+        command(["docker", "image", "inspect", "--format", "{{.Id}}", image], timeout=15)
         try:
             print(f"creating isolated kind cluster {name}", flush=True)
             command([kind_binary, "create", "cluster", "--name", name, "--kubeconfig", str(kubeconfig), "--image", node_image, "--wait", "90s"], timeout=600)
-            print("cluster ready; waiting for local image", flush=True)
-            # Allows a separately running local Docker build to finish.
-            deadline = time.monotonic() + 900
-            while time.monotonic() < deadline:
-                try:
-                    available = subprocess.run(["docker", "image", "inspect", image],
-                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
-                except subprocess.TimeoutExpired:
-                    continue
-                if available.returncode == 0:
-                    break
-                time.sleep(5)
-            else:
-                raise RuntimeError("local image was not available after 15 minutes")
             command([kind_binary, "load", "docker-image", image, "--name", name], timeout=180)
             print("loaded local image; applying retained-PVC StatefulSet", flush=True)
             kube("create", "namespace", namespace)
