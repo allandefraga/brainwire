@@ -1,10 +1,10 @@
 # Scalar indexes through Cypher
 
-Ontology `indexed_fields` and `er_fields` declare string/Boolean equality
+Ontology `indexed_fields` and `er_fields` declare string, Boolean and finite numeric equality
 indexes. `entity_id` has a separate primary lookup. Node writes, overwrites,
 NULL removal and deletion update index keys in the same RocksDB transaction;
 commit syncs the WAL. Ready declarations have been atomically backfilled.
-Legacy catalogs without the ready marker scan until reapplied.
+Legacy catalogs without the v2 ready marker scan until reapplied.
 
 Both forms now use a ready equality index:
 
@@ -38,9 +38,9 @@ CALL db.indexes() YIELD label, property, state
 RETURN label, property, state
 ```
 
-`state` is `string_boolean_ready` or `declared_only`. This reads metadata rather
+`state` is `scalar_equality_ready` or `declared_only`. This reads metadata rather
 than scanning entries. Readiness does not imply support for every property
-type: numeric/list/vector/map values still scan. The built-in primary lookup
+type: list/vector/map and nonfinite numeric values still scan. The built-in primary lookup
 is not listed. `db check NAME` separately audits full graph/index invariants.
 
 The TUI's `shell --overview --view query` shows the selected graph's real
@@ -55,5 +55,29 @@ cargo run --locked --offline -p brainwire-cypher --example index_lookup -- 10000
 cargo run --locked --offline -p brainwire-cypher --example index_lookup -- 100000
 ```
 
-It compares the same unique string in indexed `email` and unindexed `name`.
+Append `number` to compare the same unique integer in indexed `email` and
+unindexed `name`; the field names are synthetic. Both runs use an explicit
+256 MiB allocation guard.
 Open time and network latency are excluded; temporary data are removed.
+
+## Numeric encoding and migration
+
+Integers preserve all 64 bits. Integral floats within the signed 64-bit range
+use the same key as their equal integer, including `-0.0` and `0`. Other finite
+floats use their exact bit representation. This agrees with Cypher equality
+at the 2^53 precision boundary and the signed 64-bit endpoints; no lossy cast
+of every integer to float is used. These are equality indexes, not range indexes.
+
+Older string/Boolean-only stores have a v1 marker. The new engine ignores that
+marker and scans all declared fields until `db apply-ontology NAME SCHEMA.json`
+rebuilds the active indexes atomically and publishes the v2 marker. Reapply the
+same appropriate ontology, not the sample schema. The existing 100,000-key-change
+cap counts both deletions and insertions: a large migration can exceed it and
+fail without changing the catalog or publishing readiness. Resumable builds
+remain pending. Do not downgrade a v2 store to an old binary; that binary cannot
+maintain numeric entries correctly.
+
+The migration regression uses 50,001 existing v1 string entries: deleting and
+reinserting them exceeds the 100,000-change cap. The failed application must
+leave the old catalog, readiness marker and every index entry unchanged; scans
+still return all nodes. A malformed v2 marker also cannot enable a partial index.

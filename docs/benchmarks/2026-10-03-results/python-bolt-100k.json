@@ -1,0 +1,33 @@
+{
+  "rows": 100000,
+  "batch_size": 250,
+  "query_guard_mib": 256,
+  "insert_seconds": 17.978313292,
+  "replay_seconds": 17.739196333,
+  "recovered_nodes": 99999,
+  "sst_files_before_crash": [
+    11,
+    14
+  ],
+  "read_timings": {
+    "primaryPoint": {
+      "samples": 25,
+      "p50Ms": 1.7040409999964368,
+      "p95Ms": 3.162166999999272
+    },
+    "textPoint": {
+      "samples": 25,
+      "p50Ms": 2.244750000002682,
+      "p95Ms": 3.6290420000000267
+    },
+    "numericGroupCount": {
+      "samples": 25,
+      "p50Ms": 582.5897080000004,
+      "p95Ms": 653.2279170000024
+    }
+  },
+  "driver": "5.28.6",
+  "query_guard_rollback": "PASS",
+  "numeric_index_recovery": "PASS",
+  "result": "PASS"
+}

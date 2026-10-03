@@ -41,10 +41,10 @@ successfully only after a default database is serving it. `--mode live` stops
 after the handshake and login, so it does not put query load on the store.
 Use `--address` and `--timeout-ms` to target another local listener. Offline
 `brainwire db schema NAME --json` shows the persisted ontology catalog and
-reports `secondary_index_status: string_boolean_ready` when string/Boolean
+reports `secondary_index_status: scalar_equality_ready` when scalar
 equality indexes are built. A legacy database with declarations but no ready
 marker reports `declared_only` and uses safe label scans until its ontology is
-reapplied and backfilled. Numeric, list, map and vector indexes are pending.
+reapplied and backfilled. Finite numeric equality is supported; list, map, range and vector indexes are pending.
 It also reports temporal history and maintenance as `not_implemented` so
 timeline metadata cannot be mistaken for stored ticket revisions or cleanup.
 `brainwire db metrics NAME --json` reports per-column-family RocksDB estimates
@@ -53,8 +53,9 @@ not exact graph counts or total process memory.
 
 Each connection has one scoped query worker, with at most 64 concurrent
 connections. RocksDB execution runs outside Tokio's IO threads. Results are
-still fully materialized in memory, and the configured query-memory budget is
-not yet enforced. The supported Cypher subset is documented in
+still materialized in memory. `memory.query` enforces a conservative per-RUN
+allocation guard and rolls back failed transactions; it is not RSS or a shared
+concurrent-query pool. See [allocation guard limits](query-allocation-guards.md). The supported Cypher subset is documented in
 [local queries](local-cypher.md). The Graph/Query/Memory/Disk TUI demo remains
 synthetic; `shell --overview` reads real named local graphs while the server is
 stopped.

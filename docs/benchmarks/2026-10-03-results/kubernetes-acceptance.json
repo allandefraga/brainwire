@@ -1,0 +1,11 @@
+{
+  "result": "NOT_COMPLETED",
+  "phase": "kind_cluster_bootstrap",
+  "timeoutSeconds": 600,
+  "cluster": "brainwire-k8s-9ab938f35da4",
+  "nodeImage": "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+  "privateKubeconfig": true,
+  "ownedClusterRemoved": true,
+  "brainwireDeploymentStarted": false,
+  "scope": "No runtime recovery claim; bootstrap timed out before the Brainwire StatefulSet was applied."
+}

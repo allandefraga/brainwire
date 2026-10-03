@@ -1,0 +1,13 @@
+{
+  "result": "NOT_COMPLETED",
+  "phase": "current_image_build",
+  "initialBuildTag": "brainwire:20261003-test",
+  "finalBuildTag": "brainwire:20261003-final",
+  "runtimeAcceptanceStarted": false,
+  "scope": "The cold Linux RocksDB compilation had not completed within the session. Final build was waiting on the shared target cache; owned builds were interrupted. No Docker/Compose runtime recovery result is claimed.",
+  "initialBuildObservedDurationSeconds": 2188,
+  "initialBuildRecord": "kslesqf3uct4g20ogcaef5uhi",
+  "finalBuildRecord": "zq6t3ahc0bhdlfjbemnqkxz2v",
+  "ownedBuildsCanceled": true,
+  "ownedContainersRemaining": 0
+}

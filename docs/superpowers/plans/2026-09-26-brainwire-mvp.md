@@ -31,7 +31,29 @@ acceptance tests as code, but not the full implementation. Implementers run on
 a mid or top tier model and write the code from these contracts; the task
 reviews stay as they are.
 
-## Current handoff (2026-09-26)
+## Current handoff (2026-10-03)
+
+Tasks 1 through 5 are implemented locally: durable multi-query Bolt transactions,
+multiple named graphs, config/CLI and the real Python driver path. The latest
+source passed 372 Rust tests plus a 100K-node Python ingestion/replay/recovery
+workload. The historical instructions and checkboxes below remain the original
+implementation contract; they do not mean these already-completed foundations
+should be recreated.
+
+New slices include precise finite numeric equality indexes, a conservative
+per-RUN allocation guard, directed minimum-hop path procedures, offline native
+checkpoints and a real SST file inspector. See the [current measurement report](../../benchmarks/2026-10-03-guards-indexes-checkpoints-recovery.md)
+and `JOURNAL.md` for runtime evidence and remaining boundaries.
+
+The next engine task is streaming execution with live reservations and a shared
+query pool; the current guard does not enforce RSS or sum concurrent queries.
+Then benchmark mixed concurrent workloads and selective/nonselective plans.
+Large resumable index generations, connected TUI queries and DuckLake/Arrow
+incremental ingestion remain separate slices. Retained-volume orchestration
+must pass actual runtime tests before claiming that failure scenario; no
+replication, machine-loss recovery or HA is implemented.
+
+## Historical handoff (2026-09-26)
 
 Brainwire now lives at `/Users/fraga/Documents/brainwire`, a standalone sibling
 of the platform. Run the commands below from this repository.
@@ -590,8 +612,9 @@ shared-query execution and Bolt lifecycle hooks with test-only integration.
 The production worker, registry and `brainwire serve` now exist locally.
 Drivers 5.28.6 and 6.3.0 each passed write/kill/restart/read with 10,000
 bulk Customers. A local Docker image also passed a retained-volume
-kill/recreate/read test. Stronger load/failure tests, health endpoints and
-Kubernetes/Swarm manifests remain open.
+kill/recreate/read test. Health probes and Compose/Kubernetes/Swarm templates are now implemented.
+The latest source adds stronger driver/failure tests; see the current handoff
+and [orchestrator guide](../../orchestrators.md) for actual acceptance scope.
 
 Read the [transaction integration preflight](2026-09-26-brainwire-bolt-transaction-preflight.md)
 for the current ownership/runtime seams and the next implementation slices.

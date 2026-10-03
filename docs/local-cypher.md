@@ -55,11 +55,10 @@ The ontology is a versioned catalog of labels, property column IDs, edge
 signatures and event streams. Reapplying it preserves existing type and column
 IDs and appends newly declared columns, so old rows remain decodable. Use
 `brainwire db schema NAME --json` to inspect a named database's persisted
-catalog while the server is stopped. `indexed_fields`, `er_fields` and
-`identifier_columns` remain declarations only. `indexed_fields` and
-`er_fields` now create physical equality indexes for string and Boolean
+catalog while the server is stopped. `identifier_columns` remains a declaration. `indexed_fields` and
+`er_fields` create physical equality indexes for string, Boolean and finite numeric
 values in `idx`, with a bounded atomic backfill on ontology application.
-Numeric, list and map predicates still scan the label. `entity_id` has its
+List and map predicates still scan the label. `entity_id` has its
 separate primary-key lookup. `db schema --json` reports whether a legacy
 database's scalar index is ready.
 Catalog versions are schema revisions, not a history of each node. Timeline
@@ -118,3 +117,7 @@ executor: query results are materialized, and `memory.query` does not enforce
 a query memory ceiling yet. Full Cypher, authorization,
 indexed property search and the connected TUI remain separate work. The
 durable Bolt server uses the same executor and store.
+
+The CLI uses configured `memory.query` as a [conservative allocation guard](query-allocation-guards.md).
+An exceeded guard fails atomically; lower `LIMIT` does not make upstream scans
+or UNWIND streaming.

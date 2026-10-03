@@ -92,15 +92,23 @@ covers configuration and transaction behavior.
 
 | Surface | Operations now | Data source |
 | --- | --- | --- |
-| `shell --overview` | Select named graph; inspect counts, ontology, index readiness, shared offline memory and CF counters | Real local RocksDB, read only |
+| `shell --overview` | Select named graph/files; inspect counts, ontology, index readiness, shared offline memory and native SST metadata | Real local RocksDB, read only |
 | `shell --demo` | Explore Graph, Query, Memory, Disk & Files; select nodes/files; run two guided queries; read F1 explanations | Synthetic fixture, no real writes |
+| `db files/checkpoint` | Inspect real file metadata; create a native committed graph checkpoint | Real local RocksDB, offline |
 | `db create/apply-ontology` | Create and update a named graph's catalog | Real local RocksDB, offline |
 | `db stats/schema/metrics/overview/check` | Inspect counts, ontology and storage estimates | Real local RocksDB, offline |
 | `cypher --database` | Execute the supported Cypher subset against one graph | Real local RocksDB, offline |
 | `serve` | Query multiple named graphs over Bolt, selected by session | Real local RocksDB, online |
 
-The current TUI does not run arbitrary Cypher, inspect actual SST files, edit
-ontologies, delete graph data or perform maintenance jobs. The next connected
+The Disk panel now lists real file names/sizes and live-SST column family, level,
+entries and deletions. These native counters include versions/tombstones, not
+exact live graph counts. Metadata is sampled non-atomically, with at most 256
+files, and symlinks are not followed. Left/Right selects a graph, Up/Down a file;
+F1 opens the explanation on narrow terminals. Contents are never decoded.
+`db files NAME --json --limit 256` exposes the same inspection.
+
+The current TUI does not run arbitrary Cypher, edit ontologies, delete graph
+data or perform maintenance jobs. The next connected
 backoffice slice should expose a bounded per-graph neighborhood and read-only
 query results through the server, then live storage and memory telemetry. Any
 mutation from the TUI needs explicit scope to the selected graph and an
@@ -116,3 +124,5 @@ record dimensions, provenance and the memory scope.
 ![Python write pipeline](design/assets/2026-10-01-ingestion/pipeline-120x30.png)
 ![Offline memory accounting](design/assets/2026-10-01-ingestion/memory-120x30.png)
 ![RocksDB column families](design/assets/2026-10-01-ingestion/disk-120x30.png)
+
+Current terminal captures: [2026-10-03 session](design/assets/2026-10-03-session/README.md).

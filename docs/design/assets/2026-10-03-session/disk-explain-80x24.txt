@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • RocksDB estimates • read only                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌EXPLAIN • F1 • PgUp/PgDn──────────────────────────────────────────────────────┐
+│000026.sst                                                                    │
+│                                                                              │
+│Type: sst                                                                     │
+│Size: 2.7 KiB                                                                 │
+│CF: node                                                                      │
+│LSM level: L6                                                                 │
+│SST entries: 250                                                              │
+│Tombstones: 0                                                                 │
+│                                                                              │
+│Sorted key/value data on disk. Created by flush or compaction; preserves      │
+│records beyond RAM.                                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌STORAGE FLOW──────────────────────────────────────────────────────────────────┐
+│/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-tui-capture-41nccvh│
+│p/data/python-customers                                                       │
+│WRITE: WAL + memtables (RAM) -> flush -> SST L0 -> compaction L1+             │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ←→ graph • ↑↓ file • F1 explain • Tab panel • q quit                         │
+└──────────────────────────────────────────────────────────────────────────────┘

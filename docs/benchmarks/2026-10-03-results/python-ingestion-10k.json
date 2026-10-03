@@ -1,0 +1,16 @@
+{
+  "rows": 10000,
+  "batch_size": 250,
+  "query_guard_mib": 32,
+  "insert_seconds": 1.334024583,
+  "replay_seconds": 1.653956709,
+  "recovered_nodes": 9999,
+  "sst_files_before_crash": [
+    7,
+    10
+  ],
+  "driver": "5.28.6",
+  "query_guard_rollback": "PASS",
+  "numeric_index_recovery": "PASS",
+  "result": "PASS"
+}

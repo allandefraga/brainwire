@@ -12,7 +12,8 @@ adapter; the platform remains the first integration target.
 > storage foundation, graph operations, a local durable Bolt/Cypher server,
 > configuration commands, a Cypher subset parser and atomic executor, and an
 > interactive terminal backoffice demo. The server is single-node and has no
-> authentication or enforced query-memory budget yet. The design is in
+> authentication. A conservative per-RUN allocation guard is enforced, but a
+> hard process-memory ceiling and shared query pool are pending. The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
 > the implementation tasks in
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
@@ -41,13 +42,15 @@ reopening. The [server guide](docs/serve.md) covers configuration, driver access
 and current limits; the [single-node container guide](docs/container.md) covers
 the local image and retained-volume test. The [local query guide](docs/local-cypher.md)
 walks through ontology initialization, parameters, bulk JSON files and JSON output. Connecting
-the TUI to the running server and real file browsing remains pending. Offline
+the TUI to the running server remains pending. Real offline file metadata
+browsing is available in the Disk panel. Offline
 index readiness, RocksDB counters and shared memory accounting are available
 in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a
 bounded JSONL importer, MERGE/SET semantics and crash-recovery acceptance.
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
-and `graph.pagerank`, plus directed `graph.reachable` hop distances, with CSR projections built from the transaction
+and `graph.pagerank`, plus directed `graph.reachable` hop distances and
+`graph.shortestPath` node paths, with CSR projections built from the transaction
 snapshot. See the [analytics guide](docs/sparse-analytics.md) for a complete
 example, options, memory limits and a reproducible volume workload.
 
@@ -67,7 +70,7 @@ local Cypher execution, `brainwire probe` health checks and the terminal demo.
 The `brainwire-bolt-dev` binary
 uses a stub query engine.
 It now also has local `brainwire db create`, `db list`, `db overview`, `db stats`, `db schema`,
-`db metrics`, `db check` and `db apply-ontology` commands. They operate on the named RocksDB directories
+`db metrics`, `db files`, `db checkpoint`, `db check` and `db apply-ontology` commands. They operate on the named RocksDB directories
 under `server.data_dir` and require exclusive access; `db stats` scans nodes
 and relationships and accepts `--json` for scripts. For example:
 
@@ -89,13 +92,18 @@ concurrency testing, orchestrator recovery acceptance with retained volumes,
 and live TUI integration.
 The [RocksDB/query/ontology audit](docs/benchmarks/2026-10-01-query-ontology-audit.md)
 records the pre-index baseline. The first physical secondary-index slice now
-accelerates string and Boolean equality; numeric, range and vector indexes,
+accelerates string, Boolean and finite numeric equality; range and vector indexes,
 large backfills and streaming queries remain scale-critical work.
 The [first scalar-index measurement](docs/benchmarks/2026-10-01-scalar-index.md)
 records the local test and the 100,000-key atomic backfill limit.
+[Offline native checkpoints](docs/checkpoints.md) copy one committed graph
+into a new directory. [Query allocation guards](docs/query-allocation-guards.md)
+explain limits, rollback behavior and their current ceilings.
 Equality in `WHERE` can now seek the same ready scalar indexes as pattern
 properties; `CALL db.indexes()` exposes readiness through Cypher. See
 [index lookup](docs/indexes.md) and the reproducible warm benchmark example.
+[Current measurements and recovery evidence](docs/benchmarks/2026-10-03-guards-indexes-checkpoints-recovery.md)
+include numeric indexes and Python/Bolt ingestion at 100,000 nodes.
 [Docker Compose, Kubernetes and Swarm templates](docs/orchestrators.md) package
 a retained single-writer volume and recovery probes; replication remains pending.
 The [temporal graph and maintenance design](docs/design/2026-10-01-temporal-graph-and-maintenance.md)

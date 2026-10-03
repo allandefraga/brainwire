@@ -1,0 +1,40 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / grafos locais • estimativas RocksDB • somente leitura                                                                                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Grafos nomeados────────────────────────────────────────────────────────────┐┌─PIPELINE DE ESCRITA─────────────────────────────────────────────────────────────┐
+│ GRAFO                     NÓS      ARESTAS                                ││Python -> Bolt -> Cypher                                                         │
+│  knowledge                       0          0                             ││UNWIND $rows -> MERGE -> SET                                                     │
+│▶ python-customers            10000          0                             ││                                                                                 │
+│                                                                           ││Nó + índices: um WriteBatch.                                                     │
+│                                                                           ││COMMIT sincroniza o WAL.                                                         │
+│                                                                           ││Flush cria SST depois.                                                           │
+│                                                                           ││                                                                                 │
+│                                                                           ││Índice escalar: pronto                                                           │
+│                                                                           ││Customer.email, Customer.active                                                  │
+│                                                                           ││                                                                                 │
+│                                                                           ││MERGE usa entity_id estável. SET troca campos; null remove.                      │
+│                                                                           ││                                                                                 │
+│                                                                           ││LEITURAS                                                                         │
+│                                                                           ││WHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes.       │
+│                                                                           ││OR/NOT/faixa sozinhos: scan.                                                     │
+│                                                                           ││CALL db.indexes() YIELD label, property, state RETURN label, property, state     │
+│                                                                           ││                                                                                 │
+│                                                                           ││CSR: graph.project, graph.degree, graph.pagerank, graph.reachable,               │
+│                                                                           ││graph.shortestPath.                                                              │
+│                                                                           ││Painel explicativo; não executa consultas.                                       │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+└───────────────────────────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ grafo • Tab painel • q sai • snapshot: --snapshot  •  offline: pare o servidor primeiro                                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

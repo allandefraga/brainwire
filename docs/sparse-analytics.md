@@ -24,8 +24,8 @@ The existing `maxNodes` and `maxRelationships` projection limits apply, and the
 full bounded projection is built before traversal; shallow traversal is not
 a promise of an equally small projection. BFS uses O(nodes) temporary memory
 and O(nodes + visited CSR entries) time. Projection and traversal observe the
-same transaction snapshot and pending writes. Global query memory remains
-unenforced; use the explicit projection caps.
+same transaction snapshot and pending writes. The per-RUN allocation guard also applies; see
+[its memory boundaries](query-allocation-guards.md).
 
 The matrix is ephemeral. Each call rebuilds it from the query transaction's
 snapshot and pending writes. `graph.project` returns a summary and releases the
@@ -33,6 +33,20 @@ matrix; it does not register a named projection, create a file or cache results.
 The authoritative data remains in RocksDB. Reopening a database reconstructs
 the same matrix from its records; projection recovery is also checked after
 forced writer termination in the store crash test.
+
+## Return a shortest directed path
+
+```cypher
+CALL graph.shortestPath({source:'a', sourceLabel:'Page', target:'c', targetLabel:'Page', relationship:'LINK', maxDepth:3})
+YIELD node, depth RETURN node.entity_id, depth
+```
+
+This returns the source, intermediate nodes and target in path order. Equal-hop
+ties use stable CSR neighbor order. Source equal to target returns one node;
+unreachable returns no rows; unknown endpoints are errors. The path is
+unweighted, rejects `weightProperty` and builds the full bounded projection.
+It is a Brainwire procedure, not Cypher's `shortestPath()` pattern syntax or
+weighted Dijkstra.
 
 ## Run the complete example
 
@@ -83,7 +97,8 @@ LIMIT 10
 ```
 
 Calls accept zero arguments or one options map (including a `$parameter`);
-`graph.reachable` requires a map specifying `source` and `sourceLabel`.
+`graph.reachable` requires a map specifying `source` and `sourceLabel`;
+`graph.shortestPath` additionally requires `target` and `targetLabel`.
 Explicit `YIELD` fields and final `RETURN` are required. Keywords ignore case;
 procedure names and option/field names use the casing shown here. Only one call
 followed by one `RETURN` is supported per query. Standalone calls, `YIELD *`,
@@ -96,6 +111,7 @@ analytics sees those staged changes and rollback still discards them.
 | `graph.project` | `nodeCount`, `relationshipCount`, `scannedRelationshipCount`, `nonZeroCount`, `csrBytes` | One summary row, including for an empty graph. |
 | `graph.degree` | `node`, `outDegree`, `inDegree` | One row per node in NodeId order; counts selected relationships, including parallel edges, self-loops and zero-weight edges. |
 | `graph.reachable` | `node`, `depth` | Each reachable node once in NodeId order, including source at depth zero; minimum unweighted directed hop depth. |
+| `graph.shortestPath` | `node`, `depth` | Ordered nodes on one minimum-hop directed path; empty if unreachable. |
 | `graph.pagerank` | `node`, `score`, `iterations`, `converged`, `residual` | One row per node, descending score then ascending NodeId for ties. `LIMIT` selects from that order. Empty graphs return no rows. |
 
 `RETURN count(*)` and the existing projection/aggregation rules also work.
@@ -111,9 +127,11 @@ reduce the projection size or bypass validation/limits.
 | `maxNodes` | All | 100,000 | Integer 1–1,000,000. Counts all nodes, including isolated nodes. |
 | `maxRelationships` | All | 1,000,000 | Integer 1–10,000,000. Bounds all outgoing records scanned, before type filtering. |
 | `weightProperty` | project, pagerank | Unit weights | Nonempty property name on relationships. |
-| `source` | reachable | Required | Stable entity_id of the starting node. |
-| `sourceLabel` | reachable | Required | Existing node label of the starting node. |
-| `maxDepth` | reachable | 10 | Integer 1–1,000; source is returned at depth 0. |
+| `source` | reachable, shortestPath | Required | Stable entity_id of the starting node. |
+| `sourceLabel` | reachable, shortestPath | Required | Existing node label of the starting node. |
+| `maxDepth` | reachable, shortestPath | 10 | Integer 1–1,000; source is returned at depth 0. |
+| `target` | shortestPath | Required | Stable entity_id of the ending node. |
+| `targetLabel` | shortestPath | Required | Existing node label of the ending node. |
 | `maxIterations` | pagerank | 100 | Integer 1–1,000. |
 | `dampingFactor` | pagerank | 0.85 | Finite number in [0, 1]. |
 | `tolerance` | pagerank | 0.00000001 | Finite nonnegative L1 residual threshold; zero disables early stopping. |
@@ -155,7 +173,8 @@ This is single-process analytics. The embedded CLI needs exclusive database
 access; the Bolt server can run the same procedures against a selected named
 database. There is no distributed execution, persistent projection registry,
 vector similarity index, permission filtering or live graph TUI integration
-yet. Production deployment still needs enforced memory budgets.
+yet. Production deployment still needs a shared query pool, streaming execution and
+a measured hard memory envelope beyond the conservative per-RUN guard.
 
 ## Reproduce the volume workload
 

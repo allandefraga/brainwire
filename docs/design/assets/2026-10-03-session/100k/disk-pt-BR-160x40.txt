@@ -1,0 +1,40 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / grafos locais • estimativas RocksDB • somente leitura                                                                                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Grafos • ←→─────────────┐┌─DISCO E ARQUIVOS / python-customers • truncado────────────────────┐┌EXPLICAR • F1 • PgUp/PgDn──────────────────────────────────────┐
+│  knowledge             ││ ARQUIVO                   TIPO       TAMANHO                      ││000026.sst                                                     │
+│> python-customers      ││  000025.sst               sst           1.5 KiB                   ││                                                               │
+│                        ││> 000026.sst               sst           2.7 KiB                   ││Tipo: sst                                                      │
+│                        ││  000072.sst               sst           6.7 KiB                   ││Tamanho: 2.7 KiB                                               │
+│                        ││  000111.sst               sst           6.8 KiB                   ││CF: node                                                       │
+│                        ││  000153.sst               sst           6.9 KiB                   ││Nível LSM: L6                                                  │
+│                        ││  000195.sst               sst           6.8 KiB                   ││Entradas SST: 250                                              │
+│                        ││  000234.sst               sst           6.9 KiB                   ││Tombstones: 0                                                  │
+│                        ││  000273.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000311.sst               sst           6.9 KiB                   ││Dados chave/valor ordenados no disco. Criado por flush ou      │
+│                        ││  000352.sst               sst           6.8 KiB                   ││compactação; preserva registros além da RAM.                   │
+│                        ││  000393.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000431.sst               sst           6.9 KiB                   ││Entradas SST incluem versões e tombstones; não são contagens de│
+│                        ││  000469.sst               sst           6.8 KiB                   ││nós vivos.                                                     │
+│                        ││  000507.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000549.sst               sst           6.8 KiB                   ││Metadados offline, não atômicos. CF/nível vêm do RocksDB; ?    │
+│                        ││  000587.sst               sst           6.8 KiB                   ││significa indisponível. Não edite ou apague arquivos do engine.│
+│                        ││  000625.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000663.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000701.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000739.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000777.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000815.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000853.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000895.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000933.sst               sst           6.8 KiB                   ││                                                               │
+└────────────────────────┘└───────────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+┌FLUXO DE ARMAZENAMENTO────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-tui-capture-sgkx7eeo/data/python-customers                                                         │
+│ESCRITA: WAL + memtables (RAM) -> flush -> SST L0 -> compactação L1+                                                                                          │
+│LEITURA: cache -> memtables/SST. Índices também são registros persistidos.                                                                                    │
+│RAM configurada ≠ reservada. Query: proteção por RUN, não RSS. Valores ? são desconhecidos.                                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ←→ grafo • ↑↓ arquivo • F1 explica • Tab painel • q sai                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

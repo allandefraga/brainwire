@@ -65,7 +65,9 @@ storage queries. Tune the window using real recovery measurements. Probes use
 500 ms individual network timeouts and a 5 s outer orchestrator timeout.
 
 The memory limit is 2 GiB, cache 256 MiB, memtables 32 MiB inside that cache,
-and query setting 256 MiB. Query memory remains unenforced. A 60 s termination
+and query setting 256 MiB. The query setting is a conservative per-RUN
+allocation guard, not an RSS ceiling or shared concurrent pool; see
+[its boundaries](query-allocation-guards.md). A 60 s termination
 allowance does not promise graceful draining of every transaction. Acknowledged
 commits sync the WAL; interrupted uncommitted writes must disappear.
 
@@ -73,8 +75,9 @@ Acceptance: write synthetic indexed data via Python/Bolt, replace the Pod,
 wait for startup/readiness, then verify counts, index lookups and absence of
 uncommitted writes. Fence an unreachable old writer before force-deleting its
 Pod. This session checks the local manifest render and strict Kubernetes 1.36
-schema validation (both resources valid); live cluster recovery is still
-pending because no Kubernetes context is configured.
+schema validation (both resources valid); live-cluster acceptance is provided by the isolated kind script below.
+The [session report](benchmarks/2026-10-03-guards-indexes-checkpoints-recovery.md)
+records the actual runtime result separately from manifest validation.
 
 ## Docker Swarm
 
@@ -104,6 +107,7 @@ BRAINWIRE_SWARM_NODE_ID=validation-only docker stack config -c deploy/swarm.yaml
 kubectl kustomize deploy/kubernetes
 python crates/server/tests/container_restart.py --image brainwire:local --rows 10000 --cycles 5
 python crates/server/tests/compose_restart.py --image brainwire:local
+python crates/server/tests/kubernetes_restart.py --image brainwire:local --rows 10000
 ```
 
 The acceptance script waits for a query-ready probe and kills its own uniquely
@@ -119,3 +123,20 @@ Sources: [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controller
 [health probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/),
 [Swarm placement/storage](https://docs.docker.com/engine/swarm/services/),
 [update/rollback order](https://docs.docker.com/reference/compose-file/deploy/).
+
+The Kubernetes script requires `kind`, Docker, kubectl and the Neo4j driver. It
+creates a unique single-node cluster with a private kubeconfig, loads an existing
+local image and applies the actual StatefulSet template. It initializes ontology
+with an offline Job, ingests bounded Python batches, interrupts an uncommitted
+indexed overwrite by stopping the container with zero timeout, and recreates
+the Pod. Both recoveries must retain the PVC, string/numeric lookups and committed
+counts. It then audits the store, creates/audits a native checkpoint and queries
+the copy over Bolt. Its cluster is deleted in `finally`, including on failure;
+it does not deploy to an existing context. Its acceptance scope covers process/Pod
+recovery on retained storage, not machine loss, distributed replication or HA.
+
+The October 3 live attempt did not reach Brainwire deployment: the pinned kind
+cluster bootstrap timed out at 600 seconds and was removed. Thus retained-PVC
+runtime recovery remains unproven here. Build the current image first, then run
+the script; use `--node-image` for another compatible test-node image. The default
+is pinned Kubernetes 1.36.4 from kind's official release manifest.

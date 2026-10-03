@@ -6,18 +6,19 @@ The ontology records `indexed_fields`, `er_fields` and
 `identifier_columns`. The first implementation slice now stores string and
 Boolean equality keys in `idx`, updates them with node writes, selects them
 for `MATCH`, and atomically backfills at most 100,000 index keys during an
-offline ontology application. `identifier_columns`, numeric/range indexes and
+offline ontology application. `identifier_columns`, range indexes and
 larger resumable backfills remain pending. Backfill now records prefix
 dependencies so concurrent node/index writes cannot publish a stale ready index.
 `db check` audits missing and stale entries for ready active declarations. `db schema --json` distinguishes
-`string_boolean_ready` from a legacy `declared_only` catalog.
+`scalar_equality_ready` from a legacy `declared_only` catalog.
 
 ## Correctness contract
 
 - Start with exact equality on non-null Boolean and string values. Integer
   and float need a shared encoding consistent with Cypher's cross-type numeric
-  equality; until then both retain a scan. Defer list/map membership and vector
-  search to separate index designs.
+  equality; the v2 implementation now supports finite numeric equality with
+  precise integer/integral-float encoding. See [current index behavior](../indexes.md).
+  Defer list/map membership and vector search to separate index designs.
 - An `idx` key identifies `(node type, property name, type-tagged encoded
   value, node ID)`. Property names, rather than column IDs, also cover
   indexed properties stored in a row's flexible map.

@@ -38,6 +38,80 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-03, allocation guards, numeric indexes, native checkpoints and real files
+
+- **Requested:** one hour of substantial local work, starting 07:33:49 UTC
+  (09:33:49 Amsterdam). No push, publication or remote PR.
+- **Duration:** closed at 08:34:01 UTC
+  (10:34:01 Amsterdam), after
+  1h 0m 12s; the requested hour was completed.
+- **Query limits:** the real Bolt worker and embedded CLI now use configured
+  `memory.query` as a conservative per-RUN allocation guard. Query source,
+  parameters, candidates, bindings, output/grouping, write-overlay growth and
+  CSR estimates share accounting. Failures discard earlier staged RUNs and
+  their indexes. A test first exposed separate source/parameter checks; fixed
+  them to use the same guard. This is not RSS or a shared concurrent pool;
+  individual decode/store/transport operations are not fully reserved.
+- **Storage/indexes:** streamed label/index/adjacency visitors avoid eager copies
+  of every record payload. Transaction overlays have an O(1) memory estimate;
+  typed entity_id lookup now uses one primary seek. Finite numeric equality
+  indexes preserve all i64 bits and equal integral-float keys, including -0.0.
+  v1 stores scan until atomic v2 rebuild. Differential precision/overwrite/
+  snapshot/reopen checks pass; a 50,001-entry migration exceeds the deletion+
+  insertion cap and leaves the old catalog/marker/entries unchanged.
+- **Algorithms:** shared CSR BFS now returns ordered minimum-hop node paths via
+  `CALL graph.shortestPath`, with typed source/target, depth bounds, overlay
+  visibility and deterministic ties. It stops at target discovery. Unweighted
+  only; the complete bounded projection is still rebuilt for each call.
+- **Checkpoints:** RocksDB's native checkpoint captures one committed graph,
+  ontology, indexes and allocator state. CLI `db checkpoint NAME --destination`
+  refuses existing/broken-symlink/nested destinations. Reopened copies preserve
+  old values after source overwrites and allocate new identities correctly.
+  This is a local snapshot, not off-machine backup or replicated durability.
+- **TUI/CLI:** `db files` and the real offline Disk panel show actual files,
+  sizes, live-SST CF/level/entries/tombstones and explanations. No contents are
+  read or symlinks followed; output is bounded and metadata non-atomic.
+  Left/Right selects graphs, Up/Down files, F1 explains on narrow terminals.
+  Memory labels guard/accounting scope precisely. Green/cyan identity retained;
+  English default, optional Portuguese. Four panels captured at 160x40, narrow
+  80x24, and Portuguese, plus all four wide EN/PT-BR panels at 100,000
+  nodes. The gallery records synthetic fixture provenance.
+- **Verification:** 372 Rust tests passed, workspace fmt and denied-warning
+  clippy passed. Final native Python/Bolt 10K acceptance passed with drivers
+  5.28.6 and 6.3.0, including allocation failure/connection reuse and two
+  interrupted-write recovery cycles. A 100K driver workload also passed;
+  lists and embedding lists round-trip, without providing ANN/vector search.
+- **Measured:** warm debug embedded 100K string/numeric WHERE index p50
+  0.0639/0.0615 ms; equivalent scans 3.442/3.163 s. Python/Bolt 100K point
+  p50 1.704 ms primary / 2.245 ms email; a 14,286-match numeric count costs
+  582.590 ms. One 100K import/replay took 14.472/17.253 s; another loaded run
+  varied to 17.978/17.739 s. On 100K nodes/1M edges, CSR vectors use 12.8 MB
+  excluding build buffers/RSS; projection 2.440 s and direct PageRank 2.278 s.
+  Shortest path through Cypher costs 2.519 s including full projection. These
+  are local synthetic observations, not isolated production or SLA results.
+- **Deployment:** Dockerfile now caches Cargo/RocksDB build artifacts and copies
+  the executable outside the cache mount. A reusable isolated kind acceptance
+  script exercises retained PVC, container/Pod replacement, numeric indexes,
+  audit and native checkpoint via offline Jobs. First cluster was removed while
+  waiting for the image; pinned 1.36.4 bootstrap timed out at 600 seconds before
+  Brainwire deployment and was removed. Cold Linux RocksDB compilation
+  had not completed after more than 36 minutes; the final-source build waited
+  on its cache. Both owned builds were interrupted; current-image Docker/Compose
+  runtime acceptance never started. No live Kubernetes recovery or HA claim
+  is supported by this session.
+- **Saved:** code in local commit `ae188f9`; current reports/raw JSON under
+  `docs/benchmarks/2026-10-03-*`, captures under
+  `docs/design/assets/2026-10-03-session/`, updated MVP handoff and user guides.
+- **Next:** first complete current-image Docker/Compose and isolated Kubernetes
+  runtime acceptance. Then streaming MATCH/UNWIND/RETURN with live reservations
+  and a shared query pool, concurrent load/RSS measurements, resumable index
+  generations and connected TUI reads. DuckLake/Arrow incremental ingestion and
+  temporal retention remain recorded separate tasks; no connector added.
+- **Blockers:** cold Linux build and test-cluster bootstrap exceeded available
+  runtime progress on this shared local environment. Native implementation and
+  driver checks have no blocker. Replication, authentication/TLS, vector search,
+  historical node revisions and maintenance execution remain future work.
+
 ### 2026-10-02, WHERE index seeks, CSR reachability and retained-volume deployments
 
 - **Requested:** a 20-minute local session starting 06:33:18 UTC (08:33:18

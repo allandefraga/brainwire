@@ -68,8 +68,8 @@ whose operations have deliberately been made idempotent.
 
 Lists and numeric vectors are stored as values and round-trip through Python.
 Storing an embedding does **not** provide an ANN/vector-search index. Current
-secondary indexes accelerate string/Boolean equality in inline MATCH patterns.
-Numeric, list and map values fall back to scans, as does an equality in WHERE.
+secondary indexes accelerate string, Boolean and finite numeric equality in
+inline MATCH patterns and eligible WHERE predicates. List and map values scan.
 
 ## How storage stays consistent
 
@@ -102,9 +102,11 @@ and q exits. The pipeline panel explains the write path and shows persisted
 index readiness/declarations. Memory shows shared configured budgets and actual
 cache/write-buffer accounting **for the offline inspection process**. Those
 numbers are neither live-server RAM nor RSS. Memtable cache reservations are
-included in cache accounting; do not add the two. `memory.query` is configured
-but not enforced. Disk shows per-column-family estimates, memtable allocation
-and level-zero file counts, not a file browser.
+included in cache accounting; do not add the two. `memory.query` is a conservative per-RUN allocation guard, not RSS or a
+shared pool; see [guard limits](query-allocation-guards.md). Disk now lists real
+files with sizes, native live-SST CF/level metadata and explanations. Left/Right
+selects a graph; Up/Down selects a file; F1 reveals its explanation on narrow
+terminals. Inspection is offline and does not read file contents.
 
 `db check` performs an expensive offline scan: primary-key/node correspondence,
 edge mirrors/endpoints, allocator high-water marks, and missing/stale entries
@@ -198,3 +200,9 @@ lag, records and bytes per second, batch queue/memory, retries and error details
 First acceptance gate: compare Python/Bolt against Arrow/Rust on the same source,
 data, mappings, indexes and durability settings, including restart during a batch,
 commit-before-checkpoint crash, update/delete replay and missing-history recovery.
+
+The current acceptance script supports `--query-mib 1..256` (default 32).
+Use `--rows 100000 --batch-size 250 --query-mib 256` for the recorded 100K
+workload. It checks numeric segment indexes, guard-failure rollback through the
+real driver, self-path analytics, and end-to-end read latency. A numeric group
+with many matching rows is reported separately from a unique entity/email read.

@@ -1,0 +1,26 @@
+{
+  "allocationGuardBytes": 268435456,
+  "cacheMiB": 64,
+  "importMs": 2396.211375,
+  "keyType": "number",
+  "measurements": {
+    "patternIndex": {
+      "p50Ms": 0.07645800000000001,
+      "p95Ms": 0.10245800000000001,
+      "samples": 25
+    },
+    "whereIndex": {
+      "p50Ms": 0.061500000000000006,
+      "p95Ms": 0.062625,
+      "samples": 25
+    },
+    "whereScan": {
+      "p50Ms": 3162.5509159999997,
+      "p95Ms": 3535.970667,
+      "samples": 25
+    }
+  },
+  "memtableMiB": 16,
+  "mode": "warm embedded, excludes database open, 5 warmups per query",
+  "nodes": 100000
+}

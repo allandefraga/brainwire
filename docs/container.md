@@ -70,3 +70,8 @@ storage, or use a storage system that can reattach that member's volume. On
 Kubernetes, a StatefulSet and persistent volume claims are the intended first
 single-node pattern. Multi-machine high availability requires Brainwire's own
 replication protocol and quorum tests in addition to either orchestrator.
+
+The Dockerfile uses BuildKit cache mounts for Cargo downloads and build output.
+The executable is copied outside the mount before the runtime image is built;
+no compiler or writable build cache is packaged in the final image. A clean
+first build still compiles RocksDB C++, while later local rebuilds reuse it.
