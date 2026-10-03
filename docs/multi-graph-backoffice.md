@@ -126,3 +126,11 @@ record dimensions, provenance and the memory scope.
 ![RocksDB column families](design/assets/2026-10-01-ingestion/disk-120x30.png)
 
 Current terminal captures: [2026-10-03 session](design/assets/2026-10-03-session/README.md).
+
+The latest Memory panel explains the shared server reservation pool, transaction
+lifetime and cooperative `server.query_timeout_ms` deadline in English and
+Portuguese. Its live-server Cypher example is `CALL db.memory()`; offline pool
+usage remains explicitly unobserved. The pipeline panel distinguishes streaming
+simple reads from eager writes, grouped counts and CALL.
+
+Latest 100K-node captures: [second October 3 session](design/assets/2026-10-03-session2/README.md).

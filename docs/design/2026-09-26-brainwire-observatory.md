@@ -166,7 +166,7 @@ metrics and an explicit "no container limit detected" state, not a fabricated
 | Process RSS | Physical memory resident for the server process | Collector and API planned |
 | `memory.cache` | Shared cache budget for read blocks and memtable accounting reservations | Configured, default 10 GiB; store resource exists |
 | `memory.memtables` | Shared write-buffer target before data is flushed into disk tables | Configured, default 1 GiB, charged inside the cache budget |
-| `memory.query` | Intended execution-memory ceiling; consumes memory outside the cache pool | Configured, default 2 GiB; executor enforcement not implemented |
+| `memory.query` | Intended execution-memory ceiling; consumes memory outside the cache pool | Conservative per-RUN guard and shared server reservations; not RSS |
 
 Memtable reservations in the cache and actual memtable allocation are related
 but not identical counters. Reservations can lag a decrease in allocation.

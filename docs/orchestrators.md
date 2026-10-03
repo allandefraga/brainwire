@@ -66,7 +66,8 @@ storage queries. Tune the window using real recovery measurements. Probes use
 
 The memory limit is 2 GiB, cache 256 MiB, memtables 32 MiB inside that cache,
 and query setting 256 MiB. The query setting is a conservative per-RUN
-allocation guard, not an RSS ceiling or shared concurrent pool; see
+allocation guard and a shared concurrent reservation pool. It is not an RSS
+ceiling; the default cooperative execution deadline is 30 seconds. See
 [its boundaries](query-allocation-guards.md). A 60 s termination
 allowance does not promise graceful draining of every transaction. Acknowledged
 commits sync the WAL; interrupted uncommitted writes must disappear.
@@ -125,7 +126,8 @@ Sources: [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controller
 [update/rollback order](https://docs.docker.com/reference/compose-file/deploy/).
 
 The Kubernetes script requires `kind`, Docker, kubectl and the Neo4j driver. It
-creates a unique single-node cluster with a private kubeconfig, loads an existing
+checks that the local image exists before allocating resources, creates a unique
+single-node cluster with a private kubeconfig, loads that
 local image and applies the actual StatefulSet template. It initializes ontology
 with an offline Job, ingests bounded Python batches, interrupts an uncommitted
 indexed overwrite by stopping the container with zero timeout, and recreates
@@ -135,8 +137,10 @@ the copy over Bolt. Its cluster is deleted in `finally`, including on failure;
 it does not deploy to an existing context. Its acceptance scope covers process/Pod
 recovery on retained storage, not machine loss, distributed replication or HA.
 
-The October 3 live attempt did not reach Brainwire deployment: the pinned kind
-cluster bootstrap timed out at 600 seconds and was removed. Thus retained-PVC
-runtime recovery remains unproven here. Build the current image first, then run
-the script; use `--node-image` for another compatible test-node image. The default
-is pinned Kubernetes 1.36.4 from kind's official release manifest.
+The first October 3 attempt timed out during kind bootstrap. The second-session
+retry passed Kubernetes 1.36.4 retained-PVC acceptance with 10K nodes: container
+interruption, Pod recreation, index checks, offline audit, native checkpoint and
+queries against the reopened copy. See the [current session report](benchmarks/2026-10-03-streaming-pool-deadlines.md)
+for the exact local image and raw evidence. This is single-node retained-storage
+recovery, not replication, machine loss or HA. The harness checks image presence
+before creating a unique cluster; `--node-image` selects another compatible image.

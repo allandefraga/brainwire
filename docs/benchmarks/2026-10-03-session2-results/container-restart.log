@@ -1,0 +1,16 @@
+[#C5CE]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 50635)) (ResolvedIPv4Address(('127.0.0.1', 50635))): OSError('No data')
+[#C5D7]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 50640)) (ResolvedIPv4Address(('127.0.0.1', 50640))): OSError('No data')
+[#C5DF]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 50652)) (ResolvedIPv4Address(('127.0.0.1', 50652))): ConnectionResetError(54, 'Connection reset by peer')
+[#C5E9]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 50658)) (ResolvedIPv4Address(('127.0.0.1', 50658))): ConnectionResetError(54, 'Connection reset by peer')
+[#C5F2]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 50670)) (ResolvedIPv4Address(('127.0.0.1', 50670))): OSError('No data')
+[#C5FA]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 50677)) (ResolvedIPv4Address(('127.0.0.1', 50677))): OSError('No data')
+write: committed 10002 customers and one company
+cycle 0: verified after container restart
+cycle 1: verified after container restart
+cycle 2: verified after container restart
+cycle 3: verified after container restart
+cycle 4: verified after container restart
+cycle 5: verified after container restart
+cycle 6: verified after container restart
+{"database":"client_memory","scalar_indexes":"checked_active_declarations","status":"ok"}
+container restart and indexed-overwrite recovery: ok

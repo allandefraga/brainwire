@@ -1,0 +1,8 @@
+server.listen            = 0.0.0.0:7687   (env BRAINWIRE_SERVER_LISTEN)
+server.data_dir          = /data          (env BRAINWIRE_SERVER_DATA_DIR)
+server.default_database  = client_memory (default)
+server.max_message       = 256 MiB        (default)
+server.query_timeout_ms  = 30000          (default)
+memory.cache             = 10 GiB         (default)
+memory.memtables         = 1 GiB          (default)
+memory.query             = 2 GiB          (default)

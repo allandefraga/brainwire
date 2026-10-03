@@ -1,0 +1,27 @@
+{
+  "native": {
+    "os": "Darwin arm64",
+    "cpu": "Apple M5",
+    "memoryBytes": 34359738368,
+    "rustc": "1.98.1 (48a229cea 2026-09-01)",
+    "profile": "debug",
+    "sharedHost": true
+  },
+  "docker": {
+    "serverVersion": "29.7.2",
+    "builderToolchain": "1.98.1",
+    "cargoBuildJobs": 2,
+    "image": "brainwire:20261003-session2-release",
+    "imageId": "sha256:94e734987038bcf20e964eea25fac00ca414646bad0488d0c8ac72d35bc0700e",
+    "imageRevision": "ba683ad",
+    "containerRestart": "PASS",
+    "composeRestart": "PASS",
+    "kubernetesRecovery": "PASS",
+    "kubernetesVersion": "v1.36.4",
+    "queryMemoryDeadlineConcurrencyDisconnect": "PASS"
+  },
+  "engineCommit": "410e9aee14561ed43a9ed2c7f6c3f780129e1848",
+  "rustTests": 383,
+  "clippy": "PASS",
+  "format": "PASS"
+}

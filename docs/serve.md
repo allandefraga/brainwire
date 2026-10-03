@@ -53,9 +53,13 @@ not exact graph counts or total process memory.
 
 Each connection has one scoped query worker, with at most 64 concurrent
 connections. RocksDB execution runs outside Tokio's IO threads. Results are
-still materialized in memory. `memory.query` enforces a conservative per-RUN
-allocation guard and rolls back failed transactions; it is not RSS or a shared
-concurrent-query pool. See [allocation guard limits](query-allocation-guards.md). The supported Cypher subset is documented in
+still materialized in memory, while simple reads process intermediate rows
+incrementally. `memory.query` bounds conservative per-RUN accounting and the
+shared server reservation pool; `CALL db.memory()` exposes pool telemetry.
+`server.query_timeout_ms` sets a cooperative execution deadline (30 seconds by
+default). Resource failures roll back the complete transaction. These are not
+hard RSS or wall-clock ceilings. See [query limits](query-allocation-guards.md).
+The supported Cypher subset is documented in
 [local queries](local-cypher.md). The Graph/Query/Memory/Disk TUI demo remains
 synthetic; `shell --overview` reads real named local graphs while the server is
 stopped.

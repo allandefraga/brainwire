@@ -1,0 +1,8 @@
+creating isolated kind cluster brainwire-k8s-4f5e30df31a0
+cluster ready; waiting for local image
+removed isolated cluster brainwire-k8s-4f5e30df31a0
+Traceback (most recent call last):
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/kubernetes_restart.py", line 229, in <module>
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/kubernetes_restart.py", line 141, in run
+    start()
+RuntimeError: local image was not available after 15 minutes

@@ -75,3 +75,14 @@ The Dockerfile uses BuildKit cache mounts for Cargo downloads and build output.
 The executable is copied outside the mount before the runtime image is built;
 no compiler or writable build cache is packaged in the final image. A clean
 first build still compiles RocksDB C++, while later local rebuilds reuse it.
+
+The builder sets `RUSTUP_TOOLCHAIN=1.98.1` to match its base image, so the
+repository's development `stable` channel cannot silently select another Rust
+release. `CARGO_BUILD_JOBS` defaults to 2 to limit concurrent RocksDB C++ compiler
+memory; builders with sufficient free resources can override it using
+`docker build --build-arg CARGO_BUILD_JOBS=4 -t brainwire:local .`.
+
+The locked shared target cache preserves compiled dependencies, including RocksDB.
+Each uncached source build runs `cargo clean --release --workspace` first so
+workspace artifacts from another build cannot appear newer than copied sources.
+This prevents stale cross-crate APIs while retaining the expensive native cache.

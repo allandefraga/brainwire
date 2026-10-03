@@ -1,0 +1,54 @@
+{
+  "mixedWorkload": {
+    "connections": 8,
+    "operations": 800,
+    "seconds": 0.41958554089069366,
+    "operationsPerSecond": 1906.6433945787664,
+    "latency": {
+      "read": {
+        "operations": 400,
+        "p50Ms": 2.8339168056845665,
+        "p95Ms": 10.930958902463317
+      },
+      "write": {
+        "operations": 400,
+        "p50Ms": 2.875416073948145,
+        "p95Ms": 11.255874997004867
+      }
+    },
+    "indexOverwriteCheck": "PASS",
+    "scope": "native debug Bolt; 2K nodes; disjoint writer keys"
+  },
+  "result": "PASS",
+  "rows": 2000,
+  "concurrentConnections": 16,
+  "outcomes": [
+    "held",
+    "held",
+    "held",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "held",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected"
+  ],
+  "during": {
+    "status": "pool_exhausted"
+  },
+  "after": {
+    "poolLimitBytes": 262144,
+    "poolReservedBytes": 312,
+    "poolPeakBytes": 262117,
+    "poolRejections": 13
+  },
+  "deadlineRollback": "PASS",
+  "scope": "synthetic native Bolt; shared accounting, not RSS"
+}

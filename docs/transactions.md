@@ -74,8 +74,10 @@ conversion and named-database selection.
   write/SIGKILL/restart/read check with Python drivers 5.28.6 and 6.3.0.
 - Jump-ahead cancellation while synchronous query work is running; processed
   RESET cleanup alone does not implement that guarantee.
-- Multiple concurrent result streams, full protocol metadata, query memory
-  enforcement, streaming, authorization and the connected TUI.
+- Multiple concurrent result streams, full protocol metadata, allocator-level
+  memory enforcement, bounded Bolt cursors, authorization and the connected TUI.
+  Per-RUN guards, a shared reservation pool and cooperative execution deadlines
+  are implemented; see [query limits](query-allocation-guards.md).
 
 The [implementation slice](superpowers/plans/2026-09-27-brainwire-transactions.md)
 and [next-session preflight](superpowers/plans/2026-09-26-brainwire-bolt-transaction-preflight.md)

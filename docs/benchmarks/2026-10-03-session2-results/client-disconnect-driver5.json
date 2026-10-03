@@ -1,0 +1,81 @@
+{
+  "clientDisconnect": {
+    "result": "PASS",
+    "heldBytes": 65671,
+    "afterBytes": 312,
+    "scope": "SIGKILL of client, server remains running"
+  },
+  "hotKey": {
+    "writers": 4,
+    "committed": 1,
+    "retryableConflicts": 3,
+    "indexCheck": "PASS"
+  },
+  "mixedWorkload": {
+    "connections": 8,
+    "operations": 800,
+    "seconds": 1.079785667,
+    "operationsPerSecond": 740.8877747216848,
+    "latency": {
+      "read": {
+        "operations": 400,
+        "p50Ms": 8.878542000000156,
+        "p95Ms": 21.61737499999994
+      },
+      "write": {
+        "operations": 400,
+        "p50Ms": 9.335749999999976,
+        "p95Ms": 21.69133400000023
+      }
+    },
+    "indexOverwriteCheck": "PASS",
+    "scope": "native debug Bolt; 2K nodes; disjoint writer keys"
+  },
+  "result": "PASS",
+  "rows": 2000,
+  "concurrentConnections": 16,
+  "outcomes": [
+    "held",
+    "held",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "held",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected"
+  ],
+  "during": {
+    "poolLimitBytes": 262144,
+    "poolReservedBytes": 196245,
+    "poolPeakBytes": 262117,
+    "poolRejections": 13
+  },
+  "after": {
+    "poolLimitBytes": 262144,
+    "poolReservedBytes": 312,
+    "poolPeakBytes": 262117,
+    "poolRejections": 13
+  },
+  "deadlineRollback": "PASS",
+  "scope": "synthetic native Bolt; shared accounting, not RSS",
+  "offlineAudits": {
+    "first": {
+      "database": "first",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    },
+    "second": {
+      "database": "second",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    }
+  }
+}

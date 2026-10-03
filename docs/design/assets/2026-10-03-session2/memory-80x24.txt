@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • RocksDB estimates • read only                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌Named graphs────────────────────────┐┌─MEMORY • PgUp/PgDn─────────────────────┐
+│ GRAPH              NODES  EDGES    ││OFFLINE PROCESS • ALL GRAPHS            │
+│  knowledge              0        0 ││                                        │
+│▶ python-customers  100000        0 ││memory.cache: 64.00 MiB                 │
+│                                    ││Accounted: 0.26 MiB                     │
+│                                    ││memory.memtables: 4.00 MiB              │
+│                                    ││Allocated: 0.05 MiB                     │
+│                                    ││memory.query: 32.00 MiB                 │
+│                                    ││server.query_timeout_ms: 30000 ms       │
+│                                    ││                                        │
+│                                    ││Memtables are inside cache. Budget is   │
+│                                    ││not reserved RAM. Query: conservative   │
+│                                    ││per-RUN guard plus a shared server pool.│
+│                                    ││Reservations last until transaction end.│
+│                                    ││Deadline is cooperative; storage calls  │
+│                                    ││can overrun. Not RSS; these are offline │
+│                                    ││inspector values.                       │
+└────────────────────────────────────┘└────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ graph • Tab panel • q quit • offline                                      │
+└──────────────────────────────────────────────────────────────────────────────┘

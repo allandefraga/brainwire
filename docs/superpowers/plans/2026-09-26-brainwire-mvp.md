@@ -31,23 +31,32 @@ acceptance tests as code, but not the full implementation. Implementers run on
 a mid or top tier model and write the code from these contracts; the task
 reviews stay as they are.
 
-## Current handoff (2026-10-03)
+## Current handoff (2026-10-03, second session)
 
 Tasks 1 through 5 are implemented locally: durable multi-query Bolt transactions,
-multiple named graphs, config/CLI and the real Python driver path. The latest
-source passed 372 Rust tests plus a 100K-node Python ingestion/replay/recovery
-workload. The historical instructions and checkboxes below remain the original
-implementation contract; they do not mean these already-completed foundations
-should be recreated.
+multiple named graphs, config/CLI and the real Python driver path. Source commit
+`410e9ae` passed 383 Rust tests and Python driver 5/6 concurrency, rollback and
+cooperative deadline checks. The final driver 5 workload inserted/replayed 100K
+nodes, interrupted the process twice and verified recovered indexes and data.
+Historical instructions and checkboxes below remain the original contract.
 
-New slices include precise finite numeric equality indexes, a conservative
-per-RUN allocation guard, directed minimum-hop path procedures, offline native
-checkpoints and a real SST file inspector. See the [current measurement report](../../benchmarks/2026-10-03-guards-indexes-checkpoints-recovery.md)
-and `JOURNAL.md` for runtime evidence and remaining boundaries.
+Simple read-only MATCH/UNWIND pipelines now process rows incrementally and stop
+upstream work at LIMIT. Ungrouped counts avoid retaining all bindings. Writes,
+grouped aggregates, CALL and plans deeper than 64 stages still execute eagerly;
+Bolt still buffers final results. The shared server pool holds each transaction's
+conservative peak reservation until its end, across all connections and graphs.
+`CALL db.memory()` observes that pool. The 30-second default execution deadline
+is cooperative, starts after parsing/catalog setup and is not idle-transaction
+expiry or hard cancellation. Neither pool accounting nor the deadline is a
+hard resource guarantee.
 
-The next engine task is streaming execution with live reservations and a shared
-query pool; the current guard does not enforce RSS or sum concurrent queries.
-Then benchmark mixed concurrent workloads and selective/nonselective plans.
+Earlier slices include precise finite numeric equality indexes, directed
+minimum-hop paths, native checkpoints and real SST inspection. See the
+[current report](../../benchmarks/2026-10-03-streaming-pool-deadlines.md) and
+`JOURNAL.md` for measured evidence and deployment acceptance status.
+
+Next: bounded Bolt cursors with cancellation and live allocation leases, then
+streaming grouped/write operators and mixed concurrent workload measurements.
 Large resumable index generations, connected TUI queries and DuckLake/Arrow
 incremental ingestion remain separate slices. Retained-volume orchestration
 must pass actual runtime tests before claiming that failure scenario; no

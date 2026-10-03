@@ -12,8 +12,9 @@ adapter; the platform remains the first integration target.
 > storage foundation, graph operations, a local durable Bolt/Cypher server,
 > configuration commands, a Cypher subset parser and atomic executor, and an
 > interactive terminal backoffice demo. The server is single-node and has no
-> authentication. A conservative per-RUN allocation guard is enforced, but a
-> hard process-memory ceiling and shared query pool are pending. The design is in
+> authentication. Conservative per-RUN guards, a shared query reservation pool and
+> cooperative execution deadlines are enforced; a hard process-memory ceiling
+> remains pending. The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
 > the implementation tasks in
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
@@ -93,7 +94,9 @@ and live TUI integration.
 The [RocksDB/query/ontology audit](docs/benchmarks/2026-10-01-query-ontology-audit.md)
 records the pre-index baseline. The first physical secondary-index slice now
 accelerates string, Boolean and finite numeric equality; range and vector indexes,
-large backfills and streaming queries remain scale-critical work.
+large backfills, grouped/write streaming and bounded Bolt cursors remain
+scale-critical work. Read-only MATCH/UNWIND supports early LIMIT and ungrouped
+counts without materializing every input row.
 The [first scalar-index measurement](docs/benchmarks/2026-10-01-scalar-index.md)
 records the local test and the 100,000-key atomic backfill limit.
 [Offline native checkpoints](docs/checkpoints.md) copy one committed graph

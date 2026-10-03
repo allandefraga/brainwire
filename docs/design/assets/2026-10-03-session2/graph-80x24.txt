@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • RocksDB estimates • read only                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌Named graphs────────────────────────┐┌─Selected graph─────────────────────────┐
+│ GRAPH              NODES  EDGES    ││python-customers                        │
+│  knowledge              0        0 ││                                        │
+│▶ python-customers  100000        0 ││Nodes: 100000                           │
+│                                    ││Edges: 0                                │
+│                                    ││Ontology: v1                            │
+│                                    ││Node types: 1                           │
+│                                    ││Edge types: 0                           │
+│                                    ││                                        │
+│                                    ││Labels: Customer                        │
+│                                    ││Relationships: —                        │
+│                                    ││Declared indexes: 2                     │
+│                                    ││Timeline streams: 0                     │
+│                                    ││                                        │
+│                                    ││Estimated counts. Tab: pipeline, memory,│
+│                                    ││storage. History pending.               │
+│                                    ││                                        │
+└────────────────────────────────────┘└────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ graph • Tab panel • q quit • offline                                      │
+└──────────────────────────────────────────────────────────────────────────────┘

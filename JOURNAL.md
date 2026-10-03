@@ -1,6 +1,7 @@
 # Brainwire journal
 
-One 45-minute session per day, started when Allan asks. This file is the memory
+Sessions start when Allan asks; his requested duration overrides the 45-minute
+default. This file is the memory
 between sessions: each session starts with no context other than this file and
 the README.
 
@@ -10,8 +11,8 @@ Allan's current language.
 ## How a session starts
 
 1. Read the [README.md](README.md) and the newest entry below.
-2. Run `date` and note the start time. At 40 minutes, start nothing new; at
-   45, wrap up.
+2. Run `date` and note the start time and requested duration. Reserve the final
+   five minutes for verification and handoff; complete necessary cleanup.
 3. Do the **Next step** of the newest entry. If it depends on a decision from
    Allan, ask first, one question at a time, and meanwhile move forward on
    whatever does not depend on it (research, corpus, drafts of later sections).
@@ -37,6 +38,98 @@ Allan's current language.
 No line of code before the end of phase 2.
 
 ## Entries
+
+### 2026-10-03, second hour: streaming reads, shared reservations and deadlines
+
+- **Requested:** another hour of local work, starting 08:54:26 UTC
+  (10:54:26 Amsterdam). No push, publication or remote PR.
+- **Duration:** wrap-up recorded at 09:55:38 UTC
+  (11:55:38 Amsterdam), after 1h 1m 12s.
+  The requested additional hour was completed.
+- **Engine:** `410e9ae` adds row-at-a-time read-only MATCH/UNWIND, early LIMIT
+  and ungrouped counts without retaining every input binding. Shared traversal
+  preserves eager writes and grouped/CALL behavior. Scalar property access
+  avoids building a complete node property map; promotion/extra precedence is
+  covered. Full static validation remains before execution, including LIMIT 0.
+- **Resource admission:** all server connections and named graphs share one
+  `memory.query` pool. Each transaction holds its conservative high-water
+  reservation through multiple RUNs until commit/rollback/failure/drop. Pool
+  exhaustion is retryable; `CALL db.memory()` exposes process-wide counters.
+  This is estimated accounting, not RSS or a hard allocator cap.
+- **Execution deadlines:** `server.query_timeout_ms`, default 30,000 ms,
+  config/env provenance and bounds, server/CLI enforcement. Deadline starts
+  after parsing/catalog setup and is cooperative; idle transactions, native
+  calls and commit are not preempted. A Python 200^4 fanout expires at a 1-second
+  configured deadline, rolls back its prior CREATE and frees reservations.
+- **Correctness:** fixed the Bolt worker so value conversion errors also discard
+  earlier writes/reservations. Added regressions for pool contention, rollback,
+  repeated RUNs and temporary scopes. Differential test `357522c` compares the
+  streaming path with eager fallback for correlated/rebound/empty/null inputs.
+- **Verification:** 383 Rust tests, full workspace clippy with warnings denied,
+  fmt and diff checks pass. Neo4j Python drivers 5.28.6 and 6.3.0 each passed
+  16-connection/two-graph 256-KiB pool tests, mixed read/indexed-overwrite traffic,
+  four writers racing on one node (one commit, three retryable conflicts), and
+  physical offline graph/index audits after closing the server. Test commits
+  `733b38c`, `415e5e8`, `71373dc`. `d4edec6` also SIGKILLs a separate Python
+  client holding an explicit transaction: both drivers released its reservation
+  (65,671 to 312 observed bytes), discarded the indexed CREATE and passed offline
+  audits while the server remained running. No new dependencies.
+- **Scale:** final-code native Python test inserted/replayed 100K nodes in
+  15.66/17.63 seconds, survived two forced exits and recovered 99,999 nodes
+  after the intentional deletion. Driver 6 also passed the 10K workload.
+  Separate embedded debug test passed at 1M nodes with a 64-KiB query guard:
+  LIMIT 1 retained about 5.2 KiB of accounting; full label count p50 12.94 s;
+  whole-process peak resident size 64.97 MiB. These are synthetic/shared-host
+  samples, not release capacity or RSS guarantees. The report includes raw
+  timings, sample counts and the 100K comparison.
+- **TUI:** Memory/Pipeline explanations now cover streaming/eager boundaries,
+  shared pool lifetime and cooperative timeout in EN/PT-BR. Admin JSON marks
+  live server usage as unobserved offline. Thirteen actual PTY terminal renders
+  show a 100K-node fixture at 160x40 and 80x24, including real SST inspection.
+- **Linux/orchestrators:** validation in progress. Docker pins installed Rust
+  1.98.1 despite the development stable toolchain and defaults C++ builds to two
+  jobs. Kubernetes harness now keeps timeout diagnostics and bounded restart
+  waits. A queued Docker build exposed stale workspace artifacts (old Cypher
+  API reused against the new server); `ba683ad` cleans only release workspace
+  artifacts under the locked target cache, preserving RocksDB/dependencies.
+  The repaired Linux arm64 image `brainwire:20261003-session2-release` passed
+  Docker retained-volume crash/recreate/index audits and Compose acceptance.
+  Kubernetes 1.36.4 passed with 10K nodes: zero-timeout container stop and Pod
+  recreation retained the same PVC/data/indexes; offline audits and checkpoint
+  query verification passed. The earlier ready cluster timed out waiting for the
+  image and was removed; the retry used the repaired image. All owned clusters,
+  containers and test volumes were removed; only the final local image remains.
+  The complete pool/deadline/concurrency/killed-client Python test also passed
+  against that Linux release image through an isolated temporary Docker wrapper.
+- **Artifacts:** [session report](docs/benchmarks/2026-10-03-streaming-pool-deadlines.md),
+  [raw results](docs/benchmarks/2026-10-03-session2-results/),
+  [TUI gallery](docs/design/assets/2026-10-03-session2/README.md).
+- **October target:** Allan asked about an end-of-month product with Docker/K8s,
+  direct Python individual/batch writes, independent graph creation, a docs site
+  and a polished TUI. Assessment: a tested client pilot is plausible; full
+  production readiness and distributed HA are not promised. Proposed milestones:
+  retained-volume deployment/recovery by Oct 10, Python/query/resource hardening
+  by Oct 17, connected TUI/docs by Oct 24, workload validation/pilot by Oct 31.
+  See the [pilot proposal](docs/2026-10-pilot-roadmap.md) for acceptance gates.
+  Allan also asked about November beyond MCP: proposed a conditional closed beta
+  focused on incremental ingestion, query maturity, security/operations, connected
+  TUI/docs and a first history/retention slice. MCP adapts the same APIs. Vector
+  search versus distributed replication remains an explicit priority decision.
+  For December, proposed a scoped self-hosted commercial release plus support,
+  conditional on beta stability and recovery/upgrade/security acceptance. No
+  production replication or automatic failover promise was made.
+  Existing untracked `docs-site/` is a concept draft containing future syntax;
+  preserve it and reconcile its advertised capabilities before publication.
+- **Immediate client pilot:** Allan asked whether testing this week is viable.
+  Proposed a separate Docker graph, a small ontology, Python individual/batch
+  writes and representative queries/recovery checks. Audit client's actual
+  Cypher before pointing it at Brainwire; automatic DuckLake ingestion and
+  connected TUI remain pending. No existing client service was reconfigured.
+- **Next:** bounded Bolt cursors with cancellation and live allocation leases;
+  grouped/write streaming afterward. Idle transactions can still hold quota.
+  Preserve single-writer retained-volume deployments until replication and
+  fencing exist. Connected TUI, resumable index generations and DuckLake/Arrow
+  incremental ingestion remain separate work; no auth/TLS or HA was added.
 
 ### 2026-10-03, allocation guards, numeric indexes, native checkpoints and real files
 

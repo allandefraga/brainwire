@@ -95,8 +95,9 @@ BRAINWIRE_MEMORY_CACHE=64MiB BRAINWIRE_MEMORY_MEMTABLES=16MiB \
   --query 'UNWIND $rows AS row MERGE (c:Customer {entity_id: row.id}) SET c.name = row.name RETURN count(*) AS processed'
 ```
 
-This still materializes the parameter file and query rows in memory; file input
-does not add streaming or enforce the configured query-memory ceiling.
+File input still materializes the parameter document. Read-only MATCH/UNWIND
+can process intermediate rows incrementally; writes and final JSON output remain
+materialized and subject to conservative accounting.
 
 ## Implemented subset
 
@@ -112,12 +113,14 @@ does not add streaming or enforce the configured query-memory ceiling.
   See [sparse analytics](sparse-analytics.md) for runnable examples and limits.
 
 Unsupported constructs return an explicit error. Relationship variables and
-relationship property filters are not implemented. This is an eager MVP
-executor: query results are materialized, and `memory.query` does not enforce
-a query memory ceiling yet. Full Cypher, authorization,
-indexed property search and the connected TUI remain separate work. The
+relationship property filters are not implemented. The executor streams
+supported read pipelines; writes, grouped aggregates,
+CALL and final query results remain materialized. `memory.query` enforces
+conservative accounting rather than a hard RSS ceiling. Full Cypher, authorization,
+range/vector search and the connected TUI remain separate work. The
 durable Bolt server uses the same executor and store.
 
 The CLI uses configured `memory.query` as a [conservative allocation guard](query-allocation-guards.md).
-An exceeded guard fails atomically; lower `LIMIT` does not make upstream scans
-or UNWIND streaming.
+An exceeded guard fails atomically. LIMIT stops supported read-only
+MATCH/UNWIND pipelines early. `server.query_timeout_ms` sets a cooperative
+execution deadline, including rollback on expiry.

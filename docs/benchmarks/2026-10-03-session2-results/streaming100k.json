@@ -1,0 +1,53 @@
+{
+  "cacheMiB": 64,
+  "importMs": 10027.693875,
+  "measurements": {
+    "cartesianLimit": {
+      "maxMs": 0.26325,
+      "p50Ms": 0.186417,
+      "peakReservationBytes": 6622,
+      "samples": 5
+    },
+    "indexCount": {
+      "maxMs": 557.066959,
+      "p50Ms": 411.077083,
+      "peakReservationBytes": 5093,
+      "samples": 5
+    },
+    "indexLimit": {
+      "maxMs": 0.158333,
+      "p50Ms": 0.1415,
+      "peakReservationBytes": 5902,
+      "samples": 5
+    },
+    "labelCount": {
+      "maxMs": 1794.3951249999998,
+      "p50Ms": 1673.9782910000001,
+      "peakReservationBytes": 4389,
+      "samples": 5
+    },
+    "labelLimit": {
+      "maxMs": 0.27633300000000005,
+      "p50Ms": 0.145208,
+      "peakReservationBytes": 5202,
+      "samples": 5
+    },
+    "lateScanLimit": {
+      "maxMs": 4387.135334,
+      "p50Ms": 3120.3209580000002,
+      "peakReservationBytes": 5830,
+      "samples": 5
+    },
+    "unwindLimit": {
+      "maxMs": 0.089625,
+      "p50Ms": 0.083125,
+      "peakReservationBytes": 34523,
+      "samples": 5
+    }
+  },
+  "memtableMiB": 4,
+  "nodes": 100000,
+  "queryBudgetBytes": 65536,
+  "scope": "warm embedded debug, one warmup and five samples; query accounting is not RSS",
+  "unboundedResult": "memory_limit_and_reservation_release_verified"
+}

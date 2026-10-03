@@ -1,0 +1,40 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • RocksDB estimates • read only                                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Graphs • ←→─────────────┐┌─DISK & FILES / python-customers • truncated───────────────────────┐┌EXPLAIN • F1 • PgUp/PgDn───────────────────────────────────────┐
+│  knowledge             ││ FILE                      TYPE         SIZE                       ││000026.sst                                                     │
+│> python-customers      ││  000025.sst               sst           1.5 KiB                   ││                                                               │
+│                        ││> 000026.sst               sst           2.7 KiB                   ││Type: sst                                                      │
+│                        ││  000072.sst               sst           6.7 KiB                   ││Size: 2.7 KiB                                                  │
+│                        ││  000111.sst               sst           6.8 KiB                   ││CF: node                                                       │
+│                        ││  000153.sst               sst           6.9 KiB                   ││LSM level: L6                                                  │
+│                        ││  000195.sst               sst           6.8 KiB                   ││SST entries: 250                                               │
+│                        ││  000236.sst               sst           6.9 KiB                   ││Tombstones: 0                                                  │
+│                        ││  000278.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000317.sst               sst           6.9 KiB                   ││Sorted key/value data on disk. Created by flush or compaction; │
+│                        ││  000355.sst               sst           6.8 KiB                   ││preserves records beyond RAM.                                  │
+│                        ││  000394.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000435.sst               sst           6.9 KiB                   ││SST entries include versions and tombstones; not live node     │
+│                        ││  000473.sst               sst           6.8 KiB                   ││counts.                                                        │
+│                        ││  000511.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000549.sst               sst           6.8 KiB                   ││Offline, non-atomic metadata. CF/level come from RocksDB; ?    │
+│                        ││  000587.sst               sst           6.8 KiB                   ││means unavailable. Do not edit or delete engine files.         │
+│                        ││  000629.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000667.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000705.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000743.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000781.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000819.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000857.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000895.sst               sst           6.8 KiB                   ││                                                               │
+│                        ││  000933.sst               sst           6.8 KiB                   ││                                                               │
+└────────────────────────┘└───────────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+┌STORAGE FLOW──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-tui-capture-6_x2osjb/data/python-customers                                                         │
+│WRITE: WAL + memtables (RAM) -> flush -> SST L0 -> compaction L1+                                                                                             │
+│READ: cache -> memtables/SST. Indexes are persisted records too.                                                                                              │
+│Configured RAM is not reserved. Query: per-RUN guard + server pool, not RSS. ? values are unknown.                                                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ←→ graph • ↑↓ file • F1 explain • Tab panel • q quit                                                                                                         │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

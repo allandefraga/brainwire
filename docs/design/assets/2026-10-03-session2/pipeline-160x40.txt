@@ -1,0 +1,40 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • RocksDB estimates • read only                                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Named graphs───────────────────────────────────────────────────────────────┐┌─WRITE PIPELINE──────────────────────────────────────────────────────────────────┐
+│ GRAPH                     NODES    EDGES                                  ││Python -> Bolt -> Cypher                                                         │
+│  knowledge                       0          0                             ││UNWIND $rows -> MERGE -> SET                                                     │
+│▶ python-customers           100000          0                             ││                                                                                 │
+│                                                                           ││Node + indexes: one WriteBatch.                                                  │
+│                                                                           ││COMMIT syncs the WAL.                                                            │
+│                                                                           ││Flush creates SST later.                                                         │
+│                                                                           ││                                                                                 │
+│                                                                           ││Scalar equality index: ready                                                     │
+│                                                                           ││Customer.email, Customer.active                                                  │
+│                                                                           ││                                                                                 │
+│                                                                           ││MERGE uses stable entity_id. SET replaces fields; null removes.                  │
+│                                                                           ││                                                                                 │
+│                                                                           ││READS                                                                            │
+│                                                                           ││WHERE c.email=$email: ready scalar equality index. AND keeps residual filters.   │
+│                                                                           ││Standalone OR/NOT/range: scan.                                                   │
+│                                                                           ││CALL db.indexes() YIELD label, property, state RETURN label, property, state     │
+│                                                                           ││                                                                                 │
+│                                                                           ││Simple reads process one row at a time; LIMIT stops input.                       │
+│                                                                           ││Writes, grouped counts and CALL still materialize rows.                          │
+│                                                                           ││                                                                                 │
+│                                                                           ││CSR: graph.project, graph.degree, graph.pagerank, graph.reachable,               │
+│                                                                           ││graph.shortestPath.                                                              │
+│                                                                           ││Explanation panel; no query execution.                                           │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+└───────────────────────────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ graph • Tab panel • q quit • snapshot: --snapshot  •  offline: stop the server first                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

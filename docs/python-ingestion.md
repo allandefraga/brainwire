@@ -102,8 +102,8 @@ and q exits. The pipeline panel explains the write path and shows persisted
 index readiness/declarations. Memory shows shared configured budgets and actual
 cache/write-buffer accounting **for the offline inspection process**. Those
 numbers are neither live-server RAM nor RSS. Memtable cache reservations are
-included in cache accounting; do not add the two. `memory.query` is a conservative per-RUN allocation guard, not RSS or a
-shared pool; see [guard limits](query-allocation-guards.md). Disk now lists real
+included in cache accounting; do not add the two. `memory.query` bounds a conservative per-RUN guard and the shared server
+reservation pool; neither is RSS; see [guard limits](query-allocation-guards.md). Disk now lists real
 files with sizes, native live-SST CF/level metadata and explanations. Left/Right
 selects a graph; Up/Down selects a file; F1 reveals its explanation on narrow
 terminals. Inspection is offline and does not read file contents.

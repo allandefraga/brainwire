@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "image": "brainwire:20261003-session2-release",
+  "project": "brainwire-compose-bdfa19925e50",
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  }
+}

@@ -1,0 +1,72 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.73kB 0.0s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/rust:1.98.1-bookworm
+#3 DONE 0.1s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 107B done
+#4 DONE 0.0s
+
+#5 [stage-1 1/4] FROM docker.io/library/debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+#5 resolve docker.io/library/debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 0.0s done
+#5 DONE 0.0s
+
+#6 [builder 1/6] FROM docker.io/library/rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
+#6 resolve docker.io/library/rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e 0.0s done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 314.53kB 0.0s done
+#7 DONE 0.0s
+
+#8 [builder 2/6] RUN apt-get update && apt-get install -y --no-install-recommends     clang libclang-dev cmake pkg-config &&     rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [builder 3/6] WORKDIR /src
+#9 CACHED
+
+#10 [builder 4/6] COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+#10 CACHED
+
+#11 [builder 5/6] COPY crates ./crates
+#11 DONE 0.1s
+
+#12 [builder 6/6] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/src/target,sharing=locked     cargo clean --release --workspace &&     cargo build --release --locked -p brainwire-server &&     cp target/release/brainwire /src/brainwire
+#12 0.389      Removed 64 files, 25.0MiB total
+#12 0.494    Compiling brainwire-core v0.1.0 (/src/crates/core)
+#12 0.496    Compiling brainwire-tui v0.1.0 (/src/crates/tui)
+#12 3.155    Compiling brainwire-store v0.1.0 (/src/crates/store)
+#12 5.057    Compiling brainwire-cypher v0.1.0 (/src/crates/cypher)
+#12 14.62    Compiling brainwire-bolt v0.1.0 (/src/crates/bolt)
+#12 20.04    Compiling brainwire-server v0.1.0 (/src/crates/server)
+#12 34.30     Finished `release` profile [optimized] target(s) in 33.90s
+#12 DONE 34.8s
+
+#13 [stage-1 2/4] RUN apt-get update && apt-get install -y --no-install-recommends     ca-certificates libstdc++6 &&     rm -rf /var/lib/apt/lists/* &&     groupadd --gid 10001 brainwire &&     useradd --uid 10001 --gid brainwire --home-dir /nonexistent --no-create-home brainwire &&     mkdir /data && chown brainwire:brainwire /data
+#13 CACHED
+
+#14 [stage-1 3/4] COPY --from=builder /src/brainwire /usr/local/bin/brainwire
+#14 DONE 0.2s
+
+#15 [stage-1 4/4] COPY crates/core/tests/fixtures/graph_mapping.json /opt/brainwire/example-schema.json
+#15 DONE 0.2s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 1.3s done
+#16 exporting manifest sha256:963c0dff03a7cbec42f445480e6a2a948fc1450b7d8579660388696728f48421 0.1s done
+#16 exporting config sha256:8f323f710628d4dcefced563a3188ed42964c25ed05fc1a50f0d4fa47b249be6
+#16 exporting config sha256:8f323f710628d4dcefced563a3188ed42964c25ed05fc1a50f0d4fa47b249be6 0.1s done
+#16 exporting attestation manifest sha256:3674912f017a4365b7b7edf701dfbe6d47b6cedda80f8479fde04be5ce6b2328 0.0s done
+#16 exporting manifest list sha256:94e734987038bcf20e964eea25fac00ca414646bad0488d0c8ac72d35bc0700e 0.0s done
+#16 naming to docker.io/library/brainwire:20261003-session2-release 0.0s done
+#16 unpacking to docker.io/library/brainwire:20261003-session2-release
+#16 unpacking to docker.io/library/brainwire:20261003-session2-release 0.4s done
+#16 DONE 2.0s
