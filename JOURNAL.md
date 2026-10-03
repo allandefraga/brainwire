@@ -39,6 +39,36 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-03, explainable knowledge-source ranking
+
+- **Requested:** add something inspired by OntoRank; explain PageRank with visual
+  examples while continuing the feature. All changes remain local.
+- **Done:** `CALL knowledge.rank` ranks an exact term and optional domain using
+  explicit authority, author relevance, normalized usage, certification and
+  freshness properties. Returns nodes, scores and five numeric contributions.
+  Policy weights are documented; this is our heuristic, not Databricks' algorithm.
+- **Performance/correctness:** reuse the existing streaming scalar term index
+  with a label-scan fallback. A bounded heap retains only top K candidates;
+  deterministic ties use node IDs. Per-candidate scopes release temporary
+  accounting; memory, deadline and candidate guards fail without partial results.
+  Snapshot reads, staged writes, atomic failure and index overwrites remain on
+  the existing transaction path. No dependencies or storage format changes.
+- **Verification:** 388 workspace tests pass, including five new integration
+  tests for scoring/explanations, filter/index fallback, reopen, snapshot isolation,
+  invalid evidence rollback, ties, heap replacement and resource limits. A 500-source
+  top-1 query passes with a 32-KiB accounting budget. Workspace clippy with warnings
+  denied, fmt and diff checks pass. The built CLI seeded an isolated temporary
+  graph, reopened it in another process and returned official source 0.90 versus
+  popular source 0.10. Temporary demo storage was removed.
+- **Documentation:** `docs/knowledge-ranking.md` and `examples/knowledge/schema.json`
+  provide a runnable example. Interactive PageRank explainer stays in the thread's
+  visualization directory; three scenarios and iteration controls were checked.
+- **Limits/next step:** source evidence is ingestion-supplied, with no automatic
+  freshness decay, usage collection, certified-owner verification or ACL. Domain
+  filtering is not authorization. PageRank and source ranking are separate. Next:
+  validate this policy against real client questions and provenance requirements
+  before adding automatic evidence collection or a combined ranking.
+
 ### 2026-10-03, second hour: streaming reads, shared reservations and deadlines
 
 - **Requested:** another hour of local work, starting 08:54:26 UTC

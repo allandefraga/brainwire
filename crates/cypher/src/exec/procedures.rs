@@ -1,6 +1,7 @@
-//! Read-only, transaction-local sparse analytics procedures.
+//! Read-only, transaction-local analytics and inspection procedures.
 use super::*;
 use brainwire_store::graph::{sparse_projection, ProjectionError, ProjectionOptions};
+mod knowledge;
 
 fn semantic(message: impl Into<String>) -> ExecError {
     ExecError::Semantic(message.into())
@@ -25,6 +26,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
         "graph.degree" => Ok(&["node", "outDegree", "inDegree"]),
         "graph.reachable" | "graph.shortestPath" => Ok(&["node", "depth"]),
         "graph.pagerank" => Ok(&["node", "score", "iterations", "converged", "residual"]),
+        "knowledge.rank" => Ok(&["node", "score", "contributions"]),
         _ => Err(ExecError::Unsupported(format!("unknown procedure {name}"))),
     }
 }
@@ -161,6 +163,8 @@ pub(super) fn validate(
         if !args.is_empty() {
             return Err(semantic(format!("{name} takes no arguments")));
         }
+    } else if name == "knowledge.rank" {
+        knowledge::options(args, ctx)?;
     } else {
         options(name, args, ctx)?;
     }
@@ -259,6 +263,9 @@ pub(super) fn run(
                 })
             })
             .collect();
+    }
+    if name == "knowledge.rank" {
+        return knowledge::run(args, ctx, bind);
     }
     let opts = options(name, args, ctx)?;
     let projection = sparse_projection(ctx.txn, &opts.projection).map_err(projection_error)?;

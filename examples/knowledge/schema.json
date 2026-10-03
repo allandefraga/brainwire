@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "nodes": [{
+    "label": "KnowledgeSource",
+    "properties": ["term", "domain", "definition", "authority", "authorRelevance", "usage", "certified", "freshness"],
+    "indexed_fields": ["term"]
+  }]
+}

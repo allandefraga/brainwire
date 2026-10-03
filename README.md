@@ -55,6 +55,13 @@ and `graph.pagerank`, plus directed `graph.reachable` hop distances and
 snapshot. See the [analytics guide](docs/sparse-analytics.md) for a complete
 example, options, memory limits and a reproducible volume workload.
 
+`CALL knowledge.rank` ranks competing sources for an exact term and optional
+domain using explicit authority, author relevance, usage, certification and
+freshness signals. It returns per-signal contributions and uses bounded top-K
+selection with the existing term index. See [knowledge ranking](docs/knowledge-ranking.md)
+for the synthetic example, policy and limits; automated evidence collection and
+permission-aware ranking are not implemented.
+
 ## Local development
 
 ```sh
