@@ -65,6 +65,34 @@ def mixed_workload(driver):
             "indexOverwriteCheck": "PASS", "scope": "native debug Bolt; 2K nodes; disjoint writer keys"}
 
 
+def hot_key_conflicts(driver):
+    """Four snapshots stage distinct index replacements of one existing node."""
+    barrier = threading.Barrier(4, timeout=30)
+    def worker(index):
+        with driver.session(database="first") as session:
+            with session.begin_transaction() as tx:
+                tx.run("MATCH (p:Page {entity_id:'p-10'}) SET p.text=$value", value=f"hot-{index}").consume()
+                barrier.wait()
+                try:
+                    tx.commit()
+                    return index, "committed"
+                except Neo4jError as error:
+                    assert error.code == "Neo.TransientError.Transaction.Outdated", error
+                    assert error.is_retryable(), error
+                    return index, "conflict"
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        outcomes = list(executor.map(worker, range(4)))
+    winners = [index for index, outcome in outcomes if outcome == "committed"]
+    assert len(winners) == 1, outcomes
+    with driver.session(database="first") as session:
+        for index, outcome in outcomes:
+            rows = list(session.run("MATCH (p:Page) WHERE p.text=$value RETURN p.entity_id AS id", value=f"hot-{index}"))
+            assert [row["id"] for row in rows] == (["p-10"] if outcome == "committed" else [])
+        assert session.run("MATCH (p:Page) WHERE p.text='same' RETURN count(*) AS n").single()["n"] == 1995
+        assert session.run("MATCH (p:Page) RETURN count(*) AS n").single()["n"] == 2000
+    return {"writers": 4, "committed": 1, "retryableConflicts": 3, "indexCheck": "PASS"}
+
+
 def run(binary):
     with tempfile.TemporaryDirectory(prefix="brainwire-query-memory-") as temporary:
         root = Path(temporary)
@@ -169,7 +197,8 @@ query = "256KiB"
                         assert after["poolPeakBytes"] <= 256*1024
                         assert after["poolRejections"] >= outcomes.count("rejected")
                     mixed = mixed_workload(driver)
-                    print(json.dumps({"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"},indent=2))
+                    hot = hot_key_conflicts(driver)
+                    print(json.dumps({"hotKey":hot,"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"},indent=2))
             finally:
                 process.terminate()
                 try:
