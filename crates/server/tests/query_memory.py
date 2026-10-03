@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -93,6 +94,57 @@ def hot_key_conflicts(driver):
     return {"writers": 4, "committed": 1, "retryableConflicts": 3, "indexCheck": "PASS"}
 
 
+def disconnect_cleanup(driver, uri, root):
+    """Kill a separate Python client while it holds writes and a pool reservation."""
+    ready = root / "client-ready"
+    code = """
+import sys
+from pathlib import Path
+from neo4j import GraphDatabase
+with GraphDatabase.driver(sys.argv[1], auth=None) as driver:
+    with driver.session(database="first") as session:
+        with session.begin_transaction() as tx:
+            tx.run("CREATE (p:Page {entity_id:'disconnect-pending',text:'disconnect-pending'})").consume()
+            tx.run("RETURN $text", text="x"*16000).consume()
+            Path(sys.argv[2]).write_text("ready")
+            sys.stdin.readline()
+"""
+    child = subprocess.Popen([sys.executable, "-c", code, uri, str(ready)], stdin=subprocess.PIPE,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists():
+            if child.poll() is not None:
+                raise RuntimeError(child.stderr.read())
+            if time.monotonic() >= deadline:
+                raise RuntimeError("held client did not become ready")
+            time.sleep(.025)
+        with driver.session(database="second") as session:
+            held = dict(session.run(MEMORY).single())
+            assert held["poolReservedBytes"] > 16000, held
+        child.kill()
+        child.wait(timeout=5)
+        deadline = time.monotonic() + 10
+        with driver.session(database="first") as session:
+            while True:
+                released = dict(session.run(MEMORY).single())
+                if released["poolReservedBytes"] < 8192:
+                    break
+                if time.monotonic() >= deadline:
+                    raise AssertionError(released)
+                time.sleep(.025)
+            assert session.run("MATCH (p:Page) WHERE p.text='disconnect-pending' RETURN count(*) AS n").single()["n"] == 0
+            assert session.run("MATCH (p:Page) RETURN count(*) AS n").single()["n"] == 2000
+        return {"result": "PASS", "heldBytes": held["poolReservedBytes"],
+                "afterBytes": released["poolReservedBytes"], "scope": "SIGKILL of client, server remains running"}
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
+        child.stdin.close()
+        child.stderr.close()
+
+
 def run(binary):
     with tempfile.TemporaryDirectory(prefix="brainwire-query-memory-") as temporary:
         root = Path(temporary)
@@ -128,7 +180,8 @@ query = "256KiB"
                         time.sleep(.025)
                 else:
                     raise RuntimeError("server failed to start")
-                with GraphDatabase.driver(f"bolt://127.0.0.1:{port}",auth=None,max_connection_pool_size=20,max_transaction_retry_time=0) as driver:
+                uri = f"bolt://127.0.0.1:{port}"
+                with GraphDatabase.driver(uri,auth=None,max_connection_pool_size=20,max_transaction_retry_time=0) as driver:
                     with driver.session(database="first") as session:
                         for first in range(0,2000,25):
                             session.run("UNWIND $rows AS id CREATE (p:Page {entity_id:id,text:'same'})",rows=[f"p-{i}" for i in range(first,first+25)]).consume()
@@ -198,7 +251,8 @@ query = "256KiB"
                         assert after["poolRejections"] >= outcomes.count("rejected")
                     mixed = mixed_workload(driver)
                     hot = hot_key_conflicts(driver)
-                    result = {"hotKey":hot,"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"}
+                    disconnected = disconnect_cleanup(driver, uri, root)
+                    result = {"clientDisconnect":disconnected,"hotKey":hot,"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"}
             finally:
                 process.terminate()
                 try:
