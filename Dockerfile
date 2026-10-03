@@ -12,8 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
+# Shared target timestamps can make an older workspace appear fresh after COPY.
+# Rebuild workspace crates; retain expensive native/dependency artifacts.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,sharing=locked \
+    cargo clean --release --workspace && \
     cargo build --release --locked -p brainwire-server && \
     cp target/release/brainwire /src/brainwire
 
