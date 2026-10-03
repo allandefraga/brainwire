@@ -198,7 +198,7 @@ query = "256KiB"
                         assert after["poolRejections"] >= outcomes.count("rejected")
                     mixed = mixed_workload(driver)
                     hot = hot_key_conflicts(driver)
-                    print(json.dumps({"hotKey":hot,"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"},indent=2))
+                    result = {"hotKey":hot,"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"}
             finally:
                 process.terminate()
                 try:
@@ -206,6 +206,13 @@ query = "256KiB"
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+        audits = {}
+        for name in ("first", "second"):
+            audit = json.loads(subprocess.check_output([str(binary), "db", "check", name, "--json", "--config", str(config)], env=env, text=True))
+            assert audit["status"] == "ok", audit
+            audits[name] = audit
+        result["offlineAudits"] = audits
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
