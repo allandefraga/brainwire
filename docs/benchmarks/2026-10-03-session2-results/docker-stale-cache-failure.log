@@ -78,7 +78,7 @@
 #7 12.94 debconf: delaying package configuration, since apt-utils is not installed
 #7 13.04 Fetched 75.4 MB in 5s (15.6 MB/s)
 #7 13.24 Selecting previously unselected package libz3-4:arm64.
-#7 13.24 (Reading database ... 
+#7 13.24 (Reading database ...
 (Reading database ... 5%
 (Reading database ... 10%
 (Reading database ... 15%
@@ -210,13 +210,13 @@
 #13 1550.9    |             ^^^^^^^ `ExecutionLimits` does not have this field
 #13 1550.9    |
 #13 1550.9    = note: all struct fields are already assigned
-#13 1550.9 
+#13 1550.9
 #13 1550.9 error[E0599]: no variant, associated function, or constant named `TimedOut` found for enum `ExecError` in the current scope
 #13 1550.9   --> crates/server/src/cypher.rs:93:20
 #13 1550.9    |
 #13 1550.9 93 |         ExecError::TimedOut => "timeout",
 #13 1550.9    |                    ^^^^^^^^ variant, associated function, or constant not found in `ExecError`
-#13 1550.9 
+#13 1550.9
 #13 1550.9 error[E0560]: struct `ExecutionLimits` has no field named `timeout`
 #13 1550.9   --> crates/server/src/databases.rs:47:17
 #13 1550.9    |
@@ -224,26 +224,26 @@
 #13 1550.9    |                 ^^^^^^^ `ExecutionLimits` does not have this field
 #13 1550.9    |
 #13 1550.9    = note: all struct fields are already assigned
-#13 1550.9 
+#13 1550.9
 #13 1550.9 error[E0599]: no variant, associated function, or constant named `TimedOut` found for enum `ExecError` in the current scope
 #13 1550.9    --> crates/server/src/engine.rs:285:20
 #13 1550.9     |
 #13 1550.9 285 |         ExecError::TimedOut => "Neo.ClientError.Statement.ExecutionTimedOut",
 #13 1550.9     |                    ^^^^^^^^ variant, associated function, or constant not found in `ExecError`
-#13 1550.9 
+#13 1550.9
 #13 1551.2 Some errors have detailed explanations: E0560, E0599.
 #13 1551.2 For more information about an error, try `rustc --explain E0560`.
 #13 1551.2 error: could not compile `brainwire-server` (bin "brainwire") due to 4 previous errors
 #13 ERROR: process "/bin/sh -c cargo build --release --locked -p brainwire-server &&     cp target/release/brainwire /src/brainwire" did not complete successfully: exit code: 101
 ------
  > [builder 6/6] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/src/target,sharing=locked     cargo build --release --locked -p brainwire-server &&     cp target/release/brainwire /src/brainwire:
-1550.9 
+1550.9
 1550.9 error[E0599]: no variant, associated function, or constant named `TimedOut` found for enum `ExecError` in the current scope
 1550.9    --> crates/server/src/engine.rs:285:20
 1550.9     |
 1550.9 285 |         ExecError::TimedOut => "Neo.ClientError.Statement.ExecutionTimedOut",
 1550.9     |                    ^^^^^^^^ variant, associated function, or constant not found in `ExecError`
-1550.9 
+1550.9
 1551.2 Some errors have detailed explanations: E0560, E0599.
 1551.2 For more information about an error, try `rustc --explain E0560`.
 1551.2 error: could not compile `brainwire-server` (bin "brainwire") due to 4 previous errors
@@ -255,6 +255,6 @@ Dockerfile:15
   16 | >>>     --mount=type=cache,target=/src/target,sharing=locked \
   17 | >>>     cargo build --release --locked -p brainwire-server && \
   18 | >>>     cp target/release/brainwire /src/brainwire
-  19 |     
+  19 |
 --------------------
 ERROR: failed to build: failed to solve: process "/bin/sh -c cargo build --release --locked -p brainwire-server &&     cp target/release/brainwire /src/brainwire" did not complete successfully: exit code: 101
