@@ -168,3 +168,29 @@ fn streaming_hops_overlay_empty_counts_and_validation_keep_semantics() {
     .rows
     .is_empty());
 }
+
+#[test]
+fn read_pipeline_matches_eager_fallback_for_correlated_and_empty_inputs() {
+    let (_dir, db) = setup();
+    // Singleton stages preserve rows while selecting the existing deep-plan
+    // eager fallback. Compare operator behavior without another query engine.
+    let eager_prefix = (0..65)
+        .map(|i| format!("UNWIND [1] AS singleton_{i} "))
+        .collect::<String>();
+    for query in [
+        "MATCH (p:Page) WHERE p.score<3 RETURN p.entity_id,p.score",
+        "MATCH (p:Page) WHERE p.score<3 MATCH (q:Page {entity_id:p.entity_id}) RETURN p.entity_id,q.score",
+        "MATCH (p:Page) WHERE p.score<3 MATCH (q:Page) WHERE q.score<3 RETURN p.score,q.score LIMIT 4",
+        "MATCH (p:Page) WHERE p.score<3 MATCH (p:Page) RETURN p.score",
+        "MATCH (p:Page) WHERE p.score<3 RETURN count(*),count(p.score),count(p.missing)",
+        "UNWIND [[],null,[1,2]] AS group UNWIND group AS value RETURN value",
+        "UNWIND [1,null,2] AS value RETURN count(*),count(value)",
+        "UNWIND [] AS value RETURN count(*),count(value)",
+        "MATCH (p:Page) WHERE p.text='absent' RETURN count(*),count(p.score)",
+        "MATCH (p:Page) RETURN p LIMIT 0",
+    ] {
+        let streamed = execute(&db, query, &BTreeMap::new()).unwrap();
+        let eager = execute(&db, &format!("{eager_prefix}{query}"), &BTreeMap::new()).unwrap();
+        assert_eq!(streamed, eager, "{query}");
+    }
+}
