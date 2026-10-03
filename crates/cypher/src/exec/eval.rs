@@ -43,11 +43,7 @@ pub(super) fn eval(
             return Ok(binding.clone());
         }
         Expr::Prop(base, name) => match eval(base, row, ctx)? {
-            Binding::Node(id) => graph::node_out(ctx, id)?
-                .props
-                .get(name)
-                .cloned()
-                .unwrap_or(Value::Null),
+            Binding::Node(id) => graph::node_property(ctx, id, name)?,
             Binding::Value(Value::Map(map)) => map.get(name).cloned().unwrap_or(Value::Null),
             Binding::Value(Value::Null) => Value::Null,
             _ => {
@@ -176,11 +172,23 @@ fn group_equal(a: &Binding, b: &Binding) -> bool {
         _ => false,
     }
 }
-fn out(v: Binding, ctx: &Context<'_, '_>) -> Result<Out, ExecError> {
+pub(super) fn out(v: Binding, ctx: &Context<'_, '_>) -> Result<Out, ExecError> {
     match v {
         Binding::Value(v) => Ok(Out::Value(v)),
         Binding::Node(id) => Ok(Out::Node(graph::node_out(ctx, id)?)),
     }
+}
+pub(super) fn project_row(
+    ctx: &Context<'_, '_>,
+    row: &Bindings,
+    items: &[ReturnItem],
+) -> Result<Vec<Out>, ExecError> {
+    let result = items
+        .iter()
+        .map(|i| out(eval(&i.expr, row, ctx)?, ctx))
+        .collect::<Result<Vec<_>, _>>()?;
+    ctx.budget.output(&result)?;
+    Ok(result)
 }
 pub(super) fn limit(expr: &Expr, ctx: &Context<'_, '_>) -> Result<usize, ExecError> {
     match scalar(eval(expr, &Bindings::new(), ctx)?)? {
@@ -209,12 +217,7 @@ pub(super) fn project(
     let aggregate = |e: &Expr| matches!(e, Expr::CountStar | Expr::Count(_));
     if !items.iter().any(|i| aggregate(&i.expr)) {
         for row in rows.iter().take(max) {
-            let result = items
-                .iter()
-                .map(|i| out(eval(&i.expr, row, ctx)?, ctx))
-                .collect::<Result<Vec<_>, _>>()?;
-            ctx.budget.output(&result)?;
-            output.push(result);
+            output.push(project_row(ctx, row, items)?);
         }
     } else {
         // First-seen group order. Linear lookup is intentionally simple for this eager MVP.

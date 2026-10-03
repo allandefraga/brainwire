@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let limits = ExecutionLimits {
         memory_bytes: 256 << 20,
+        timeout: None,
     };
     let dir = tempfile::tempdir()?;
     let resources = Resources::new(StoreConfig {

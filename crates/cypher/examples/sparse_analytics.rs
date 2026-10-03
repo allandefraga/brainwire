@@ -39,6 +39,7 @@ fn measure_local_query(
             &params,
             ExecutionLimits {
                 memory_bytes: 256 << 20,
+                timeout: None,
             },
         )?;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -178,6 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &empty,
         ExecutionLimits {
             memory_bytes: 256 << 20,
+            timeout: None,
         },
     )?;
     let cypher_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -190,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path_result = execute_with_limits(&db,
         "CALL graph.shortestPath({source:$source,sourceLabel:'Page',target:'synthetic-0',targetLabel:'Page',relationship:'LINK'}) YIELD node,depth RETURN node.entity_id,depth",
         &BTreeMap::from([("source".into(),Value::Str(format!("synthetic-{}",node_count-1)))]),
-        ExecutionLimits { memory_bytes: 256 << 20 })?;
+        ExecutionLimits { memory_bytes: 256 << 20 , timeout: None })?;
     let cypher_path_ms = started.elapsed().as_secs_f64() * 1000.0;
     assert_eq!(path_result.rows.len(), 2);
     assert_eq!(

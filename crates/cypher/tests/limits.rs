@@ -16,6 +16,7 @@ fn setup() -> (tempfile::TempDir, Database) {
 fn limits(bytes: usize) -> ExecutionLimits {
     ExecutionLimits {
         memory_bytes: bytes,
+        timeout: None,
     }
 }
 
@@ -40,12 +41,12 @@ fn oversized_parameters_and_fanout_fail_without_writes_and_poison_prior_runs() {
         "rows".into(),
         Value::List((0..40).map(Value::Int).collect()),
     )]);
-    let query = "UNWIND $rows AS a UNWIND $rows AS b RETURN a,b LIMIT 1";
+    let query = "UNWIND $rows AS a UNWIND $rows AS b RETURN a,b";
     assert!(matches!(
         execute_with_limits(&db, query, &params, limits(32_768)),
         Err(ExecError::MemoryLimit { .. })
     ));
-    assert_eq!(execute(&db, query, &params).unwrap().rows.len(), 1);
+    assert_eq!(execute(&db, query, &params).unwrap().rows.len(), 1600);
 }
 
 #[test]
@@ -127,7 +128,7 @@ fn hop_grouping_and_shortest_path_limits_discard_an_indexed_overwrite() {
             &BTreeMap::from([("id".into(), Value::Str(format!("leaf-{i}")))])).unwrap();
     }
     for query in [
-        "MATCH (a:Page {entity_id:'root'})-[:LINK]->(b:Page) RETURN b LIMIT 1",
+        "MATCH (a:Page {entity_id:'root'})-[:LINK]->(b:Page) RETURN b",
         "MATCH (p:Page) RETURN p.text, count(*) LIMIT 1",
         "CALL graph.shortestPath({source:'root',sourceLabel:'Page',target:'leaf-0',targetLabel:'Page'}) YIELD node,depth RETURN node,depth",
     ] {

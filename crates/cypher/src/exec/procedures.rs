@@ -9,6 +9,12 @@ fn semantic(message: impl Into<String>) -> ExecError {
 pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
     match name {
         "db.indexes" => Ok(&["label", "property", "state"]),
+        "db.memory" => Ok(&[
+            "poolLimitBytes",
+            "poolReservedBytes",
+            "poolPeakBytes",
+            "poolRejections",
+        ]),
         "graph.project" => Ok(&[
             "nodeCount",
             "relationshipCount",
@@ -151,9 +157,9 @@ pub(super) fn validate(
     ctx: &Context<'_, '_>,
 ) -> Result<(), ExecError> {
     let available = fields(name)?;
-    if name == "db.indexes" {
+    if matches!(name, "db.indexes" | "db.memory") {
         if !args.is_empty() {
-            return Err(semantic("db.indexes takes no arguments"));
+            return Err(semantic(format!("{name} takes no arguments")));
         }
     } else {
         options(name, args, ctx)?;
@@ -213,6 +219,25 @@ pub(super) fn run(
         ctx.budget.bindings(&row)?;
         Ok(row)
     };
+    if name == "db.memory" {
+        let values = match ctx.budget.pool_usage() {
+            Some(usage) => [
+                usage.limit_bytes,
+                usage.reserved_bytes,
+                usage.peak_bytes,
+                usage.rejections,
+            ]
+            .into_iter()
+            .map(|n| {
+                i64::try_from(n)
+                    .map(|n| value(Value::Int(n)))
+                    .map_err(|_| semantic("memory counter exceeds Cypher integer capacity"))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+            None => vec![value(Value::Null); 4],
+        };
+        return Ok(vec![bind(values)?]);
+    }
     if name == "db.indexes" {
         let ready = brainwire_store::graph::scalar_indexes_ready(ctx.txn)?;
         let state = if ready {

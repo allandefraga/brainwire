@@ -65,6 +65,9 @@ pub fn run(
         query,
         &params,
         brainwire_cypher::ExecutionLimits {
+            timeout: Some(std::time::Duration::from_millis(
+                loaded.config.server.query_timeout_ms,
+            )),
             memory_bytes: usize::try_from(memory.query.0)
                 .map_err(|_| "config: query exceeds platform address size")?,
         },
@@ -86,7 +89,8 @@ fn category(e: &ExecError) -> &'static str {
         ExecError::Semantic(_) => "semantic",
         ExecError::ParameterMissing(_) => "parameter",
         ExecError::ConstraintViolation(_) => "constraint",
-        ExecError::MemoryLimit { .. } => "resource",
+        ExecError::MemoryLimit { .. } | ExecError::MemoryPoolExhausted { .. } => "resource",
+        ExecError::TimedOut => "timeout",
         ExecError::Conflict => "conflict",
         ExecError::Graph(_) => "storage",
     }

@@ -1,16 +1,18 @@
-//! Atomic, eager execution of the supported Cypher subset.
+//! Atomic Cypher execution with bounded row-at-a-time read pipelines.
 //!
 //! A query transaction owns one snapshot and write overlay across its runs.
 //! All output is evaluated before commit; any query error discards every staged
 //! graph write. `execute` provides the same atomic behavior for one query.
-//! Scans, bindings and output are materialized. Optional conservative allocation
-//! guardrails reject excessive work; this is not a streaming executor or RSS cap.
+//! Read-only MATCH/UNWIND pipelines stream into bounded output or simple counts.
+//! Writes, grouped aggregates and CALL remain eager; Bolt output is materialized.
+//! Conservative guards and an optional shared pool are not process RSS caps.
 mod budget;
 mod eval;
 use budget::Budget;
-pub use budget::ExecutionLimits;
+pub use budget::{ExecutionLimits, QueryMemoryPool, QueryMemoryUsage};
 mod graph;
 mod procedures;
+mod stream;
 mod validate;
 
 use crate::{ast::*, parse, ParseError};
@@ -53,6 +55,14 @@ pub enum ExecError {
     ConstraintViolation(String),
     #[error("query allocation guard exceeded: attempted {attempted} bytes, limit {limit} bytes")]
     MemoryLimit { limit: usize, attempted: usize },
+    #[error("query execution deadline exceeded")]
+    TimedOut,
+    #[error("shared query memory pool exhausted: requested {requested} additional bytes, {reserved} reserved, limit {limit}")]
+    MemoryPoolExhausted {
+        limit: usize,
+        reserved: usize,
+        requested: usize,
+    },
     #[error("transaction conflict")]
     Conflict,
     #[error(transparent)]
@@ -87,7 +97,7 @@ struct Context<'a, 'db> {
     txn: &'a Txn<'db>,
     catalog: &'a Catalog,
     params: &'a BTreeMap<String, Value>,
-    budget: &'a Budget,
+    budget: &'a Budget<'a>,
 }
 
 /// Lifecycle of a shared query transaction. Terminal states cannot be reused.
@@ -106,13 +116,14 @@ pub enum QueryTransactionState {
 /// transaction immediately. Successful commit transitions to `Committed`;
 /// rollback of an active context transitions to `RolledBack`. Rollback is
 /// idempotent and preserves terminal states. Dropping an active context discards
-/// its writes. No savepoints or streaming execution are provided.
+/// its writes. No savepoints or incremental Bolt result cursor are provided.
 pub struct QueryTransaction<'db> {
     txn: Option<Txn<'db>>,
     catalog: Catalog,
     wrote: bool,
     state: QueryTransactionState,
     limits: ExecutionLimits,
+    reservation: Option<budget::Reservation>,
 }
 
 impl<'db> QueryTransaction<'db> {
@@ -149,7 +160,21 @@ impl<'db> QueryTransaction<'db> {
             wrote: false,
             state: QueryTransactionState::Active,
             limits,
+            reservation: None,
         })
+    }
+
+    /// Share conservative transaction reservations across connections/databases.
+    /// The reservation lasts through commit, rollback, failure or drop, including
+    /// time waiting for a Bolt client to consume its materialized result.
+    pub fn begin_with_pool(
+        db: &'db Database,
+        limits: ExecutionLimits,
+        pool: std::sync::Arc<QueryMemoryPool>,
+    ) -> Result<Self, ExecError> {
+        let mut transaction = Self::begin_with_limits(db, limits)?;
+        transaction.reservation = Some(budget::Reservation::new(pool));
+        Ok(transaction)
     }
 
     pub fn state(&self) -> QueryTransactionState {
@@ -168,6 +193,7 @@ impl<'db> QueryTransaction<'db> {
 
     fn fail(&mut self) {
         self.txn.take();
+        self.reservation.take();
         self.state = QueryTransactionState::Failed;
     }
 
@@ -209,6 +235,7 @@ impl<'db> QueryTransaction<'db> {
             params,
             self.limits,
             source_bytes,
+            self.reservation.as_ref(),
         );
         match result {
             Ok((output, wrote)) => {
@@ -235,6 +262,7 @@ impl<'db> QueryTransaction<'db> {
             drop(txn);
             Ok(None)
         };
+        self.reservation.take();
         self.state = if result.is_ok() {
             QueryTransactionState::Committed
         } else {
@@ -247,6 +275,7 @@ impl<'db> QueryTransaction<'db> {
     pub fn rollback(&mut self) {
         if self.state == QueryTransactionState::Active {
             self.txn.take();
+            self.reservation.take();
             self.state = QueryTransactionState::RolledBack;
         }
     }
@@ -290,8 +319,9 @@ fn execute_clauses(
     params: &BTreeMap<String, Value>,
     limits: ExecutionLimits,
     source_bytes: usize,
+    reservation: Option<&budget::Reservation>,
 ) -> Result<(QueryOutput, bool), ExecError> {
-    let budget = Budget::new(limits);
+    let budget = Budget::new(limits, reservation);
     budget.charge(source_bytes)?;
     budget.charge(budget::map_bytes(params))?;
     budget.charge(txn.estimated_memory_bytes())?;
@@ -304,6 +334,18 @@ fn execute_clauses(
             budget: &budget,
         },
     )?;
+    if stream::supports(query) {
+        return stream::run(
+            &Context {
+                txn,
+                catalog,
+                params,
+                budget: &budget,
+            },
+            query,
+        )
+        .map(|output| (output, false));
+    }
     let mut rows = vec![Bindings::new()];
     let mut output = QueryOutput {
         fields: vec![],
@@ -450,5 +492,6 @@ fn execute_clauses(
             }
         }
     }
+    budget.check_deadline()?;
     Ok((output, wrote))
 }

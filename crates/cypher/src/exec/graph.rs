@@ -1,14 +1,8 @@
 use super::*;
 use brainwire_store::graph::*;
 
-pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, ExecError> {
+fn node_record(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeRecord, ExecError> {
     let record = get_node(ctx.txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
-    let ty = ctx
-        .catalog
-        .node_types
-        .iter()
-        .find(|t| t.id == id.type_id())
-        .ok_or_else(|| ExecError::Semantic("node type absent from catalog".into()))?;
     ctx.budget.charge(
         record.entity_id.len().saturating_add(
             record
@@ -22,10 +16,26 @@ pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, Exe
                 }),
         ),
     )?;
+    Ok(record)
+}
+fn node_type<'a>(
+    ctx: &'a Context<'_, '_>,
+    id: NodeId,
+) -> Result<&'a brainwire_core::schema::NodeType, ExecError> {
+    ctx.catalog
+        .node_types
+        .iter()
+        .find(|ty| ty.id == id.type_id())
+        .ok_or_else(|| ExecError::Semantic("node type absent from catalog".into()))
+}
+
+pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, ExecError> {
+    let mut record = node_record(ctx, id)?;
+    let ty = node_type(ctx, id)?;
     let mut props = BTreeMap::new();
     for column in &ty.columns {
-        if let Some(v) = record.row.columns.get(&column.id) {
-            props.insert(column.name.clone(), v.clone());
+        if let Some(value) = record.row.columns.remove(&column.id) {
+            props.insert(column.name.clone(), value);
         }
     }
     props.extend(record.row.extra);
@@ -35,6 +45,31 @@ pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, Exe
         label: ty.label.clone(),
         props,
     })
+}
+
+/// Decode and charge the stored row, but do not build/copy a full property map
+/// for a scalar read. Extra fields retain node_out's precedence after promotion.
+pub(super) fn node_property(
+    ctx: &Context<'_, '_>,
+    id: NodeId,
+    name: &str,
+) -> Result<Value, ExecError> {
+    let mut record = node_record(ctx, id)?;
+    let ty = node_type(ctx, id)?;
+    if name == "entity_id" {
+        return Ok(Value::Str(record.entity_id));
+    }
+    Ok(record
+        .row
+        .extra
+        .remove(name)
+        .or_else(|| {
+            ty.columns
+                .iter()
+                .find(|column| column.name == name)
+                .and_then(|column| record.row.columns.remove(&column.id))
+        })
+        .unwrap_or(Value::Null))
 }
 pub(super) fn bound_node(row: &Bindings, name: &str) -> Result<NodeId, ExecError> {
     match row.get(name) {
@@ -73,6 +108,11 @@ fn matches(
     let Some(row) = bind(row, pat, id) else {
         return Ok(None);
     };
+    if pat.props.is_empty() {
+        // Validate existence/corruption, without constructing unused properties.
+        node_record(ctx, id)?;
+        return Ok((pat.label.as_ref() == Some(&node_type(ctx, id)?.label)).then_some(row));
+    }
     let node = node_out(ctx, id)?;
     if pat.label.as_ref() != Some(&node.label) {
         return Ok(None);
@@ -126,88 +166,93 @@ pub(super) fn match_pattern(
     predicate: Option<&Expr>,
 ) -> Result<Vec<Bindings>, ExecError> {
     let mut next = vec![];
+    for row in rows {
+        visit_pattern::<ExecError>(ctx, &row, pat, predicate, &mut |row| {
+            ctx.budget.retain_bindings(&row)?;
+            next.push(row);
+            Ok(())
+        })?;
+    }
+    Ok(next)
+}
+
+/// Shared candidate traversal for eager writes and bounded read pipelines.
+/// Callback errors stop the underlying RocksDB iterator immediately.
+pub(super) fn visit_pattern<E>(
+    ctx: &Context<'_, '_>,
+    row: &Bindings,
+    pat: &Pattern,
+    predicate: Option<&Expr>,
+    visit: &mut dyn FnMut(Bindings) -> Result<(), E>,
+) -> Result<(), E>
+where
+    E: From<ExecError> + From<GraphError> + From<StoreError>,
+{
+    let _lookup_scope = ctx.budget.scope();
     let ty = ctx
         .catalog
         .node_type(pat.start.label.as_deref().expect("validated label"))
         .expect("validated type");
-    let lookup = lookup_props(&pat.start, predicate);
-    let scan = || {
-        let mut found = Vec::new();
-        visit_nodes_of_type::<ExecError>(ctx.txn, ty.id, |id| {
-            ctx.budget.charge(16)?;
-            found.push(id);
-            Ok(())
-        })?;
-        Ok::<_, ExecError>(found)
-    };
-    for row in rows {
-        let candidates = if let Some(existing) = pat.start.var.as_ref().and_then(|v| row.get(v)) {
-            match existing {
-                Binding::Node(id) => vec![*id],
-                _ => return Err(ExecError::Semantic("MATCH variable must be a node".into())),
-            }
-        } else if let Some((_, e)) = lookup.iter().find(|(name, _)| name == "entity_id") {
-            // A reference to the pattern's own variable cannot seed the index lookup.
-            if validate::mentions(e, pat.start.var.as_deref()) {
-                scan()?
-            } else {
-                match scalar(eval(e, &row, ctx)?)? {
-                    Value::Str(s) => find_by_entity_id(ctx.txn, &s, Some(ty.id))?,
-                    _ => vec![],
-                }
-            }
-        } else {
-            let mut indexed = None;
-            for (field, expr) in &lookup {
-                if validate::mentions(expr, pat.start.var.as_deref()) {
-                    continue;
-                }
-                let value = scalar(eval(expr, &row, ctx)?)?;
-                let mut found = Vec::new();
-                if visit_by_indexed_property::<ExecError>(ctx.txn, ty, field, &value, |id| {
-                    ctx.budget.charge(16)?;
-                    found.push(id);
-                    Ok(())
-                })? {
-                    indexed = Some(found);
-                    break;
-                }
-            }
-            match indexed {
-                Some(found) => found,
-                None => scan()?,
-            }
+    let mut candidate = |id| -> Result<(), E> {
+        let _row_scope = ctx.budget.scope();
+        ctx.budget.charge(16)?;
+        let Some(row) = matches(ctx, row, &pat.start, id)? else {
+            return Ok(());
         };
-        for id in candidates {
-            let Some(row) = matches(ctx, &row, &pat.start, id)? else {
-                continue;
+        ctx.budget.bindings(&row)?;
+        if let Some((rel, end)) = &pat.hop {
+            let edge_type = ctx
+                .catalog
+                .edge_type(&rel.rel_type)
+                .expect("validated edge type")
+                .id;
+            let cf = match rel.direction {
+                Direction::Out => Cf::Out,
+                Direction::In => Cf::In,
             };
-            if let Some((rel, end)) = &pat.hop {
-                let edge_type = ctx
-                    .catalog
-                    .edge_type(&rel.rel_type)
-                    .expect("validated edge type")
-                    .id;
-                let cf = match rel.direction {
-                    Direction::Out => Cf::Out,
-                    Direction::In => Cf::In,
-                };
-                visit_edges::<ExecError>(ctx.txn, cf, id, |edge| {
-                    if edge.edge_type == edge_type {
-                        if let Some(row) = matches(ctx, &row, end, edge.other)? {
-                            ctx.budget.bindings(&row)?;
-                            next.push(row);
-                        }
+            visit_edges::<E>(ctx.txn, cf, id, |edge| {
+                let _edge_scope = ctx.budget.scope();
+                if edge.edge_type == edge_type {
+                    if let Some(row) = matches(ctx, &row, end, edge.other)? {
+                        ctx.budget.bindings(&row)?;
+                        visit(row)?;
                     }
-                    Ok(())
-                })?;
-            } else {
-                ctx.budget.bindings(&row)?;
-                next.push(row);
+                }
+                Ok(())
+            })?;
+        } else {
+            visit(row)?;
+        }
+        Ok(())
+    };
+    if let Some(existing) = pat.start.var.as_ref().and_then(|v| row.get(v)) {
+        return match existing {
+            Binding::Node(id) => candidate(*id),
+            _ => Err(ExecError::Semantic("MATCH variable must be a node".into()).into()),
+        };
+    }
+    let lookup = lookup_props(&pat.start, predicate);
+    if let Some((_, expr)) = lookup.iter().find(|(name, _)| name == "entity_id") {
+        if !validate::mentions(expr, pat.start.var.as_deref()) {
+            if let Value::Str(value) = scalar(eval(expr, row, ctx)?)? {
+                for id in find_by_entity_id(ctx.txn, &value, Some(ty.id))? {
+                    candidate(id)?;
+                }
+            }
+            return Ok(());
+        }
+    } else {
+        for (field, expr) in &lookup {
+            if validate::mentions(expr, pat.start.var.as_deref()) {
+                continue;
+            }
+            let value = scalar(eval(expr, row, ctx)?)?;
+            if visit_by_indexed_property::<E>(ctx.txn, ty, field, &value, &mut candidate)? {
+                return Ok(());
             }
         }
     }
-    Ok(next)
+    visit_nodes_of_type::<E>(ctx.txn, ty.id, candidate)
 }
 pub(super) fn write_pattern(
     txn: &mut Txn<'_>,

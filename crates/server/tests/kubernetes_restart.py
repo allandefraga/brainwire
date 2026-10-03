@@ -30,7 +30,13 @@ def run(kind_binary, image, rows, node_image):
         env = dict(os.environ, KUBECONFIG=str(kubeconfig), KIND_EXPERIMENTAL_PROVIDER="docker")
 
         def command(args, text=None, timeout=180):
-            result = subprocess.run(args, input=text, text=True, capture_output=True, env=env, timeout=timeout)
+            try:
+                result = subprocess.run(args, input=text, text=True, capture_output=True, env=env, timeout=timeout)
+            except subprocess.TimeoutExpired as error:
+                def decoded(value):
+                    return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+                raise RuntimeError(f"{' '.join(args[:5])} timed out after {timeout}s:\n"
+                                   + decoded(error.stdout)[-6000:] + decoded(error.stderr)[-6000:]) from error
             if result.returncode:
                 raise RuntimeError(f"{' '.join(args[:5])}: {result.stdout}\n{result.stderr}")
             return result.stdout
@@ -168,8 +174,9 @@ def run(kind_binary, image, rows, node_image):
                                     ids = command(["docker", "exec", f"{name}-control-plane", "crictl", "ps", "--label", "io.kubernetes.pod.name=brainwire-0", "--label", f"io.kubernetes.pod.namespace={namespace}", "-q"]).split()
                                     assert len(ids) == 1, ids
                                     command(["docker", "exec", f"{name}-control-plane", "crictl", "stop", "--timeout=0", ids[0]])
-                                    for _ in range(180):
-                                        current = json.loads(kube("get", "pod/brainwire-0", "-o", "json"))
+                                    deadline = time.monotonic() + 180
+                                    while time.monotonic() < deadline:
+                                        current = json.loads(kube("get", "pod/brainwire-0", "-o", "json", timeout=10))
                                         statuses = current.get("status", {}).get("containerStatuses", [])
                                         if statuses and statuses[0]["restartCount"] > old_restarts:
                                             break

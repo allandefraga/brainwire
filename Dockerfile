@@ -1,5 +1,10 @@
 FROM rust:1.98.1-bookworm AS builder
 
+# Keep the image's compiler even when the development toolchain tracks stable.
+ENV RUSTUP_TOOLCHAIN=1.98.1
+# RocksDB's C++ compiler jobs can exhaust a shared Docker Desktop VM.
+ARG CARGO_BUILD_JOBS=2
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang libclang-dev cmake pkg-config && \
     rm -rf /var/lib/apt/lists/*

@@ -15,6 +15,7 @@ pub struct Databases {
     // One cache and write-buffer budget is shared by every opened database.
     resources: Resources,
     query_limits: brainwire_cypher::ExecutionLimits,
+    query_pool: Arc<brainwire_cypher::QueryMemoryPool>,
 }
 
 pub(crate) fn valid_name(name: &str) -> bool {
@@ -43,9 +44,16 @@ impl Databases {
             databases: Mutex::new(BTreeMap::new()),
             resources,
             query_limits: brainwire_cypher::ExecutionLimits {
+                timeout: Some(std::time::Duration::from_millis(
+                    config.server.query_timeout_ms,
+                )),
                 memory_bytes: usize::try_from(config.memory.query.0)
                     .map_err(|_| "memory.query exceeds platform address size")?,
             },
+            query_pool: Arc::new(brainwire_cypher::QueryMemoryPool::new(
+                usize::try_from(config.memory.query.0)
+                    .map_err(|_| "memory.query exceeds platform address size")?,
+            )),
         };
         for entry in fs::read_dir(&registry.data_dir)
             .map_err(|e| format!("cannot list {}: {e}", registry.data_dir.display()))?
@@ -65,6 +73,9 @@ impl Databases {
 
     pub fn query_limits(&self) -> brainwire_cypher::ExecutionLimits {
         self.query_limits
+    }
+    pub fn query_pool(&self) -> Arc<brainwire_cypher::QueryMemoryPool> {
+        Arc::clone(&self.query_pool)
     }
 
     pub fn memory_usage(&self) -> (usize, usize) {

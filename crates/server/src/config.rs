@@ -30,6 +30,7 @@ pub struct ServerSection {
     pub data_dir: PathBuf,
     pub default_database: String,
     pub max_message: ByteSize,
+    pub query_timeout_ms: u64,
 }
 
 impl Default for ServerSection {
@@ -39,6 +40,7 @@ impl Default for ServerSection {
             data_dir: PathBuf::from("./data"),
             default_database: "client_memory".to_string(),
             max_message: ByteSize(256 << 20),
+            query_timeout_ms: 30_000,
         }
     }
 }
@@ -95,11 +97,12 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 7] = [
+pub(crate) const KEYS: [&str; 8] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
     "server.max_message",
+    "server.query_timeout_ms",
     "memory.cache",
     "memory.memtables",
     "memory.query",
@@ -144,6 +147,8 @@ struct FileServerSection {
     default_database: Option<String>,
     #[serde(default)]
     max_message: Option<ByteSize>,
+    #[serde(default)]
+    query_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -206,6 +211,10 @@ fn apply_file(
         config.server.max_message = v;
         sources.insert("server.max_message", Source::File(path.to_path_buf()));
     }
+    if let Some(v) = file.server.query_timeout_ms {
+        config.server.query_timeout_ms = v;
+        sources.insert("server.query_timeout_ms", Source::File(path.to_path_buf()));
+    }
     if let Some(v) = file.memory.cache {
         config.memory.cache = v;
         sources.insert("memory.cache", Source::File(path.to_path_buf()));
@@ -251,6 +260,18 @@ fn apply_env(
         sources.insert("server.max_message", Source::Env(var));
     }
 
+    let var = env_var_name("server.query_timeout_ms");
+    if let Some(value) = env.get(&var) {
+        config.server.query_timeout_ms =
+            value
+                .parse()
+                .map_err(|error: std::num::ParseIntError| ConfigError::BadValue {
+                    key: "server.query_timeout_ms".into(),
+                    message: error.to_string(),
+                })?;
+        sources.insert("server.query_timeout_ms", Source::Env(var));
+    }
+
     let var = env_var_name("memory.cache");
     if let Some(v) = env.get(&var) {
         config.memory.cache = parse_byte_size(v, "memory.cache")?;
@@ -282,6 +303,11 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if !(1..=3_600_000).contains(&config.server.query_timeout_ms) {
+        return Err(ConfigError::Invalid(
+            "server.query_timeout_ms must be between 1 and 3600000".into(),
+        ));
+    }
     if config.memory.query.0 == 0 {
         return Err(ConfigError::Invalid("memory.query must be positive".into()));
     }
@@ -335,17 +361,21 @@ pub fn default_file() -> String {
          # Largest Bolt message accepted from a client.\n\
          max_message = \"{max_message}\"\n\
          \n\
+         # Cooperative per-RUN deadline; storage calls and commit can overrun.\n\
+         query_timeout_ms = {query_timeout_ms}\n\
+         \n\
          [memory]\n\
          # RocksDB block cache. The memtables below are charged inside it.\n\
          cache = \"{cache}\"\n\
          # Total memtable budget across all open databases, charged inside `cache`.\n\
          memtables = \"{memtables}\"\n\
-         # Conservative per-RUN allocation guard (not process RSS or a shared pool).\n\
+         # Shared server query reservation pool and per-RUN guard (not process RSS).\n\
          query = \"{query}\"\n",
         listen = d.server.listen,
         data_dir = d.server.data_dir.display(),
         default_database = d.server.default_database,
         max_message = d.server.max_message,
+        query_timeout_ms = d.server.query_timeout_ms,
         cache = d.memory.cache,
         memtables = d.memory.memtables,
         query = d.memory.query,
@@ -379,6 +409,7 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.data_dir" => config.server.data_dir.display().to_string(),
         "server.default_database" => config.server.default_database.clone(),
         "server.max_message" => config.server.max_message.to_string(),
+        "server.query_timeout_ms" => config.server.query_timeout_ms.to_string(),
         "memory.cache" => config.memory.cache.to_string(),
         "memory.memtables" => config.memory.memtables.to_string(),
         "memory.query" => config.memory.query.to_string(),
@@ -467,6 +498,36 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn query_timeout_has_file_env_provenance_and_rejects_invalid_bounds() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("brainwire.toml");
+        std::fs::write(&path, "[server]\nquery_timeout_ms=750\n").unwrap();
+        let loaded = load(Some(&path), &BTreeMap::new()).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.query_timeout_ms"
+                && value == "750"
+                && source.starts_with("file ")));
+        let env = BTreeMap::from([("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS".into(), "1250".into())]);
+        let loaded = load(Some(&path), &env).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.query_timeout_ms"
+                && value == "1250"
+                && source.starts_with("env ")));
+        for bad in ["0", "3600001", "oops", "-1"] {
+            assert!(
+                load(
+                    None,
+                    &BTreeMap::from([("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS".into(), bad.into())])
+                )
+                .is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
@@ -573,6 +634,7 @@ mod tests {
                 ("BRAINWIRE_SERVER_DATA_DIR", "/tmp/brainwire-data"),
                 ("BRAINWIRE_SERVER_DEFAULT_DATABASE", "other_db"),
                 ("BRAINWIRE_SERVER_MAX_MESSAGE", "512MiB"),
+                ("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS", "1250"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
                 ("BRAINWIRE_MEMORY_QUERY", "128MiB"),
@@ -586,6 +648,7 @@ mod tests {
         );
         assert_eq!(loaded.config.server.default_database, "other_db");
         assert_eq!(loaded.config.server.max_message.0, 512 << 20);
+        assert_eq!(loaded.config.server.query_timeout_ms, 1250);
         assert_eq!(loaded.config.memory.cache.0, 1 << 30);
         assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
         assert_eq!(loaded.config.memory.query.0, 128 << 20);

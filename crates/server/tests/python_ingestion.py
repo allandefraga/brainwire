@@ -139,7 +139,7 @@ query = "{query_mib}MiB"
                                 try:
                                     with session.begin_transaction() as tx:
                                         tx.run("MATCH (c:Customer {entity_id:'id-0'}) SET c.email='guard-rollback', c.segment=999999").consume()
-                                        tx.run("UNWIND $values AS a UNWIND $values AS b UNWIND $values AS c RETURN a,b,c LIMIT 1", values=list(range(400))).consume()
+                                        tx.run("UNWIND $values AS a UNWIND $values AS b UNWIND $values AS c RETURN a,b,c,$padding", values=list(range(400)), padding="x"*4096).consume()
                                 except Neo4jError as error:
                                     assert error.code == "Neo.ClientError.Statement.MemoryLimitExceeded", error
                                 else:

@@ -41,6 +41,7 @@ pub struct GraphSummary {
     pub cache_budget: u64,
     pub memtable_budget: u64,
     pub query_budget: u64,
+    pub query_timeout_ms: u64,
     pub cache_accounted: u64,
     pub memtables_allocated: u64,
     pub directory: String,
@@ -54,12 +55,12 @@ fn mib(bytes: u64) -> String {
 
 fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
     match view {
-        View::Memory => format!("{}\n\nmemory.cache: {}\n{}: {}\nmemory.memtables: {}\n{}: {}\nmemory.query: {}\n\n{}",
+        View::Memory => format!("{}\n\nmemory.cache: {}\n{}: {}\nmemory.memtables: {}\n{}: {}\nmemory.query: {}\nserver.query_timeout_ms: {} ms\n\n{}",
             lang.choose("PROCESSO OFFLINE • TODOS OS GRAFOS", "OFFLINE PROCESS • ALL GRAPHS"),
             mib(g.cache_budget), lang.choose("Contabilizado", "Accounted"), mib(g.cache_accounted),
-            mib(g.memtable_budget), lang.choose("Alocado", "Allocated"), mib(g.memtables_allocated), mib(g.query_budget),
-            lang.choose("Memtables estão dentro do cache. Orçamento não é RAM reservada. Query: proteção conservadora por RUN; não é limite de RSS. Estes valores não são do servidor parado, nem RSS.",
-                "Memtables are inside cache. Budget is not reserved RAM. Query: conservative per-RUN allocation guard; not an RSS cap. These are not stopped-server values or RSS.")),
+            mib(g.memtable_budget), lang.choose("Alocado", "Allocated"), mib(g.memtables_allocated), mib(g.query_budget), g.query_timeout_ms,
+            lang.choose("Memtables estão dentro do cache. Orçamento não é RAM reservada. Query: proteção conservadora por RUN e pool compartilhado no servidor. Reservas duram até o fim da transação. Prazo é cooperativo; operações de storage podem excedê-lo. Não é RSS; estes valores são do inspetor offline.\n\nNo servidor: CALL db.memory() YIELD poolLimitBytes, poolReservedBytes RETURN poolLimitBytes, poolReservedBytes",
+                "Memtables are inside cache. Budget is not reserved RAM. Query: conservative per-RUN guard plus a shared server pool. Reservations last until transaction end. Deadline is cooperative; storage calls can overrun. Not RSS; these are offline inspector values.\n\nOn the server: CALL db.memory() YIELD poolLimitBytes, poolReservedBytes RETURN poolLimitBytes, poolReservedBytes")),
         View::Disk => {
             let mut text = lang.choose("ROCKSDB • GRAFO SELECIONADO\nCF       ~keys   mem KiB  L0\n", "ROCKSDB • SELECTED GRAPH\nCF       ~keys   mem KiB  L0\n").to_string();
             for (cf, metrics) in &g.storage {
@@ -74,8 +75,8 @@ fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
             lang.choose("Índice escalar", "Scalar equality index"),
             if g.index_declarations == 0 { lang.choose("nenhum", "none") } else if g.indexes_ready { lang.choose("pronto", "ready") } else { lang.choose("pendente (scan)", "pending (scan)") },
             g.indexed_fields.join(", "),
-            lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes. OR/NOT/faixa sozinhos: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nPainel explicativo; não executa consultas.",
-                "MERGE uses stable entity_id. SET replaces fields; null removes.\n\nREADS\nWHERE c.email=$email: ready scalar equality index. AND keeps residual filters. Standalone OR/NOT/range: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nExplanation panel; no query execution.")),
+            lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes. OR/NOT/faixa sozinhos: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nLeituras simples: uma linha por vez; LIMIT para a leitura.\nEscritas, agrupamentos e CALL ainda acumulam linhas.\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nPainel explicativo; não executa consultas.",
+                "MERGE uses stable entity_id. SET replaces fields; null removes.\n\nREADS\nWHERE c.email=$email: ready scalar equality index. AND keeps residual filters. Standalone OR/NOT/range: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nSimple reads process one row at a time; LIMIT stops input.\nWrites, grouped counts and CALL still materialize rows.\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nExplanation panel; no query execution.")),
         View::Graph => unreachable!(),
     }
 }
@@ -289,7 +290,7 @@ fn render_disk(
                 "F1 explains • ←→ graph • files: offline metadata",
             )
         } else {
-            lang.choose("RAM configurada ≠ reservada. Query: proteção por RUN, não RSS. Valores ? são desconhecidos.", "Configured RAM is not reserved. Query: per-RUN guard, not RSS. ? values are unknown.")
+            lang.choose("RAM configurada ≠ reservada. Query: proteção por RUN + pool no servidor, não RSS. Valores ? são desconhecidos.", "Configured RAM is not reserved. Query: per-RUN guard + server pool, not RSS. ? values are unknown.")
         }
     );
     frame.render_widget(

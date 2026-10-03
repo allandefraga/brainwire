@@ -92,9 +92,10 @@ fn worker(receiver: mpsc::Receiver<Command>, databases: Arc<Databases>, default_
                     )));
                     continue;
                 };
-                let mut transaction = match QueryTransaction::begin_with_limits(
+                let mut transaction = match QueryTransaction::begin_with_pool(
                     &database,
                     databases.query_limits(),
+                    databases.query_pool(),
                 ) {
                     Ok(transaction) => transaction,
                     Err(err) => {
@@ -111,6 +112,11 @@ fn worker(receiver: mpsc::Receiver<Command>, databases: Arc<Databases>, default_
                                     transaction.run(&query, &params).map_err(execution_error)
                                 })
                                 .and_then(output_to_bolt);
+                            // Conversion errors happen outside QueryTransaction::run;
+                            // they must also discard earlier writes and pool reservations.
+                            if result.is_err() {
+                                transaction.rollback();
+                            }
                             let _ = reply.send(result);
                         }
                         Command::Commit(reply) => {
@@ -273,6 +279,10 @@ fn error_code(error: &ExecError) -> &'static str {
         ExecError::ParameterMissing(_) => "Neo.ClientError.Statement.ParameterMissing",
         ExecError::ConstraintViolation(_) => "Neo.ClientError.Schema.ConstraintValidationFailed",
         ExecError::MemoryLimit { .. } => "Neo.ClientError.Statement.MemoryLimitExceeded",
+        ExecError::MemoryPoolExhausted { .. } => {
+            "Neo.TransientError.General.QueryMemoryPoolExhausted"
+        }
+        ExecError::TimedOut => "Neo.ClientError.Statement.ExecutionTimedOut",
         ExecError::Conflict => "Neo.TransientError.Transaction.Outdated",
         ExecError::Graph(_) => "Neo.DatabaseError.General.UnknownError",
     }
@@ -385,6 +395,77 @@ mod tests {
             error_code(&ExecError::Unsupported("x".into())),
             "Neo.ClientError.Statement.SyntaxError"
         );
+    }
+
+    #[test]
+    fn parameter_conversion_failure_discards_prior_writes_and_reservations() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = dir.path().join("data");
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        let dbs = Arc::new(Databases::open_all(&config).unwrap());
+        let db = dbs.get("client_memory").unwrap();
+        let mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        db.apply_ontology(&mapping).unwrap();
+        let mut engine = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "CREATE (c:Customer {entity_id:'pending-conversion'})",
+                &PackValue::Map(vec![]),
+            )
+            .unwrap();
+        assert!(dbs.query_pool().usage().reserved_bytes > 0);
+        assert!(engine
+            .run(
+                None,
+                "RETURN $bad",
+                &PackValue::Map(vec![("bad".into(), PackValue::Bytes(vec![1, 2]))])
+            )
+            .is_err());
+        assert!(engine.commit().is_err());
+        assert_eq!(dbs.query_pool().usage().reserved_bytes, 0);
+        assert_eq!(db.stats().unwrap().nodes, 0);
+    }
+
+    #[test]
+    fn named_database_workers_share_and_release_the_query_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = dir.path().join("data");
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        config.memory.query = crate::size::ByteSize(24_000);
+        let dbs = Arc::new(Databases::open_all(&config).unwrap());
+        dbs.create("second").unwrap();
+        let mut a = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+        let mut b = DbEngine::new(Arc::clone(&dbs), "second".into()).unwrap();
+        let params = PackValue::Map(vec![("text".into(), PackValue::String("x".repeat(3000)))]);
+        a.begin(None).unwrap();
+        a.run(None, "RETURN $text", &params).unwrap();
+        let held = dbs.query_pool().usage().reserved_bytes;
+        b.begin(None).unwrap();
+        let error = b
+            .run(None, "RETURN $text", &params)
+            .err()
+            .expect("shared pool must reject");
+        assert_eq!(
+            error.code,
+            "Neo.TransientError.General.QueryMemoryPoolExhausted"
+        );
+        assert!(b.commit().is_err());
+        b.abort().unwrap();
+        assert_eq!(dbs.query_pool().usage().reserved_bytes, held);
+        a.abort().unwrap();
+        assert_eq!(dbs.query_pool().usage().reserved_bytes, 0);
+        b.begin(None).unwrap();
+        b.run(None, "RETURN $text", &params).unwrap();
+        b.commit().unwrap();
+        assert_eq!(dbs.query_pool().usage().reserved_bytes, 0);
     }
 
     #[test]
