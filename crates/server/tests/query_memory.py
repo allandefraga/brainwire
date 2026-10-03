@@ -20,6 +20,51 @@ from neo4j.exceptions import Neo4jError
 MEMORY = "CALL db.memory() YIELD poolLimitBytes,poolReservedBytes,poolPeakBytes,poolRejections RETURN poolLimitBytes,poolReservedBytes,poolPeakBytes,poolRejections"
 
 
+def mixed_workload(driver):
+    """Short concurrent reads/overwrites, disjoint writer keys and indexed values."""
+    barrier = threading.Barrier(8, timeout=30)
+    def worker(index):
+        timings = []
+        with driver.session(database="first") as session:
+            barrier.wait()
+            for operation in range(100):
+                started = time.perf_counter()
+                if index < 4:
+                    # Each writer owns one node. Reusing the index value exercises
+                    # removal/reinsertion without intentional lost-update races.
+                    value = f"writer-{index}-{operation % 2}"
+                    session.run("MATCH (p:Page {entity_id:$id}) SET p.text=$text",
+                                id=f"p-{index}", text=value).consume()
+                else:
+                    identifier = f"p-{(operation * 17 + index) % 2000}"
+                    row = session.run("MATCH (p:Page {entity_id:$id}) RETURN p.entity_id AS id",
+                                      id=identifier).single()
+                    assert row["id"] == identifier
+                timings.append((time.perf_counter() - started) * 1000)
+        return ("write" if index < 4 else "read"), timings
+    started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        runs = list(executor.map(worker, range(8)))
+    elapsed = time.perf_counter() - started
+    measurements = {}
+    for kind in ("read", "write"):
+        values = sorted(value for label, values in runs if label == kind for value in values)
+        measurements[kind] = {"operations": len(values), "p50Ms": values[len(values)//2],
+                              "p95Ms": values[(len(values)*95+99)//100-1]}
+    with driver.session(database="first") as session:
+        for index in range(4):
+            current = f"writer-{index}-1"
+            stale = f"writer-{index}-0"
+            row = session.run("MATCH (p:Page) WHERE p.text=$text RETURN p.entity_id AS id", text=current).single()
+            assert row["id"] == f"p-{index}"
+            assert session.run("MATCH (p:Page) WHERE p.text=$text RETURN count(*) AS n", text=stale).single()["n"] == 0
+        assert session.run("MATCH (p:Page) WHERE p.text='same' RETURN count(*) AS n").single()["n"] == 1996
+        assert session.run("MATCH (p:Page) RETURN count(*) AS n").single()["n"] == 2000
+    return {"connections": 8, "operations": 800, "seconds": elapsed,
+            "operationsPerSecond": 800/elapsed, "latency": measurements,
+            "indexOverwriteCheck": "PASS", "scope": "native debug Bolt; 2K nodes; disjoint writer keys"}
+
+
 def run(binary):
     with tempfile.TemporaryDirectory(prefix="brainwire-query-memory-") as temporary:
         root = Path(temporary)
@@ -123,7 +168,8 @@ query = "256KiB"
                         assert after["poolReservedBytes"] < 8192,after # This observer query has its own reservation.
                         assert after["poolPeakBytes"] <= 256*1024
                         assert after["poolRejections"] >= outcomes.count("rejected")
-                    print(json.dumps({"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"},indent=2))
+                    mixed = mixed_workload(driver)
+                    print(json.dumps({"mixedWorkload":mixed,"result":"PASS","rows":2000,"concurrentConnections":16,"outcomes":outcomes,"during":during,"after":after,"deadlineRollback":"PASS","scope":"synthetic native Bolt; shared accounting, not RSS"},indent=2))
             finally:
                 process.terminate()
                 try:
