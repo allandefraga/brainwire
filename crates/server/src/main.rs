@@ -91,7 +91,7 @@ enum Commands {
         /// Render one plain-text frame without a terminal.
         #[arg(long)]
         snapshot: bool,
-        /// Initial view: graph, query, memory or disk.
+        /// Initial view: graph, query, memory, disk; ontology is available with --overview.
         #[arg(long, default_value = "graph")]
         view: String,
         /// Snapshot columns (80..240).
@@ -268,7 +268,9 @@ fn main() {
                 height,
             };
             if overview {
-                admin::graph_summaries(config.as_deref(), estimated).and_then(|graphs| {
+                // Opening the schema should never require a full instance count scan.
+                let quick_counts = estimated || options.view == "ontology";
+                admin::graph_summaries(config.as_deref(), quick_counts).and_then(|graphs| {
                     brainwire_tui::run_overview(&options, graphs, graph.as_deref())
                 })
             } else {

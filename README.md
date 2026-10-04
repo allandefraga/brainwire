@@ -35,6 +35,9 @@ and a file inspector with an illustrative LSM storage flow. See the
 `brainwire shell --overview` is a separate read-only view of the real named
 graphs on local disk. The [multi-graph backoffice guide](docs/multi-graph-backoffice.md)
 shows current counts, commands and which TUI operations are live or synthetic.
+`brainwire shell --overview --view ontology` now shows real schema connections,
+with type selection, property/index inspection and incoming/outgoing signatures.
+It uses quick count estimates and remains an offline, read-only inspector.
 
 For real graph reads and writes, run `brainwire serve` to connect over Bolt, or
 use the embedded `brainwire cypher --database <directory> --query <text>` command

@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-04",
+  "build": "debug",
+  "system": "macOS-26.6.2-arm64-arm-64bit",
+  "fixture": "existing local synthetic staging-100k; registry also opens analytics-demo and client_memory",
+  "runs": {
+    "ontology_snapshot": {
+      "argv": [
+        "shell",
+        "--overview",
+        "--snapshot",
+        "--view",
+        "ontology",
+        "--graph",
+        "staging-100k",
+        "--width",
+        "160",
+        "--height",
+        "40"
+      ],
+      "milliseconds": [
+        70.084,
+        72.039,
+        70.679,
+        70.408,
+        75.2
+      ],
+      "median_ms": 70.679
+    },
+    "exact_graph_snapshot": {
+      "argv": [
+        "shell",
+        "--overview",
+        "--snapshot",
+        "--view",
+        "graph",
+        "--graph",
+        "staging-100k",
+        "--width",
+        "160",
+        "--height",
+        "40"
+      ],
+      "milliseconds": [
+        876.949,
+        808.902,
+        985.263,
+        912.528,
+        917.234
+      ],
+      "median_ms": 912.528
+    },
+    "estimated_graph_snapshot": {
+      "argv": [
+        "shell",
+        "--overview",
+        "--estimated",
+        "--snapshot",
+        "--view",
+        "graph",
+        "--graph",
+        "staging-100k",
+        "--width",
+        "160",
+        "--height",
+        "40"
+      ],
+      "milliseconds": [
+        74.518,
+        90.054,
+        91.456,
+        83.524,
+        80.586
+      ],
+      "median_ms": 83.524
+    }
+  }
+}

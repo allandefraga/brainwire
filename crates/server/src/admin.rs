@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use brainwire_core::schema::{Catalog, GraphMapping};
-use brainwire_tui::{GraphSummary, StorageFileSummary};
+use brainwire_tui::{
+    GraphSummary, OntologyEdge, OntologyNode, OntologySummary, StorageFileSummary,
+};
 
 use crate::config;
 use crate::databases::Databases;
@@ -202,6 +204,11 @@ pub fn graph_summaries(
             .map_err(|e| format!("cannot read ontology of {name}: {e}"))?;
         let (files, files_truncated) = inventory(&db, 256)?;
         graphs.push(GraphSummary {
+            ontology: catalog
+                .as_ref()
+                .map(ontology_summary)
+                .transpose()?
+                .unwrap_or_default(),
             name,
             nodes,
             edges,
@@ -252,6 +259,50 @@ pub fn graph_summaries(
         graph.memtables_allocated = memtables as u64;
     }
     Ok(graphs)
+}
+
+fn ontology_summary(catalog: &Catalog) -> Result<OntologySummary, String> {
+    let nodes = catalog
+        .node_types
+        .iter()
+        .map(|ty| OntologyNode {
+            label: ty.label.clone(),
+            properties: std::iter::once("entity_id".to_string())
+                .chain(
+                    ty.columns
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .filter(|name| name != "entity_id"),
+                )
+                .collect(),
+            indexed_fields: ty.indexed.clone(),
+        })
+        .collect();
+    let mut edges = Vec::new();
+    for ty in &catalog.edge_types {
+        for (from, to) in &ty.signatures {
+            let label = |id| {
+                catalog
+                    .node_types
+                    .iter()
+                    .find(|n| n.id == id)
+                    .map(|n| n.label.clone())
+                    .ok_or_else(|| {
+                        format!(
+                            "ontology relation {} references an unknown node type",
+                            ty.name
+                        )
+                    })
+            };
+            edges.push(OntologyEdge {
+                name: ty.name.clone(),
+                source: label(*from)?,
+                target: label(*to)?,
+                properties: ty.columns.iter().map(|c| c.name.clone()).collect(),
+            });
+        }
+    }
+    Ok(OntologySummary { nodes, edges })
 }
 
 pub fn overview(json: bool, estimated: bool, config: Option<&Path>) -> Result<(), String> {
@@ -479,4 +530,49 @@ pub fn check(name: &str, json: bool, config: Option<&Path>) -> Result<(), String
         println!("database={name} consistency=ok scalar_indexes={index_status}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ontology_preserves_every_signature_and_rejects_dangling_types() {
+        let mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        let mut catalog = Catalog::apply(&mapping, None).unwrap();
+        let summary = ontology_summary(&catalog).unwrap();
+        let signatures: Vec<_> = summary
+            .edges
+            .iter()
+            .map(|e| (e.name.as_str(), e.source.as_str(), e.target.as_str()))
+            .collect();
+        assert_eq!(
+            signatures,
+            vec![
+                ("WORKS_AT", "Customer", "Company"),
+                ("IN_SEGMENT", "Company", "Segment"),
+                ("IN_SEGMENT", "Customer", "Segment"),
+            ]
+        );
+        assert_eq!(summary.edges[0].properties, ["role"]);
+        // The catalog also indexes entity-resolution fields and sorts declarations.
+        assert_eq!(
+            summary.nodes[0].indexed_fields,
+            ["email", "phone", "segment"]
+        );
+        assert_eq!(
+            summary.nodes[0]
+                .properties
+                .iter()
+                .filter(|p| *p == "entity_id")
+                .count(),
+            1
+        );
+        catalog.node_types.retain(|n| n.label != "Company");
+        assert!(ontology_summary(&catalog)
+            .unwrap_err()
+            .contains("unknown node type"));
+    }
 }

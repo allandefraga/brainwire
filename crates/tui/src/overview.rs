@@ -9,6 +9,53 @@ use ratatui::{
     Frame,
 };
 
+// The live catalog view belongs to the real overview, not the synthetic demo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverviewView {
+    Graph,
+    Query,
+    Memory,
+    Disk,
+    Ontology,
+}
+impl OverviewView {
+    const ALL: [Self; 5] = [
+        Self::Graph,
+        Self::Query,
+        Self::Memory,
+        Self::Disk,
+        Self::Ontology,
+    ];
+    fn parse(name: &str) -> Result<Self, String> {
+        match name {
+            "graph" => Ok(Self::Graph),
+            "query" => Ok(Self::Query),
+            "memory" => Ok(Self::Memory),
+            "disk" => Ok(Self::Disk),
+            "ontology" => Ok(Self::Ontology),
+            _ => Err("--view must be graph, query, memory, disk or ontology".into()),
+        }
+    }
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|v| *v == self)
+            .expect("known view")
+    }
+    fn from_index(index: usize) -> Self {
+        Self::ALL[index % Self::ALL.len()]
+    }
+    fn display(self, lang: Language) -> &'static str {
+        match self {
+            Self::Graph => View::Graph.display(lang),
+            Self::Query => View::Query.display(lang),
+            Self::Memory => View::Memory.display(lang),
+            Self::Disk => View::Disk.display(lang),
+            Self::Ontology => lang.choose("ONTOLOGIA", "ONTOLOGY"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StorageFileSummary {
     pub name: String,
@@ -23,6 +70,7 @@ pub struct StorageFileSummary {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GraphSummary {
+    pub ontology: OntologySummary,
     pub name: String,
     pub nodes: u64,
     pub edges: u64,
@@ -53,15 +101,15 @@ fn mib(bytes: u64) -> String {
     format!("{:.2} MiB", bytes as f64 / 1_048_576.0)
 }
 
-fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
+fn storage_details(g: &GraphSummary, view: OverviewView, lang: Language) -> String {
     match view {
-        View::Memory => format!("{}\n\nmemory.cache: {}\n{}: {}\nmemory.memtables: {}\n{}: {}\nmemory.query: {}\nserver.query_timeout_ms: {} ms\n\n{}",
+        OverviewView::Memory => format!("{}\n\nmemory.cache: {}\n{}: {}\nmemory.memtables: {}\n{}: {}\nmemory.query: {}\nserver.query_timeout_ms: {} ms\n\n{}",
             lang.choose("PROCESSO OFFLINE • TODOS OS GRAFOS", "OFFLINE PROCESS • ALL GRAPHS"),
             mib(g.cache_budget), lang.choose("Contabilizado", "Accounted"), mib(g.cache_accounted),
             mib(g.memtable_budget), lang.choose("Alocado", "Allocated"), mib(g.memtables_allocated), mib(g.query_budget), g.query_timeout_ms,
             lang.choose("Memtables estão dentro do cache. Orçamento não é RAM reservada. Query: proteção conservadora por RUN e pool compartilhado no servidor. Reservas duram até o fim da transação. Prazo é cooperativo; operações de storage podem excedê-lo. Não é RSS; estes valores são do inspetor offline.\n\nNo servidor: CALL db.memory() YIELD poolLimitBytes, poolReservedBytes RETURN poolLimitBytes, poolReservedBytes",
                 "Memtables are inside cache. Budget is not reserved RAM. Query: conservative per-RUN guard plus a shared server pool. Reservations last until transaction end. Deadline is cooperative; storage calls can overrun. Not RSS; these are offline inspector values.\n\nOn the server: CALL db.memory() YIELD poolLimitBytes, poolReservedBytes RETURN poolLimitBytes, poolReservedBytes")),
-        View::Disk => {
+        OverviewView::Disk => {
             let mut text = lang.choose("ROCKSDB • GRAFO SELECIONADO\nCF       ~keys   mem KiB  L0\n", "ROCKSDB • SELECTED GRAPH\nCF       ~keys   mem KiB  L0\n").to_string();
             for (cf, metrics) in &g.storage {
                 let value = |key: &str, divisor: u64| metrics.get(key).copied().flatten().map_or_else(|| "?".into(), |v| (v / divisor).to_string());
@@ -70,20 +118,21 @@ fn storage_details(g: &GraphSummary, view: View, lang: Language) -> String {
             text.push_str(lang.choose("\n~keys: estimativa, inclui versões.\nWAL -> memtables -> SST -> compactação", "\n~keys: estimate, includes versions.\nWAL -> memtables -> SST -> compaction"));
             text
         }
-        View::Query => format!("Python -> Bolt -> Cypher\nUNWIND $rows -> MERGE -> SET\n\n{}\n\n{}: {}\n{}\n\n{}",
+        OverviewView::Query => format!("Python -> Bolt -> Cypher\nUNWIND $rows -> MERGE -> SET\n\n{}\n\n{}: {}\n{}\n\n{}",
             lang.choose("Nó + índices: um WriteBatch.\nCOMMIT sincroniza o WAL.\nFlush cria SST depois.", "Node + indexes: one WriteBatch.\nCOMMIT syncs the WAL.\nFlush creates SST later."),
             lang.choose("Índice escalar", "Scalar equality index"),
             if g.index_declarations == 0 { lang.choose("nenhum", "none") } else if g.indexes_ready { lang.choose("pronto", "ready") } else { lang.choose("pendente (scan)", "pending (scan)") },
             g.indexed_fields.join(", "),
             lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes. OR/NOT/faixa sozinhos: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nLeituras simples: uma linha por vez; LIMIT para a leitura.\nEscritas, agrupamentos e CALL ainda acumulam linhas.\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nPainel explicativo; não executa consultas.",
                 "MERGE uses stable entity_id. SET replaces fields; null removes.\n\nREADS\nWHERE c.email=$email: ready scalar equality index. AND keeps residual filters. Standalone OR/NOT/range: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nSimple reads process one row at a time; LIMIT stops input.\nWrites, grouped counts and CALL still materialize rows.\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nExplanation panel; no query execution.")),
-        View::Graph => unreachable!(),
+        OverviewView::Graph | OverviewView::Ontology => unreachable!(),
     }
 }
 
 #[derive(Default)]
 struct OverviewSelection {
     graph: usize,
+    node_type: usize,
     scroll: u16,
     file: usize,
     explain: bool,
@@ -100,7 +149,7 @@ fn first_data_file(graph: Option<&GraphSummary>) -> usize {
         .unwrap_or(0)
 }
 
-fn terminal_text(text: &str) -> String {
+pub(super) fn terminal_text(text: &str) -> String {
     text.chars()
         .flat_map(|c| {
             if c.is_control() {
@@ -305,7 +354,7 @@ fn render_disk(
     );
 }
 
-fn panel(title: &'static str, color: Color, no_color: bool) -> Block<'static> {
+pub(super) fn panel(title: &'static str, color: Color, no_color: bool) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -316,7 +365,7 @@ fn panel(title: &'static str, color: Color, no_color: bool) -> Block<'static> {
         })
 }
 
-fn text_style(color: Color, no_color: bool) -> Style {
+pub(super) fn text_style(color: Color, no_color: bool) -> Style {
     if no_color {
         Style::default()
     } else {
@@ -328,7 +377,7 @@ fn render_overview(
     frame: &mut Frame,
     graphs: &[GraphSummary],
     state: &mut OverviewSelection,
-    view: View,
+    view: OverviewView,
     lang: Language,
     no_color: bool,
 ) {
@@ -362,7 +411,57 @@ fn render_overview(
         sections[0],
     );
 
-    if view == View::Disk {
+    if view == OverviewView::Ontology {
+        if let Some(graph) = graphs.get(state.graph) {
+            state.node_type = state
+                .node_type
+                .min(graph.ontology.nodes.len().saturating_sub(1));
+            let heading = format!(
+                " BRAINWIRE / {} / {} • {} • {}",
+                view.display(lang),
+                terminal_text(&graph.name),
+                lang.choose("esquema offline", "offline schema"),
+                if graph.index_declarations == 0 {
+                    lang.choose("sem índices declarados", "no declared indexes")
+                } else if graph.indexes_ready {
+                    lang.choose("índices prontos", "indexes ready")
+                } else {
+                    lang.choose("índices pendentes", "indexes pending")
+                }
+            );
+            frame.render_widget(
+                Paragraph::new(heading).block(panel("", GREEN, no_color)),
+                sections[0],
+            );
+            crate::ontology::render(
+                frame,
+                sections[1],
+                &graph.ontology,
+                state.node_type,
+                &mut state.scroll,
+                state.explain,
+                lang,
+                no_color,
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(lang.choose("Nenhum grafo encontrado.", "No graphs found."))
+                    .block(panel(view.display(lang), GREEN, no_color)),
+                sections[1],
+            );
+        }
+        frame.render_widget(
+            Paragraph::new(lang.choose(
+                " ←→ grafo • ↑↓ tipo • Enter detalhes • PgUp/Dn rola • Tab painel • q sai",
+                " ←→ graph • ↑↓ type • Enter inspect • PgUp/Dn scroll • Tab panel • q quit",
+            ))
+            .block(panel("", GREEN, no_color)),
+            sections[2],
+        );
+        return;
+    }
+
+    if view == OverviewView::Disk {
         render_disk(frame, graphs, state, sections[1], lang, no_color);
         frame.render_widget(
             Paragraph::new(lang.choose(
@@ -464,13 +563,13 @@ fn render_overview(
             graph.timeline_streams,
             if graph.estimated {
                 lang.choose(
-                    "Contagens estimadas. Tab: pipeline, memória, armazenamento. Histórico pendente.",
-                    "Estimated counts. Tab: pipeline, memory, storage. History pending.",
+                    "Contagens estimadas. Tab: pipeline, memória, armazenamento, ontologia. Histórico pendente.",
+                    "Estimated counts. Tab: pipeline, memory, storage, ontology. History pending.",
                 )
             } else {
                 lang.choose(
-                    "Contagens exatas. Tab: pipeline, memória, armazenamento. Histórico pendente.",
-                    "Exact counts. Tab: pipeline, memory, storage. History pending.",
+                    "Contagens exatas. Tab: pipeline, memória, armazenamento, ontologia. Histórico pendente.",
+                    "Exact counts. Tab: pipeline, memory, storage, ontology. History pending.",
                 )
             }
         )
@@ -479,13 +578,13 @@ fn render_overview(
             .to_string()
     };
     if let Some(graph) = graphs.get(selected) {
-        if view != View::Graph {
+        if view != OverviewView::Graph {
             details = storage_details(graph, view, lang);
         }
     }
-    let title = if view == View::Graph {
+    let title = if view == OverviewView::Graph {
         lang.choose("Grafo selecionado", "Selected graph")
-    } else if view == View::Query {
+    } else if view == OverviewView::Query {
         lang.choose("PIPELINE DE ESCRITA", "WRITE PIPELINE")
     } else {
         view.display(lang)
@@ -532,7 +631,7 @@ pub fn run_overview(
 ) -> Result<(), String> {
     let lang = Language::parse(&options.lang)?;
     let mut state = OverviewSelection::default();
-    let mut view = View::parse(&options.view)?;
+    let mut view = OverviewView::parse(&options.view)?;
     let no_color = std::env::var_os("NO_COLOR").is_some();
     state.graph = match graph {
         Some(name) => graphs
@@ -576,60 +675,143 @@ pub fn run_overview(
             if key.kind != event::KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Tab => {
-                    view = View::from_index(view.index() + 1);
-                    state.scroll = 0;
-                }
-                KeyCode::PageDown => state.scroll = state.scroll.saturating_add(5),
-                KeyCode::PageUp => state.scroll = state.scroll.saturating_sub(5),
-                KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::F(1) if view == View::Disk => {
-                    state.explain = !state.explain;
-                    state.scroll = 0;
-                }
-                KeyCode::Down if view == View::Disk => {
-                    state.file = (state.file + 1).min(
-                        graphs
-                            .get(state.graph)
-                            .map_or(0, |g| g.files.len().saturating_sub(1)),
-                    );
-                    state.scroll = 0;
-                }
-                KeyCode::Up if view == View::Disk => {
-                    state.file = state.file.saturating_sub(1);
-                    state.scroll = 0;
-                }
-                KeyCode::Left if view == View::Disk => {
-                    state.graph = state.graph.saturating_sub(1);
-                    state.file = first_data_file(graphs.get(state.graph));
-                    state.scroll = 0;
-                }
-                KeyCode::Right if view == View::Disk => {
-                    state.graph = (state.graph + 1).min(graphs.len().saturating_sub(1));
-                    state.file = first_data_file(graphs.get(state.graph));
-                    state.scroll = 0;
-                }
-                KeyCode::Down if !graphs.is_empty() => {
-                    state.graph = (state.graph + 1).min(graphs.len() - 1);
-                    state.file = first_data_file(graphs.get(state.graph));
-                    state.scroll = 0;
-                }
-                KeyCode::Up => {
-                    state.graph = state.graph.saturating_sub(1);
-                    state.file = first_data_file(graphs.get(state.graph));
-                    state.scroll = 0;
-                }
-                _ => {}
+            if handle_key(key.code, &mut state, &mut view, &graphs) {
+                break;
             }
         }
     }
     Ok(())
 }
 
+// Returns true when the user asks to leave the overview.
+fn handle_key(
+    key: KeyCode,
+    state: &mut OverviewSelection,
+    view: &mut OverviewView,
+    graphs: &[GraphSummary],
+) -> bool {
+    let mut graph_changed = false;
+    match key {
+        KeyCode::Tab => {
+            *view = OverviewView::from_index(view.index() + 1);
+            state.scroll = 0;
+            state.explain = false;
+        }
+        KeyCode::BackTab => {
+            *view = OverviewView::from_index(view.index() + OverviewView::ALL.len() - 1);
+            state.scroll = 0;
+            state.explain = false;
+        }
+        KeyCode::PageDown => state.scroll = state.scroll.saturating_add(5),
+        KeyCode::PageUp => state.scroll = state.scroll.saturating_sub(5),
+        KeyCode::Esc if *view == OverviewView::Ontology && state.explain => {
+            state.explain = false;
+            state.scroll = 0;
+        }
+        KeyCode::Char('q') | KeyCode::Esc => return true,
+        KeyCode::F(1) if matches!(view, OverviewView::Disk | OverviewView::Ontology) => {
+            state.explain = !state.explain;
+            state.scroll = 0;
+        }
+        KeyCode::Enter if *view == OverviewView::Ontology => {
+            state.explain = !state.explain;
+            state.scroll = 0;
+        }
+        KeyCode::Down if *view == OverviewView::Ontology => {
+            state.node_type = (state.node_type + 1).min(
+                graphs
+                    .get(state.graph)
+                    .map_or(0, |g| g.ontology.nodes.len().saturating_sub(1)),
+            );
+            state.scroll = 0;
+        }
+        KeyCode::Up if *view == OverviewView::Ontology => {
+            state.node_type = state.node_type.saturating_sub(1);
+            state.scroll = 0;
+        }
+        KeyCode::Down if *view == OverviewView::Disk => {
+            state.file = (state.file + 1).min(
+                graphs
+                    .get(state.graph)
+                    .map_or(0, |g| g.files.len().saturating_sub(1)),
+            );
+            state.scroll = 0;
+        }
+        KeyCode::Up if *view == OverviewView::Disk => {
+            state.file = state.file.saturating_sub(1);
+            state.scroll = 0;
+        }
+        KeyCode::Left if matches!(view, OverviewView::Disk | OverviewView::Ontology) => {
+            state.graph = state.graph.saturating_sub(1);
+            graph_changed = true;
+        }
+        KeyCode::Right if matches!(view, OverviewView::Disk | OverviewView::Ontology) => {
+            state.graph = (state.graph + 1).min(graphs.len().saturating_sub(1));
+            graph_changed = true;
+        }
+        KeyCode::Down => {
+            state.graph = (state.graph + 1).min(graphs.len().saturating_sub(1));
+            graph_changed = true;
+        }
+        KeyCode::Up => {
+            state.graph = state.graph.saturating_sub(1);
+            graph_changed = true;
+        }
+        _ => {}
+    }
+    if graph_changed {
+        state.file = first_data_file(graphs.get(state.graph));
+        state.node_type = 0;
+        state.scroll = 0;
+        state.explain = false;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ontology_navigation_selects_types_resets_on_graph_change_and_closes_inspector() {
+        let graphs = vec![
+            GraphSummary {
+                ontology: OntologySummary {
+                    nodes: vec![OntologyNode::default(), OntologyNode::default()],
+                    edges: vec![],
+                },
+                ..GraphSummary::default()
+            },
+            GraphSummary::default(),
+        ];
+        let mut state = OverviewSelection::default();
+        let mut view = OverviewView::Disk;
+        assert!(!handle_key(KeyCode::Tab, &mut state, &mut view, &graphs));
+        assert_eq!(view, OverviewView::Ontology);
+        for _ in 0..3 {
+            handle_key(KeyCode::Down, &mut state, &mut view, &graphs);
+        }
+        assert_eq!(state.node_type, 1);
+        handle_key(KeyCode::Enter, &mut state, &mut view, &graphs);
+        assert!(state.explain);
+        assert!(!handle_key(KeyCode::Esc, &mut state, &mut view, &graphs));
+        assert!(!state.explain);
+        handle_key(KeyCode::PageDown, &mut state, &mut view, &graphs);
+        handle_key(KeyCode::Right, &mut state, &mut view, &graphs);
+        assert_eq!((state.graph, state.node_type, state.scroll), (1, 0, 0));
+        handle_key(KeyCode::Down, &mut state, &mut view, &graphs);
+        assert_eq!(state.node_type, 0);
+        handle_key(KeyCode::Tab, &mut state, &mut view, &graphs);
+        assert_eq!(view, OverviewView::Graph);
+        handle_key(KeyCode::BackTab, &mut state, &mut view, &graphs);
+        assert_eq!(view, OverviewView::Ontology);
+        assert!(handle_key(
+            KeyCode::Char('q'),
+            &mut state,
+            &mut view,
+            &graphs
+        ));
+    }
 
     #[test]
     fn pipeline_overflow_scrolls_to_explanation_and_memory_never_claims_live_usage() {
@@ -647,7 +829,7 @@ mod tests {
                 ..OverviewSelection::default()
             };
             terminal
-                .draw(|f| render_overview(f, &graphs, &mut state, View::Query, lang, true))
+                .draw(|f| render_overview(f, &graphs, &mut state, OverviewView::Query, lang, true))
                 .unwrap();
             assert!(state.scroll > 0 && state.scroll < u16::MAX);
             let buffer = terminal.backend().buffer();
@@ -657,7 +839,7 @@ mod tests {
                 .join("\n");
             assert!(text.contains("PgUp/PgDn"));
             assert!(text.contains(lang.choose("consultas.", "execution.")));
-            let memory = storage_details(&graphs[0], View::Memory, lang);
+            let memory = storage_details(&graphs[0], OverviewView::Memory, lang);
             assert!(memory.contains(lang.choose("proteção conservadora", "conservative per-RUN")));
         }
     }
@@ -684,7 +866,16 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let mut state = OverviewSelection::default();
             terminal
-                .draw(|f| render_overview(f, &graphs, &mut state, View::Disk, Language::En, true))
+                .draw(|f| {
+                    render_overview(
+                        f,
+                        &graphs,
+                        &mut state,
+                        OverviewView::Disk,
+                        Language::En,
+                        true,
+                    )
+                })
                 .unwrap();
             let buffer = terminal.backend().buffer();
             let text = (0..height)
@@ -752,7 +943,7 @@ mod tests {
                         graph: 1,
                         ..OverviewSelection::default()
                     },
-                    View::Graph,
+                    OverviewView::Graph,
                     Language::En,
                     false,
                 )

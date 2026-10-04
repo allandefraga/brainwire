@@ -46,16 +46,49 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
 
 `shell --overview` is a **real, read-only, offline** TUI. Up/Down chooses a
 graph and the inspector shows its exact node/edge counts, ontology version,
-node labels and edge types. Tab changes to the write pipeline, Memory and
-Disk panels; PgUp/PgDn scroll long explanations. `--view query|memory|disk`
+node labels and edge types. Tab changes to the write pipeline, Memory,
+Disk and Ontology panels; Shift-Tab moves backward. PgUp/PgDn scroll long explanations. `--view query|memory|disk|ontology`
 chooses the initial panel; `q` or Esc exits. See the
 [Python ingestion guide](python-ingestion.md) for memory semantics and the
 new offline `db check` consistency audit. `--graph` sets the initial
 selection, including in `--snapshot` mode. It opens the RocksDB directories
-exclusively and scans every graph for counts, so stop `brainwire serve` first
-and expect cost on large datasets. Add `--estimated` to use quick RocksDB
+exclusively, so stop `brainwire serve` first. By default it scans every graph
+for counts; starting with `--view ontology` skips that scan automatically. Add `--estimated` to use quick RocksDB
 key-count estimates instead of the full scan; the output labels those values
 as estimates. An unknown graph name is an error.
+
+## Ontology connections in the TUI
+
+```sh
+./target/debug/brainwire shell --overview --view ontology --graph tickets
+./target/debug/brainwire shell --overview --view ontology --graph tickets --lang pt-BR
+```
+
+The Ontology panel reads the persisted catalog, including every declared
+source/relationship/target signature. It displays a type list, directed
+connections around the selected type and an inspector with properties,
+declared indexes, incoming/outgoing signatures and relationship properties.
+These boxes are **types, not individual graph records**; allowed connections
+remain visible even when no instance edges exist. Isolated types and graphs
+without an ontology have explicit empty states. Canonical names are unchanged
+by localization.
+
+Up/Down selects a type; Left/Right switches named graphs and resets selection.
+At 100 columns or wider, connections and inspector are side by side. On smaller
+terminals, Enter or F1 switches between connections and the inspector; Esc closes
+the inspector before exiting. PgUp/PgDn scroll long content; `q` exits.
+The header reports the selected graph and scalar-index readiness separately from
+the inspector's declarations. Schema identifiers with terminal controls are escaped.
+
+Starting with `--view ontology` uses quick RocksDB count estimates automatically,
+so opening the schema does not trigger full node/edge count scans. Catalogs and
+file metadata are loaded once at startup, under the same exclusive offline access
+as the other overview panels. Reopen the TUI after schema changes. This is schema
+inspection, not a live server connection or an ontology editor.
+
+[Actual Ontology captures and startup measurements](design/assets/2026-10-04-ontology/README.md)
+cover English/Portuguese, compact inspectors, isolated types, empty schemas and
+the existing 100K-node/1M-edge fixture.
 
 On this warm local 100K/1M fixture, one measured exact overview took 1.053 s
 and one estimated overview took 0.078 s. They returned the same counts in
@@ -92,7 +125,7 @@ covers configuration and transaction behavior.
 
 | Surface | Operations now | Data source |
 | --- | --- | --- |
-| `shell --overview` | Select named graph/files; inspect counts, ontology, index readiness, shared offline memory and native SST metadata | Real local RocksDB, read only |
+| `shell --overview` | Select named graph/files/types; inspect ontology connections, properties, counts, index readiness, shared offline memory and native SST metadata | Real local RocksDB, read only |
 | `shell --demo` | Explore Graph, Query, Memory, Disk & Files; select nodes/files; run two guided queries; read F1 explanations | Synthetic fixture, no real writes |
 | `db files/checkpoint` | Inspect real file metadata; create a native committed graph checkpoint | Real local RocksDB, offline |
 | `db create/apply-ontology` | Create and update a named graph's catalog | Real local RocksDB, offline |

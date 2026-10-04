@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / ONTOLOGY / ontology • offline schema • indexes ready             │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌TYPES • ↑↓────────┐┌INSPECTOR • Enter/F1──────────────────────────────────────┐
+│> Customer        ││DECLARED INDEXES                                          │
+│  Company         ││  email                                                   │
+│  Segment         ││  phone                                                   │
+│                  ││  segment                                                 │
+│                  ││                                                          │
+│                  ││OUTGOING                                                  │
+│                  ││Customer -[:WORKS_AT]-> Company                           │
+│                  ││  Properties: role                                        │
+│                  ││Customer -[:IN_SEGMENT]-> Segment                         │
+│                  ││                                                          │
+│                  ││INCOMING                                                  │
+│                  ││  No declarations.                                        │
+│                  ││                                                          │
+│                  ││Connections allowed by the schema; these are not instance │
+│                  ││records. Declared indexes do not indicate readiness.      │
+│                  ││                                                          │
+└──────────────────┘└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ←→ graph • ↑↓ type • Enter inspect • PgUp/Dn scroll • Tab panel • q quit     │
+└──────────────────────────────────────────────────────────────────────────────┘

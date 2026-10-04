@@ -10,7 +10,9 @@ use crossterm::terminal::{
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::style::Color;
 use ratatui::Terminal;
+mod ontology;
 mod overview;
+pub use ontology::{OntologyEdge, OntologyNode, OntologySummary};
 mod ui;
 pub use overview::{run_overview, GraphSummary, StorageFileSummary};
 pub use ui::render;

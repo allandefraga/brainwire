@@ -39,6 +39,44 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-04, real ontology connections in the offline TUI
+
+- **Requested:** a 15-minute local session, starting 09:18:41 UTC
+  (11:18:41 Amsterdam). No push, publication or remote PR.
+- **Done:** the real overview now has an Ontology panel backed by each graph's
+  persisted RocksDB catalog. It shows type selection, directed connections,
+  every source/target signature, incoming/outgoing relationships, properties
+  and declared indexes. Isolated types, self-loops and empty ontologies have
+  explicit representations. Schema controls are escaped before terminal output.
+- **Interaction:** Up/Down selects types, Left/Right changes graphs, Tab cycles
+  five panels, PgUp/PgDn scroll, and Enter/F1 opens the compact inspector. English
+  is the default; Portuguese preserves canonical schema names. At 100 columns,
+  connections and inspector fit side by side; compact terminals toggle them.
+- **Performance:** starting with `--view ontology` skips full graph count scans
+  and uses RocksDB estimates. Five warm debug-process runs on the local synthetic
+  100K-node/1M-edge fixture had median startup 70.679 ms for the Ontology snapshot,
+  912.528 ms for exact-count Graph and 83.524 ms for estimated Graph. This measures
+  startup/render/exit with a small schema, not query throughput or cold-cache speed.
+- **Verification:** 395 workspace tests pass (seven added); workspace clippy with
+  warnings denied, fmt and diff checks pass. Coverage includes catalog projection,
+  shared relationship signatures, dangling endpoints, navigation, clamped scrolling,
+  Unicode/control characters, small/empty layouts and CLI process reopen. Actual
+  PTY runs checked Down, Enter, PgDn, resize from 160x40 to 80x24 and clean exit.
+  An additional isolated smoke loaded 2,000 types and 1,999 signatures and rendered
+  its snapshot successfully; this was a single-run check, not a volume benchmark.
+  Astra reviewed the final Rust and found no blockers. The main agent verified
+  tests and inspected actual captures independently of agent reports.
+- **Artifacts:** `docs/design/assets/2026-10-04-ontology/` contains actual terminal
+  renders/text, a repeatable isolated capture helper and raw startup measurements.
+  README and the multi-graph backoffice guide explain scope and commands. No new
+  Rust dependency or storage format; pyte/Pillow are external capture tools only.
+- **Limits/next step:** this is a read-only startup snapshot requiring exclusive
+  offline access, not a live server connection or ontology editor. Connections
+  represent allowed type signatures, not stored instance edges. Next: design a
+  bounded read-only schema/neighborhood interface over the existing server so the
+  TUI can inspect a running database without opening RocksDB itself. Keep ontology
+  changes and data deletion out of that first connected slice. No blockers.
+
 ### 2026-10-03, explainable knowledge-source ranking
 
 - **Requested:** add something inspired by OntoRank; explain PageRank with visual

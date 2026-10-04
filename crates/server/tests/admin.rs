@@ -288,6 +288,78 @@ fn overview_reports_multiple_independent_graphs() {
 }
 
 #[test]
+fn ontology_view_reads_real_catalog_signatures_properties_and_empty_graphs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        include_str!("../../core/tests/fixtures/graph_mapping.json"),
+    )
+    .unwrap();
+    let created = command(&dir)
+        .args(["db", "create", "ontology", "--ontology", "schema.json"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    for (lang, width) in [("en", "160"), ("pt-BR", "160"), ("en", "80")] {
+        let output = command(&dir)
+            .args([
+                "shell",
+                "--overview",
+                "--snapshot",
+                "--graph",
+                "ontology",
+                "--view",
+                "ontology",
+                "--lang",
+                lang,
+                "--width",
+                width,
+                "--height",
+                "40",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        for expected in ["Customer", "Company", "Segment", "WORKS_AT", "IN_SEGMENT"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains("Only tickets")); // Types, never instance data.
+        if width == "160" {
+            assert!(text.contains("email"), "{text}");
+            assert!(text.contains("entity_id"), "{text}");
+        }
+        assert!(text.contains(if lang == "en" {
+            "offline schema"
+        } else {
+            "esquema offline"
+        }));
+    }
+    let empty = command(&dir)
+        .args([
+            "shell",
+            "--overview",
+            "--snapshot",
+            "--graph",
+            "client_memory",
+            "--view",
+            "ontology",
+        ])
+        .output()
+        .unwrap();
+    assert!(empty.status.success(), "{empty:?}");
+    assert!(!String::from_utf8_lossy(&empty.stdout).contains("Customer"));
+    assert!(String::from_utf8_lossy(&empty.stdout).contains("no declared indexes"));
+    let after = command(&dir)
+        .args(["db", "stats", "ontology", "--json"])
+        .output()
+        .unwrap();
+    let stats: serde_json::Value = serde_json::from_slice(&after.stdout).unwrap();
+    assert_eq!(stats["nodes"], 0);
+    assert_eq!(stats["edges"], 0);
+}
+
+#[test]
 fn invalid_name_never_escapes_configured_data_directory() {
     let dir = tempfile::tempdir().unwrap();
     let result = command(&dir)
