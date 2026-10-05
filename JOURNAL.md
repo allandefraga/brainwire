@@ -39,6 +39,50 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-05, connected ontology inspection over Bolt
+
+- **Requested:** a 20-minute local session, starting 08:13:17 UTC
+  (10:13:17 Amsterdam). No push, publication or remote PR.
+- **Done:** `CALL db.schema()` returns one read-only transaction-consistent row
+  with catalog version, node types/properties/index declarations, every relationship
+  signature and scalar-index readiness. Empty catalogs return an empty schema row.
+  Effective column/declaration order is preserved, including retained old columns;
+  properties are names, not retained type declarations. No instance-data scans.
+- **Connected TUI:** `shell --connect IP:PORT --graph NAME --view ontology` reads
+  through Bolt without loading client database config or opening RocksDB. It reuses
+  the green schema renderer, supports EN/PT-BR and manual `r` refresh, displays
+  sample age/version and retains a clearly marked stale snapshot after failure.
+  Successful refresh keeps selection by label where possible. Other panels remain
+  offline; target graph is explicit and fixed for a session.
+- **Bounds:** 4096 node types/signatures, 65536 aggregate entries, 1 MiB expanded
+  schema strings; conservative allocation reservation before building output plus
+  existing query guards/deadlines. Client validates exact shapes and complete
+  results with a cumulative 4 MiB wire cap; GOODBYE/EOF rejects extra and delayed
+  trailing records. Partial network reads/writes obey an absolute deadline.
+  The shared health probe now uses that deadline and a cumulative 64 KiB wire cap.
+- **Verification:** 409 workspace tests pass, including 14 added checks; clippy
+  with warnings denied, fmt and diff checks pass. Two-graph/empty/missing database
+  integration proves server-held RocksDB locks and invalid client-local settings
+  do not affect connected reads. Fake-server tests cover malformed/over-limit,
+  slow-drip and trailing responses. TUI checks include stale warnings at 40/60 columns.
+  Astra reviewed the design and final changes; narrow-warning finding was fixed.
+- **Real use:** Python driver 5.28.6 ran 40 schema reads concurrently with 10 write
+  batches inserting 200 Customers; final count, connected snapshot and post-stop
+  storage audit passed. Actual PTY captures exercise server stop, failed refresh,
+  restart with schema v2 and refresh without restarting the TUI. Test servers and
+  temporary databases are cleaned up. These checks are not performance benchmarks.
+- **Artifacts:** `docs/connected-ontology.md`, README/server/backoffice updates,
+  and `docs/design/assets/2026-10-05-connected/` with five captures, text and
+  repeatable Python/PTY checks. No new runtime dependency or storage format.
+- **Limits/next step:** refresh is synchronous (default 3-second network deadline,
+  configurable 1..10000 ms), no background polling, no graph discovery, no arbitrary
+  connected query editor or mutation. Catalog loading precedes procedure preflight;
+  allocation/wire caps are not RSS bounds. Client additionally counts escaped text.
+  Existing renderer scroll is capped at 65535 lines; huge property lists can require
+  Cypher/Python inspection. Next: bounded instance-neighborhood reads and connected
+  graph selection, then asynchronous refresh/pagination. Keep authentication/TLS and
+  production readiness separate; current server remains for trusted testing.
+
 ### 2026-10-04, real ontology connections in the offline TUI
 
 - **Requested:** a 15-minute local session, starting 09:18:41 UTC

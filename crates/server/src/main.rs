@@ -6,6 +6,7 @@ mod cypher;
 mod databases;
 mod engine;
 mod probe;
+mod remote;
 mod serve;
 mod size;
 
@@ -31,7 +32,7 @@ enum Commands {
         /// Live checks a Bolt session; ready also runs a read-only query.
         #[arg(long, value_enum, default_value_t = probe::Mode::Ready)]
         mode: probe::Mode,
-        /// Deadline for each network operation in milliseconds.
+        /// Total deadline for connection and probe exchange in milliseconds.
         #[arg(long, default_value_t = 2000)]
         timeout_ms: u64,
     },
@@ -65,7 +66,7 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
-    /// Open the synthetic observatory or the read-only local graph overview.
+    /// Open the synthetic observatory, local overview or server ontology snapshot.
     Shell {
         /// Use the bounded synthetic demo fixture.
         #[arg(long, conflicts_with = "overview")]
@@ -73,11 +74,17 @@ enum Commands {
         /// Inspect every named local graph (requires exclusive database access).
         #[arg(long, conflicts_with = "demo")]
         overview: bool,
+        /// Fetch a read-only ontology snapshot over Bolt (IP:PORT; --view ontology).
+        #[arg(long, conflicts_with_all = ["demo", "overview", "config", "estimated"], requires = "graph")]
+        connect: Option<String>,
+        /// Total connection/fetch deadline in milliseconds (1..10000).
+        #[arg(long, requires = "connect", default_value_t = 3000)]
+        timeout_ms: u64,
         /// Config file for --overview; otherwise uses ./brainwire.toml.
         #[arg(long, requires = "overview")]
         config: Option<PathBuf>,
-        /// Initially select this named graph in --overview.
-        #[arg(long, requires = "overview")]
+        /// Named graph for --overview or --connect; required with --connect.
+        #[arg(long)]
         graph: Option<String>,
         /// Use quick RocksDB key-count estimates instead of full scans.
         #[arg(long, requires = "overview")]
@@ -91,7 +98,7 @@ enum Commands {
         /// Render one plain-text frame without a terminal.
         #[arg(long)]
         snapshot: bool,
-        /// Initial view: graph, query, memory, disk; ontology is available with --overview.
+        /// Initial view: graph, query, memory, disk; ontology with --overview or --connect.
         #[arg(long, default_value = "graph")]
         view: String,
         /// Snapshot columns (80..240).
@@ -248,6 +255,8 @@ fn main() {
         Commands::Shell {
             demo,
             overview,
+            connect,
+            timeout_ms,
             config,
             graph,
             estimated,
@@ -267,14 +276,25 @@ fn main() {
                 width,
                 height,
             };
-            if overview {
+            if let Some(address) = connect {
+                let graph = graph
+                    .as_deref()
+                    .expect("clap requires --graph with --connect");
+                brainwire_tui::run_connected_ontology(&options, &address, graph, || {
+                    remote::schema(&address, graph, timeout_ms)
+                })
+            } else if overview {
                 // Opening the schema should never require a full instance count scan.
                 let quick_counts = estimated || options.view == "ontology";
                 admin::graph_summaries(config.as_deref(), quick_counts).and_then(|graphs| {
                     brainwire_tui::run_overview(&options, graphs, graph.as_deref())
                 })
             } else {
-                brainwire_tui::run(options)
+                if graph.is_some() {
+                    Err("--graph requires --overview or --connect".into())
+                } else {
+                    brainwire_tui::run(options)
+                }
             }
         }
         Commands::Db { command } => match command {

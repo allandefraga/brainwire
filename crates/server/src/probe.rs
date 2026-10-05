@@ -23,41 +23,9 @@ pub fn run(address: &str, mode: Mode, timeout_ms: u64) -> Result<(), String> {
     if !(1..=30_000).contains(&timeout_ms) {
         return Err("--timeout-ms must be between 1 and 30000".into());
     }
-    let address: SocketAddr = address
-        .parse()
-        .map_err(|e| format!("invalid probe address: {e}"))?;
-    let timeout = Duration::from_millis(timeout_ms);
-    let mut stream = TcpStream::connect_timeout(&address, timeout)
-        .map_err(|e| format!("cannot connect to {address}: {e}"))?;
-    stream
-        .set_read_timeout(Some(timeout))
-        .map_err(|e| e.to_string())?;
-    stream
-        .set_write_timeout(Some(timeout))
-        .map_err(|e| e.to_string())?;
-
-    let mut greeting = [0u8; 20];
-    greeting[..4].copy_from_slice(&MAGIC);
-    greeting[4..8].copy_from_slice(&[0, 0, 4, 5]);
-    stream
-        .write_all(&greeting)
-        .map_err(|e| format!("handshake write: {e}"))?;
-    let mut version = [0u8; 4];
-    stream
-        .read_exact(&mut version)
-        .map_err(|e| format!("handshake read: {e}"))?;
-    if version != [0, 0, 4, 5] {
-        return Err(format!("unexpected Bolt version response: {version:?}"));
-    }
-
-    send(&mut stream, 0x01, vec![PackValue::Map(vec![])])?;
-    expect_success(receive(&mut stream)?)?;
-    send(&mut stream, 0x6a, vec![PackValue::Map(vec![])])?;
-    expect_success(receive(&mut stream)?)?;
-
+    let mut client = BoltClient::connect(address, timeout_ms, MAX_PROBE_RESPONSE)?;
     if matches!(mode, Mode::Ready) {
-        send(
-            &mut stream,
+        client.send(
             0x10,
             vec![
                 PackValue::String("RETURN 1 AS ready".into()),
@@ -65,70 +33,210 @@ pub fn run(address: &str, mode: Mode, timeout_ms: u64) -> Result<(), String> {
                 PackValue::Map(vec![]),
             ],
         )?;
-        expect_success(receive(&mut stream)?)?;
-        send(&mut stream, 0x3f, vec![PackValue::Map(vec![])])?;
-        match receive(&mut stream)? {
+        success(client.receive()?)?;
+        client.send(0x3f, vec![PackValue::Map(vec![])])?;
+        match client.receive()? {
             PackValue::Struct { tag: 0x71, fields }
                 if fields == vec![PackValue::List(vec![PackValue::Int(1)])] => {}
             other => return Err(format!("unexpected probe record: {other:?}")),
         }
-        expect_success(receive(&mut stream)?)?;
+        success(client.receive()?)?;
     }
     Ok(())
 }
 
-fn send(stream: &mut TcpStream, tag: u8, fields: Vec<PackValue>) -> Result<(), String> {
-    let mut body = Vec::new();
-    pack(&PackValue::Struct { tag, fields }, &mut body);
-    stream
-        .write_all(&encode_message(&body))
-        .map_err(|e| format!("Bolt request write: {e}"))
+/// The two bounded, synchronous read-only clients share framing and deadlines.
+pub(crate) struct BoltClient {
+    stream: TcpStream,
+    deadline: std::time::Instant,
+    remaining_wire: usize,
 }
 
-fn receive(stream: &mut TcpStream) -> Result<PackValue, String> {
-    let mut body = Vec::new();
-    let mut noops = 0;
-    loop {
-        let mut size = [0u8; 2];
-        stream
-            .read_exact(&mut size)
-            .map_err(|e| format!("Bolt response read: {e}"))?;
-        let size = usize::from(u16::from_be_bytes(size));
-        if size == 0 {
-            if !body.is_empty() {
-                break;
-            }
-            noops += 1;
-            if noops > 16 {
-                return Err("too many empty Bolt chunks".into());
-            }
-            continue;
+impl BoltClient {
+    pub(crate) fn connect(address: &str, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
+        let address: SocketAddr = address
+            .parse()
+            .map_err(|e| format!("invalid Bolt address: {e}"))?;
+        let timeout = Duration::from_millis(timeout_ms);
+        let deadline = std::time::Instant::now() + timeout;
+        let stream = TcpStream::connect_timeout(&address, timeout)
+            .map_err(|e| format!("cannot connect to {address}: {e}"))?;
+        let mut client = Self {
+            stream,
+            deadline,
+            remaining_wire: max_wire,
+        };
+        let mut greeting = [0u8; 20];
+        greeting[..4].copy_from_slice(&MAGIC);
+        greeting[4..8].copy_from_slice(&[0, 0, 4, 5]);
+        client.write(&greeting)?;
+        let mut version = [0u8; 4];
+        client.read(&mut version)?;
+        if version != [0, 0, 4, 5] {
+            return Err(format!("unexpected Bolt version response: {version:?}"));
         }
-        if body.len() + size > MAX_PROBE_RESPONSE {
-            return Err("Bolt probe response exceeds 64 KiB".into());
+        client.send(0x01, vec![PackValue::Map(vec![])])?;
+        success(client.receive()?)?;
+        client.send(0x6a, vec![PackValue::Map(vec![])])?;
+        success(client.receive()?)?;
+        Ok(client)
+    }
+
+    fn timeout(&self) -> Result<Duration, String> {
+        self.deadline
+            .checked_duration_since(std::time::Instant::now())
+            .filter(|duration| !duration.is_zero())
+            .ok_or_else(|| "Bolt request deadline exceeded".into())
+    }
+
+    fn write(&mut self, mut bytes: &[u8]) -> Result<(), String> {
+        while !bytes.is_empty() {
+            self.stream
+                .set_write_timeout(Some(self.timeout()?))
+                .map_err(|e| e.to_string())?;
+            match self.stream.write(bytes) {
+                Ok(0) => return Err("Bolt request write: connection closed".into()),
+                Ok(n) => bytes = &bytes[n..],
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    return Err("Bolt request deadline exceeded".into());
+                }
+                Err(e) => return Err(format!("Bolt request write: {e}")),
+            }
         }
-        let start = body.len();
-        body.resize(start + size, 0);
-        stream
-            .read_exact(&mut body[start..])
-            .map_err(|e| format!("Bolt response read: {e}"))?;
+        self.timeout()?;
+        Ok(())
     }
-    let mut input = body.as_slice();
-    let value = unpack(&mut input).map_err(|e| format!("invalid Bolt response: {e}"))?;
-    if !input.is_empty() {
-        return Err("trailing bytes in Bolt response".into());
+
+    fn read(&mut self, mut bytes: &mut [u8]) -> Result<(), String> {
+        if bytes.len() > self.remaining_wire {
+            return Err("Bolt response exceeds wire limit".into());
+        }
+        while !bytes.is_empty() {
+            self.stream
+                .set_read_timeout(Some(self.timeout()?))
+                .map_err(|e| e.to_string())?;
+            match self.stream.read(bytes) {
+                Ok(0) => return Err("Bolt response read: connection closed".into()),
+                Ok(n) => {
+                    self.remaining_wire -= n;
+                    bytes = &mut bytes[n..];
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    return Err("Bolt request deadline exceeded".into());
+                }
+                Err(e) => return Err(format!("Bolt response read: {e}")),
+            }
+        }
+        self.timeout()?;
+        Ok(())
     }
-    Ok(value)
+
+    pub(crate) fn send(&mut self, tag: u8, fields: Vec<PackValue>) -> Result<(), String> {
+        let mut body = Vec::new();
+        pack(&PackValue::Struct { tag, fields }, &mut body);
+        self.write(&encode_message(&body))
+    }
+
+    pub(crate) fn receive(&mut self) -> Result<PackValue, String> {
+        let mut body = Vec::new();
+        let mut noops = 0;
+        loop {
+            let mut size = [0u8; 2];
+            self.read(&mut size)?;
+            let size = usize::from(u16::from_be_bytes(size));
+            if size == 0 {
+                if !body.is_empty() {
+                    break;
+                }
+                noops += 1;
+                if noops > 16 {
+                    return Err("too many empty Bolt chunks".into());
+                }
+                continue;
+            }
+            if size > self.remaining_wire {
+                return Err("Bolt response exceeds wire limit".into());
+            }
+            let start = body.len();
+            body.resize(start + size, 0);
+            self.read(&mut body[start..])?;
+        }
+        let mut input = body.as_slice();
+        let value = unpack(&mut input).map_err(|e| format!("invalid Bolt response: {e}"))?;
+        if !input.is_empty() {
+            return Err("trailing bytes in Bolt response".into());
+        }
+        Ok(value)
+    }
+
+    pub(crate) fn finish(&mut self) -> Result<(), String> {
+        // GOODBYE closes the server side, so delayed extra records cannot race a peek.
+        self.send(0x02, vec![])?;
+        loop {
+            self.stream
+                .set_read_timeout(Some(self.timeout()?))
+                .map_err(|e| e.to_string())?;
+            match self.stream.read(&mut [0u8; 1]) {
+                Ok(0) => {
+                    self.timeout()?;
+                    return Ok(());
+                }
+                Ok(_) => return Err("trailing Bolt response after result completion".into()),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    return Err("Bolt request deadline exceeded".into());
+                }
+                Err(e) => return Err(format!("Bolt response completion: {e}")),
+            }
+        }
+    }
 }
 
-fn expect_success(response: PackValue) -> Result<(), String> {
+pub(crate) fn success(response: PackValue) -> Result<PackValue, String> {
     match response {
         PackValue::Struct {
             tag: 0x70,
-            fields: _,
-        } => Ok(()),
-        PackValue::Struct { tag: 0x7f, fields } => Err(format!("Bolt failure: {fields:?}")),
-        other => Err(format!("unexpected Bolt response: {other:?}")),
+            mut fields,
+        } if fields.len() == 1 => {
+            let metadata = fields.remove(0);
+            if let PackValue::Map(entries) = &metadata {
+                let mut keys = std::collections::HashSet::new();
+                if entries.iter().all(|(key, _)| keys.insert(key)) {
+                    return Ok(metadata);
+                }
+            }
+            Err("invalid Bolt SUCCESS metadata".into())
+        }
+        PackValue::Struct { tag: 0x7f, fields } => {
+            let detail = fields.first().and_then(|metadata| metadata.get("message"));
+            let message = match detail {
+                Some(PackValue::String(message)) => message
+                    .chars()
+                    .take(400)
+                    .flat_map(char::escape_default)
+                    .collect::<String>(),
+                _ => "server rejected request".into(),
+            };
+            Err(format!("Bolt failure: {message}"))
+        }
+        _ => Err("unexpected Bolt response (expected SUCCESS)".into()),
     }
 }
 
@@ -145,11 +253,16 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             stream.write_all(&[0; 34]).unwrap();
         });
-        let mut stream = TcpStream::connect(addr).unwrap();
+        let stream = TcpStream::connect(addr).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
-        assert!(receive(&mut stream).unwrap_err().contains("too many empty"));
+        let mut client = BoltClient {
+            stream,
+            deadline: std::time::Instant::now() + Duration::from_secs(1),
+            remaining_wire: MAX_PROBE_RESPONSE,
+        };
+        assert!(client.receive().unwrap_err().contains("too many empty"));
         writer.join().unwrap();
     }
 }

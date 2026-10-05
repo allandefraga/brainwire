@@ -57,6 +57,9 @@ for counts; starting with `--view ontology` skips that scan automatically. Add `
 key-count estimates instead of the full scan; the output labels those values
 as estimates. An unknown graph name is an error.
 
+For the running server, the [connected Ontology mode](connected-ontology.md)
+uses Bolt and requires no local RocksDB access. Other overview panels stay offline.
+
 ## Ontology connections in the TUI
 
 ```sh
@@ -125,6 +128,7 @@ covers configuration and transaction behavior.
 
 | Surface | Operations now | Data source |
 | --- | --- | --- |
+| `shell --connect IP:PORT --graph NAME --view ontology` | Inspect schema and refresh; retain stale snapshot on failure | Real server catalog over Bolt |
 | `shell --overview` | Select named graph/files/types; inspect ontology connections, properties, counts, index readiness, shared offline memory and native SST metadata | Real local RocksDB, read only |
 | `shell --demo` | Explore Graph, Query, Memory, Disk & Files; select nodes/files; run two guided queries; read F1 explanations | Synthetic fixture, no real writes |
 | `db files/checkpoint` | Inspect real file metadata; create a native committed graph checkpoint | Real local RocksDB, offline |
@@ -141,7 +145,7 @@ F1 opens the explanation on narrow terminals. Contents are never decoded.
 `db files NAME --json --limit 256` exposes the same inspection.
 
 The current TUI does not run arbitrary Cypher, edit ontologies, delete graph
-data or perform maintenance jobs. The next connected
+data or perform maintenance jobs. The connected Ontology slice is available; the next
 backoffice slice should expose a bounded per-graph neighborhood and read-only
 query results through the server, then live storage and memory telemetry. Any
 mutation from the TUI needs explicit scope to the selected graph and an

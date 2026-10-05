@@ -1,0 +1,24 @@
+┌──────────────────────────────────────┐
+│ BRAINWIRE / ONTOLOGY / tickets @ 127.│
+└──────────────────────────────────────┘
+┌STALE • refresh failed────────────────┐
+│ SERVER SNAPSHOT • schema v1 • age 0s │
+│• indexes ready                       │
+└──────────────────────────────────────┘
+┌TYPES • ↑↓────────┐┌CONNECTIONS • PgUp┐
+│> Customer        ││Customer          │
+│  Company         ││Schema • declared │
+│  Segment         ││connections       │
+│                  ││                  │
+│                  ││WORKS_AT          │
+│                  ││Customer          │
+│                  ││-[:WORKS_AT]->    │
+│                  ││Company           │
+│                  ││                  │
+│                  ││IN_SEGMENT        │
+│                  ││Customer          │
+│                  ││-[:IN_SEGMENT]->  │
+└──────────────────┘└──────────────────┘
+┌──────────────────────────────────────┐
+│ ↑↓ type • Enter/F1 inspect • PgUp/Dn │
+└──────────────────────────────────────┘

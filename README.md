@@ -38,6 +38,9 @@ shows current counts, commands and which TUI operations are live or synthetic.
 `brainwire shell --overview --view ontology` now shows real schema connections,
 with type selection, property/index inspection and incoming/outgoing signatures.
 It uses quick count estimates and remains an offline, read-only inspector.
+For a running server, `brainwire shell --connect 127.0.0.1:7687 --graph tickets --view ontology`
+fetches a real read-only server snapshot, with manual refresh and stale-error status.
+See the [connected ontology guide](docs/connected-ontology.md) and `CALL db.schema()`.
 
 For real graph reads and writes, run `brainwire serve` to connect over Bolt, or
 use the embedded `brainwire cypher --database <directory> --query <text>` command
@@ -45,8 +48,8 @@ while the server is stopped. Queries commit atomically to RocksDB and survive
 reopening. The [server guide](docs/serve.md) covers configuration, driver access
 and current limits; the [single-node container guide](docs/container.md) covers
 the local image and retained-volume test. The [local query guide](docs/local-cypher.md)
-walks through ontology initialization, parameters, bulk JSON files and JSON output. Connecting
-the TUI to the running server remains pending. Real offline file metadata
+walks through ontology initialization, parameters, bulk JSON files and JSON output. The Ontology panel can connect to the running server; other real TUI panels
+still require offline access. Real offline file metadata
 browsing is available in the Disk panel. Offline
 index readiness, RocksDB counters and shared memory accounting are available
 in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a

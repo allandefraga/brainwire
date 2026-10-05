@@ -69,3 +69,11 @@ explicit deployment goals; durable volumes and restarts on either orchestrator
 come before multi-machine replication. Container orchestration alone does not
 replicate the graph. The [data and recovery design](design/2026-09-27-brainwire-data-and-recovery.md)
 defines the later replicated-cluster and failure acceptance criteria.
+
+## Connected ontology inspection
+
+`brainwire shell --connect 127.0.0.1:7687 --graph client_memory --view ontology`
+reads a complete schema snapshot while this server is running. It uses the same
+`CALL db.schema()` procedure available to Python Bolt clients; `r` refreshes and
+failed refreshes retain an explicitly stale snapshot. See the
+[connected ontology guide](connected-ontology.md) for bounds and controls.

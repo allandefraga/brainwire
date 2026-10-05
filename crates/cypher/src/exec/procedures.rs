@@ -2,6 +2,7 @@
 use super::*;
 use brainwire_store::graph::{sparse_projection, ProjectionError, ProjectionOptions};
 mod knowledge;
+mod schema;
 
 fn semantic(message: impl Into<String>) -> ExecError {
     ExecError::Semantic(message.into())
@@ -9,6 +10,7 @@ fn semantic(message: impl Into<String>) -> ExecError {
 
 pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
     match name {
+        "db.schema" => Ok(&["version", "nodes", "relationships", "indexesReady"]),
         "db.indexes" => Ok(&["label", "property", "state"]),
         "db.memory" => Ok(&[
             "poolLimitBytes",
@@ -159,7 +161,7 @@ pub(super) fn validate(
     ctx: &Context<'_, '_>,
 ) -> Result<(), ExecError> {
     let available = fields(name)?;
-    if matches!(name, "db.indexes" | "db.memory") {
+    if matches!(name, "db.indexes" | "db.memory" | "db.schema") {
         if !args.is_empty() {
             return Err(semantic(format!("{name} takes no arguments")));
         }
@@ -223,6 +225,9 @@ pub(super) fn run(
         ctx.budget.bindings(&row)?;
         Ok(row)
     };
+    if name == "db.schema" {
+        return Ok(vec![bind(schema::values(ctx, yields.len())?)?]);
+    }
     if name == "db.memory" {
         let values = match ctx.budget.pool_usage() {
             Some(usage) => [
