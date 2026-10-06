@@ -39,6 +39,41 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-06, expanded October 31 beta target
+
+- **Requested:** reorganize the plan for an October-end beta with every requested
+  product area minimally functional and strong performance.
+- **Done:** revised the existing `docs/2026-10-pilot-roadmap.md` instead of adding
+  another competing roadmap. The October beta matrix includes graph/value/Cypher
+  functionality, scalar/range/text/vector indexes, CSR/ranking/weights, node AND
+  edge history, retention/deprecation jobs, Python incremental DuckLake/DuckDB/
+  Parquet/Delta, Arrow measurement, local/object backup roles, three-voter instance
+  replication, Docker/Kubernetes/Swarm, authentication, connected TUI, docs and MCP.
+  Existing November/December sections remain explicitly historical context.
+- **Decided:** preserve the approved one-Raft-group-per-instance boundary across
+  all graphs. Start durable commit/apply identity and replication immediately;
+  include allocator/catalog/registry/internal mutations, source checkpoints and
+  maintenance in replay/snapshot contracts. Object storage is for checksummed
+  backups/document blobs and restore; live RocksDB still requires local storage.
+- **Schedule:** October 7–12 foundation/feasibility; 13–19 data/search/history and
+  replication; 20–26 integrated candidate; 27–31 freeze, soak/failure/restore and
+  documentation acceptance. No implied remote publication or deployment.
+- **Performance:** proposed, unproven release-mode targets on a frozen resource
+  profile, representative payloads and separate single-node/replicated/history/
+  search modes. Mandatory 100K nodes/1M relationships and 100K vectors, stress
+  toward 1M nodes/10M relationships with explicit supported bounds. Measure p95,
+  throughput/RSS, recall, compaction, recovery and exact post-failure state.
+- **Risk:** all-area beta is a stretch target. Twenty minutes daily across the
+  remaining 25 days is only eight hours and twenty minutes; sustained work and integration
+  capacity are required. October 12 explicitly assesses feasibility and raises
+  capacity/date/scope if gates fail. Do not silently deliver a narrow pilot as
+  the requested full beta or claim same-host containers prove machine-loss HA.
+- **Verification:** documentation-only edit, local link/scope consistency review;
+  advisory Astra reviewed architectural dependencies and release feasibility.
+  No implementation tests rerun for prose. Existing functionality is unchanged.
+- **Next:** durable commit/apply and bounded API feasibility slice, with early
+  three-voter durable-write/restart prototype and release profiling of node reads.
+
 ### 2026-10-06, typed adjacency seeks and million-relationship acceptance
 
 - **Requested:** 20 minutes on database-engine performance/features, keeping all

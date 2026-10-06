@@ -126,6 +126,10 @@ prefix directly, avoiding unrelated edges. See the
 and its Python batch, rollback and restart acceptance check.
 [Docker Compose, Kubernetes and Swarm templates](docs/orchestrators.md) package
 a retained single-writer volume and recovery probes; replication remains pending.
+The [October 31 beta roadmap](docs/2026-10-pilot-roadmap.md) now targets working
+minimums across all requested areas, with an October 12 feasibility gate and
+explicit performance/recovery acceptance. It is a target, not an implemented
+feature report or a guaranteed delivery date.
 The [temporal graph and maintenance design](docs/design/2026-10-01-temporal-graph-and-maintenance.md)
 defines the next steps for ticket history, node and edge weights, retention
 and safe cleanup after ontology changes.
