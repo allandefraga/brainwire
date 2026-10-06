@@ -1,0 +1,134 @@
+{
+  "driver": "neo4j 5.28.6",
+  "initialNodes": 50001,
+  "concurrentReaders": 4,
+  "concurrentReadQueries": 100,
+  "writeBatches": 10,
+  "newNodes": 100,
+  "finalSelectedEdges": 109,
+  "snapshotIsolation": "passed",
+  "mergeOverwrite": "passed",
+  "rollback": "passed",
+  "detachDelete": "passed",
+  "killRestartRecovery": "passed",
+  "uncommittedCrashRollback": "passed",
+  "postRestartAudit": {
+    "database": "perf",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "postRestartStats": {
+    "database": "perf",
+    "edges": 1000119,
+    "nodes": 50100
+  },
+  "postRestartRocksDBMetrics": {
+    "column_families": {
+      "acl": {
+        "estimated_keys": 0,
+        "level0_files": 0,
+        "live_data_bytes": 0,
+        "memtable_bytes": 2048
+      },
+      "event": {
+        "estimated_keys": 0,
+        "level0_files": 0,
+        "live_data_bytes": 0,
+        "memtable_bytes": 2048
+      },
+      "ident": {
+        "estimated_keys": 0,
+        "level0_files": 0,
+        "live_data_bytes": 0,
+        "memtable_bytes": 2048
+      },
+      "idx": {
+        "estimated_keys": 0,
+        "level0_files": 0,
+        "live_data_bytes": 0,
+        "memtable_bytes": 2048
+      },
+      "in": {
+        "estimated_keys": 1000118,
+        "level0_files": 1,
+        "live_data_bytes": 946674,
+        "memtable_bytes": 2048
+      },
+      "lbl": {
+        "estimated_keys": 0,
+        "level0_files": 0,
+        "live_data_bytes": 0,
+        "memtable_bytes": 2048
+      },
+      "meta": {
+        "estimated_keys": 4,
+        "level0_files": 1,
+        "live_data_bytes": 1574,
+        "memtable_bytes": 2048
+      },
+      "node": {
+        "estimated_keys": 50100,
+        "level0_files": 1,
+        "live_data_bytes": 199996,
+        "memtable_bytes": 2048
+      },
+      "note": {
+        "estimated_keys": 0,
+        "level0_files": 0,
+        "live_data_bytes": 0,
+        "memtable_bytes": 2048
+      },
+      "out": {
+        "estimated_keys": 1000118,
+        "level0_files": 1,
+        "live_data_bytes": 1044839,
+        "memtable_bytes": 2048
+      },
+      "pk": {
+        "estimated_keys": 50099,
+        "level0_files": 1,
+        "live_data_bytes": 139947,
+        "memtable_bytes": 2048
+      }
+    },
+    "database": "perf",
+    "kind": "rocksdb_estimates"
+  },
+  "warmBoltCount": {
+    "p50Ms": 0.7614579953951761,
+    "p95Ms": 0.8052920020418242,
+    "samplesMs": [
+      0.8052920020418242,
+      0.7754590042168275,
+      0.7570000016130507,
+      0.9530410025035962,
+      0.7875830051489174,
+      0.7957920024637133,
+      0.788541990914382,
+      0.7825420034350827,
+      0.7630420004716143,
+      0.7614579953951761,
+      0.7446669915225357,
+      0.7811249961378053,
+      0.7634170033270493,
+      0.7524169923271984,
+      0.7477920007659122,
+      0.8257500012405217,
+      0.78691600356251,
+      0.753250002162531,
+      0.7480839994968846,
+      0.7362499891314656,
+      0.7497500046156347,
+      0.7336249982472509,
+      0.7557079952675849,
+      0.7649580074939877,
+      0.7470830023521557,
+      0.7449580007232726,
+      0.7427090022247285,
+      0.7852079870644957,
+      0.7478330080630258,
+      0.7805000059306622
+    ]
+  },
+  "note": "debug localhost acceptance; includes driver/network, not a throughput benchmark"
+}

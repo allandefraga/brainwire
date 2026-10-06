@@ -775,6 +775,30 @@ pub fn visit_edges<E: From<GraphError> + From<StoreError>>(
     txn: &Txn,
     cf: Cf,
     node: NodeId,
+    visit: impl FnMut(EdgeRef) -> Result<(), E>,
+) -> Result<(), E> {
+    visit_edge_prefix(txn, cf, &node.0.to_be_bytes(), visit)
+}
+
+/// Stream one relationship type using the exact node/type key prefix.
+/// Snapshot visibility, pending writes and callback errors follow `visit_edges`.
+pub fn visit_edges_of_type<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    cf: Cf,
+    node: NodeId,
+    edge_type: EdgeTypeId,
+    visit: impl FnMut(EdgeRef) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut prefix = [0; 10];
+    prefix[..8].copy_from_slice(&node.0.to_be_bytes());
+    prefix[8..].copy_from_slice(&edge_type.0.to_be_bytes());
+    visit_edge_prefix(txn, cf, &prefix, visit)
+}
+
+fn visit_edge_prefix<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    cf: Cf,
+    prefix: &[u8],
     mut visit: impl FnMut(EdgeRef) -> Result<(), E>,
 ) -> Result<(), E> {
     if !matches!(cf, Cf::Out | Cf::In) {
@@ -782,7 +806,7 @@ pub fn visit_edges<E: From<GraphError> + From<StoreError>>(
             StoreError::Corrupt("adjacency requires out or in column family".into()).into(),
         );
     }
-    txn.visit_prefix::<E>(cf, &node.0.to_be_bytes(), |key, _| {
+    txn.visit_prefix::<E>(cf, prefix, |key, _| {
         let (_, edge_type, other, id) = decode_edge_key(key).map_err(GraphError::from)?;
         visit(EdgeRef {
             edge_type,
@@ -996,6 +1020,115 @@ mod tests {
                 .unwrap();
         let cat = db.apply_ontology(&mapping).unwrap();
         (dir, res, db, cat)
+    }
+
+    #[test]
+    fn typed_adjacency_preserves_snapshot_overlay_direction_and_edge_ids() {
+        let (_dir, _res, db, _cat) = setup();
+        let node = NodeId(0x0102_0304_0506_0708);
+        let neighbor = NodeId(node.0 + 1);
+        let selected = EdgeTypeId(0x00ff);
+        let adjacent = EdgeTypeId(0x0100);
+        let refs = |txn: &Txn<'_>, cf, ty| {
+            let mut found = Vec::new();
+            visit_edges_of_type::<GraphError>(txn, cf, node, ty, |edge| {
+                found.push((edge.edge_type, edge.other, edge.id));
+                Ok(())
+            })
+            .unwrap();
+            found
+        };
+        let mut seed = db.begin();
+        for cf in [Cf::Out, Cf::In] {
+            for (ty, id) in [(selected, EdgeId(7)), (adjacent, EdgeId(9))] {
+                seed.put(cf, edge_key(node, ty, neighbor, id), Vec::new());
+            }
+            // Neither a neighboring node nor a neighboring type belongs to the prefix.
+            seed.put(
+                cf,
+                edge_key(neighbor, selected, node, EdgeId(11)),
+                Vec::new(),
+            );
+        }
+        seed.commit().unwrap();
+        let mut snapshot = db.begin();
+        let mut writer = db.begin();
+        for cf in [Cf::Out, Cf::In] {
+            writer.put(
+                cf,
+                edge_key(node, selected, neighbor, EdgeId(8)),
+                Vec::new(),
+            );
+        }
+        writer.commit().unwrap();
+        for cf in [Cf::Out, Cf::In] {
+            assert_eq!(
+                refs(&snapshot, cf, selected),
+                [(selected, neighbor, EdgeId(7))]
+            );
+            assert_eq!(
+                refs(&db.begin(), cf, selected),
+                [
+                    (selected, neighbor, EdgeId(7)),
+                    (selected, neighbor, EdgeId(8))
+                ]
+            );
+            assert_eq!(
+                refs(&snapshot, cf, adjacent),
+                [(adjacent, neighbor, EdgeId(9))]
+            );
+            assert!(refs(&snapshot, cf, EdgeTypeId(0x00fe)).is_empty());
+            snapshot.delete(cf, edge_key(node, selected, neighbor, EdgeId(7)));
+            snapshot.put(cf, edge_key(node, selected, node, EdgeId(42)), Vec::new());
+            assert_eq!(
+                refs(&snapshot, cf, selected),
+                [(selected, node, EdgeId(42))]
+            );
+            let mut all = Vec::new();
+            visit_edges::<GraphError>(&snapshot, cf, node, |edge| {
+                all.push(edge.edge_type);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(all, [selected, adjacent]);
+        }
+    }
+
+    #[test]
+    fn typed_adjacency_validates_family_and_stops_on_callback_error() {
+        let (_dir, _res, db, _cat) = setup();
+        let node = NodeId(1);
+        let ty = EdgeTypeId(0x0100);
+        let mut txn = db.begin();
+        txn.put(
+            Cf::Out,
+            edge_key(node, ty, NodeId(2), EdgeId(7)),
+            Vec::new(),
+        );
+        txn.put(
+            Cf::Out,
+            edge_key(node, ty, NodeId(3), EdgeId(8)),
+            Vec::new(),
+        );
+        let mut callbacks = 0;
+        let result = visit_edges_of_type::<GraphError>(&txn, Cf::Out, node, ty, |_| {
+            callbacks += 1;
+            Err(StoreError::Corrupt("callback stopped".into()).into())
+        });
+        assert_eq!(callbacks, 1);
+        assert!(result.unwrap_err().to_string().contains("callback stopped"));
+        for cf in [Cf::Node, Cf::Meta, Cf::Pk, Cf::Idx] {
+            assert!(visit_edges_of_type::<GraphError>(&txn, cf, node, ty, |_| {
+                panic!("invalid family must not invoke callback")
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("out or in"));
+        }
+        let mut corrupt = edge_key(node, ty, NodeId(4), EdgeId(9));
+        corrupt.pop();
+        txn.put(Cf::Out, corrupt, Vec::new());
+        assert!(visit_edges_of_type::<GraphError>(&txn, Cf::Out, node, ty, |_| Ok(())).is_err());
     }
 
     #[test]

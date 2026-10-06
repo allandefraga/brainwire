@@ -1,0 +1,12 @@
+{
+  "baselineCommit": "14a5c3ddb7af58e874cf5a7e0ae6a0bef531a132",
+  "beforeExecutableSha256": "271b14f0162066087f79aae1de0c2807721dfa6d92b19ccd8115247cb19fb816",
+  "afterExecutableSha256": "6e56a1665762023c2303a74c6d45b9d5bf17589c29ea3de6c806caac94274bbd",
+  "benchmarkSourceSha256": "b2b2f52b7f61e80775b911bb76b93580056233faf08ca43c33d8edbd649066e3",
+  "afterBuild": "Canonical checkout; cargo clean -p brainwire-store -p brainwire-cypher -p brainwire-server; build log confirmed all three packages compiled; immutable executable copied after build",
+  "pairedRun": "Serial before/after processes on unchanged fixtures; discarded pilot and artifact-collision runs are excluded",
+  "cpu": "Apple M5",
+  "ramBytes": 34359738368,
+  "rustc": "1.98.1 (48a229cea 2026-09-01)",
+  "profile": "dev/debug"
+}

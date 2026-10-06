@@ -124,3 +124,25 @@ The CLI uses configured `memory.query` as a [conservative allocation guard](quer
 An exceeded guard fails atomically. LIMIT stops supported read-only
 MATCH/UNWIND pipelines early. `server.query_timeout_ms` sets a cooperative
 execution deadline, including rollback on expiry.
+
+## Typed neighborhood reads
+
+Outgoing and incoming typed hops seek the existing RocksDB adjacency key prefix
+for the start node **and relationship type**, rather than visiting every edge
+of that node and discarding other types. For example:
+
+```cypher
+MATCH (c:Customer {entity_id:$id})-[:WORKS_AT]->(company:Company)
+RETURN company.entity_id
+```
+
+This is automatic in embedded queries and the Python/Bolt server, including
+the eager matching path used by writes. It needs no additional index declaration
+or storage migration. Snapshot visibility, pending transaction changes and
+selected-edge order are preserved. `DETACH DELETE` still examines every type
+and retains its existing conflict checks.
+
+The gain depends on how many unrelated edges the start node has. This does not
+change CSR projection or PageRank execution. See the
+[mixed-type hub measurements](benchmarks/2026-10-06-typed-adjacency.md)
+for the synthetic workload, raw samples and reproduction commands.

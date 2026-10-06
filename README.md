@@ -120,6 +120,10 @@ properties; `CALL db.indexes()` exposes readiness through Cypher. See
 [index lookup](docs/indexes.md) and the reproducible warm benchmark example.
 [Current measurements and recovery evidence](docs/benchmarks/2026-10-03-guards-indexes-checkpoints-recovery.md)
 include numeric indexes and Python/Bolt ingestion at 100,000 nodes.
+Typed one-hop queries now seek the existing node/relationship-type adjacency
+prefix directly, avoiding unrelated edges. See the
+[mixed-type neighborhood benchmark](docs/benchmarks/2026-10-06-typed-adjacency.md)
+and its Python batch, rollback and restart acceptance check.
 [Docker Compose, Kubernetes and Swarm templates](docs/orchestrators.md) package
 a retained single-writer volume and recovery probes; replication remains pending.
 The [temporal graph and maintenance design](docs/design/2026-10-01-temporal-graph-and-maintenance.md)

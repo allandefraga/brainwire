@@ -210,13 +210,11 @@ where
                 Direction::Out => Cf::Out,
                 Direction::In => Cf::In,
             };
-            visit_edges::<E>(ctx.txn, cf, id, |edge| {
+            visit_edges_of_type::<E>(ctx.txn, cf, id, edge_type, |edge| {
                 let _edge_scope = ctx.budget.scope();
-                if edge.edge_type == edge_type {
-                    if let Some(row) = matches(ctx, &row, end, edge.other)? {
-                        ctx.budget.bindings(&row)?;
-                        visit(row)?;
-                    }
+                if let Some(row) = matches(ctx, &row, end, edge.other)? {
+                    ctx.budget.bindings(&row)?;
+                    visit(row)?;
                 }
                 Ok(())
             })?;

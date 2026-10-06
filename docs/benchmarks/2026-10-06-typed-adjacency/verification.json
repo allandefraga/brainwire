@@ -1,0 +1,24 @@
+{
+  "workspaceTestsPassed": 414,
+  "newRegressionTests": 5,
+  "commands": [
+    {
+      "command": "cargo test --workspace --locked --offline",
+      "result": "passed"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --locked --offline -- -D warnings",
+      "result": "passed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "engineRebuild": "Canonical store/Cypher/server recompiled after targeted cleanup before final verification",
+  "review": "Advisory architecture and final correctness/data review: no blockers"
+}

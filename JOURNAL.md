@@ -39,6 +39,47 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-06, typed adjacency seeks and million-relationship acceptance
+
+- **Requested:** 20 minutes on database-engine performance/features, keeping all
+  changes local. Session began at 10:06 Europe/Paris; canonical standalone checkout.
+- **Done:** Cypher outgoing/incoming typed MATCH now seeks the existing 10-byte
+  node/type adjacency prefix through `visit_edges_of_type`, rather than visiting
+  every relationship type. Streaming reads and eager matching before writes share
+  the optimization. Storage format, scalar-index readiness and all-type detach
+  conflict dependencies are unchanged; no migration is required.
+- **Measured:** paired warm dev/debug runs on identical synthetic fixtures, five
+  warmups and 30 samples/query. At 50,001 nodes / 1,000,020 relationships, outgoing
+  count of ten WANTED neighbors changed from 367.388 ms to 0.112 ms p50; counting
+  all 50,000 NOISE_0 neighbors changed from 683.062 ms to 316.302 ms. Incoming,
+  absent-type and actual projection LIMIT queries also improved. The unchanged
+  primary-key/count control remained about 0.040 ms. These are selective local
+  measurements, not general throughput, release-build or cold-disk claims.
+- **Acceptance:** Python driver 5.28.6, four reader tasks/100 queries and ten
+  ten-node batches on a disposable copy of the million-relationship fixture.
+  Snapshot isolation, stable MERGE overwrite, explicit rollback, DETACH DELETE,
+  committed recovery after SIGKILL and disappearance of an uncommitted crash
+  write passed. Final audit/counts: 50,100 nodes / 1,000,119 relationships.
+  Warm Python/Bolt count p50 0.761 ms; RocksDB estimates captured separately.
+- **Verification:** five new regressions cover directional/type/node boundaries,
+  EdgeId ordering, overlays, snapshots, callback stop, invalid families, truncated
+  selected keys, self-loops, residual predicates, eager writes, rollback, reopen
+  and LIMIT. Workspace has 414 passing tests; Clippy warnings denied, fmt and
+  diff checks. Advisory Astra found no production-code blockers; main checked
+  actual tests and measurements.
+- **Decision:** benchmark builds initially collided in a shared Cargo target
+  directory. Disputed runs were discarded. Preserve the original executable,
+  clean affected store/Cypher/server packages, rebuild the canonical code and
+  measure immutable executable copies serially. Provenance and raw final samples
+  are retained in `docs/benchmarks/2026-10-06-typed-adjacency/`; source and complete
+  method are linked from `docs/benchmarks/2026-10-06-typed-adjacency.md`.
+- **Next:** profile remaining per-node decode/binding costs in large returned
+  neighborhoods and indexed counts; measure release builds and representative
+  property payloads. Continue bounded Python batch import and failure acceptance
+  before client integration. CSR projection/PageRank were not changed today.
+- **Blockers:** none for this slice. Distributed replication, auth/TLS and
+  DuckLake/Arrow incremental ingestion remain separate work. No push/publishing.
+
 ### 2026-10-05, connected ontology inspection over Bolt
 
 - **Requested:** a 20-minute local session, starting 08:13:17 UTC
