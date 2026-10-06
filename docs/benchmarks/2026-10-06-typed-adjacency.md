@@ -115,3 +115,13 @@ Clippy with warnings denied, formatting and diff checks passed.
 
 Raw fixture, paired query measurements and Python results are in
 [the results directory](2026-10-06-typed-adjacency/).
+
+## Remaining cost
+
+A separate five-second macOS sampling run of the optimized debug workload
+places most of the selected dense-query call-tree branch under `node_record`
+and `get_node`/`read_node`; empty-row decoding occupies a much smaller part.
+The saved `profile-summary.json` contains overlapping inclusive sample counts,
+not additive percentages. This profiling run is excluded from latency tables.
+Next investigation: bounded node-read batching/reuse that retains snapshot,
+corruption checks, memory accounting and early LIMIT behavior.

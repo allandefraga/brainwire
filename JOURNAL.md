@@ -73,7 +73,11 @@ No line of code before the end of phase 2.
   measure immutable executable copies serially. Provenance and raw final samples
   are retained in `docs/benchmarks/2026-10-06-typed-adjacency/`; source and complete
   method are linked from `docs/benchmarks/2026-10-06-typed-adjacency.md`.
-- **Next:** profile remaining per-node decode/binding costs in large returned
+- **Profile:** a separate five-second macOS sample points to per-node RocksDB
+  reads (`node_record`/`get_node`/`read_node`) as the dominant selected dense-query
+  branch; empty-row decode itself is much smaller. Inclusive branch counts are
+  saved separately and excluded from latency tables.
+- **Next:** investigate bounded node-read batching/reuse in large returned
   neighborhoods and indexed counts; measure release builds and representative
   property payloads. Continue bounded Python batch import and failure acceptance
   before client integration. CSR projection/PageRank were not changed today.

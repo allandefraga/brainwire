@@ -1,0 +1,15 @@
+{
+  "tool": "macOS sample",
+  "durationSeconds": 5,
+  "intervalMs": 1,
+  "workload": "Verified optimized debug benchmark on 50001-node/1000020-edge fixture; sampling overlaps denseType count",
+  "selectedCallTreeBranchInclusiveSamples": {
+    "matches": 2511,
+    "node_record": 2461,
+    "get_node": 2433,
+    "read_node": 2218,
+    "decode_node": 98,
+    "decode_row": 27
+  },
+  "note": "Overlapping inclusive counts from a selected call-tree branch, not additive totals or a release profile. Node point-read path dominates this branch; empty-row decode itself is much smaller. This separate profiling run is excluded from latency tables."
+}
