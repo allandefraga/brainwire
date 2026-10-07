@@ -43,7 +43,7 @@ brainwire shell --overview --estimated --graph research --view query
 ```
 
 `db overview --json` includes each graph's `commit_state` with the same string,
-tracked flag and local scope. The TUI is an offline snapshot, not a live counter.
+tracked flag and local scope. The TUI is an offline snapshot, not a live counter. See [all six actual captures](tui-commit-state.md).
 The checkpoint CLI also includes the position captured in its receipt; see
 [checkpoints](checkpoints.md).
 

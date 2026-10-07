@@ -42,7 +42,8 @@ No line of code before the end of phase 2.
 ### 2026-10-07, durable commits, resumable ingestion and extended acceptance
 
 - **Requested:** work for 30 minutes, all local. Started 06:57:45 UTC
-  (08:57:45 Europe/Paris); preserved the historical worktree and untracked
+  (08:57:45 Europe/Paris); closed at 07:28:01 UTC after at least 30 minutes.
+  Preserved the historical worktree and untracked
   docs-site/.DS_Store files. Canonical checkout remains /Users/fraga/Documents/brainwire.
 - **Done:** versioned durable per-store commit counter shares the synchronous
   graph/index WriteBatch. Reopening continues it. Missing legacy state is
