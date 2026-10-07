@@ -84,7 +84,7 @@ local Cypher execution, `brainwire probe` health checks and the terminal demo.
 The `brainwire-bolt-dev` binary
 uses a stub query engine.
 It now also has local `brainwire db create`, `db list`, `db overview`, `db stats`, `db schema`,
-`db metrics`, `db files`, `db checkpoint`, `db check` and `db apply-ontology` commands. They operate on the named RocksDB directories
+`db metrics`, `db files`, `db checkpoint`, `db commit-state`, `db check` and `db apply-ontology` commands. They operate on the named RocksDB directories
 under `server.data_dir` and require exclusive access; `db stats` scans nodes
 and relationships and accepts `--json` for scripts. For example:
 
@@ -113,7 +113,11 @@ counts without materializing every input row.
 The [first scalar-index measurement](docs/benchmarks/2026-10-01-scalar-index.md)
 records the local test and the 100,000-key atomic backfill limit.
 [Offline native checkpoints](docs/checkpoints.md) copy one committed graph
-into a new directory. [Query allocation guards](docs/query-allocation-guards.md)
+into a new directory. [Durable local commit state](docs/commit-state.md) survives
+reopening and is visible through Cypher, CLI and the offline TUI pipeline.
+The [resumable Python import example](docs/python-ingestion.md#resumable-immutable-jsonl)
+commits its source cursor with each data batch.
+[Query allocation guards](docs/query-allocation-guards.md)
 explain limits, rollback behavior and their current ceilings.
 Equality in `WHERE` can now seek the same ready scalar indexes as pattern
 properties; `CALL db.indexes()` exposes readiness through Cypher. See

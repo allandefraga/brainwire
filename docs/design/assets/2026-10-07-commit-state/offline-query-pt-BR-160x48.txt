@@ -1,0 +1,48 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / grafos locais • dados reais • somente leitura                                                                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Grafos nomeados────────────────────────────────────────────────────────────┐┌─PIPELINE DE ESCRITA─────────────────────────────────────────────────────────────┐
+│ GRAFO                     NÓS      ARESTAS                                ││Python -> Bolt -> Cypher                                                         │
+│▶ customers-100k             100000          0                             ││UNWIND $rows -> MERGE -> SET                                                     │
+│  client_memory                 0          0                             ││                                                                                 │
+│                                                                           ││Nó + índices: um WriteBatch.                                                     │
+│                                                                           ││COMMIT sincroniza o WAL.                                                         │
+│                                                                           ││Flush cria SST depois.                                                           │
+│                                                                           ││                                                                                 │
+│                                                                           ││Sequência persistida do store: 121                                               │
+│                                                                           ││Último commit deste store, lido offline. Inclui reservas de IDs e escritas de    │
+│                                                                           ││ontologia; não é contagem de nós nem posição de replicação global.               │
+│                                                                           ││                                                                                 │
+│                                                                           ││No servidor, CALL informa o snapshot da transação:                               │
+│                                                                           ││CALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked,   │
+│                                                                           ││scope                                                                            │
+│                                                                           ││                                                                                 │
+│                                                                           ││Índice escalar: pronto                                                           │
+│                                                                           ││Customer.email, Customer.phone, Customer.segment, Company.industry               │
+│                                                                           ││                                                                                 │
+│                                                                           ││MERGE usa entity_id estável. SET troca campos; null remove.                      │
+│                                                                           ││                                                                                 │
+│                                                                           ││LEITURAS                                                                         │
+│                                                                           ││WHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes.       │
+│                                                                           ││OR/NOT/faixa sozinhos: scan.                                                     │
+│                                                                           ││CALL db.indexes() YIELD label, property, state RETURN label, property, state     │
+│                                                                           ││                                                                                 │
+│                                                                           ││Leituras simples: uma linha por vez; LIMIT para a leitura.                       │
+│                                                                           ││Escritas, agrupamentos e CALL ainda acumulam linhas.                             │
+│                                                                           ││                                                                                 │
+│                                                                           ││CSR: graph.project, graph.degree, graph.pagerank, graph.reachable,               │
+│                                                                           ││graph.shortestPath.                                                              │
+│                                                                           ││Painel explicativo; não executa consultas.                                       │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+└───────────────────────────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ grafo • Tab painel • q sai • snapshot: --snapshot  •  offline: pare o servidor primeiro                                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

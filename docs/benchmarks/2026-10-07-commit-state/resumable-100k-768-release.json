@@ -1,0 +1,31 @@
+{
+  "batch_size": 250,
+  "before_commit_customer_and_cursor_rollback": true,
+  "binary_sha256": "8095c2fa70d576bd2cb80db8f2110a9f550af518126a94efc3b98b9f9547833a",
+  "changed_source_rejected_without_commit": true,
+  "completed_resume_no_new_commit": true,
+  "driver": "5.28.6",
+  "embedding_dimensions": 768,
+  "final_offset": 1570442893,
+  "final_sequence": "1617",
+  "first_batch_rows": 66,
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "input_limits": {
+    "batch_bytes": 1048576,
+    "line_bytes": 65536,
+    "rows": 250
+  },
+  "list_vector_and_scalar_index_roundtrip": true,
+  "lost_ack_cursor_survives_sigkill": true,
+  "measurement_context": "Concurrent independent 100k-node mixed-load soak; acceptance evidence, not an isolated performance baseline.",
+  "offline_graph_and_index_audit": true,
+  "profile": "release",
+  "remaining_rows_per_second": 1463.8588201744906,
+  "resume_seconds": 68.26751229198999,
+  "rows": 100000,
+  "source_bytes": 1570442893,
+  "source_sha256": "8bf362da6af452f9c7b3b93facc16885ff65f41e677f2c790b6ffc36dccf41a3",
+  "temporary_data_removed": true,
+  "test_server_stopped": true,
+  "vector_values": "seeded_random"
+}

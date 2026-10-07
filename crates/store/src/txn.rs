@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
-use crate::db::{Database, StoreError};
+use crate::db::{Database, StoreError, COMMIT_SEQUENCE_KEY};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Cf {
@@ -62,13 +62,25 @@ pub(crate) struct Committer {
 }
 
 impl Committer {
-    pub(crate) fn new(conflict_history_keys: usize) -> Committer {
+    pub(crate) fn new(conflict_history_keys: usize, sequence: Option<u64>) -> Committer {
         Committer {
             state: Mutex::new(CommitState {
                 cap: conflict_history_keys,
+                seq: sequence.unwrap_or(0),
+                tracked: sequence.is_some(),
                 ..CommitState::default()
             }),
         }
+    }
+
+    pub(crate) fn checkpoint(
+        &self,
+        db: &rocksdb::DB,
+        destination: &std::path::Path,
+    ) -> Result<Option<u64>, StoreError> {
+        let st = self.lock();
+        rocksdb::checkpoint::Checkpoint::new(db)?.create_checkpoint(destination)?;
+        Ok(st.tracked.then_some(st.seq))
     }
 
     /// The one place that locks the committer. A poisoned lock means an
@@ -98,6 +110,7 @@ impl Committer {
 #[derive(Default)]
 struct CommitState {
     seq: u64,
+    tracked: bool,
     // BTreeMap, not HashMap: a prefix dependency (`Txn::scan_prefix_for_update`)
     // needs a range scan over "every key of this Cf starting with this
     // prefix", which only an ordered map gives cheaply.
@@ -168,6 +181,7 @@ pub struct Txn<'db> {
     db: &'db Database,
     snapshot: rocksdb::Snapshot<'db>,
     start_seq: u64,
+    snapshot_commit_sequence: Option<u64>,
     writes: BTreeMap<Key, Option<Vec<u8>>>,
     depends: BTreeSet<Key>,
     /// Range dependencies recorded by `scan_prefix_for_update`: (cf, prefix)
@@ -180,9 +194,17 @@ pub struct Txn<'db> {
 }
 
 impl Database {
+    /// Latest durable per-store commit sequence. Missing legacy metadata is
+    /// untracked until the first successful write; reads never create a marker.
+    pub fn commit_sequence(&self) -> Option<u64> {
+        let st = self.committer.lock();
+        st.tracked.then_some(st.seq)
+    }
+
     pub fn begin(&self) -> Txn<'_> {
         let mut st = self.committer.lock();
         let start_seq = st.seq;
+        let snapshot_commit_sequence = st.tracked.then_some(start_seq);
         *st.active.entry(start_seq).or_insert(0) += 1;
         // Taken under the lock, so no commit lands between the sequence and the snapshot.
         let snapshot = self.db.snapshot();
@@ -191,6 +213,7 @@ impl Database {
             db: self,
             snapshot,
             start_seq,
+            snapshot_commit_sequence,
             writes: BTreeMap::new(),
             depends: BTreeSet::new(),
             depends_prefix: BTreeSet::new(),
@@ -203,6 +226,12 @@ impl Database {
 impl<'db> Txn<'db> {
     pub fn database(&self) -> &'db Database {
         self.db
+    }
+
+    /// Durable sequence captured with this transaction's snapshot at begin.
+    /// Pending writes and later commits do not change it.
+    pub fn snapshot_commit_sequence(&self) -> Option<u64> {
+        self.snapshot_commit_sequence
     }
 
     /// Conservative O(1) overlay/dependency estimate, excluding RocksDB internals.
@@ -424,6 +453,12 @@ impl<'db> Txn<'db> {
         let db = self.db;
         let mut st = db.committer.lock();
         let start = self.start_seq;
+        if self
+            .writes
+            .contains_key(&(Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec()))
+        {
+            return Err(StoreError::Corrupt("commit sequence metadata is reserved".into()).into());
+        }
         let touched_anything =
             !self.writes.is_empty() || !self.depends.is_empty() || !self.depends_prefix.is_empty();
         // A transaction old enough to predate `pruned_through` can no longer
@@ -449,6 +484,10 @@ impl<'db> Txn<'db> {
             return Err(TxnError::Conflict);
         }
         if !self.writes.is_empty() {
+            let seq = st
+                .seq
+                .checked_add(1)
+                .ok_or_else(|| StoreError::Corrupt("commit sequence exhausted".into()))?;
             let mut batch = rocksdb::WriteBatch::default();
             for ((cf, key), value) in &self.writes {
                 let handle = db.cf(cf.name())?;
@@ -457,12 +496,20 @@ impl<'db> Txn<'db> {
                     None => batch.delete_cf(handle, key),
                 }
             }
+            // Keep this internal write outside self.writes: ordinary disjoint
+            // writers must not implicitly depend on the shared marker.
+            let mut marker = [0; 9];
+            marker[0] = 1;
+            marker[1..].copy_from_slice(&seq.to_be_bytes());
+            batch.put_cf(db.cf("meta")?, COMMIT_SEQUENCE_KEY, marker);
             let mut opts = rocksdb::WriteOptions::default();
             opts.set_sync(true);
             db.db.write_opt(batch, &opts).map_err(StoreError::from)?;
-            st.seq += 1;
-            let seq = st.seq;
-            let keys: Vec<Key> = self.writes.keys().cloned().collect();
+            st.seq = seq;
+            st.tracked = true;
+            let mut keys: Vec<Key> = self.writes.keys().cloned().collect();
+            // Explicit point/prefix dependencies on metadata still observe it.
+            keys.push((Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec()));
             for key in &keys {
                 st.last_write.insert(key.clone(), seq);
             }
@@ -774,7 +821,11 @@ mod tests {
         let res = Resources::new(StoreConfig::for_tests());
         // Create every column family, then close the read-write handle so a
         // second, read-only handle can attach to the same path.
-        drop(Database::open(dir.path(), &res).unwrap());
+        let writable = Database::open(dir.path(), &res).unwrap();
+        let mut seed = writable.begin();
+        seed.put(Cf::Node, b"seed".to_vec(), b"committed".to_vec());
+        assert_eq!(seed.commit().unwrap(), 1);
+        drop(writable);
 
         let opts = rocksdb::Options::default();
         let cfs = crate::db::COLUMN_FAMILIES
@@ -782,6 +833,8 @@ mod tests {
             .map(|name| rocksdb::ColumnFamilyDescriptor::new(*name, rocksdb::Options::default()));
         let ro = rocksdb::DB::open_cf_descriptors_read_only(&opts, dir.path(), cfs, false).unwrap();
         let db = Database::for_test(ro, 1_000_000);
+        assert_eq!(db.commit_sequence(), Some(1));
+        assert_eq!(db.begin().snapshot_commit_sequence(), Some(1));
 
         let mut t = db.begin();
         t.put(Cf::Node, b"a".to_vec(), b"1".to_vec());
@@ -791,6 +844,11 @@ mod tests {
                 panic!("expected TxnError::Store for a write against a read-only db, got {other:?}")
             }
         }
+        assert_eq!(db.commit_sequence(), Some(1));
+        assert_eq!(db.begin().get(Cf::Node, b"a").unwrap(), None);
+        drop(db);
+        let reopened = Database::open(dir.path(), &res).unwrap();
+        assert_eq!(reopened.commit_sequence(), Some(1));
     }
 
     // Fix round 1 (review of the tests above found the dependency check

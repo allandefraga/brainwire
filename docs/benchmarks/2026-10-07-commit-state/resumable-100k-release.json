@@ -1,0 +1,21 @@
+{
+  "batch_size": 250,
+  "before_commit_customer_and_cursor_rollback": true,
+  "changed_source_rejected_without_commit": true,
+  "completed_resume_no_new_commit": true,
+  "driver": "5.28.6",
+  "embedding_dimensions": 16,
+  "final_offset": 44496868,
+  "final_sequence": "501",
+  "list_vector_and_scalar_index_roundtrip": true,
+  "lost_ack_cursor_survives_sigkill": true,
+  "measurement_context": "Concurrent independent 100k-node mixed-load soak; acceptance evidence, not an isolated performance baseline.",
+  "offline_graph_and_index_audit": true,
+  "profile": "release",
+  "remaining_rows_per_second": 24821.913143665293,
+  "resume_seconds": 4.0186265829979675,
+  "rows": 100000,
+  "source_sha256": "ce3898326ce28f0447fefe44849664d6d19728a22ac4831b985b3b05aa8b4a8c",
+  "temporary_data_removed": true,
+  "test_server_stopped": true
+}

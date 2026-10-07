@@ -250,7 +250,8 @@ impl<'db> QueryTransaction<'db> {
     }
 
     /// Commit once, returning a store sequence for a write transaction, or
-    /// `None` for read-only completion. This is not a restart-stable bookmark.
+    /// `None` for read-only completion. Write sequences are durable per store;
+    /// they are not global, fork-aware bookmarks or instance Raft indexes.
     /// Read-only completion drops the snapshot without checking write conflicts,
     /// preserving the standalone executor's read-only behavior.
     pub fn commit(&mut self) -> Result<Option<u64>, ExecError> {

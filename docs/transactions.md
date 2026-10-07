@@ -37,8 +37,9 @@ query or commit again; begin a new context instead. A write conflict fails the
 commit, without publishing that transaction's writes.
 
 Commit returns an optional storage sequence: a write commit returns `Some`,
-while a read-only completion returns `None`. This sequence is process-local,
-not a restart-stable causal bookmark. Allocated ID gaps can remain after abort;
+while a read-only completion returns `None`. The sequence is now durable within
+one store and continues after reopening; it is not a causal bookmark or a global
+replication position. See [durable commit state](commit-state.md). Allocated ID gaps can remain after abort;
 ID allocation intentionally reserves durable blocks independently of graph writes.
 
 The public context borrows its database. An owning worker can hold the database

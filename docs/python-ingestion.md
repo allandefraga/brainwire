@@ -206,3 +206,65 @@ Use `--rows 100000 --batch-size 250 --query-mib 256` for the recorded 100K
 workload. It checks numeric segment indexes, guard-failure rollback through the
 real driver, self-path analytics, and end-to-end read latency. A numeric group
 with many matching rows is reported separately from a unique entity/email read.
+
+## Resumable immutable JSONL
+
+The bounded [resumable example](../examples/python/resumable_customers.py) stores
+an `ImportCheckpoint` node containing the source file's SHA256 and its next byte
+offset. Each transaction reads that node, imports a batch of customers, and
+updates the cursor atomically. A new process rereads the graph cursor rather
+than trusting a local progress file or the storage commit counter.
+
+Create a separate test graph using the example's ontology, then start the server:
+
+```sh
+./target/debug/brainwire db create customers-resumable --ontology examples/python/resumable_customers_ontology.json
+./target/debug/brainwire serve
+```
+
+In another terminal:
+
+```sh
+.venv/bin/python examples/python/resumable_customers.py examples/python/customers.jsonl \
+  --database customers-resumable --source-id synthetic-customers-v1 \
+  --batch-size 250 --batch-bytes 1048576 --line-bytes 65536
+```
+
+Rerun the same command after interruption. If the last commit succeeded but its
+receipt was lost, the next attempt starts from its durable cursor. A completed
+source is a no-op. A changed file with the same source ID is rejected before
+customer changes; use a new source ID deliberately for a new immutable export.
+
+The defaults cap input at 250 customer rows, 1 MiB of JSONL bytes per transaction
+and 64 KiB per line. Blank lines consume the byte budget and advance the cursor;
+a final line need not end in a newline. Limits bound source input, not exact
+Python/Rust allocations or total RSS. Earlier committed batches survive a later
+malformed row or an oversized line. SHA256 is computed with a 1 MiB streaming
+buffer before importing; every restart must read the whole source to verify it.
+
+**One importer per source ID, immutable local input.** There is no lease or
+coordinated multi-writer source ownership. Stat checks detect ordinary changes
+through hashing/import, but cannot enforce immutability against concurrent or
+adversarial edits. Source IDs identify input content, not a filesystem path.
+The example performs identity MERGE and explicit property SET; it does not
+propagate source deletions or provide DuckLake/Delta change capture, out-of-order
+CDC resolution or a general SDK. Those connectors must reuse this atomic
+source-progress contract with their own event/snapshot identities.
+
+Inspect its durable cursor while the server runs:
+
+```cypher
+MATCH (s:ImportCheckpoint {entity_id:'synthetic-customers-v1'})
+RETURN s.sha256, s.next_offset
+```
+
+Algorithm tests run without installing a driver:
+
+```sh
+python3 -m unittest discover -s examples/python -p test_resumable_customers.py
+```
+
+The [real Bolt failure harness](benchmarks/2026-10-07-commit-state/resumable_acceptance.py)
+checks rollback after customer writes and before cursor advancement, lost receipts,
+process kill/reopen/resume, list/vector round trips, changed-source rejection and
+the graph/index audit. It uses disposable synthetic data.

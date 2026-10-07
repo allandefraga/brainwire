@@ -33,6 +33,10 @@ The server preserves explicit transaction writes across `RUN` calls. `COMMIT`
 persists them; `ROLLBACK`, `RESET`, a query error or connection teardown
 discards them. An autocommit query persists when its result is consumed.
 Storage sequence numbers are not exposed as restart-stable Bolt bookmarks.
+`CALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked, scope`
+reads the durable local position captured by the current transaction. Its decimal
+string is separate from a causal bookmark or a source ingestion cursor; see
+[commit state](commit-state.md).
 Database selection uses an existing named database; `brainwire db create` is
 an offline administration command.
 

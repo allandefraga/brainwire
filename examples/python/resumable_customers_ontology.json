@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "nodes": [
+    {
+      "label": "Customer",
+      "properties": ["email", "active", "tags", "embedding"],
+      "indexed_fields": ["email", "active"]
+    },
+    {
+      "label": "ImportCheckpoint",
+      "properties": ["sha256", "next_offset"],
+      "indexed_fields": []
+    }
+  ]
+}

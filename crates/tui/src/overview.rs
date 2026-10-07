@@ -83,6 +83,7 @@ pub struct GraphSummary {
     pub index_declarations: usize,
     pub timeline_streams: usize,
     pub indexes_ready: bool,
+    pub commit_sequence: Option<u64>,
     pub indexed_fields: Vec<String>,
     pub storage:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, Option<u64>>>,
@@ -118,8 +119,12 @@ fn storage_details(g: &GraphSummary, view: OverviewView, lang: Language) -> Stri
             text.push_str(lang.choose("\n~keys: estimativa, inclui versões.\nWAL -> memtables -> SST -> compactação", "\n~keys: estimate, includes versions.\nWAL -> memtables -> SST -> compaction"));
             text
         }
-        OverviewView::Query => format!("Python -> Bolt -> Cypher\nUNWIND $rows -> MERGE -> SET\n\n{}\n\n{}: {}\n{}\n\n{}",
+        OverviewView::Query => format!("Python -> Bolt -> Cypher\nUNWIND $rows -> MERGE -> SET\n\n{}\n\n{}: {}\n{}\n\n{}: {}\n{}\n\n{}",
             lang.choose("Nó + índices: um WriteBatch.\nCOMMIT sincroniza o WAL.\nFlush cria SST depois.", "Node + indexes: one WriteBatch.\nCOMMIT syncs the WAL.\nFlush creates SST later."),
+            lang.choose("Sequência persistida do store", "Persisted store sequence"),
+            g.commit_sequence.map_or_else(|| lang.choose("não rastreado", "untracked").to_string(), |sequence| sequence.to_string()),
+            lang.choose("Último commit deste store, lido offline. Inclui reservas de IDs e escritas de ontologia; não é contagem de nós nem posição de replicação global.\n\nNo servidor, CALL informa o snapshot da transação:\nCALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked, scope",
+                "Latest commit of this store, read offline. Includes ID reservations and ontology writes; not a node count or global replication position.\n\nOn the server, CALL reports the transaction snapshot:\nCALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked, scope"),
             lang.choose("Índice escalar", "Scalar equality index"),
             if g.index_declarations == 0 { lang.choose("nenhum", "none") } else if g.indexes_ready { lang.choose("pronto", "ready") } else { lang.choose("pendente (scan)", "pending (scan)") },
             g.indexed_fields.join(", "),
@@ -771,6 +776,49 @@ fn handle_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_panel_shows_persisted_store_sequence_and_localized_untracked_state() {
+        for lang in [Language::En, Language::PtBr] {
+            for sequence in [Some(u64::MAX), None] {
+                let graphs = vec![GraphSummary {
+                    name: "synthetic-sequence".into(),
+                    commit_sequence: sequence,
+                    ..GraphSummary::default()
+                }];
+                let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+                let mut state = OverviewSelection::default();
+                terminal
+                    .draw(|f| {
+                        render_overview(f, &graphs, &mut state, OverviewView::Query, lang, true)
+                    })
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let text = (0..36)
+                    .map(|y| {
+                        (0..120)
+                            .map(|x| buffer[(x, y)].symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(
+                    text.contains(lang.choose("Sequência persistida", "Persisted store sequence"))
+                );
+                assert!(text.contains(&sequence.map_or_else(
+                    || lang.choose("não rastreado", "untracked").into(),
+                    |value| value.to_string(),
+                )));
+                let details = storage_details(&graphs[0], OverviewView::Query, lang);
+                assert!(details.contains("CALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked, scope"));
+                assert!(details.contains(lang.choose("reservas de IDs", "ID reservations")));
+                assert!(details.contains(lang.choose("replicação global", "global replication")));
+                assert!(
+                    details.contains(lang.choose("snapshot da transação", "transaction snapshot"))
+                );
+            }
+        }
+    }
 
     #[test]
     fn ontology_navigation_selects_types_resets_on_graph_change_and_closes_inspector() {

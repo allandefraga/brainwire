@@ -1,0 +1,31 @@
+{
+  "batch_size": 250,
+  "before_commit_customer_and_cursor_rollback": true,
+  "binary_sha256": "636ba89b16aef67fd26fc3d00f2fb69c85a9e6921b0470703c86673a0c315a71",
+  "changed_source_rejected_without_commit": true,
+  "cli_completed_resume_no_new_commit": true,
+  "completed_resume_no_new_commit": true,
+  "driver": "6.3.0",
+  "embedding_dimensions": 16,
+  "final_offset": 4429532,
+  "final_sequence": "53",
+  "first_batch_rows": 250,
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "input_limits": {
+    "batch_bytes": 1048576,
+    "line_bytes": 65536,
+    "rows": 250
+  },
+  "list_vector_and_scalar_index_roundtrip": true,
+  "lost_ack_cursor_survives_sigkill": true,
+  "offline_graph_and_index_audit": true,
+  "profile": "release",
+  "remaining_rows_per_second": 32222.35958225316,
+  "resume_seconds": 0.3025849170080619,
+  "rows": 10000,
+  "source_bytes": 4429532,
+  "source_sha256": "84f5cc8d8fb940c070f8304876441aa1907ae8796a6f66be2cfe8dae6d7499c5",
+  "temporary_data_removed": true,
+  "test_server_stopped": true,
+  "vector_values": "repeated_per_node"
+}

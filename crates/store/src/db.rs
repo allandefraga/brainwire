@@ -11,6 +11,26 @@ use rocksdb::{
     WriteBufferManager, DB,
 };
 
+/// Reserved metadata key; only the transaction committer may write it.
+pub(crate) const COMMIT_SEQUENCE_KEY: &[u8] = b"commit/sequence";
+
+pub(crate) fn load_commit_sequence(db: &DB) -> Result<Option<u64>, StoreError> {
+    let cf = db
+        .cf_handle("meta")
+        .ok_or(StoreError::MissingColumnFamily("meta"))?;
+    let Some(marker) = db.get_cf(cf, COMMIT_SEQUENCE_KEY)? else {
+        return Ok(None);
+    };
+    if marker.len() != 9 || marker[0] != 1 {
+        return Err(StoreError::Corrupt(
+            "invalid commit sequence marker version or length".into(),
+        ));
+    }
+    Ok(Some(u64::from_be_bytes(
+        marker[1..].try_into().expect("validated marker length"),
+    )))
+}
+
 pub const COLUMN_FAMILIES: [&str; 11] = [
     "meta", "node", "pk", "out", "in", "lbl", "idx", "ident", "event", "acl", "note",
 ];
@@ -119,9 +139,10 @@ impl Database {
             .iter()
             .map(|name| ColumnFamilyDescriptor::new(*name, family_options(res)));
         let db = DB::open_cf_descriptors(&opts, path, families)?;
+        let sequence = load_commit_sequence(&db)?;
         Ok(Database {
             db,
-            committer: crate::txn::Committer::new(res.config.conflict_history_keys),
+            committer: crate::txn::Committer::new(res.config.conflict_history_keys, sequence),
             alloc: crate::alloc::IdAllocator::default(),
             id_block: res.config.id_block,
         })
@@ -131,6 +152,13 @@ impl Database {
     /// Parent must exist; destination cannot be nested inside the live database.
     /// SST hardlinks are immutable; this is not an off-machine backup.
     pub fn checkpoint(&self, destination: &Path) -> Result<(), StoreError> {
+        self.checkpoint_with_sequence(destination).map(|_| ())
+    }
+
+    /// Creates a checkpoint and returns the durable sequence captured with its
+    /// data. Commits are blocked during native checkpoint creation so the
+    /// receipt cannot describe a newer or older store state.
+    pub fn checkpoint_with_sequence(&self, destination: &Path) -> Result<Option<u64>, StoreError> {
         let error = |e: std::io::Error| StoreError::Checkpoint(e.to_string());
         let parent = destination
             .parent()
@@ -156,8 +184,7 @@ impl Database {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(error(e)),
         }
-        rocksdb::checkpoint::Checkpoint::new(&self.db)?.create_checkpoint(destination)?;
-        Ok(())
+        self.committer.checkpoint(&self.db, &destination)
     }
 
     pub fn directory(&self) -> &Path {
@@ -208,9 +235,10 @@ impl Database {
     /// directly, which would need updating every time this struct gains a
     /// field (Task 8+).
     pub(crate) fn for_test(db: DB, conflict_history_keys: usize) -> Database {
+        let sequence = load_commit_sequence(&db).expect("valid test database commit marker");
         Database {
             db,
-            committer: crate::txn::Committer::new(conflict_history_keys),
+            committer: crate::txn::Committer::new(conflict_history_keys, sequence),
             alloc: crate::alloc::IdAllocator::default(),
             id_block: StoreConfig::for_tests().id_block,
         }

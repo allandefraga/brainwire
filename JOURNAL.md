@@ -39,6 +39,70 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-07, durable commits, resumable ingestion and extended acceptance
+
+- **Requested:** work for 30 minutes, all local. Started 06:57:45 UTC
+  (08:57:45 Europe/Paris); preserved the historical worktree and untracked
+  docs-site/.DS_Store files. Canonical checkout remains /Users/fraga/Documents/brainwire.
+- **Done:** versioned durable per-store commit counter shares the synchronous
+  graph/index WriteBatch. Reopening continues it. Missing legacy state is
+  explicitly untracked; overflow/corruption/reserved-key mutation fails closed.
+  Snapshot counter does not follow pending/later writes. Ordinary disjoint
+  writers do not depend on the internal marker; explicit marker dependencies
+  still conflict. Allocator reservations are included and can survive outer rollback.
+- **Done:** CALL db.commitState() yields exact decimal sequence/tracked/scope;
+  offline db commit-state and overview JSON expose latest local state. Native
+  checkpoint receipt captures the exact counter under the commit lock, retaining
+  the original checkpoint API. Eight concurrent captures match marker and data.
+  TUI pipeline explains real counters in EN/PT, including untracked/u64::MAX.
+- **Done:** immutable-JSONL Python example hashes input incrementally, bounds
+  rows/bytes/line size, and commits ImportCheckpoint source cursor with each data
+  batch. Every retry rereads graph progress; completed resume is a no-op. One
+  importer per source required. No DuckLake/CDC/delete propagation or general SDK
+  claim. Examples now use a distinct customers-resumable graph.
+- **Verified:** 434 Rust workspace tests, all-targets Clippy, rustfmt/diff checks;
+  nine Python algorithm tests. Existing/new store crash suites cover eight
+  SIGKILL cycles. Actual Python/Bolt tests cover old snapshots, disjoint writers,
+  pending-index-update kill/restart, checkpoint independence and full audits.
+  Actual importer failure after customer writes/before cursor update rolls back;
+  lost receipt followed by kill/restart resumes safely and rejects changed input.
+  Both driver 5.28.6 and a separate 10K driver 6.3.0 resumable/recovery run pass;
+  the actual importer CLI also resumes a completed source without a new commit.
+- **Volume:** 100K nodes with 16D values and 100K with seeded-random 768D values
+  round-trip, recover and audit. Wide JSONL was 1.57 GB with <=1 MiB batch input;
+  ~1,464 rows/s under simultaneous independent soak, not an ANN benchmark.
+- **Mixed load:** 601.15-second release soak, one writer/four readers, 100K nodes:
+  172,253 committed 250-row batches (43,063,250 updates), 3,846,944 point reads.
+  Reader last-10K-window p95 1.259–1.269 ms; writer last-window p95 3.97 ms/batch.
+  RSS peak 93.42 MiB, final 88.02 MiB with 64 MiB cache/16 MiB memtables. Indexed
+  segment counts agree; SIGKILL/reopen counter exactly 172752; full audit passes.
+  Short isolated 100K/1KiB/two-index release insert run: 2.459 s, ~40,661 rows/s,
+  7.027 ms batch p95. No pinned 4-vCPU/8-GiB or one-hour-beta certification claimed.
+- **UI:** six actual offline 160x48 PTY captures (five EN tabs and PT pipeline)
+  for 100K nodes/zero instance edges; sequence121 agrees with CLI and inspection
+  leaves it unchanged. Assets/receipt/capture script in
+  docs/design/assets/2026-10-07-commit-state/. Main inspected EN/PT pipeline and
+  disk PNGs and then independently reviewed all six captures. No test server,
+  PTY or synthetic store remains.
+- **Review:** focused storage, Cypher/Python and TUI workers with main independent
+  integration checks. Astra reviewed the architecture and final code; no code
+  blockers. Fixed its docs findings about exclusive embedded access and example
+  graph/path collision. Checkpoints block begins/commits/status during capture.
+  Counter is local, not a Raft position/bookmark/as-of identifier. Writable
+  downgrade is unsupported; checkpoint forks can reuse future numbers.
+- **Next:** deterministic mutation/apply contract covering all graph catalogs,
+  allocators and source-progress writes before three-voter replication. In
+  parallel, perform the scoped release destination-read batching experiment in
+  docs/design/2026-10-07-batched-node-read-spike.md: compare copied/pinned multi-get,
+  preserve order/overlay/snapshot/LIMIT/error timing and decide a result-byte policy.
+  Current key-count caps alone do not bound arbitrary node payload bytes.
+- **Evidence:** docs/commit-state.md, updated Python/transaction/checkpoint/serve
+  guides and roadmap; docs/benchmarks/2026-10-07-commit-state.md and raw scripts,
+  JSON and final source/binary hashes. Replication, temporal history, ANN, auth,
+  full connected TUI and source connectors remain unfinished beta work.
+- **Blockers:** none for this slice. Keep future sessions substantial and timed;
+  no push, publication or remote PR was performed.
+
 ### 2026-10-06, expanded October 31 beta target
 
 - **Requested:** reorganize the plan for an October-end beta with every requested

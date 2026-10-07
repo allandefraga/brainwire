@@ -36,6 +36,10 @@ beta. A failed feature remains visibly incomplete; dates never override correctn
   reachability/shortest path and OntoRank-inspired source ranking.
 - Local checkpoints, integrity audit, retained-volume Docker/Compose/Kubernetes
   acceptance; Swarm templates have narrower execution evidence.
+- Durable per-store commit sequence, snapshot inspection through Cypher/CLI,
+  exact checkpoint receipts and a bounded immutable-JSONL Python importer whose
+  source cursor commits atomically with each data batch (October 7). DuckLake
+  change capture, general source deletion handling and replicated apply remain pending.
 - Real offline graph/pipeline/memory/disk/ontology panels and connected ontology
   inspection. Other connected panels, query execution and live job progress remain
   work. Preserve the chosen strong-green Observatory identity and EN/PT-BR display.
@@ -91,10 +95,10 @@ replicate allocator reservations, catalogs, graph registry/lifecycle, history,
 maintenance and source-checkpoint mutations as well as user graph mutations.
 Do not replicate Cypher text and assume all replicas generate the same state.
 
-The current transaction conflict sequence is in memory and advances after the
-RocksDB write; it is not a durable revision/log position. ID-block reservations
-also use internal transactions. The initial durable apply contract must account
-for both. Snapshot installation needs a consistent graph registry/catalog,
+The transaction sequence is now persisted in the same synchronous batch as
+data and continues after reopening; ID-block reservations also advance it through
+internal transactions. This per-store counter is not a global replicated log
+position or a deterministic apply contract. Snapshot installation needs a consistent graph registry/catalog,
 per-store state and committed/applied log position. Use a mature consensus
 implementation selected through a bounded integration spike; do not invent a
 home-grown consensus algorithm to meet the date.

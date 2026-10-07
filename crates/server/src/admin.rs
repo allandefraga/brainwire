@@ -213,6 +213,7 @@ pub fn graph_summaries(
             nodes,
             edges,
             estimated,
+            commit_sequence: db.commit_sequence(),
             ontology_version: catalog.as_ref().map(|c| c.version),
             node_types: catalog.as_ref().map_or(0, |c| c.node_types.len()),
             edge_types: catalog.as_ref().map_or(0, |c| c.edge_types.len()),
@@ -316,6 +317,7 @@ pub fn overview(json: bool, estimated: bool, config: Option<&Path>) -> Result<()
                     "nodes": g.nodes,
                     "edges": g.edges,
                     "count_kind": if g.estimated { "rocksdb_estimate" } else { "exact" },
+                    "commit_state": {"sequence": g.commit_sequence.unwrap_or(0).to_string(), "tracked": g.commit_sequence.is_some(), "scope": "store_latest"},
                     "ontology_version": g.ontology_version,
                     "node_types": g.node_types,
                     "edge_types": g.edge_types,
@@ -495,15 +497,41 @@ pub fn apply_ontology(name: &str, file: &Path, config: Option<&Path>) -> Result<
     Ok(())
 }
 
+pub fn commit_state(name: &str, json: bool, config: Option<&Path>) -> Result<(), String> {
+    let registry = open_registry(config)?;
+    let db = registry
+        .get(name)
+        .ok_or_else(|| format!("database {name:?} does not exist"))?;
+    let sequence = db.commit_sequence();
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "database": name, "sequence": sequence.unwrap_or(0).to_string(),
+                "tracked": sequence.is_some(), "scope": "store_latest"
+            })
+        );
+    } else {
+        println!(
+            "database={name} commit_sequence={} tracked={} scope=store_latest",
+            sequence.unwrap_or(0),
+            sequence.is_some()
+        );
+    }
+    Ok(())
+}
+
 pub fn checkpoint(name: &str, destination: &Path, config: Option<&Path>) -> Result<(), String> {
     let registry = open_registry(config)?;
     let db = registry
         .get(name)
         .ok_or_else(|| format!("database {name:?} does not exist"))?;
-    db.checkpoint(destination).map_err(|e| e.to_string())?;
+    let sequence = db
+        .checkpoint_with_sequence(destination)
+        .map_err(|e| e.to_string())?;
     println!(
         "{}",
-        serde_json::json!({"database":name,"status":"checkpoint_created","destination":destination,"scope":"single_graph_committed_native_checkpoint"})
+        serde_json::json!({"database":name,"status":"checkpoint_created","destination":destination,"scope":"single_graph_committed_native_checkpoint", "commit_sequence":sequence.unwrap_or(0).to_string(), "commit_sequence_tracked":sequence.is_some()})
     );
     Ok(())
 }

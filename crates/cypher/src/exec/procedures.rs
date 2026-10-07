@@ -11,6 +11,7 @@ fn semantic(message: impl Into<String>) -> ExecError {
 pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
     match name {
         "db.schema" => Ok(&["version", "nodes", "relationships", "indexesReady"]),
+        "db.commitState" => Ok(&["sequence", "tracked", "scope"]),
         "db.indexes" => Ok(&["label", "property", "state"]),
         "db.memory" => Ok(&[
             "poolLimitBytes",
@@ -161,7 +162,10 @@ pub(super) fn validate(
     ctx: &Context<'_, '_>,
 ) -> Result<(), ExecError> {
     let available = fields(name)?;
-    if matches!(name, "db.indexes" | "db.memory" | "db.schema") {
+    if matches!(
+        name,
+        "db.indexes" | "db.memory" | "db.schema" | "db.commitState"
+    ) {
         if !args.is_empty() {
             return Err(semantic(format!("{name} takes no arguments")));
         }
@@ -227,6 +231,14 @@ pub(super) fn run(
     };
     if name == "db.schema" {
         return Ok(vec![bind(schema::values(ctx, yields.len())?)?]);
+    }
+    if name == "db.commitState" {
+        let sequence = ctx.txn.snapshot_commit_sequence();
+        return Ok(vec![bind(vec![
+            value(Value::Str(sequence.unwrap_or(0).to_string())),
+            value(Value::Bool(sequence.is_some())),
+            value(Value::Str("store_snapshot".into())),
+        ])?]);
     }
     if name == "db.memory" {
         let values = match ctx.budget.pool_usage() {

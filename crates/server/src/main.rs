@@ -174,6 +174,14 @@ enum DbCommands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Show the latest durable local commit sequence without scanning graph records.
+    CommitState {
+        name: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Show the persisted ontology catalog and current index implementation status.
     Schema {
         name: String,
@@ -309,6 +317,9 @@ fn main() {
             }
             DbCommands::Stats { name, json, config } => {
                 admin::stats(&name, json, config.as_deref())
+            }
+            DbCommands::CommitState { name, json, config } => {
+                admin::commit_state(&name, json, config.as_deref())
             }
             DbCommands::Schema { name, json, config } => {
                 admin::schema(&name, json, config.as_deref())

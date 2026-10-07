@@ -1,0 +1,39 @@
+{
+  "scope": "actual disposable offline graph; synthetic customers",
+  "nodes": 100000,
+  "edges": 0,
+  "stats": {
+    "database": "customers-100k",
+    "edges": 0,
+    "nodes": 100000
+  },
+  "commit_state": {
+    "database": "customers-100k",
+    "scope": "store_latest",
+    "sequence": "121",
+    "tracked": true
+  },
+  "commit_counter_is_node_count": false,
+  "batch_rows": 5000,
+  "batches": 20,
+  "terminal": {
+    "columns": 160,
+    "rows": 48
+  },
+  "binary_sha256": "883ebf260981de247d79eca80b127dbd4da5e63fe8ffda0965ad59d96d843210",
+  "binary": "target/debug/brainwire",
+  "views": [
+    "offline-graph-en-160x48",
+    "offline-query-en-160x48",
+    "offline-memory-en-160x48",
+    "offline-disk-en-160x48",
+    "offline-ontology-en-160x48",
+    "offline-query-pt-BR-160x48"
+  ],
+  "configured_cache": "64MiB",
+  "configured_memtables": "16MiB",
+  "elapsed_seconds": 11.327,
+  "temporary_store_removed_on_exit": true,
+  "capture_source": "PTY escape stream rendered with pyte and Pillow",
+  "counter_explanation": "Per-store commits include ID allocator and ontology writes; not a node count or global replication position."
+}

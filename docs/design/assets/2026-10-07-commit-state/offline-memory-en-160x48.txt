@@ -1,0 +1,48 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • real data • read only                                                                                                             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Named graphs───────────────────────────────────────────────────────────────┐┌─MEMORY──────────────────────────────────────────────────────────────────────────┐
+│ GRAPH                     NODES    EDGES                                  ││OFFLINE PROCESS • ALL GRAPHS                                                     │
+│▶ customers-100k             100000          0                             ││                                                                                 │
+│  client_memory                 0          0                             ││memory.cache: 64.00 MiB                                                          │
+│                                                                           ││Accounted: 8.97 MiB                                                              │
+│                                                                           ││memory.memtables: 16.00 MiB                                                      │
+│                                                                           ││Allocated: 0.05 MiB                                                              │
+│                                                                           ││memory.query: 2048.00 MiB                                                        │
+│                                                                           ││server.query_timeout_ms: 30000 ms                                                │
+│                                                                           ││                                                                                 │
+│                                                                           ││Memtables are inside cache. Budget is not reserved RAM. Query: conservative      │
+│                                                                           ││per-RUN guard plus a shared server pool. Reservations last until transaction end.│
+│                                                                           ││Deadline is cooperative; storage calls can overrun. Not RSS; these are offline   │
+│                                                                           ││inspector values.                                                                │
+│                                                                           ││                                                                                 │
+│                                                                           ││On the server: CALL db.memory() YIELD poolLimitBytes, poolReservedBytes RETURN   │
+│                                                                           ││poolLimitBytes, poolReservedBytes                                                │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+└───────────────────────────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ graph • Tab panel • q quit • snapshot: --snapshot  •  offline: stop the server first                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

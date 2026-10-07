@@ -16,6 +16,7 @@ fn main() {
         .expect("first number")
         .parse()
         .expect("a number");
+    let sequence_ack = std::env::args().nth(3).as_deref() == Some("--sequence-ack");
     let res = Resources::new(StoreConfig::for_tests());
     let db = Database::open(Path::new(&path), &res).expect("open");
     let mapping: GraphMapping = serde_json::from_str(include_str!(
@@ -30,6 +31,12 @@ fn main() {
         let mut txn = db.begin();
         let mut props = BTreeMap::new();
         props.insert("name".to_string(), Value::Str(format!("customer {i}")));
+        if sequence_ack {
+            props.insert(
+                "segment".to_string(),
+                Value::Str(format!("segment {}", i % 3)),
+            );
+        }
         let customer = merge_node(&mut txn, &catalog, "Customer", &format!("c:{i}"), &props)
             .expect("customer");
         let company = merge_node(
@@ -49,8 +56,12 @@ fn main() {
             &BTreeMap::new(),
         )
         .expect("edge");
-        txn.commit().expect("commit");
-        writeln!(out, "{i}").expect("stdout");
+        let sequence = txn.commit().expect("commit");
+        if sequence_ack {
+            writeln!(out, "{i} {sequence}").expect("stdout");
+        } else {
+            writeln!(out, "{i}").expect("stdout");
+        }
         out.flush().expect("flush");
         i = i.checked_add(1).expect("commit number exhausted");
     }

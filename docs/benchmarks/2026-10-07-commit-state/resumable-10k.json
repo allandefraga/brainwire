@@ -1,0 +1,20 @@
+{
+  "batch_size": 250,
+  "before_commit_customer_and_cursor_rollback": true,
+  "changed_source_rejected_without_commit": true,
+  "completed_resume_no_new_commit": true,
+  "driver": "5.28.6",
+  "embedding_dimensions": 16,
+  "final_offset": 4429532,
+  "final_sequence": "53",
+  "list_vector_and_scalar_index_roundtrip": true,
+  "lost_ack_cursor_survives_sigkill": true,
+  "offline_graph_and_index_audit": true,
+  "profile": "debug",
+  "remaining_rows_per_second": 13716.678144094045,
+  "resume_seconds": 0.7108135000016773,
+  "rows": 10000,
+  "source_sha256": "84f5cc8d8fb940c070f8304876441aa1907ae8796a6f66be2cfe8dae6d7499c5",
+  "temporary_data_removed": true,
+  "test_server_stopped": true
+}

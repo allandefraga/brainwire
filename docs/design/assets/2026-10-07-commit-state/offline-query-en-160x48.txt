@@ -1,0 +1,48 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / local graphs • real data • read only                                                                                                             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Named graphs───────────────────────────────────────────────────────────────┐┌─WRITE PIPELINE──────────────────────────────────────────────────────────────────┐
+│ GRAPH                     NODES    EDGES                                  ││Python -> Bolt -> Cypher                                                         │
+│▶ customers-100k             100000          0                             ││UNWIND $rows -> MERGE -> SET                                                     │
+│  client_memory                 0          0                             ││                                                                                 │
+│                                                                           ││Node + indexes: one WriteBatch.                                                  │
+│                                                                           ││COMMIT syncs the WAL.                                                            │
+│                                                                           ││Flush creates SST later.                                                         │
+│                                                                           ││                                                                                 │
+│                                                                           ││Persisted store sequence: 121                                                    │
+│                                                                           ││Latest commit of this store, read offline. Includes ID reservations and ontology │
+│                                                                           ││writes; not a node count or global replication position.                         │
+│                                                                           ││                                                                                 │
+│                                                                           ││On the server, CALL reports the transaction snapshot:                            │
+│                                                                           ││CALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked,   │
+│                                                                           ││scope                                                                            │
+│                                                                           ││                                                                                 │
+│                                                                           ││Scalar equality index: ready                                                     │
+│                                                                           ││Customer.email, Customer.phone, Customer.segment, Company.industry               │
+│                                                                           ││                                                                                 │
+│                                                                           ││MERGE uses stable entity_id. SET replaces fields; null removes.                  │
+│                                                                           ││                                                                                 │
+│                                                                           ││READS                                                                            │
+│                                                                           ││WHERE c.email=$email: ready scalar equality index. AND keeps residual filters.   │
+│                                                                           ││Standalone OR/NOT/range: scan.                                                   │
+│                                                                           ││CALL db.indexes() YIELD label, property, state RETURN label, property, state     │
+│                                                                           ││                                                                                 │
+│                                                                           ││Simple reads process one row at a time; LIMIT stops input.                       │
+│                                                                           ││Writes, grouped counts and CALL still materialize rows.                          │
+│                                                                           ││                                                                                 │
+│                                                                           ││CSR: graph.project, graph.degree, graph.pagerank, graph.reachable,               │
+│                                                                           ││graph.shortestPath.                                                              │
+│                                                                           ││Explanation panel; no query execution.                                           │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+│                                                                           ││                                                                                 │
+└───────────────────────────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ graph • Tab panel • q quit • snapshot: --snapshot  •  offline: stop the server first                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

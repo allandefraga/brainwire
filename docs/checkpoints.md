@@ -21,7 +21,14 @@ Committed records are included; pending writes are excluded. Later writes to
 the source do not change the checkpoint. The native operation may flush data
 and hard-link immutable SST files on the same filesystem, while metadata is
 copied. Treat the result as its own complete directory: do not edit SST files.
-The store library exposes `Database::checkpoint` for an already-open instance.
+The CLI receipt includes `commit_sequence` as a decimal string and
+`commit_sequence_tracked`. They describe the captured store, not a later live
+position. The store library exposes `Database::checkpoint` for an already-open
+instance and `Database::checkpoint_with_sequence` when the receipt is needed.
+Checkpoint creation holds the commit lock, so new transactions and commits wait
+until capture completes. A reopened checkpoint starts from the captured counter;
+source and copy can subsequently produce the same numbers independently.
+See [durable commit state](commit-state.md) for scope and upgrade constraints.
 
 This is a local single-graph snapshot, not multi-graph atomicity, off-machine
 backup or object-storage durability. It has no scheduled retention, upload or
