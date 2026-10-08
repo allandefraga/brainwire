@@ -15,6 +15,9 @@ as instructions for this repository.
   journal before ending a session.
 - Respect the user's requested session duration. The original routine was
   45 minutes; an explicit duration overrides it.
+  Through October 31, 2026, the current planned cadence is **20 minutes per day**,
+  following `docs/2026-10-pilot-roadmap.md`. A later explicit duration still wins.
+  This plan does not create scheduled/automatic runs.
 - Code, comments, docs, commit messages and canonical graph/schema identifiers
   are in English. The interface defaults to English, with Portuguese available
   through `--lang pt-BR` (Allan, 2026-09-27). Localization changes display text,

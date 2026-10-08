@@ -1,28 +1,66 @@
 # Brainwire October 31, 2026 beta roadmap
 
-Revised October 6 at Allan's request: target a beta by October 31 covering every
-requested product area with a working minimum and strong measured performance.
-This replaces the earlier narrow October pilot scope. It is an ambitious target,
-not evidence that pending features already exist or a guaranteed delivery date.
-Keep implementation, documentation previews and release artifacts local; no push,
-publication, DNS changes or deployment to an existing environment without the
-user's explicit instruction.
+Revised October 8 at Allan's request: retain October 31 as the beta target,
+with **20 minutes of active development per day**. October 8's implementation
+session is complete; October 9–31 provides 23 sessions, **460 minutes (7h40)**.
+This revision supersedes the older full-scope execution dates and uses an
+updated remaining-days count for the twenty-minute cadence.
+
+The complete requested product remains the target described by the feature
+matrix below. Delivering every pending row in 7h40 is not a credible commitment.
+The executable schedule proposes a **controlled single-node client beta**;
+it does not rename that subset as a completed distributed/full-feature beta.
+Reduced October acceptance scope is a visible planning proposal, not an assertion
+that Allan withdrew any requirement. If the complete matrix is mandatory on
+October 31, additional development capacity or a different date is required.
+
+Keep implementation, docs previews and release artifacts local. No push,
+publication, DNS changes or deployment to an existing environment without explicit
+authorization. This is a work queue, not a configured automatic daily run.
 
 ## Capacity and release rule
 
-There are 25 days from October 7 through October 31. Twenty-minute daily sessions
-would provide only eight hours and twenty minutes of main-session time. The complete scope
-needs sustained implementation, focused parallel work and integration time.
-Subagents help independent slices; they do not eliminate shared storage and
-correctness work. Maintain at most three coordinated workstreams: engine and
-replication; data/ingestion/search; operation/TUI/docs. File ownership must not
-overlap; shared transaction/storage contracts are integrated by the main agent.
+Spend each daily session on one dependency: approximately 3 minutes reviewing
+state, 13 implementing/integrating, and 4 verifying and recording the next step.
+For engine/security changes, focused workers and advisory review can assist within
+the session; parallel agents do not make integration or failure tests free.
+Large features span several sessions rather than being repeatedly abandoned.
 
-On October 12, report whether the complete target is feasible with actual
-progress and available work time. If the critical gates fail, mark the full beta
-at risk and explicitly resolve capacity, date or scope with Allan. Do not silently
-remove replication/history/search and keep calling the smaller pilot the complete
-beta. A failed feature remains visibly incomplete; dates never override correctness.
+Long local load/recovery checks may run beyond a session only when explicitly
+started, supervised appropriately and their evidence is collected. Twenty minutes
+of coding is not a one-hour endurance test. Do not assume scheduled wakeups or
+unattended acceptance jobs exist. A blocked task consumes a later slot or displaces
+a lower-priority task; there is no hidden buffer of unlimited extra development.
+
+The October 12 gate assesses the client workload and API/storage gaps. October
+24 is the candidate/feature-freeze gate. October 31 is a release decision based on
+evidence, not a promise to deploy regardless of failed gates.
+
+## Proposed October beta boundary
+
+- One durable instance with multiple independent named graphs. Python/Bolt writes
+  and supported Cypher/indexes remain the engine path. No second ingestion engine.
+- client first consumes an explicitly scoped synthetic/anonymized data profile,
+  then a separately authorized source snapshot. Define stable entity IDs, mapping,
+  overwrite semantics and a replay-safe progress cursor before integration.
+- DuckLake stays the priority source. Start with a pinned source snapshot exported
+  to bounded immutable input and the existing importer, if direct snapshot reads
+  cannot be validated in time. Call this **snapshot ingestion**, not DuckLake CDC.
+  Source deletes, out-of-order events and arbitrary schema evolution remain
+  unsupported until their independent contracts/tests pass.
+- Token authentication and graph-scoped read/write/admin access are release blockers
+  for any shared or production environment. Document the encrypted transport boundary.
+- A supported Docker single-instance profile, retained storage, restart/checkpoint/
+  restore acceptance, and explicit Kubernetes/Swarm evidence status. Container
+  scheduling does not supply replica durability or machine-loss failover.
+- Real supported TUI inspection/status, EN/PT-BR, a local documentation quickstart,
+  limits, runbook and measured client workload. Connected unsupported panels stay
+  explicitly unavailable; a demo panel is never acceptance evidence.
+
+Use shadow mode first: DuckLake remains authoritative and a new independent graph
+can be rebuilt. Beta testing and production readiness are different decisions.
+Do not make Brainwire the sole copy of essential client records until security,
+restoration, failure and workload acceptance pass and deployment is authorized.
 
 ## Current foundation — implemented, not the whole beta
 
@@ -32,8 +70,8 @@ beta. A failed feature remains visibly incomplete; dates never override correctn
   synchronous WAL acknowledgement.
 - String/Boolean/numeric equality indexes, typed adjacency seeks, bounded simple
   read pipelines, conservative query memory accounting and cooperative deadlines.
-- Rich primitive/list/map values, CSR analytics, weighted-edge PageRank, degree,
-  reachability/shortest path and OntoRank-inspired source ranking.
+- Rich primitive/list/map values, scalar Cypher size() for list/Unicode text,
+  CSR analytics, weighted-edge PageRank, degree, reachability/shortest path and OntoRank-inspired source ranking.
 - Local checkpoints, integrity audit, retained-volume Docker/Compose/Kubernetes
   acceptance; Swarm templates have narrower execution evidence.
 - Durable per-store commit sequence, snapshot inspection through Cypher/CLI,
@@ -51,8 +89,10 @@ preserved and reconciled with implemented APIs before a release preview.
 
 ## Beta feature and acceptance matrix
 
-All rows belong to the target. A minimum is an explicit supported limit, not a
-placeholder, a simulated TUI panel or an undocumented fallback.
+All rows remain requested product requirements. This is the full-product matrix,
+not a promise that its pending features fit the October 20-minute/day schedule.
+The proposed October boundary above is narrower and explicitly identified. A
+minimum is an explicit supported limit, not a placeholder or simulated TUI panel.
 
 | Area | Minimum functional beta | Required acceptance |
 | --- | --- | --- |
@@ -78,14 +118,61 @@ unbounded values/results and partitioning one graph across machines are not
 implied by these minima. The replicated beta copies the instance's full data set;
 sharding and distributed execution require their own future design and tests.
 
-## Sequence and dates
+## Daily execution queue — October 9–31
 
-| Dates | Engine/replication critical path | Data/search path | Operation and product path | Exit gate |
-| --- | --- | --- | --- | --- |
-| October 7–12 | Durable commit/apply identity; deterministic mutation contract; node-read batching investigation; bounded Bolt cursors; first three-voter durable-write/restart prototype | Freeze value/index semantics; replay-safe atomic source checkpoint; DuckLake change contract and release benchmark baseline | Authentication/graph scopes; pinned benchmark profile; existing orchestrator acceptance rerun; live API inventory | October 12 feasibility gate below |
-| October 13–19 | Replica apply/snapshot/restart; allocator/catalog/graph lifecycle replication; node+edge history and current indexes atomic | Python incremental adapters, range/resumable indexes, lexical search, exact vector reference then ANN integration | History/maintenance API status, real connected graph/query/memory/disk views; backup manifests and object-store restore | Each new write path passes rollback, restart and replicated replay; searches never silently return stale/deleted data |
-| October 20–26 | Leader-loss/partition/snapshot catch-up; resumable retention/deprecation; mixed-load performance and recovery hardening | Full source replay including deletes/out-of-order events; search recall/rebuild; client-shaped integration fixture | Three target orchestrators, all connected TUI tabs, docs preview and thin MCP; Python end-to-end walkthrough | Integrated candidate with every matrix row demonstrable and measured |
-| October 27–31 | Feature freeze; sustained load, repeated failures, restore and upgrade/rollback; fix beta blockers | Validate exact source/graph/history/search agreement after recovery | Run documented install-to-restore flows, capture every TUI tab, package locally and publish truthful support matrix | Beta only if correctness, recovery and performance gates pass; no unreviewed late feature additions |
+Dates allocate a session, not guaranteed completion. Each deliverable needs a
+runnable check or evidence; unfinished security/recovery work takes priority over
+later interface polish. Carry-over is recorded in JOURNAL.md, with displaced dates
+visible. Do not split a storage invariant merely to mark a day complete.
+
+| Date | Task | Reviewable result / check |
+| --- | --- | --- |
+| Oct 9 | Freeze the client workload and proposed beta support boundary | Entity/relationship mapping, stable identities, required properties, important queries, volume/resource profile and targets; source assumptions listed |
+| Oct 10 | Assemble the bounded Python integration fixture | Executable ontology + MERGE/SET import/query script, separate named graph, configurable batch rows/bytes and expected answers |
+| Oct 11 | Add token verification at Bolt session boundary | Accepted/denied authentication, no token leakage; first replay/overwrite tests retained |
+| Oct 12 | Enforce graph selection and transaction authorization; feasibility gate | Explicit/implicit transaction modes and database selection cannot bypass scope; assess remaining blockers/capacity |
+| Oct 13 | Close read/write/procedure permissions | Negative tests for reads, writes, CALL and cross-graph access; failed authorization precedes mutation |
+| Oct 14 | Audit administration/TUI access and transport configuration | No admin bypass; unsupported connected operations unavailable; encrypted transport boundary explicit |
+| Oct 15 | Security and API-limit gate | Protected fixture reads/writes, bounded result/query timeout, cancellation and rollback; otherwise reserve later slots for blockers |
+| Oct 16 | Define DuckLake snapshot consistency and source identity | Pinned snapshot identity, stable IDs, mapping and cursor; direct read versus explicit immutable export chosen from tested behavior |
+| Oct 17 | Implement the chosen bounded snapshot bridge | Local DuckLake snapshot fixture if available, or documented export fallback; batch bytes/rows and source consistency enforced |
+| Oct 18 | Exercise import replay/overwrite/failure | Duplicate batch, property change/null, changed input, crash/resume and index audit; source deletes explicitly unsupported unless proven |
+| Oct 19 | Package the single-node runtime | Pinned local release image/configuration, persistent path, fresh install and Python smoke test |
+| Oct 20 | Exercise retained-volume restart | Docker recovery and existing Kubernetes harness where available; acknowledged writes preserved; Swarm execution evidence stated |
+| Oct 21 | Restore a checkpoint into a fresh store and resume import | Exact receipt/counter, data/index/source cursor audit, independent restored graph and restore time |
+| Oct 22 | Run representative release benchmark | Agreed client queries; 100K nodes / 1M edges if within declared profile, representative payloads/two indexes; latency/throughput/RSS/host load |
+| Oct 23 | Run and inspect extended mixed load/failure evidence | One-hour supervised local acceptance, or explicitly incomplete endurance gate; restart/replay and audit under the workload |
+| Oct 24 | Candidate gate and feature freeze | Installs, protected import/query/restart/restore work; performance gaps and blockers recorded; remaining time goes to fixes |
+| Oct 25 | Reconcile real TUI/status and local documentation | Graph/import/index/commit status where implemented, accurate live/offline labels, EN/PT-BR; executable quickstart/limits/runbook |
+| Oct 26 | Rehearse the client shadow pilot locally | Install → schema → source/input → import → queries → restart → restore, with expected answers and provenance |
+| Oct 27 | Prepare upgrade/cutover/rollback and local release package | Version/config compatibility, restore path, support matrix and unresolved limitations; no new major features |
+| Oct 28 | Buffer: highest-priority blocker | Correctness/security/recovery first; affected acceptance repeated |
+| Oct 29 | Buffer: integration/performance blocker | Fix measured issue or complete missing evidence; no cosmetic work ahead of blockers |
+| Oct 30 | Final rehearsal and freeze verification | Candidate hashes, install/restore instructions, security/recovery checks and rollback reviewed |
+| Oct 31 | Final beta decision | Ready/conditional/no-go against published checklist; local beta artifacts and release notes; deployment separately authorized |
+
+If authentication/authorization cannot safely be implemented by October 15,
+reserve subsequent feature slots for it. An unauthenticated single-node build may
+remain an isolated developer test, but must not be called shared-production ready.
+If the DuckLake bridge cannot pass source consistency/replay tests, ship only the
+validated immutable-input importer and identify direct DuckLake integration as
+incomplete. Neither fallback meets the original full-product beta matrix.
+
+## Full-product backlog retained beyond the daily beta queue
+
+| Workstream | Pending requirement | Dependency / completion evidence |
+| --- | --- | --- |
+| Distribution | Deterministic mutation/apply, three-voter Raft, leader loss, partitions, snapshots and whole-cluster restart | All graphs/catalogs/allocators/progress replicated; distinct-machine failure acceptance; local counter alone is insufficient |
+| Search/indexes | Range indexes, lexical documents, exact vectors then ANN, resumable builds/freshness | Mutation/rebuild/delete correctness; measured recall/filter/latency and memory |
+| Temporal/maintenance | Node AND edge history, valid/recorded clocks, weights across history, resumable retention/deprecation | Atomic revisions, ticket transitions, late events and exact dry-run/cleanup sets |
+| Sources | Full DuckLake incremental change capture including deletes, DuckDB/Parquet/Delta adapters and Arrow comparison | Durable source event/checkpoint contract, schema evolution, replay and reconciliation |
+| Storage/operation | Checksummed object-storage backups/blobs, validated multi-machine profiles and upgrades | Interrupted upload, complete manifests, restore/RPO and upgrade rollback |
+| Product | Fully connected Observatory, query/jobs/history/maintenance tabs, hosted docs and MCP | Shared authenticated APIs, real bounded status and examples; publication separately authorized |
+
+These are not dropped. Their dates require a new capacity decision based on the
+October pilot evidence. The next large engine task remains deterministic apply;
+this revision deliberately puts the client pilot blockers ahead of claiming
+an untested distributed system in a 7h40 development budget.
 
 Temporal/history and replication work cannot independently invent transaction or
 snapshot formats. Use the existing approved design's **one Raft group per instance
@@ -112,30 +199,47 @@ records without regenerating embeddings externally. A completed backup manifest
 includes every referenced document blob and checksum; restore must verify those
 objects before declaring the recovered document/search service ready.
 
-## October 12 feasibility checkpoint
+## Beta decision gates
 
-Require all of the following before declaring the complete October beta on track:
+**October 12:** workload/queries and support boundary fixed; replay/overwrite,
+crash resume and index audit demonstrated. Record the gaps, owners and displaced
+sessions. Include first protected query-path evidence or record it as blocked.
+This is not certification of the complete product matrix.
 
-1. Representative release-mode baseline and frozen beta workload/resource profile.
-2. Durable commit/apply identity across restart, including internal allocations.
-3. Graph mutation, index/history metadata and replay-safe batch/source checkpoint
-   share an atomic/recoverable contract; idempotent replay has exact expected state.
-4. Bounded Python reads/writes/cursors, cancellation and graph-scoped authentication.
-5. A three-voter prototype commits deterministic mutations durably and recovers
-   after restart. Explicitly record local versus distinct-machine test coverage.
-6. Reviewed contracts for vector/text freshness, temporal clocks and all four
-   incremental sources. Delta/DuckLake source deletions must have a real strategy.
+**October 15:** authentication, graph authorization and admin surface review pass,
+or the build stays an isolated developer test. The transport boundary is explicit.
 
-Failing these is a risk to the **whole requested beta**, not an excuse to rename a
-single-node subset as the completed distributed release. Do not consume the final
-five-day freeze with unfinished feature construction unnoticed.
+**October 24:** a candidate installs, ingests the agreed source form, answers the
+important queries, restarts and restores independently. Any failed critical path
+blocks feature freeze and consumes the remaining buffer.
+
+**October 31:** classify separately:
+
+- **client shadow beta:** validated source/input and queries on independent data,
+  security/isolation appropriate to its environment, reproducible restart/restore,
+  documented limits and measured workload results.
+- **Production candidate:** all shadow gates plus shared-environment security,
+  operational readiness, completed sustained/failure acceptance, tested rollback
+  and explicit authorization for the actual production environment. Installation
+  instructions or a container image alone do not satisfy this status.
+- **Complete requested beta:** every row of the full feature matrix passes. No claim
+  that this is achievable with the remaining 7h40.
+
+Open data-loss, authorization, failed restore, unknown source consistency or
+unbounded-memory blockers mean **no-go** for production. Report failed or unrun
+tests rather than interpreting the calendar as a passing gate.
 
 ## Performance gates — engineering targets, not measured guarantees
 
-Freeze the reference configuration by October 12: release binaries, pinned image,
-4 vCPU / 8 GiB per member, SSD-backed retained storage, fixed cache/memtable/query
-budgets and a documented network. Measure single-node and replicated modes
-separately. Include one-kilobyte representative property payloads, two scalar
+These retained targets describe the original full product. For the proposed
+October shadow beta, gate supported point/neighborhood/count/ingest workloads,
+sustained load and single-node recovery. ANN and quorum acceptance apply only
+once those implementations exist and are claimed as supported.
+
+Freeze workload/resource assumptions by October 12; pin the local candidate image
+during October 19 packaging. Reference: release binaries, 4 vCPU / 8 GiB per
+member, SSD-backed retained storage, fixed cache/memtable/query budgets and a
+documented network. Measure single-node and future replicated modes separately. Include one-kilobyte representative property payloads, two scalar
 indexes, skewed degrees, updates/deletes and concurrent readers/writers. History,
 text and vector costs need separate enabled profiles rather than being hidden.
 
@@ -152,12 +256,15 @@ Initial targets to validate against that configuration:
 | Recovery | Zero missing acknowledged commits in supported quorum/retained-storage scenarios; record RTO, stale-index rebuild and readiness times; backup restore has its own measured RPO |
 
 These are proposed pass/fail targets, not extensions of today's 0.112 ms debug
-count measurement to every query. If October 12 baseline cannot support a target,
-show the measured gap and negotiate a visible target or release decision; do not
+count measurement to every query. Freeze applicable shadow-beta targets by
+October 12 and measure them on October 22. If that baseline cannot support a
+target, show the gap and record a visible support limit or release decision; do not
 quietly change the dataset, disable history or omit network/replication costs.
 
-Use 100,000 nodes / 1,000,000 relationships as the mandatory representative beta
-profile, plus 100,000 search vectors on its declared memory profile. Stress toward
+Use 100,000 nodes / 1,000,000 relationships as the representative supported
+client profile where it fits the declared resources; a smaller passing profile
+is explicitly a smaller support limit. The full product additionally requires
+100,000 search vectors on its declared memory profile. Stress toward
 1,000,000 nodes / 10,000,000 relationships with explicit bounds and separate
 reports; a successful stress import does not certify every analytic/query at
 that size. Collect p50/p95/p99, throughput, peak RSS, cache/memtable/compaction
@@ -165,19 +272,14 @@ pressure, write amplification, history growth, recovery and restore time.
 
 ## Daily execution and remaining months
 
-Each session selects the next dependency from this roadmap, makes a bounded
-reviewable implementation, tests correctness and records measurements in the
-journal. Use focused authorized subagents with explicit ownership, and advisory
-architecture review before consequential storage/replication decisions. Avoid
-spending engine sessions on extra visual polish before a critical gate passes.
-The next implementation is the durable commit/apply and bounded API feasibility
-slice, paired with the measured node-read bottleneck; start replication early.
+The dated queue above is the active 20-minute/day plan. Each session reads the
+newest journal entry, completes the next dependency, verifies it and records any
+carry-over. Tests may span sessions; daily sessions are not automatically scheduled.
 
-The old November/December proposals below remain historical planning context.
-Features promoted into the October matrix are no longer silently deferred by
-those older sections. After beta, prioritize hardening and measured scale,
-commercial support boundaries, more complete language/search semantics, dynamic
-cluster membership and eventual graph partitioning based on pilot evidence.
+The November/December proposals below are historical planning context, not new
+promises. Pending full-product requirements remain in the matrix and backlog.
+After the October decision, re-estimate capacity for distributed durability,
+search/history, connected operation and commercial support using real pilot data.
 
 ## November extension, proposed October 3
 

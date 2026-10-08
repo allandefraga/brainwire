@@ -39,6 +39,31 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-08 — October beta daily queue revised
+
+- **Requested:** organize the remaining month for an October 31 client-testable
+  beta toward production. Allan revised the cadence from 15 to **20 minutes/day**.
+  October 9–31 gives 23 sessions / 460 minutes / 7h40, excluding today's completed
+  implementation. This planning turn is not another timed coding session.
+- **Done:** revised docs/2026-10-pilot-roadmap.md with a dated queue, security
+  early, DuckLake snapshot ingestion, Python replay/overwrite, install/restart/
+  restore, representative performance and one-hour acceptance evidence, real
+  TUI/docs, candidate freeze and three final buffer days. Added the cadence to
+  AGENTS.md so future sessions retain it. No automation or deployment created.
+- **Boundary:** proposes a controlled single-node client shadow beta; the full
+  requested matrix remains visible and is not credibly guaranteed in 7h40.
+  Replication, ANN/search, complete history/maintenance, all source connectors,
+  object backup, full connected TUI/MCP remain requirements, not completed work.
+  Production status requires security, recovery, workload and explicit deployment
+  authorization. DuckLake snapshot/export ingestion is not CDC or delete sync.
+- **Review/checks:** advisory Astra checked priorities/dependencies; main applied
+  the security-first order and protected freeze/fix buffer. Documentation-only:
+  arithmetic/dates/links and git diff checks; no engine tests rerun unnecessarily.
+- **Next:** October 9 session freezes the client schema/IDs, representative
+  source shape, queries and proposed beta support boundary. If source details are
+  missing, list assumptions and use synthetic data until confirmed.
+- **Local:** docs/AGENTS/journal changes only; no push, publication or deployment.
+
 ### 2026-10-08 — Cypher size and gated pinned-read experiment
 
 - **Requested:** 15 minutes of features/engineering/platform, all local. Started
