@@ -108,6 +108,7 @@ materialized and subject to conservative accounting.
 - `UNWIND`, node property `SET`, and `DETACH DELETE`.
 - `RETURN` values or nodes, top-level `count` aggregation and grouping,
   nonnegative integer `LIMIT`, parameters and three-valued boolean logic.
+- Scalar `size(expression)` for lists and strings; null propagates.
 - Read-only `CALL graph.project`, `graph.degree` and `graph.pagerank`, with
   explicit `YIELD`, aliases, optional `WHERE` and final `RETURN`/`LIMIT`.
   See [sparse analytics](sparse-analytics.md) for runnable examples and limits.
@@ -124,6 +125,31 @@ The CLI uses configured `memory.query` as a [conservative allocation guard](quer
 An exceeded guard fails atomically. LIMIT stops supported read-only
 MATCH/UNWIND pipelines early. `server.query_timeout_ms` sets a cooperative
 execution deadline, including rollback on expiry.
+
+## List and text size
+
+```cypher
+RETURN size([1, null, 3]) AS items, size('é🧠') AS characters
+```
+
+Returns `3` and `2`. `size(null)` returns null, including missing properties.
+Strings count Unicode code points, not bytes or displayed grapheme clusters;
+`size('é')` is `2` for the decomposed accent. This follows the
+[Cypher scalar function contract](https://neo4j.com/docs/cypher-manual/current/functions/scalar/#functions-size).
+
+```cypher
+MATCH (c:Customer) WHERE size(c.name) > 3 RETURN c.entity_id, size(c.name)
+```
+
+Exactly one argument is required. Numbers, maps, booleans and node values are
+rejected. Lists can hold document chunks or vector components, but `size()`
+does not provide vector similarity or ANN search. It also works in UNWIND,
+SET and `count(size(...))`; aggregates inside `size()` remain unsupported.
+
+The [Python/Bolt integration check](benchmarks/2026-10-08-size/python_bolt.py)
+starts a disposable local server, verifies parameter sizes and a persisted SET,
+and shuts down in `finally`. Build `brainwire-server`, then run
+`uv run --no-project --with neo4j==5.28.6 python docs/benchmarks/2026-10-08-size/python_bolt.py`.
 
 ## Typed neighborhood reads
 

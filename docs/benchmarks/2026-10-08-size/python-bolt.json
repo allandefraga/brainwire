@@ -1,0 +1,1 @@
+{"status": "PASS", "interface": "Python/Bolt", "result": {"characters": 2, "items": 3}, "persisted": {"length": 2, "characters": 2}, "scope": "disposable local server; std size/list/string; no ANN"}

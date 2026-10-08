@@ -90,6 +90,7 @@ pub enum Expr {
     Prop(Box<Expr>, String),
     CountStar,
     Count(Box<Expr>),
+    Size(Box<Expr>),
     List(Vec<Expr>),
     Map(Vec<(String, Expr)>),
     Cmp(Box<Expr>, CmpOp, Box<Expr>),

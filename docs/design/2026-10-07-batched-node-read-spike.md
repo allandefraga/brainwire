@@ -1,6 +1,9 @@
 # Bounded destination-read batching: next performance experiment
 
 Status: investigation only, October 7. No production batching is implemented.
+The [October 8 single-value pinned-read experiment](../benchmarks/2026-10-08-pinned-read.md)
+did not pass its performance gate under host contention; its production candidate
+was reverted. The copied point-read baseline remains in use.
 This follows the [October 6 dense-hop profile](../benchmarks/2026-10-06-typed-adjacency.md):
 most samples were in destination node point reads, rather than codec decoding.
 Typed adjacency already seeks the exact source/type prefix.

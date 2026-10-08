@@ -52,6 +52,21 @@ pub(super) fn eval(
                 ))
             }
         },
+        Expr::Size(inner) => {
+            let length = match scalar(eval(inner, row, ctx)?)? {
+                Value::Null => return Ok(Binding::Value(Value::Null)),
+                Value::List(items) => items.len(),
+                Value::Str(text) => text.chars().count(),
+                _ => {
+                    return Err(ExecError::Semantic(
+                        "size expects a list, string or null".into(),
+                    ))
+                }
+            };
+            Value::Int(
+                i64::try_from(length).map_err(|_| ExecError::Semantic("size overflow".into()))?,
+            )
+        }
         Expr::List(items) => Value::List(
             items
                 .iter()

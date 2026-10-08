@@ -1,0 +1,82 @@
+diff --git a/crates/store/src/graph.rs b/crates/store/src/graph.rs
+index fdd8dd6..2dc808e 100644
+--- a/crates/store/src/graph.rs
++++ b/crates/store/src/graph.rs
+@@ -576,4 +576,3 @@ fn read_node(txn: &Txn, id: NodeId) -> Result<Option<(String, Row)>, GraphError>
+-    match txn.get(Cf::Node, &node_key(id))? {
+-        Some(bytes) => Ok(Some(decode_node(&bytes)?)),
+-        None => Ok(None),
+-    }
++    Ok(txn.read_value(Cf::Node, &node_key(id), |bytes| {
++        bytes.map(decode_node).transpose()
++    })?)
+diff --git a/crates/store/src/txn.rs b/crates/store/src/txn.rs
+index 5bac271..7765882 100644
+--- a/crates/store/src/txn.rs
++++ b/crates/store/src/txn.rs
+@@ -248,0 +249,14 @@ impl<'db> Txn<'db> {
++    /// Decodes an owned result while borrowing overlay or snapshot bytes.
++    pub(crate) fn read_value<T>(
++        &self,
++        cf: Cf,
++        key: &[u8],
++        read: impl FnOnce(Option<&[u8]>) -> Result<T, StoreError>,
++    ) -> Result<T, StoreError> {
++        if let Some(value) = self.writes.get(&(cf, key.to_vec())) {
++            return read(value.as_deref());
++        }
++        let value = self.snapshot.get_pinned_cf(self.db.cf(cf.name())?, key)?;
++        read(value.as_deref())
++    }
++
+@@ -545,0 +560,50 @@ mod tests {
++    #[test]
++    fn read_value_uses_overlay_tombstones_snapshot_and_propagates_callback_errors() {
++        let (_dir, _res, db) = open();
++        let mut seed = db.begin();
++        seed.put(Cf::Node, b"key".to_vec(), b"original".to_vec());
++        seed.commit().unwrap();
++        let mut reader = db.begin();
++        let value = |bytes: Option<&[u8]>| Ok(bytes.map(<[u8]>::to_vec));
++        assert_eq!(
++            reader.read_value(Cf::Node, b"missing", value).unwrap(),
++            None
++        );
++        assert_eq!(
++            reader.read_value(Cf::Node, b"key", value).unwrap(),
++            Some(b"original".to_vec())
++        );
++        let mut update = db.begin();
++        update.put(Cf::Node, b"key".to_vec(), b"updated".to_vec());
++        update.commit().unwrap();
++        assert_eq!(
++            reader.read_value(Cf::Node, b"key", value).unwrap(),
++            Some(b"original".to_vec())
++        );
++        let mut delete = db.begin();
++        delete.delete(Cf::Node, b"key".to_vec());
++        delete.commit().unwrap();
++        assert_eq!(
++            reader.read_value(Cf::Node, b"key", value).unwrap(),
++            Some(b"original".to_vec())
++        );
++        assert_eq!(
++            db.begin().read_value(Cf::Node, b"key", value).unwrap(),
++            None
++        );
++        assert!(matches!(reader.read_value::<()>(Cf::Node, b"key", |_| {
++            Err(StoreError::Corrupt("callback".into()))
++        }), Err(StoreError::Corrupt(message)) if message == "callback"));
++        reader.put(Cf::Node, b"key".to_vec(), b"overlay".to_vec());
++        assert_eq!(
++            reader.read_value(Cf::Node, b"key", value).unwrap(),
++            Some(b"overlay".to_vec())
++        );
++        assert!(matches!(reader.read_value::<()>(Cf::Node, b"key", |_| {
++            Err(StoreError::Corrupt("overlay callback".into()))
++        }), Err(StoreError::Corrupt(message)) if message == "overlay callback"));
++        reader.delete(Cf::Node, b"key".to_vec());
++        assert_eq!(reader.read_value(Cf::Node, b"key", value).unwrap(), None);
++        assert_eq!(reader.depends.len(), 0);
++    }
++

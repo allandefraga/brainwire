@@ -22,17 +22,17 @@
 //! expr      := or;  or := and (OR and)*;  and := not (AND not)*;  not := [NOT] cmp
 //! cmp       := primary [('=' | '<>' | '<' | '<=' | '>' | '>=') primary]
 //! primary   := literal | '$' name | var ['.' key] | count '(' ('*' | expr) ')'
-//!            | '[' [expr (',' expr)*] ']' | map | '(' expr ')'
+//!            | size '(' expr ')' | '[' [expr (',' expr)*] ']' | map | '(' expr ')'
 //! literal   := integer | float | string | TRUE | FALSE | NULL | '-' number
 //! ```
 //!
 //! Anything else (`OPTIONAL MATCH`, `WITH`, `ORDER BY`, `SKIP`,
 //! variable-length relationships, several labels, several hops, functions
-//! other than `count`, `DELETE` without `DETACH`) is rejected with a
+//! other than `count` and `size`, `DELETE` without `DETACH`) is rejected with a
 //! `ParseError` whose message starts with `not supported yet: `.
 //!
-//! Nesting through parentheses, lists and maps (including a `count(...)`
-//! argument) is capped at [`MAX_NESTING`] levels so a malicious, deeply
+//! Nesting through parentheses, lists and maps (including function
+//! arguments) is capped at [`MAX_NESTING`] levels so a malicious, deeply
 //! nested query cannot recurse the parser into a stack overflow; the
 //! tokenizer itself never recurses regardless of input length (see
 //! `lexer`).
@@ -42,7 +42,7 @@ use brainwire_core::value::Value;
 use crate::ast::*;
 use crate::lexer::{tokenize, Spanned, Tok};
 
-/// Parentheses, lists and maps (and a `count(...)` argument) may nest this
+/// Parentheses, lists, maps and function arguments may nest this
 /// many levels deep before parsing gives up; see the module docs.
 const MAX_NESTING: usize = 64;
 
@@ -716,13 +716,14 @@ impl<'a> Parser<'a> {
             return Ok(ParsedExpr::leaf(Expr::Literal(Value::Null)));
         }
         if self.peek_at(1) == Some(&Tok::LParen) {
-            if !name.eq_ignore_ascii_case("count") {
+            let size = name.eq_ignore_ascii_case("size");
+            if !size && !name.eq_ignore_ascii_case("count") {
                 return Err(self.error_at(start, format!("not supported yet: function {name}")));
             }
-            self.advance(); // "count"
+            self.advance(); // function name
             return self.with_nesting(|p| {
                 p.expect(Tok::LParen, "'('")?;
-                if p.check(&Tok::Star) {
+                if !size && p.check(&Tok::Star) {
                     p.advance();
                     p.expect(Tok::RParen, "')'")?;
                     return Ok(ParsedExpr::leaf(Expr::CountStar));
@@ -731,7 +732,11 @@ impl<'a> Parser<'a> {
                 p.expect(Tok::RParen, "')'")?;
                 let depth = p.checked_depth(inner.depth, start)?;
                 Ok(ParsedExpr {
-                    expr: Expr::Count(Box::new(inner.expr)),
+                    expr: if size {
+                        Expr::Size(Box::new(inner.expr))
+                    } else {
+                        Expr::Count(Box::new(inner.expr))
+                    },
                     depth,
                 })
             });

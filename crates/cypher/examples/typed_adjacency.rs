@@ -11,7 +11,9 @@ use std::{collections::BTreeMap, path::Path, time::Instant};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let [mode, path, rest @ ..] = args.as_slice() else {
-        return Err("usage: typed_adjacency build PATH [neighbors] | run PATH".into());
+        return Err(
+            "usage: typed_adjacency build PATH [neighbors] [payload-bytes] | run PATH".into(),
+        );
     };
     if !matches!(mode.as_str(), "build" | "run") {
         return Err("mode must be build or run".into());
@@ -24,8 +26,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     if mode == "build" {
         let neighbors: usize = rest.first().map_or(Ok(10_000), |n| n.parse())?;
-        if rest.len() > 1 || !(10..=100_000).contains(&neighbors) {
-            return Err("neighbors must be between 10 and 100000".into());
+        let payload_bytes: usize = rest.get(1).map_or(Ok(0), |n| n.parse())?;
+        if rest.len() > 2 || !(10..=100_000).contains(&neighbors) || payload_bytes > 16_384 {
+            return Err(
+                "neighbors must be between 10 and 100000; payload-bytes at most 16384".into(),
+            );
         }
         if Path::new(path).try_exists()? {
             return Err("refusing to overwrite an existing path".into());
@@ -41,6 +46,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))?;
         let catalog = db.apply_ontology(&mapping)?;
         let empty = BTreeMap::new();
+        let properties = if payload_bytes == 0 {
+            BTreeMap::new()
+        } else {
+            BTreeMap::from([("payload".into(), Value::Str("x".repeat(payload_bytes)))])
+        };
         let mut tx = db.begin();
         let hub = merge_node(&mut tx, &catalog, "Item", "hub", &empty)?;
         tx.commit()?;
@@ -48,7 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for start in (0..neighbors).step_by(100) {
             let mut tx = db.begin();
             for i in start..(start + 100).min(neighbors) {
-                let other = merge_node(&mut tx, &catalog, "Item", &format!("item-{i}"), &empty)?;
+                let other =
+                    merge_node(&mut tx, &catalog, "Item", &format!("item-{i}"), &properties)?;
                 for kind in 0..10 {
                     let kind = format!("NOISE_{kind}");
                     merge_edge(&mut tx, &catalog, hub, &kind, other, &empty)?;
@@ -64,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         check_invariants(&db)?;
         println!(
             "{}",
-            serde_json::json!({"nodes":neighbors+1,"relationships":neighbors*20+20,"buildMs":started.elapsed().as_secs_f64()*1000.0})
+            serde_json::json!({"nodes":neighbors+1,"relationships":neighbors*20+20,"payloadBytes":payload_bytes,"buildMs":started.elapsed().as_secs_f64()*1000.0})
         );
         return Ok(());
     }

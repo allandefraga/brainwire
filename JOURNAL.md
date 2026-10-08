@@ -39,7 +39,51 @@ No line of code before the end of phase 2.
 
 ## Entries
 
-### 2026-10-07, durable commits, resumable ingestion and extended acceptance
+### 2026-10-08 — Cypher size and gated pinned-read experiment
+
+- **Requested:** 15 minutes of features/engineering/platform, all local. Started
+  07:17:09 UTC (09:17:09 Europe/Paris); closed at 07:32:32 UTC after
+  at least 15 minutes.
+- **Done:** scalar `size(expression)` accepts a list, Unicode string or null;
+  counts code points rather than bytes/graphemes, propagates null and rejects
+  other types/invalid arity. Shared evaluation works in parameters, predicates,
+  UNWIND, SET, grouped RETURN and count arguments. Existing nesting guards,
+  variable validation, aggregate restrictions and allocation accounting remain.
+- **Verified:** four integration tests cover Unicode/decomposed accents, lists,
+  null, parameters, missing properties, unknown variables, wrong types/arity,
+  nested aggregates/depth, grouped counts, successful SET and atomic rollback
+  after a row-dependent runtime failure following CREATE. Final 438 workspace
+  tests pass; workspace all-targets Clippy, rustfmt and diff checks pass.
+  Actual CLI returns [2,3,null]. Python Neo4j driver 5.28.6 against a disposable
+  local Bolt server returns Unicode/list sizes and persists SET length=2;
+  server stopped and its temporary data removed. Runnable evidence:
+  docs/benchmarks/2026-10-08-size/python_bolt.py and python-bolt.json.
+- **Investigated:** crate-private callback decodes node bytes from overlay or
+  Snapshot::get_pinned_cf, eliminating one intermediate raw Vec copy. Its
+  snapshot/tombstone/error/LIMIT semantics and 435-test candidate workspace
+  passed, but its performance gate did not. Initial five alternating release
+  pairs favored 10K/4KiB median by ~10%; subsequent ten pairs did not repeat
+  the gain. External virtualization and other-project Python CPU load were
+  observed and left untouched. No isolated-host, RSS or production speed claim.
+  Reverted candidate production helper and routing together; no unused API.
+- **Engineering:** existing typed_adjacency benchmark now supports optional
+  0–16KiB text payloads. Audited 10K empty, 10K/4KiB and 50K/4KiB stores with
+  up to 1,000,020 edges. Retained baseline/candidate hashes, 90 raw timing
+  documents, summarizer and candidate patch in
+  docs/benchmarks/2026-10-08-pinned-read/. Highly compressible synthetic text,
+  warm embedded timing, process-percentile medians explicitly documented.
+- **Review:** focused storage/Cypher worker and advisory Astra; main independently
+  ran workspace checks and CLI/Python integration. No dependencies introduced.
+  Docs explain the scalar contract and update the read-batching investigation.
+- **Next:** deterministic mutation/apply contract covering catalog, allocator and
+  source-progress writes before three-voter replication; retry destination-read
+  optimization only on a controlled idle host with incompressible/skewed values
+  and allocation/RSS evidence. size() is not vector similarity or ANN search.
+- **Local:** canonical /Users/fraga/Documents/brainwire; preserve untracked
+  docs-site/ and .DS_Store files. No remote push/publication. All synthetic
+  benchmark fixtures and local test executables removed before handoff.
+
+## 2026-10-07, durable commits, resumable ingestion and extended acceptance
 
 - **Requested:** work for 30 minutes, all local. Started 06:57:45 UTC
   (08:57:45 Europe/Paris); closed at 07:28:01 UTC after at least 30 minutes.
