@@ -3,7 +3,9 @@
 Python is the client; Brainwire runs the graph engine in Rust. Send parameterized
 Cypher over Bolt using the Neo4j Python driver. The acceptance harness currently
 verifies driver 5.28.6; this is a tested protocol subset, not full Neo4j feature
-compatibility. The client-specific adapter remains a separate integration task.
+compatibility. A [synthetic client ticket/comment snapshot adapter](client-shadow.md)
+now reuses the same importer; direct DuckLake reading and a production mapping
+remain separate integration tasks.
 
 ## Run the example
 
@@ -211,7 +213,9 @@ with many matching rows is reported separately from a unique entity/email read.
 
 The bounded [resumable example](../examples/python/resumable_customers.py) stores
 an `ImportCheckpoint` node containing the source file's SHA256 and its next byte
-offset. Each transaction reads that node, imports a batch of customers, and
+offset. Custom mapping examples also persist a versioned `contract_id`; a
+different mapping cannot silently reuse a completed cursor. Each transaction
+reads that node, imports a batch of customers, and
 updates the cursor atomically. A new process rereads the graph cursor rather
 than trusting a local progress file or the storage commit counter.
 

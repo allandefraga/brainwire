@@ -118,6 +118,18 @@ unbounded values/results and partitioning one graph across machines are not
 implied by these minima. The replicated beta copies the instance's full data set;
 sharding and distributed execution require their own future design and tests.
 
+## Progress recorded October 10
+
+The [client shadow fixture](client-shadow.md) implements the executable
+Ticket/TicketComment ingestion slice using documented Zendesk concepts. Source
+identity, required fields, example queries and proposed workload limits are now
+written down; they are a **synthetic candidate contract**, not an approved live
+client mapping. Direct DuckLake input and production sample shape remain open.
+Actual release acceptance covers 100K tickets + 200K comments + 200K edges,
+atomic source progress, update/null/index behavior, replay, SIGKILL and fresh
+checkpoint restore. This is not the full 100K/1M target or an endurance certificate.
+Next queued dependency: October 11 authentication, before shared deployment.
+
 ## Daily execution queue — October 9–31
 
 Dates allocate a session, not guaranteed completion. Each deliverable needs a
@@ -211,7 +223,8 @@ or the build stays an isolated developer test. The transport boundary is explici
 
 **October 24:** a candidate installs, ingests the agreed source form, answers the
 important queries, restarts and restores independently. Any failed critical path
-blocks feature freeze and consumes the remaining buffer.
+blocks candidate readiness and consumes the remaining buffer. New major feature
+intake remains frozen while those blockers are fixed.
 
 **October 31:** classify separately:
 

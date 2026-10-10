@@ -21,11 +21,12 @@ SET c.email = row.email, c.active = row.active,
 """
 CHECKPOINT = """
 MATCH (s:ImportCheckpoint {entity_id: $source_id})
-RETURN s.sha256 AS sha256, s.next_offset AS next_offset
+RETURN s.sha256 AS sha256, s.next_offset AS next_offset,
+       s.contract_id AS contract_id
 """
 INITIALIZE = """
 MERGE (s:ImportCheckpoint {entity_id: $source_id})
-SET s.sha256 = $sha256, s.next_offset = 0
+SET s.sha256 = $sha256, s.next_offset = 0, s.contract_id = $contract_id
 """
 ADVANCE = """
 MATCH (s:ImportCheckpoint {entity_id: $source_id})
@@ -53,7 +54,20 @@ def fingerprint(path):
     return digest.hexdigest(), before
 
 
-def read_batch(path, offset, size, batch_size, batch_bytes, line_bytes):
+def normalize_customer(row):
+    if not isinstance(row, dict) or not REQUIRED.issubset(row):
+        raise ValueError(f"row requires {sorted(REQUIRED)}")
+    if not isinstance(row["entity_id"], str) or not row["entity_id"]:
+        raise ValueError("entity_id must be a nonempty string")
+    return {key: row[key] for key in REQUIRED}
+
+
+def write_customers(tx, rows):
+    tx.run(CUSTOMERS, rows=rows).consume()
+
+
+def read_batch(path, offset, size, batch_size, batch_bytes, line_bytes, *, normalize_row=None):
+    normalize_row = normalize_customer if normalize_row is None else normalize_row
     if type(offset) is not int or not 0 <= offset <= min(size, MAX_INTEGER):
         raise ValueError("invalid checkpoint byte offset")
     rows = []
@@ -73,19 +87,25 @@ def read_batch(path, offset, size, batch_size, batch_bytes, line_bytes):
             if consumed + len(line) > batch_bytes:
                 break
             if line.strip():
-                row = json.loads(line)
-                if not isinstance(row, dict) or not REQUIRED.issubset(row):
-                    raise ValueError(f"row at byte {offset + consumed} requires {sorted(REQUIRED)}")
-                if not isinstance(row["entity_id"], str) or not row["entity_id"]:
-                    raise ValueError("entity_id must be a nonempty string")
-                rows.append({key: row[key] for key in REQUIRED})
+                try:
+                    rows.append(normalize_row(json.loads(line)))
+                except ValueError as error:
+                    raise ValueError(f"row at byte {offset + consumed}: {error}") from error
             consumed += len(line)
     return rows, offset + consumed
 
 
 def ingest(driver, database, file, source_id, batch_size=250,
-           batch_bytes=1 << 20, line_bytes=64 << 10):
+           batch_bytes=1 << 20, line_bytes=64 << 10, *,
+           normalize_row=None, write_batch=None, contract_id=None):
     """Return the durable byte cursor; every retry rereads its graph checkpoint."""
+    if contract_id is not None and (not isinstance(contract_id, str) or not contract_id):
+        raise ValueError("contract_id must be a nonempty string or None")
+    if (normalize_row is not None or write_batch is not None) and contract_id is None:
+        raise ValueError("custom hooks require a nonempty contract_id")
+    if any(hook is not None and not callable(hook) for hook in (normalize_row, write_batch)):
+        raise ValueError("normalizer and writer hooks must be callable")
+    writer = write_customers if write_batch is None else write_batch
     if not isinstance(source_id, str) or not source_id:
         raise ValueError("source_id must be a nonempty string")
     if any(type(n) is not int or n <= 0 for n in (batch_size, batch_bytes, line_bytes)):
@@ -103,17 +123,19 @@ def ingest(driver, database, file, source_id, batch_size=250,
         check_source()
         checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
         if checkpoint is None:
-            tx.run(INITIALIZE, source_id=source_id, sha256=digest).consume()
+            tx.run(INITIALIZE, source_id=source_id, sha256=digest, contract_id=contract_id).consume()
             checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
         if checkpoint is None or checkpoint["sha256"] != digest:
             raise ValueError("source ID already refers to a different SHA256")
+        if checkpoint.get("contract_id") != contract_id:
+            raise ValueError("source ID already refers to a different mapping contract")
         rows, next_offset = read_batch(
             path, checkpoint["next_offset"], original[2],
-            batch_size, batch_bytes, line_bytes,
+            batch_size, batch_bytes, line_bytes, normalize_row=normalize_row,
         )
         check_source()
         if rows:
-            tx.run(CUSTOMERS, rows=rows).consume()
+            writer(tx, rows)
         if next_offset != checkpoint["next_offset"]:
             tx.run(ADVANCE, source_id=source_id, next_offset=next_offset).consume()
         check_source()

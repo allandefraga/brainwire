@@ -39,6 +39,52 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-10 — client snapshot adapter and recovery acceptance
+
+- **Requested:** 20 minutes of active work, starting 14:22:11 UTC / 16:22:11
+  Europe/Paris. Continued the October 9–10 pilot workload/fixture dependency.
+- **Done:** added a runnable synthetic Ticket/TicketComment snapshot adapter,
+  HAS_COMMENT edges, scoped immutable identities, fixed authoritative/null SET
+  fields and parent validation. Reused the existing bounded Python/Bolt importer;
+  checkpoint content SHA, mapping contract and byte cursor now guard resume.
+  Added deterministic fixture generation, real-server acceptance and a local
+  quickstart with schema, queries and accurate TUI inspection instructions.
+- **Measured:** 100K tickets + 200K comments + 200K edges imported in 25.101s
+  (11,952 input records/s), driver 5.28.6, release, localhost Apple M5/32GiB,
+  64MiB cache / 16MiB memtables / 64MiB query guard. One short synthetic run,
+  highly compressible 1KiB comments and smaller tickets, host contention; no
+  sustained throughput, p95, peak RSS, production or 1M-edge certification.
+- **Correctness:** exact counts/index answers, tenant-qualified identities,
+  overwrite/null index cleanup, duplicate-edge replay, missing/immutable parents,
+  conflicting duplicate parents, mapping mismatch, rollback, pending-write
+  SIGKILL/reopen and independent native checkpoint restore/resume/index audit.
+  Driver 6.3.0 separately passed changed-source rejection and lost-ack partial
+  resume. Raw receipts distinguish cases actually run at each size.
+- **Compatibility/checks:** 438 Rust workspace tests, all-targets Clippy with
+  warnings denied and rustfmt; 13 importer + 3 adapter Python tests; module CLI
+  help, schema JSON, receipt and guide checks. Existing Customer failure suite
+  passed after helper extension. Actual old Customer catalog/checkpoint without
+  contract_id also resumed, replayed and accepted a new default source through
+  Bolt with a clean index audit. Advisory Astra found no implementation blockers.
+- **Finding:** a mass SET over 33,334 open tickets hit the unchanged 64MiB query
+  guard. Acceptance records denial/rollback and then uses a bounded primary-key
+  write for recovery; budgets were not increased to hide this limit. Allocator
+  reservations may survive rollback; the source byte cursor remains authoritative.
+- **Boundary:** client starter graph mapping is empty. Documented Zendesk
+  ontology fragment supplied candidate concepts, not a confirmed live mapping.
+  Synthetic data only. Snapshot revisions require new source IDs and serial,
+  chronological application per tenant/connector. No CDC, delete synchronization,
+  source-version arbitration, external edge repair or new connected TUI feature.
+- **Next:** implement protected Bolt authentication and graph/operation scopes
+  across HELLO/LOGON, implicit RUN and explicit BEGIN. The read-only trace is in
+  docs/beta-auth-checklist.md; consult Astra on policy/state/config first. Current
+  AllowAll, RESET/LOGOFF behavior, read-only mutation checks and process-wide CALL
+  telemetry need explicit denial tests. Do not expose current Bolt on a shared
+  network. Confirm real client export mapping before any live-data integration.
+- **Evidence/local:** docs/benchmarks/2026-10-10-client.md and its raw JSON,
+  reproducible harnesses and final source inventory. Temporary stores and owned
+  servers cleaned. All work local; no push, publication, PR or deployment.
+
 ### 2026-10-08 — October beta daily queue revised
 
 - **Requested:** organize the remaining month for an October 31 client-testable

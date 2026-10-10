@@ -1,0 +1,23 @@
+{
+  "version": "1",
+  "nodes": [
+    {
+      "label": "Ticket",
+      "properties": ["tenant_id", "connector_id", "external_id", "subject", "status", "priority", "tags"],
+      "indexed_fields": ["status", "priority"]
+    },
+    {
+      "label": "TicketComment",
+      "properties": ["tenant_id", "connector_id", "external_id", "ticket_id", "ticket_entity_id", "body", "is_public"],
+      "indexed_fields": ["ticket_entity_id", "is_public"]
+    },
+    {
+      "label": "ImportCheckpoint",
+      "properties": ["sha256", "next_offset", "contract_id"],
+      "indexed_fields": []
+    }
+  ],
+  "edges": [
+    {"type": "HAS_COMMENT", "from": {"label": "Ticket"}, "to": {"label": "TicketComment"}}
+  ]
+}

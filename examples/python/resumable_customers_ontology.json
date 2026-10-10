@@ -8,7 +8,7 @@
     },
     {
       "label": "ImportCheckpoint",
-      "properties": ["sha256", "next_offset"],
+      "properties": ["sha256", "next_offset", "contract_id"],
       "indexed_fields": []
     }
   ]

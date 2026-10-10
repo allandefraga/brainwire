@@ -1,0 +1,69 @@
+{
+  "synthetic": true,
+  "driver": "6.3.0",
+  "profile": "release",
+  "binary_sha256": "7ec30a82d277601611382e45a705b336a2a551667a14ef061a36f4eea1fc0462",
+  "fixture": {
+    "synthetic": true,
+    "tickets": 1000,
+    "comments": 2000,
+    "relationships": 2000,
+    "status_counts": {
+      "open": 334,
+      "pending": 333,
+      "solved": 333
+    },
+    "priority_counts": {
+      "high": 200,
+      "normal": 800
+    },
+    "comment_body_characters": 1024,
+    "source_bytes": 2591055
+  },
+  "import_seconds": 0.27696191699942574,
+  "input_rows_per_second": 10831.814108241533,
+  "rollback_allocator_counter_advanced": false,
+  "large_write_guard_rejected": false,
+  "audit": {
+    "database": "client-shadow-synthetic",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "validation_audit": {
+    "database": "client-validation",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checkpoint": {
+    "commit_sequence": "17",
+    "commit_sequence_tracked": true,
+    "database": "client-shadow-synthetic",
+    "destination": "/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-client-y100mhf2/data/restored",
+    "scope": "single_graph_committed_native_checkpoint",
+    "status": "checkpoint_created"
+  },
+  "restore_audit": {
+    "database": "restored",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checks": [
+    "exact node/edge/index counts",
+    "no-op replay",
+    "mapping mismatch",
+    "overwrite/null indexes",
+    "duplicate edge replay",
+    "immutable/missing parents",
+    "conflicting duplicate parents",
+    "graph isolation",
+    "changed source rejected",
+    "lost-acknowledgement partial resume",
+    "callback rollback",
+    "bounded write/guard rollback",
+    "SIGKILL pending data/cursor",
+    "reopen/replay",
+    "independent checkpoint restore/resume/audit"
+  ],
+  "result": "PASS",
+  "scope": "localhost single-node synthetic snapshot; no CDC, auth, Raft, ANN or production performance certification"
+}

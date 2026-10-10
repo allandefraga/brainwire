@@ -54,6 +54,9 @@ browsing is available in the Disk panel. Offline
 index readiness, RocksDB counters and shared memory accounting are available
 in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a
 bounded JSONL importer, MERGE/SET semantics and crash-recovery acceptance.
+The [client shadow guide](docs/client-shadow.md) adds a synthetic Zendesk-shaped
+Ticket/Comment snapshot, source-qualified identities, atomic HAS_COMMENT links
+and a cursor bound to both input digest and mapping contract.
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
 and `graph.pagerank`, plus directed `graph.reachable` hop distances and

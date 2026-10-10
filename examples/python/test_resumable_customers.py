@@ -31,7 +31,7 @@ class Transaction:
             return Result(self.checkpoints.get(params["source_id"]))
         if query == importer.INITIALIZE:
             self.checkpoints[params["source_id"]] = {
-                "sha256": params["sha256"], "next_offset": 0,
+                "sha256": params["sha256"], "next_offset": 0, "contract_id": params.get("contract_id"),
             }
         elif query == importer.CUSTOMERS:
             self.driver.attempted_batches.append(copy.deepcopy(params["rows"]))
@@ -99,6 +99,49 @@ class ResumableCustomersTests(unittest.TestCase):
     def ingest(self, driver, **kwargs):
         return importer.ingest(driver, "customers", self.path, "synthetic-source",
                                batch_size=1, **kwargs)
+
+    def test_custom_hooks_require_contract_and_completed_mapping_mismatch_fails(self):
+        driver = Driver()
+        self.ingest(driver)
+        before = copy.deepcopy((driver.checkpoints, driver.customers))
+        with self.assertRaisesRegex(ValueError, "contract"):
+            self.ingest(driver, normalize_row=lambda row: row)
+        with self.assertRaisesRegex(ValueError, "contract"):
+            self.ingest(driver, normalize_row=lambda row: row, contract_id="another-mapping")
+        self.assertEqual((driver.checkpoints, driver.customers), before)
+
+    def test_matching_custom_contract_resumes_and_mismatch_rejects_completed_source(self):
+        driver = Driver()
+        hook = lambda row: importer.normalize_customer(row)
+        self.ingest(driver, normalize_row=hook, contract_id="mapping-v1")
+        self.assertEqual(driver.checkpoints["synthetic-source"]["contract_id"], "mapping-v1")
+        before = copy.deepcopy((driver.checkpoints, driver.customers, driver.attempted_batches))
+        self.ingest(driver, normalize_row=hook, contract_id="mapping-v1")
+        self.assertEqual((driver.checkpoints, driver.customers, driver.attempted_batches), before)
+        with self.assertRaisesRegex(ValueError, "contract"):
+            self.ingest(driver, normalize_row=hook, contract_id="mapping-v2")
+        with self.assertRaisesRegex(ValueError, "contract"):
+            self.ingest(driver)
+        self.assertEqual((driver.checkpoints, driver.customers, driver.attempted_batches), before)
+
+    def test_legacy_checkpoint_accepts_only_default_mapping(self):
+        driver = Driver()
+        self.ingest(driver)
+        driver.checkpoints["synthetic-source"].pop("contract_id")
+        self.ingest(driver)
+        with self.assertRaisesRegex(ValueError, "contract"):
+            self.ingest(driver, normalize_row=importer.normalize_customer, contract_id="custom")
+
+    def test_writer_failure_does_not_advance_cursor_or_initialize_checkpoint(self):
+        def fail(tx, rows):
+            tx.run(importer.CUSTOMERS, rows=rows).consume()
+            raise ValueError("writer failed")
+        driver = Driver()
+        with self.assertRaisesRegex(ValueError, "writer failed"):
+            self.ingest(driver, write_batch=fail, contract_id="test-mapping")
+        self.assertEqual(driver.checkpoints, {})
+        self.assertEqual(driver.customers, {})
+        self.assertEqual(driver.commits, 0)
 
     def test_retry_before_commit_replays_identical_batch_and_cursor(self):
         driver = Driver(retry="before_commit")
