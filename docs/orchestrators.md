@@ -7,6 +7,11 @@ development server is unprotected unless the optional
 [service-token policy](bolt-auth.md) is configured. Native TLS remains pending;
 see [protected overlays](protected-containers.md).
 
+The proposed [distributed deployment and routing design](design/2026-10-12-distributed-deployment.md)
+explains future member identities, separate peer/client endpoints, host placement,
+bootstrap, load balancing and drain/fencing. It does not change these single-node
+templates or provide a runnable replicated cluster.
+
 ## Docker Compose
 
 ```sh

@@ -39,6 +39,58 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-12 — Pods, machines and load-balancing concepts
+
+- **Requested:** 30 more minutes focused on distribution, Kubernetes, Docker,
+  containers, Pods, machines and load balancing. Started at 16:22:31 UTC /
+  18:22:31 Europe/Amsterdam; the requested end was 16:52:31 UTC / 18:52:31 local.
+  Session closed at 2026-10-12 16:52:41 UTC, after the full requested interval.
+  Continued the concepts-only scope of the preceding session. No engine, TUI
+  or deployment implementation was performed; all changes remain local.
+- **Done:** [deployment and routing companion](docs/design/2026-10-12-distributed-deployment.md),
+  linked from README, the orchestrator guide and capacity notes. Distinguished
+  logical instances/members from containers, Pods/tasks, hosts and volumes;
+  separated client entry, named authenticated peer traffic and operations.
+  Covered routing alternatives, transaction affinity/unknown outcomes, external
+  advertised addresses, entry availability, host/zone placement, storage
+  provenance, per-member resources, bootstrap cycles, health phases and drain.
+  Added proposed TUI deployment fields and a proof sequence that includes crash
+  recovery from the first stage; later gates consolidate measured evidence.
+- **Decided:** retain three proposed complete-instance voters on independent
+  machines. A transport load balancer cannot supply write authority, transaction
+  migration or peer identity. A pure TCP entry requires a defined endpoint
+  purpose/conservative destination; read-mode routing needs an application
+  contract. Kubernetes OrderedReady and readiness-dependent peer DNS can cause
+  separate bootstrap deadlocks. Swarm manager quorum is distinct from database
+  quorum. Kubernetes API-dependent routing updates can fail independently of
+  ongoing peer progress; no universal DNS/LB/storage survival is assumed.
+  Orchestrator counts, stop-first and PVC access modes are not universal
+  membership or fencing proofs. A PDB constrains supported voluntary evictions,
+  not all failures or controller updates; its availability count is not quorum.
+- **Recovery boundary:** a valid lagging follower can catch up while retaining
+  its durable votes/logs. A known voter backup needs controlled restore or
+  replacement; historically valid local IDs do not universally detect rollback.
+  Whole-instance disaster restore and member replacement are different lineage
+  procedures. No automatic failover or distributed durability is claimed today.
+- **Verification:** reviewed current server, Bolt and deployment files;
+  checked official Kubernetes/Docker/Bolt references with read-only explorer,
+  researcher and focused Astra review. Added ten future deployment-fault
+  exercises with required evidence; these are not executed cluster tests.
+  Local document references, code fences and whitespace passed. No runtime
+  behavior changed and no Rust or real-cluster tests were needed for this scope.
+- **Educational visual:** 16 illustrative platform/placement/failure combinations
+  in `/Users/fraga/.codex/visualizations/2026/09/26/01a0de61-91ef-7403-b7d7-5f354611fe90/brainwire-deployment-explorer.html`.
+  Wide and narrow browser checks passed, with no JavaScript errors. It is a
+  teaching diagram, not a consensus simulator. Owned preview servers and tab
+  were closed; the temporary browser viewport was reset.
+- **Next step:** resolve the mutation/apply/retry durability contract, then
+  choose fixed-member bootstrap, routing, health and drain contracts before
+  claiming a three-member topology. Test protocol/process failures before
+  distinct-machine Kubernetes and Swarm acceptance and recovery/load evidence.
+- **Blockers:** Raft replication, member identity, ROUTE/bookmarks, native TLS
+  and application-level drain remain unimplemented. This session does not
+  approve a new implementation phase or convert current manifests into HA.
+
 ### 2026-10-12 — Distributed systems concepts only
 
 - **Requested:** one hour of distributed systems concepts only, starting

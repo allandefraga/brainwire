@@ -139,6 +139,9 @@ prefix directly, avoiding unrelated edges. See the
 and its Python batch, rollback and restart acceptance check.
 [Docker Compose, Kubernetes and Swarm templates](docs/orchestrators.md) package
 a retained single-writer volume and recovery probes; replication remains pending.
+The proposed [distributed deployment and routing design](docs/design/2026-10-12-distributed-deployment.md)
+maps future members to Pods/tasks, machines and volumes, with separate client
+entry and authenticated peer paths; these cluster contracts are not implemented.
 The [October 31 beta roadmap](docs/2026-10-pilot-roadmap.md) now targets working
 minimums across all requested areas, with an October 12 feasibility gate and
 explicit performance/recovery acceptance. It is a target, not an implemented

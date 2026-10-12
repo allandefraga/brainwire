@@ -6,6 +6,9 @@ Status: proposed, unimplemented. Companion to the
 This document explains costs and operational boundaries; it is neither a
 performance measurement nor a deployable cluster configuration.
 
+The [deployment companion](2026-10-12-distributed-deployment.md) maps members to
+Pods/tasks, hosts and volumes, and separates client balancing from peer discovery.
+
 ## The first topology
 
 The approved direction starts with one consensus group replicating the entire
