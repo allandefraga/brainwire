@@ -11,8 +11,10 @@ adapter; the platform remains the first integration target.
 > **Status: local MVP development.** The Rust workspace contains the RocksDB
 > storage foundation, graph operations, a local durable Bolt/Cypher server,
 > configuration commands, a Cypher subset parser and atomic executor, and an
-> interactive terminal backoffice demo. The server is single-node and has no
-> authentication. Conservative per-RUN guards, a shared query reservation pool and
+> interactive terminal backoffice demo. The server is single-node and disables
+> authentication by default; optional service-token protection now grants read/write
+> access per named graph. Native TLS, human-password login and JWT validation are
+> pending. Conservative per-RUN guards, a shared query reservation pool and
 > cooperative execution deadlines are enforced; a hard process-memory ceiling
 > remains pending. The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
@@ -48,7 +50,8 @@ while the server is stopped. Queries commit atomically to RocksDB and survive
 reopening. The [server guide](docs/serve.md) covers configuration, driver access
 and current limits; the [single-node container guide](docs/container.md) covers
 the local image and retained-volume test. The [local query guide](docs/local-cypher.md)
-walks through ontology initialization, parameters, bulk JSON files and JSON output. The Ontology panel can connect to the running server; other real TUI panels
+walks through ontology initialization, parameters, bulk JSON files and JSON output,
+including lazy `coalesce(...)` defaults. The Ontology panel can connect to the running server; other real TUI panels
 still require offline access. Real offline file metadata
 browsing is available in the Disk panel. Offline
 index readiness, RocksDB counters and shared memory accounting are available
@@ -57,6 +60,8 @@ bounded JSONL importer, MERGE/SET semantics and crash-recovery acceptance.
 The [client shadow guide](docs/client-shadow.md) adds a synthetic Zendesk-shaped
 Ticket/Comment snapshot, source-qualified identities, atomic HAS_COMMENT links
 and a cursor bound to both input digest and mapping contract.
+[Protected Bolt connections](docs/bolt-auth.md) cover Python/native credentials,
+graph permissions and the optional [container overlays](docs/protected-containers.md).
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
 and `graph.pagerank`, plus directed `graph.reachable` hop distances and
@@ -69,7 +74,8 @@ domain using explicit authority, author relevance, usage, certification and
 freshness signals. It returns per-signal contributions and uses bounded top-K
 selection with the existing term index. See [knowledge ranking](docs/knowledge-ranking.md)
 for the synthetic example, policy and limits; automated evidence collection and
-permission-aware ranking are not implemented.
+per-source permission-aware ranking are not implemented; protected readers still
+need a grant on the selected graph.
 
 ## Local development
 

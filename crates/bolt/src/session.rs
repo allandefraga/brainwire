@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 
+use crate::auth::AccessContext;
+pub use crate::auth::AuthMode;
 use crate::message::{Request, Response};
 use crate::packstream::PackValue;
 
@@ -22,6 +24,16 @@ pub struct EngineError {
 }
 
 pub trait QueryEngine {
+    /// Engines must explicitly support protected identities; legacy engines fail closed.
+    fn set_access(&mut self, access: AccessContext) -> Result<(), EngineError> {
+        match access {
+            AccessContext::Unrestricted => Ok(()),
+            _ => Err(EngineError {
+                code: "Neo.ClientError.Security.Forbidden".into(),
+                message: "engine does not support protected access".into(),
+            }),
+        }
+    }
     /// Begin one transaction, bound to this database until completion.
     /// A failure may leave partial state: the session will call `abort`.
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError>;
@@ -42,6 +54,15 @@ pub trait QueryEngine {
 pub struct StubEngine;
 
 impl QueryEngine for StubEngine {
+    fn set_access(&mut self, access: AccessContext) -> Result<(), EngineError> {
+        match access {
+            AccessContext::Unrestricted | AccessContext::Unauthenticated => Ok(()),
+            AccessContext::Authenticated(_) => Err(EngineError {
+                code: "Neo.ClientError.Security.Forbidden".into(),
+                message: "stub engine does not support protected access".into(),
+            }),
+        }
+    }
     // Synthetic results have no persistent state or durable bookmark.
     fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
         Ok(())
@@ -90,18 +111,13 @@ pub enum State {
     Defunct,
 }
 
-pub enum AuthMode {
-    /// Development only; real authentication arrives with the security plan.
-    AllowAll,
-}
-
 pub struct Session<E: QueryEngine> {
     engine: E,
     state: State,
     rows: VecDeque<Vec<PackValue>>,
     db: Option<String>,
     pending: bool,
-    _auth: AuthMode,
+    auth: AuthMode,
 }
 
 fn meta(pairs: Vec<(&str, PackValue)>) -> Response {
@@ -123,7 +139,7 @@ impl<E: QueryEngine> Session<E> {
             rows: VecDeque::new(),
             db: None,
             pending: false,
-            _auth: auth,
+            auth,
         }
     }
 
@@ -173,7 +189,45 @@ impl<E: QueryEngine> Session<E> {
         self.state = State::Defunct;
     }
 
+    fn revoke(&mut self) -> Result<(), EngineError> {
+        let cleanup = self.cleanup();
+        // Revoke even if abort fails; the connection will close in that case.
+        let revoke = self.engine.set_access(AccessContext::Unauthenticated);
+        cleanup.and(revoke)
+    }
+
+    fn logon(&mut self, auth: &PackValue) -> Vec<Response> {
+        let access = match &self.auth {
+            AuthMode::AllowAll => AccessContext::Unrestricted,
+            AuthMode::Required(policy) => match policy.authenticate(auth) {
+                Ok(principal) => AccessContext::Authenticated(principal),
+                Err(_) => {
+                    let _ = self.revoke();
+                    self.state = State::Defunct;
+                    return vec![Response::Failure {
+                        code: "Neo.ClientError.Security.Unauthorized".into(),
+                        message: "authentication failed".into(),
+                    }];
+                }
+            },
+        };
+        match self.engine.set_access(access) {
+            Ok(()) => {
+                self.state = State::Ready;
+                vec![meta(vec![])]
+            }
+            Err(error) => {
+                let _ = self.revoke();
+                self.state = State::Defunct;
+                vec![Self::engine_failure(error)]
+            }
+        }
+    }
+
     fn database(extra: &PackValue) -> Result<Option<String>, Response> {
+        if extra.get("imp_user").is_some() {
+            return Err(invalid("impersonation is not supported"));
+        }
         match extra.get("db") {
             None => Ok(None),
             Some(PackValue::String(db)) => Ok(Some(db.clone())),
@@ -287,9 +341,23 @@ impl<E: QueryEngine> Session<E> {
             (_, Request::Hello { .. }) => {
                 self.defunct(invalid("HELLO is only valid right after the handshake"))
             }
-            (Authentication, Request::Logon { .. }) => {
-                self.state = Ready;
-                vec![meta(vec![])]
+            (Authentication, Request::Logon { auth }) => self.logon(&auth),
+            (_, Request::Logon { .. }) => {
+                let _ = self.revoke();
+                self.state = Defunct;
+                vec![invalid("LOGON is only valid in authentication state")]
+            }
+            (Ready | Streaming | TxReady | TxStreaming | Failed, Request::Logoff) => {
+                match self.revoke() {
+                    Ok(()) => {
+                        self.state = Authentication;
+                        vec![meta(vec![])]
+                    }
+                    Err(error) => {
+                        self.state = Defunct;
+                        vec![Self::engine_failure(error)]
+                    }
+                }
             }
             // Anything else while the session has not logged on yet is a
             // protocol violation, and unlike the same violation post-login it
@@ -677,5 +745,291 @@ mod tests {
             "expected FAILURE, got {r:?}"
         );
         assert_eq!(s.state(), State::Defunct);
+    }
+    #[test]
+    fn default_access_hook_rejects_any_protected_context() {
+        let mut engine = ThreeRows;
+        assert!(engine.set_access(AccessContext::Unrestricted).is_ok());
+        assert!(engine.set_access(AccessContext::Unauthenticated).is_err());
+        assert!(engine
+            .set_access(AccessContext::Authenticated(crate::auth::Principal {
+                id: "reader".into(),
+                graphs: Default::default(),
+                instance_admin: false,
+            }))
+            .is_err());
+    }
+}
+
+#[cfg(test)]
+mod protected_tests {
+    use super::*;
+    use crate::auth::{AccessContext, AuthPolicy, GraphAccess};
+    use std::sync::{Arc, Mutex};
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    fn empty() -> PackValue {
+        PackValue::Map(vec![])
+    }
+    fn credentials() -> PackValue {
+        PackValue::Map(vec![
+            ("scheme".into(), PackValue::String("basic".into())),
+            ("principal".into(), PackValue::String("reader".into())),
+            ("credentials".into(), PackValue::String(TOKEN.into())),
+        ])
+    }
+    fn required() -> AuthMode {
+        AuthMode::Required(Arc::new(AuthPolicy::from_json(br#"{"principals":[{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"tickets":"read"},"instance_admin":false}]}"#).unwrap()))
+    }
+    #[derive(Default)]
+    struct Trace {
+        access: Vec<AccessContext>,
+        events: Vec<&'static str>,
+        fail_abort: bool,
+    }
+    struct Engine(Arc<Mutex<Trace>>);
+    impl QueryEngine for Engine {
+        fn set_access(&mut self, access: AccessContext) -> Result<(), EngineError> {
+            let mut trace = self.0.lock().unwrap();
+            trace.events.push("access");
+            trace.access.push(access);
+            Ok(())
+        }
+        fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+            self.0.lock().unwrap().events.push("begin");
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<QueryResult, EngineError> {
+            self.0.lock().unwrap().events.push("run");
+            Ok(QueryResult {
+                fields: vec!["x".into()],
+                rows: vec![vec![PackValue::Int(1)]; 3],
+            })
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            self.0.lock().unwrap().events.push("commit");
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            let mut trace = self.0.lock().unwrap();
+            trace.events.push("abort");
+            if trace.fail_abort {
+                Err(EngineError {
+                    code: "test.abort".into(),
+                    message: "cleanup failed".into(),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+    fn session(mode: AuthMode) -> (Session<Engine>, Arc<Mutex<Trace>>) {
+        let trace = Arc::new(Mutex::new(Trace::default()));
+        let mut session = Session::new(Engine(trace.clone()), mode);
+        session.handle(Request::Hello { extra: empty() });
+        (session, trace)
+    }
+    fn login(s: &mut Session<Engine>) {
+        assert!(matches!(
+            s.handle(Request::Logon {
+                auth: credentials()
+            })[0],
+            Response::Success(_)
+        ));
+    }
+    fn run() -> Request {
+        Request::Run {
+            query: "RETURN 1".into(),
+            params: empty(),
+            extra: empty(),
+        }
+    }
+
+    #[test]
+    fn protected_logon_passes_principal_and_reset_preserves_identity() {
+        let (mut s, t) = session(required());
+        login(&mut s);
+        let trace = t.lock().unwrap();
+        assert!(
+            matches!(&trace.access[0],AccessContext::Authenticated(p) if p.id=="reader" && p.graphs.get("tickets")==Some(&GraphAccess::Read))
+        );
+        drop(trace);
+        s.handle(run());
+        s.handle(Request::Reset);
+        assert_eq!(s.state(), State::Ready);
+        assert_eq!(t.lock().unwrap().access.len(), 1);
+    }
+    #[test]
+    fn failed_auth_is_generic_fatal_and_cannot_be_reset() {
+        for auth in [
+            empty(),
+            PackValue::Map(vec![(
+                "credentials".into(),
+                PackValue::String(TOKEN.into()),
+            )]),
+        ] {
+            let (mut s, t) = session(required());
+            let result = s.handle(Request::Logon { auth });
+            assert!(
+                matches!(&result[0],Response::Failure{code,message} if code=="Neo.ClientError.Security.Unauthorized" && message=="authentication failed")
+            );
+            assert_eq!(s.state(), State::Defunct);
+            assert!(s.handle(Request::Reset).is_empty());
+            assert!(s.handle(run()).is_empty());
+            assert!(!t.lock().unwrap().events.contains(&"begin"));
+        }
+    }
+    #[test]
+    fn logoff_discards_stream_and_transaction_before_revoking_identity() {
+        for explicit in [false, true] {
+            let (mut s, t) = session(required());
+            login(&mut s);
+            if explicit {
+                s.handle(Request::Begin { extra: empty() });
+            }
+            s.handle(run());
+            assert!(matches!(s.handle(Request::Logoff)[0], Response::Success(_)));
+            assert_eq!(s.state(), State::Authentication);
+            let trace = t.lock().unwrap();
+            assert_eq!(&trace.events[trace.events.len() - 2..], ["abort", "access"]);
+            assert_eq!(trace.access.last(), Some(&AccessContext::Unauthenticated));
+            assert!(!trace.events.contains(&"commit"));
+            drop(trace);
+            login(&mut s);
+            assert!(s.rows.is_empty());
+        }
+    }
+    #[test]
+    fn logoff_works_in_failed_state_and_allow_all_requires_fresh_login() {
+        for mode in [required(), AuthMode::AllowAll] {
+            let (mut s, t) = session(mode);
+            login(&mut s);
+            s.handle(Request::Route);
+            assert_eq!(s.state(), State::Failed);
+            assert!(matches!(s.handle(Request::Logoff)[0], Response::Success(_)));
+            assert_eq!(s.state(), State::Authentication);
+            assert_eq!(
+                t.lock().unwrap().access.last(),
+                Some(&AccessContext::Unauthenticated)
+            );
+            assert!(matches!(
+                s.handle(Request::Reset)[0],
+                Response::Failure { .. }
+            ));
+            assert_eq!(s.state(), State::Defunct);
+        }
+    }
+    #[test]
+    fn repeated_logon_closes_and_revokes_previous_identity() {
+        for failed in [false, true] {
+            let (mut s, t) = session(required());
+            login(&mut s);
+            s.handle(run());
+            if failed {
+                s.handle(Request::Route);
+            }
+            assert!(matches!(
+                s.handle(Request::Logon {
+                    auth: credentials()
+                })[0],
+                Response::Failure { .. }
+            ));
+            assert_eq!(s.state(), State::Defunct);
+            assert_eq!(
+                t.lock().unwrap().access.last(),
+                Some(&AccessContext::Unauthenticated)
+            );
+            assert!(!t.lock().unwrap().events.contains(&"commit"));
+        }
+    }
+    #[test]
+    fn logoff_cleanup_failure_still_revokes_and_closes() {
+        let (mut s, t) = session(required());
+        login(&mut s);
+        s.handle(run());
+        t.lock().unwrap().fail_abort = true;
+        assert!(matches!(
+            s.handle(Request::Logoff)[0],
+            Response::Failure { .. }
+        ));
+        assert_eq!(s.state(), State::Defunct);
+        assert_eq!(
+            t.lock().unwrap().access.last(),
+            Some(&AccessContext::Unauthenticated)
+        );
+    }
+    #[test]
+    fn hello_credentials_do_not_authenticate_and_unsupported_engines_fail_closed() {
+        let mut s = Session::new(StubEngine, required());
+        s.handle(Request::Hello {
+            extra: credentials(),
+        });
+        assert_eq!(s.state(), State::Authentication);
+        assert!(matches!(s.handle(run())[0], Response::Failure { .. }));
+        let mut s = Session::new(StubEngine, required());
+        s.handle(Request::Hello { extra: empty() });
+        assert!(
+            matches!(&s.handle(Request::Logon{auth:credentials()})[0],Response::Failure{code,..} if code=="Neo.ClientError.Security.Forbidden")
+        );
+        assert_eq!(s.state(), State::Defunct);
+    }
+    #[test]
+    fn impersonation_is_rejected_before_begin_or_run() {
+        for explicit in [false, true] {
+            let (mut s, t) = session(required());
+            login(&mut s);
+            let extra =
+                PackValue::Map(vec![("imp_user".into(), PackValue::String("admin".into()))]);
+            let request = if explicit {
+                Request::Begin { extra }
+            } else {
+                Request::Run {
+                    query: "RETURN 1".into(),
+                    params: empty(),
+                    extra,
+                }
+            };
+            assert!(matches!(s.handle(request)[0], Response::Failure { .. }));
+            assert!(!t.lock().unwrap().events.contains(&"begin"));
+        }
+    }
+    #[test]
+    fn logoff_ready_and_tx_ready_revoke_without_committing() {
+        for explicit in [false, true] {
+            let (mut s, t) = session(required());
+            login(&mut s);
+            if explicit {
+                s.handle(Request::Begin { extra: empty() });
+            }
+            assert!(matches!(s.handle(Request::Logoff)[0], Response::Success(_)));
+            assert_eq!(s.state(), State::Authentication);
+            let trace = t.lock().unwrap();
+            assert_eq!(trace.access.last(), Some(&AccessContext::Unauthenticated));
+            assert!(!trace.events.contains(&"commit"));
+        }
+    }
+
+    #[test]
+    fn explicit_run_impersonation_aborts_bound_transaction() {
+        let (mut s, t) = session(required());
+        login(&mut s);
+        s.handle(Request::Begin { extra: empty() });
+        assert!(matches!(
+            s.handle(Request::Run {
+                query: "RETURN 1".into(),
+                params: empty(),
+                extra: PackValue::Map(vec![("imp_user".into(), PackValue::Null)])
+            })[0],
+            Response::Failure { .. }
+        ));
+        assert_eq!(s.state(), State::Failed);
+        let trace = t.lock().unwrap();
+        assert!(trace.events.contains(&"abort"));
+        assert!(!trace.events.contains(&"run"));
     }
 }

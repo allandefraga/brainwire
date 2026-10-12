@@ -86,6 +86,7 @@ fn category(e: &ExecError) -> &'static str {
     match e {
         ExecError::Syntax(_) => "syntax",
         ExecError::Unsupported(_) => "unsupported",
+        ExecError::Forbidden(_) => "authorization",
         ExecError::Semantic(_) => "semantic",
         ExecError::ParameterMissing(_) => "parameter",
         ExecError::ConstraintViolation(_) => "constraint",

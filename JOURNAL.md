@@ -39,6 +39,62 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-12 — Protected Cypher, connection APIs and deployment profiles
+
+- **Requested:** one hour starting 13:26:17 UTC / 15:26:17 Europe/Amsterdam;
+  then explicit focus on Cypher, Docker Swarm, connection APIs and Kubernetes.
+  Finished at 2026-10-12 14:26:38 UTC, after the requested hour.
+  Worked in the standalone repository; kept everything local.
+- **Done:** strict optional high-entropy service-token policy loaded before bind,
+  per-session exact named-graph read/write grants, separate instance telemetry
+  permission and whole-AST Cypher authorization before execution/ID allocation.
+  LOGOFF/re-auth abort staged writes and discard results; RESET cannot restore
+  revoked identity. Unknown procedures/impersonation fail closed. Development
+  mode remains explicit, unprotected by default and warns at startup.
+- **Cypher/API:** lazy `coalesce(...)` with semantic/depth/memory validation;
+  shared strict credentials-file loading in Python and native probe/connected
+  ontology clients; private service-token generator. Real driver 5.28.6 and
+  6.3.0 acceptance covers graph selection, denied mutations, snapshot importer,
+  module/direct-script Customer import/resume, sparse analytics and explainable
+  ranking, token revocation after restart and offline index audit.
+- **Deployment:** optional Compose/Swarm/Kubernetes secret overlays, independent
+  read-only health identity and local manifest/render checks. Fresh Linux Docker
+  image passed real authenticated health, denial and 1,000 indexed writes. A
+  protected explicit transaction remained open at SIGKILL; recreation retained
+  confirmed records/old index and discarded its pending node/index changes.
+  Temporary owned containers/volume were removed. Swarm/Kubernetes protected
+  profiles were rendered only, with no target-cluster mutation.
+- **Measured:** protected 100K-node, four-reader/one-writer 900-second observation:
+  4,603,488 reads and 16,449 updates; identity/scalar-read p95 1.680/1.708ms,
+  update p95 5.272ms. Import 3.846s (~26,003 records/s); sampled RSS peak 91.75MiB.
+  Distinct synthetic 1KiB payloads, ID/email responses, disjoint reader/writer
+  keys, writer waits 50ms; unisolated Apple M5/32GiB host, 64/16/64MiB budgets.
+  One local observation, not certification or a before/after speedup. SIGKILL
+  after traffic preserved counts/latest acknowledged updates and index audit.
+- **Additional load:** separate 600-second run overlaps identity reads with the
+  writer's 200 hot records: 3,749,330 reads and 11,080 updates, hot identity p95
+  1.225ms, scalar read p95 1.260ms and update p95 2.043ms; sampled RSS 101.19MiB.
+  No request errors; post-traffic SIGKILL/latest-update/index audit passed. One
+  throttled writer; this is not multi-writer contention or a linearizability test.
+- **Verified:** 475 Rust workspace tests, all-target Clippy with warnings denied,
+  rustfmt; 16 Python helper/importer + 3 adapter tests, real driver/runtime and
+  profile checks. Four new protected Session+DbEngine tests exercise logout and
+  relogin during both transaction modes, with reservations returning to zero.
+  Astra advisory reviews found no blocking issue; main independently verified.
+- **Decided/limits:** service tokens are random machine credentials, not passwords,
+  JWT/JWKS or tenant/row ACLs. Native TLS, online policy reload and replication
+  remain absent; policy changes require restart. Secret mounts and orchestrator
+  scheduling do not encrypt Bolt or copy RocksDB writes. Preserve Observatory
+  layout; only connected credential handling changed. User `docs-site/` and
+  `.DS_Store` files remain untouched/uncommitted.
+- **Next step:** execute protected profiles in a separately authorized target
+  cluster and validate the chosen encrypted transport; then continue the
+  DuckLake pinned-snapshot consistency/source identity contract and bounded
+  importer bridge. Do not claim CDC, source deletes or machine-loss failover.
+- **Evidence:** [session report](docs/benchmarks/2026-10-12-auth.md),
+  [connection guide](docs/bolt-auth.md), [container guide](docs/protected-containers.md),
+  [updated beta security checklist](docs/beta-auth-checklist.md).
+
 ### 2026-10-10 — client snapshot adapter and recovery acceptance
 
 - **Requested:** 20 minutes of active work, starting 14:22:11 UTC / 16:22:11

@@ -16,7 +16,7 @@ fn children(e: &Expr) -> Vec<&Expr> {
     match e {
         Expr::Prop(e, _) | Expr::Count(e) | Expr::Size(e) | Expr::Not(e) => vec![e],
         Expr::Cmp(a, _, b) | Expr::And(a, b) | Expr::Or(a, b) => vec![a, b],
-        Expr::List(es) => es.iter().collect(),
+        Expr::List(es) | Expr::Coalesce(es) => es.iter().collect(),
         Expr::Map(es) => es.iter().map(|(_, e)| e).collect(),
         _ => vec![],
     }
@@ -26,11 +26,20 @@ pub(super) fn mentions(e: &Expr, var: Option<&str>) -> bool {
         || children(e).into_iter().any(|e| mentions(e, var))
 }
 fn expr(e: &Expr, scope: &Scope, ctx: &Context<'_, '_>, count: bool) -> Result<(), ExecError> {
+    expr_checked(e, scope, ctx, count, true)
+}
+fn expr_checked(
+    e: &Expr,
+    scope: &Scope,
+    ctx: &Context<'_, '_>,
+    count: bool,
+    evaluate: bool,
+) -> Result<(), ExecError> {
     match e {
         Expr::Var(v) if !scope.contains_key(v) => {
             return Err(semantic(format!("unknown variable {v}")))
         }
-        Expr::Param(p) if !ctx.params.contains_key(p) => {
+        Expr::Param(p) if evaluate && !ctx.params.contains_key(p) => {
             return Err(ExecError::ParameterMissing(p.clone()))
         }
         Expr::Count(_) | Expr::CountStar if !count => {
@@ -39,7 +48,17 @@ fn expr(e: &Expr, scope: &Scope, ctx: &Context<'_, '_>, count: bool) -> Result<(
         _ => {}
     }
     for child in children(e) {
-        expr(child, scope, ctx, false)?;
+        // Coalesce validates every name/shape, but runtime checks follow its lazy choice.
+        expr_checked(
+            child,
+            scope,
+            ctx,
+            false,
+            evaluate && !matches!(e, Expr::Coalesce(_)),
+        )?;
+    }
+    if !evaluate {
+        return Ok(());
     }
     match e {
         Expr::And(a, b) | Expr::Or(a, b) => {

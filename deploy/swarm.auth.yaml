@@ -1,0 +1,25 @@
+# Optional overlay for deploy/swarm.yaml; create both external secrets before deployment.
+# The health principal needs read access on the configured default database.
+version: "3.8"
+services:
+  brainwire:
+    environment:
+      BRAINWIRE_SERVER_AUTH_FILE: /run/secrets/brainwire-policy.json
+      BRAINWIRE_BOLT_AUTH_FILE: /run/secrets/brainwire-health-auth.json
+    secrets:
+      - source: brainwire-auth-policy
+        target: brainwire-policy.json
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: brainwire-health-auth
+        target: brainwire-health-auth.json
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+
+secrets:
+  brainwire-auth-policy:
+    external: true
+  brainwire-health-auth:
+    external: true

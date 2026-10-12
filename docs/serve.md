@@ -15,10 +15,11 @@ To use a separate data directory or port, set `BRAINWIRE_SERVER_DATA_DIR` and
 Container deployments must mount a retained volume at `server.data_dir` and
 set memory budgets appropriate to that container. The default listen address
 is loopback, so a container needs an explicit bind address such as
-`0.0.0.0:7687` plus network access controls. There is currently no
-authentication or TLS; expose this MVP only inside a trusted test network.
+`0.0.0.0:7687` plus network access controls. Authentication is optional; without
+`server.auth_file` the server runs unprotected. Native TLS remains unavailable;
+use a trusted/encrypted transport boundary for protected shared connections.
 
-Example using the Neo4j Python driver:
+Development-mode example using the Neo4j Python driver on isolated loopback:
 
 ```python
 from neo4j import GraphDatabase
@@ -81,3 +82,11 @@ reads a complete schema snapshot while this server is running. It uses the same
 `CALL db.schema()` procedure available to Python Bolt clients; `r` refreshes and
 failed refreshes retain an explicitly stale snapshot. See the
 [connected ontology guide](connected-ontology.md) for bounds and controls.
+
+## Optional protected connections
+
+Set `server.auth_file` / `BRAINWIRE_SERVER_AUTH_FILE` to a service-token policy
+path. Invalid configured policy fails before listening; no configured policy
+retains development mode with a startup warning. See [protected Bolt](bolt-auth.md)
+for graph/read/write grants, native/Python clients, restart-based rotation and
+transport limits. Authenticated containers use the [secret overlays](protected-containers.md).

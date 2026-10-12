@@ -31,6 +31,7 @@ pub struct ServerSection {
     pub default_database: String,
     pub max_message: ByteSize,
     pub query_timeout_ms: u64,
+    pub auth_file: Option<PathBuf>,
 }
 
 impl Default for ServerSection {
@@ -41,6 +42,7 @@ impl Default for ServerSection {
             default_database: "client_memory".to_string(),
             max_message: ByteSize(256 << 20),
             query_timeout_ms: 30_000,
+            auth_file: None,
         }
     }
 }
@@ -97,12 +99,13 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 8] = [
+pub(crate) const KEYS: [&str; 9] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
     "server.max_message",
     "server.query_timeout_ms",
+    "server.auth_file",
     "memory.cache",
     "memory.memtables",
     "memory.query",
@@ -149,6 +152,8 @@ struct FileServerSection {
     max_message: Option<ByteSize>,
     #[serde(default)]
     query_timeout_ms: Option<u64>,
+    #[serde(default)]
+    auth_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -215,6 +220,10 @@ fn apply_file(
         config.server.query_timeout_ms = v;
         sources.insert("server.query_timeout_ms", Source::File(path.to_path_buf()));
     }
+    if let Some(path_value) = file.server.auth_file {
+        config.server.auth_file = Some(auth_file_path(path_value)?);
+        sources.insert("server.auth_file", Source::File(path.to_path_buf()));
+    }
     if let Some(v) = file.memory.cache {
         config.memory.cache = v;
         sources.insert("memory.cache", Source::File(path.to_path_buf()));
@@ -272,6 +281,12 @@ fn apply_env(
         sources.insert("server.query_timeout_ms", Source::Env(var));
     }
 
+    let var = env_var_name("server.auth_file");
+    if let Some(value) = env.get(&var) {
+        config.server.auth_file = Some(auth_file_path(PathBuf::from(value))?);
+        sources.insert("server.auth_file", Source::Env(var));
+    }
+
     let var = env_var_name("memory.cache");
     if let Some(v) = env.get(&var) {
         config.memory.cache = parse_byte_size(v, "memory.cache")?;
@@ -291,6 +306,16 @@ fn apply_env(
     }
 
     Ok(())
+}
+
+fn auth_file_path(path: PathBuf) -> Result<PathBuf, ConfigError> {
+    if path.to_string_lossy().trim().is_empty() {
+        return Err(ConfigError::BadValue {
+            key: "server.auth_file".into(),
+            message: "must be a nonblank path; omit the setting for local development mode".into(),
+        });
+    }
+    Ok(path)
 }
 
 fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
@@ -364,6 +389,9 @@ pub fn default_file() -> String {
          # Cooperative per-RUN deadline; storage calls and commit can overrun.\n\
          query_timeout_ms = {query_timeout_ms}\n\
          \n\
+         # Optional protected Bolt policy; omit for local development mode.\n\
+         # auth_file = \"/run/secrets/brainwire-policy.json\"\n\
+         \n\
          [memory]\n\
          # RocksDB block cache. The memtables below are charged inside it.\n\
          cache = \"{cache}\"\n\
@@ -410,6 +438,12 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.default_database" => config.server.default_database.clone(),
         "server.max_message" => config.server.max_message.to_string(),
         "server.query_timeout_ms" => config.server.query_timeout_ms.to_string(),
+        "server.auth_file" => config
+            .server
+            .auth_file
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unset>".into()),
         "memory.cache" => config.memory.cache.to_string(),
         "memory.memtables" => config.memory.memtables.to_string(),
         "memory.query" => config.memory.query.to_string(),
@@ -435,6 +469,56 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn auth_file_defaults_unset_and_reports_path_provenance() {
+        let loaded = load(None, &env(&[])).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.auth_file"
+                && value == "<unset>"
+                && source == "default"));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brainwire.toml");
+        std::fs::write(&path, "[server]\nauth_file='/run/secrets/policy.json'\n").unwrap();
+        let loaded = load(Some(&path), &env(&[])).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.auth_file"
+                && value == "/run/secrets/policy.json"
+                && source.starts_with("file ")));
+        let loaded = load(
+            Some(&path),
+            &env(&[("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/override.json")]),
+        )
+        .unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.auth_file"
+                && value == "/run/secrets/override.json"
+                && source == "env BRAINWIRE_SERVER_AUTH_FILE"));
+    }
+
+    #[test]
+    fn auth_file_rejects_explicit_blank_paths_in_file_and_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brainwire.toml");
+        for blank in ["", " ", "\t"] {
+            let error = load(None, &env(&[("BRAINWIRE_SERVER_AUTH_FILE", blank)])).unwrap_err();
+            assert!(error.to_string().contains("server.auth_file"));
+            std::fs::write(&path, format!("[server]\nauth_file={blank:?}\n")).unwrap();
+            let error = load(Some(&path), &env(&[])).unwrap_err();
+            assert!(error.to_string().contains("auth_file"));
+            // An invalid explicit file setting is never silently overridden into access.
+            assert!(load(
+                Some(&path),
+                &env(&[("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json")])
+            )
+            .is_err());
+        }
+        std::fs::write(&path, "[server]\nauth_file='/run/secrets/policy.json'\n").unwrap();
+        assert!(load(Some(&path), &env(&[("BRAINWIRE_SERVER_AUTH_FILE", "")])).is_err());
     }
 
     #[test]
@@ -635,6 +719,7 @@ mod tests {
                 ("BRAINWIRE_SERVER_DEFAULT_DATABASE", "other_db"),
                 ("BRAINWIRE_SERVER_MAX_MESSAGE", "512MiB"),
                 ("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS", "1250"),
+                ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
                 ("BRAINWIRE_MEMORY_QUERY", "128MiB"),
@@ -649,6 +734,10 @@ mod tests {
         assert_eq!(loaded.config.server.default_database, "other_db");
         assert_eq!(loaded.config.server.max_message.0, 512 << 20);
         assert_eq!(loaded.config.server.query_timeout_ms, 1250);
+        assert_eq!(
+            loaded.config.server.auth_file.as_deref(),
+            Some(Path::new("/run/secrets/policy.json"))
+        );
         assert_eq!(loaded.config.memory.cache.0, 1 << 30);
         assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
         assert_eq!(loaded.config.memory.query.0, 128 << 20);

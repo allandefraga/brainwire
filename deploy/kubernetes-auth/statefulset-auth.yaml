@@ -1,0 +1,32 @@
+# Create Secret brainwire-auth with policy.json and health.json before applying this overlay.
+# The health principal needs read access on the configured default database.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: brainwire
+spec:
+  template:
+    spec:
+      containers:
+        - name: brainwire
+          env:
+            - name: BRAINWIRE_SERVER_AUTH_FILE
+              value: /run/secrets/brainwire-policy.json
+            - name: BRAINWIRE_BOLT_AUTH_FILE
+              value: /run/secrets/brainwire-health-auth.json
+          volumeMounts:
+            - name: auth
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: auth
+          secret:
+            secretName: brainwire-auth
+            optional: false
+            # The base StatefulSet's fsGroup 10001 makes these group-readable to Brainwire.
+            defaultMode: 0440
+            items:
+              - key: policy.json
+                path: brainwire-policy.json
+              - key: health.json
+                path: brainwire-health-auth.json

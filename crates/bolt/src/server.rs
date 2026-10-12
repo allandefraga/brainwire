@@ -45,6 +45,21 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    serve_with_auth_and_limit(listener, make_engine, max_message_bytes, AuthMode::AllowAll).await
+}
+
+/// Serve with an explicit authentication policy. Protected engines must accept
+/// authenticated access contexts; this transport does not provide native TLS.
+pub async fn serve_with_auth_and_limit<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    max_message_bytes: usize,
+    auth: AuthMode,
+) -> std::io::Result<()>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
     let make_engine = Arc::new(make_engine);
     let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
     loop {
@@ -73,9 +88,10 @@ where
             continue;
         };
         let make = Arc::clone(&make_engine);
+        let auth = auth.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = handle_connection(stream, make(), max_message_bytes).await;
+            let _ = handle_connection(stream, make(), max_message_bytes, auth).await;
         });
     }
 }
@@ -118,6 +134,7 @@ async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + Async
     mut stream: S,
     engine: E,
     max_message_bytes: usize,
+    auth: AuthMode,
 ) -> std::io::Result<()> {
     let mut hello = [0u8; 20];
     stream.read_exact(&mut hello).await?;
@@ -130,7 +147,7 @@ async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + Async
     if version.is_none() {
         return Ok(());
     }
-    let mut session = Session::new(engine, AuthMode::AllowAll);
+    let mut session = Session::new(engine, auth);
     let mut reader = ChunkReader::default();
     let mut buf = vec![0u8; 64 * 1024];
     let mut pending = 0usize;
@@ -497,6 +514,7 @@ mod tests {
                 server,
                 CleanupEngine(aborted.clone()),
                 64,
+                AuthMode::AllowAll,
             ));
             login_and_begin(&mut client).await;
             if oversized {
@@ -526,7 +544,9 @@ mod tests {
         let engine = CleanupEngine(aborted.clone());
         let task = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            handle_connection(stream, engine, 1024).await.unwrap();
+            handle_connection(stream, engine, 1024, AuthMode::AllowAll)
+                .await
+                .unwrap();
         });
         let mut client = TcpStream::connect(address).await.unwrap();
         login_and_begin(&mut client).await;
@@ -535,5 +555,98 @@ mod tests {
             .await
             .unwrap();
         task.await.unwrap();
+    }
+    struct AuthEngine(Arc<std::sync::Mutex<Vec<crate::auth::AccessContext>>>);
+    impl QueryEngine for AuthEngine {
+        fn set_access(
+            &mut self,
+            access: crate::auth::AccessContext,
+        ) -> Result<(), crate::session::EngineError> {
+            self.0.lock().unwrap().push(access);
+            Ok(())
+        }
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            unreachable!()
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn protected_listener_applies_policy_to_each_connection() {
+        use crate::auth::{AccessContext, AuthPolicy, GraphAccess};
+        let policy=AuthPolicy::from_json(br#"{"principals":[{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"tickets":"read"},"instance_admin":false}]}"#).unwrap();
+        let access = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = access.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_with_auth_and_limit(
+            listener,
+            move || AuthEngine(received.clone()),
+            1024,
+            AuthMode::Required(Arc::new(policy)),
+        ));
+        for valid in [false, true] {
+            let mut client = TcpStream::connect(address).await.unwrap();
+            handshake(&mut client).await;
+            send_request(&mut client, 0x01, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+            let auth = if valid {
+                PackValue::Map(vec![
+                    ("scheme".into(), PackValue::String("basic".into())),
+                    ("principal".into(), PackValue::String("reader".into())),
+                    (
+                        "credentials".into(),
+                        PackValue::String(
+                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                                .into(),
+                        ),
+                    ),
+                ])
+            } else {
+                PackValue::Map(vec![])
+            };
+            send_request(&mut client, 0x6a, vec![auth]).await;
+            if valid {
+                read_success(&mut client).await;
+                send_request(&mut client, 0x02, vec![]).await;
+            }
+            let mut out = Vec::new();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                client.read_to_end(&mut out),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            if valid {
+                assert!(out.is_empty());
+            } else {
+                assert_eq!(
+                    decode_failure(&out).0,
+                    "Neo.ClientError.Security.Unauthorized"
+                );
+            }
+        }
+        server.abort();
+        let _ = server.await;
+        let access = access.lock().unwrap();
+        assert_eq!(access.len(), 2);
+        assert_eq!(access[0], AccessContext::Unauthenticated);
+        assert!(
+            matches!(&access[1],AccessContext::Authenticated(p) if p.id=="reader" && p.graphs.get("tickets")==Some(&GraphAccess::Read))
+        );
     }
 }

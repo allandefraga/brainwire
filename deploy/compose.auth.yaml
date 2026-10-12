@@ -1,0 +1,20 @@
+# Optional overlay: docker compose -f deploy/compose.yaml -f deploy/compose.auth.yaml config
+# Set both file paths before rendering or starting this profile. No credentials belong in YAML.
+# Compose file-backed secrets retain host permissions; files must be readable by UID 10001.
+# The health principal needs read access on the configured default database.
+services:
+  brainwire:
+    environment:
+      BRAINWIRE_SERVER_AUTH_FILE: /run/secrets/brainwire-policy.json
+      BRAINWIRE_BOLT_AUTH_FILE: /run/secrets/brainwire-health-auth.json
+    secrets:
+      - source: brainwire-auth-policy
+        target: brainwire-policy.json
+      - source: brainwire-health-auth
+        target: brainwire-health-auth.json
+
+secrets:
+  brainwire-auth-policy:
+    file: ${BRAINWIRE_AUTH_POLICY_FILE:?Set the protected server policy JSON file path}
+  brainwire-health-auth:
+    file: ${BRAINWIRE_HEALTH_AUTH_FILE:?Set the health principal client JSON file path}

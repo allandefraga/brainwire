@@ -45,9 +45,10 @@ prior uncommitted writes in the same transaction.
 Ingestion supplies and normalizes these properties. `freshness` does not decay
 automatically, `usage` is not a raw count, and certification is a stored flag,
 not a verified approval workflow. Higher scores do not establish factual truth.
-The server currently has no authentication or per-source ACL; `domain` is an
-exact-match relevance filter, **not access control**. Do not expose this as a
-permission-aware knowledge assistant until authorization is implemented.
+The server supports optional [named-graph service-token grants](bolt-auth.md),
+but no per-source ACL. `domain` is an exact-match relevance filter, **not access
+control**. A reader can rank all sources in its allowed graph; use separate graphs
+when records require separate permissions. Native TLS remains pending.
 
 ## Query and resource contract
 
@@ -79,4 +80,5 @@ permission-aware knowledge assistant until authorization is implemented.
 directed edges. `knowledge.rank` evaluates explicit source evidence. Neither
 automatically proves truth, and this first source-ranking policy does not combine
 the two. Automatic provenance extraction, learned weights, usage collection,
-time decay and permission-aware ranking remain future work.
+time decay and per-source permission-aware ranking remain future work.
+Optional named-graph grants already apply to the procedure.

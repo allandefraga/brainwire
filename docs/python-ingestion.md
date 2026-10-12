@@ -7,6 +7,11 @@ compatibility. A [synthetic client ticket/comment snapshot adapter](client-shado
 now reuses the same importer; direct DuckLake reading and a production mapping
 remain separate integration tasks.
 
+Protected servers use `BRAINWIRE_BOLT_AUTH_FILE` with the shared
+[service-token connection contract](bolt-auth.md); absent credentials retain
+isolated development compatibility. Driver 5.28.6 and 6.3.0 pass the protected
+connection/importer acceptance.
+
 ## Run the example
 
 From the repository root, with the server stopped:
@@ -45,7 +50,9 @@ with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
         print(records.single()["c"])
 ```
 
-The example uses a trusted local server with no authentication/TLS. Different
+The example uses unprotected development mode on trusted loopback. Use the
+[credentials-file connection](bolt-auth.md) for a protected service; native TLS
+remains pending. Different
 session database names select separate graphs. They share process cache and
 write-buffer resources, but have independent RocksDB directories and catalogs.
 

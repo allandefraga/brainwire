@@ -1,0 +1,159 @@
+# Protected Bolt service connections
+
+The beta can require random service tokens and graph-scoped read/write grants.
+This is not the planned human-password/Argon2 or JWT/JWKS authentication, row/field
+ACLs, user management, online graph administration or native encrypted transport.
+A principal with read access can see the complete allowed graph, including every
+stored tenant. Source-qualified IDs alone do not isolate tenants within a graph.
+
+## Create and run a protected local graph
+
+From the repository root, select fresh local paths and an unused loopback port:
+
+```sh
+python3 -m examples.python.create_service_tokens /tmp/brainwire-auth --graph tickets
+export BRAINWIRE_SERVER_DATA_DIR=/tmp/brainwire-protected-data
+export BRAINWIRE_SERVER_DEFAULT_DATABASE=tickets
+export BRAINWIRE_SERVER_LISTEN=127.0.0.1:17687
+export BRAINWIRE_SERVER_AUTH_FILE=/tmp/brainwire-auth/policy.json
+export BRAINWIRE_MEMORY_CACHE=64MiB
+export BRAINWIRE_MEMORY_MEMTABLES=16MiB
+export BRAINWIRE_MEMORY_QUERY=64MiB
+./target/release/brainwire db create tickets --ontology examples/client/ontology.json
+./target/release/brainwire serve
+```
+
+The generator creates a private directory and files, never prints tokens and
+refuses an existing directory. It grants `writer` write/read access and `reader`
+and `health` read access, all to exactly the named graph. No instance-admin grant
+is generated. Store real credential files outside the repository and protect them
+with OS/secret-store access controls. A partial filesystem failure leaves a partial
+directory; fix permissions and use a new path, rather than overwriting tokens.
+
+`server.auth_file` is also a TOML option. It contains a **path**, not credentials.
+Absent auth_file retains development mode with a startup warning. An explicitly
+empty path, missing/unreadable file, malformed/empty policy or invalid grant fails
+startup; it never falls back to development mode. The policy is read before bind.
+
+## Python, health checks and connected ontology
+
+All updated Python examples and native Bolt clients share the credentials-file
+format. Tokens stay out of argv and output:
+
+```sh
+export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/writer.json
+python3 -m examples.client.generate_fixture /tmp/brainwire-protected-tickets.jsonl --tickets 10000
+uv run --no-project --with neo4j==6.3.0 python -m examples.client.ingest_snapshot \
+  /tmp/brainwire-protected-tickets.jsonl --database tickets --uri bolt://127.0.0.1:17687 \
+  --source-id synthetic-snapshot-001
+
+export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/reader.json
+./target/release/brainwire shell --connect 127.0.0.1:17687 --graph tickets --view ontology
+
+export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/health.json
+./target/release/brainwire probe --address 127.0.0.1:17687 --mode ready
+```
+
+Programmatic Python connection from the repository root:
+
+```python
+from neo4j import GraphDatabase
+from examples.python.connection import auth_from_env
+from examples.client.ingest_snapshot import identity
+
+with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env()) as driver:
+    with driver.session(database="tickets") as session:
+        record = session.run(
+            "MATCH (t:Ticket {entity_id:$id}) "
+            "RETURN t.subject, coalesce(t.priority,'normal') AS priority",
+            id=identity("tenant-0", "zendesk-main", "ticket", "0"),
+        ).single()
+```
+
+Without the environment variable, the examples retain auth=None for isolated
+unprotected development servers. A configured invalid client file fails instead
+of silently making an anonymous connection. The native `live` probe completes
+handshake/login; `ready` also reads through the default graph, which must be in
+the health principal's grants. The connected TUI uses the existing ontology
+snapshot path; it does not gain a query/job editor or new visual identity.
+
+## Connection API contract
+
+Use a direct `bolt://host:port` Python connection. The server does not implement
+Neo4j routing discovery (`neo4j://`), TLS schemes, a Redis protocol or an HTTP
+query endpoint. Graph selection belongs to `driver.session(database="name")`;
+Cypher statements do not choose another graph inside an active transaction.
+A transaction spans one named graph and is not a cross-graph atomic transaction.
+
+Reuse a driver rather than create a new connection pool for every row. Sessions
+and transactions must be closed after use; use context managers as in the examples.
+Each session needs its own ownership when clients run concurrently. The existing
+bounded importer sends parameterized batches and commits each batch independently;
+use its immutable-source/checkpoint variant when restart-safe resume is required.
+Retries of identity MERGE + authoritative SET are replay-safe under that contract;
+arbitrary increments and external side effects are not automatically safe.
+
+| Surface | Credentials and graph selection | Current operation |
+| --- | --- | --- |
+| Python driver | `auth_from_env()`, explicit session database | Supported Cypher reads/writes/procedures and transactions |
+| Public import scripts | Same environment/file, `--database` | Bounded Customer or client snapshot import/resume |
+| Native connected TUI | Same environment/file, `--graph` | Real ontology inspection/refresh |
+| Native probe `live` | Same environment/file | Negotiation and login only |
+| Native probe `ready` | Same environment/file, configured default graph grant | Login plus a read query |
+| Offline CLI | Filesystem authority, local path/named store | Local administration/query/checkpoint; separate from network grants |
+
+The connected TUI currently takes a numeric IP:port, while the Python driver's
+URI can resolve a hostname. Native clients share authentication, not every driver
+feature. Use the documented Python API for connected queries; the TUI does not
+yet execute them. Durable store commit IDs are not restart-stable Bolt bookmarks.
+
+## Policy contract and enforcement
+
+A client file has exactly `principal` and `credentials`. The token is 64 ASCII
+hex characters, generated from 32 random bytes. Policy JSON contains `principals`,
+with each entry specifying `id`, `token_sha256`, `graphs`, and `instance_admin`.
+The verifier is SHA-256 of the **exact ASCII token string**, not its decoded hex
+bytes; uppercase/lowercase token text differs. Verifier comparison uses
+`subtle::ConstantTimeEq`; principal lookup is not claimed constant-time.
+
+Policies are bounded to 1MiB and 1–64 unique principals. Names use 1–128 ASCII
+letters/digits/underscores/hyphens. Graph grants are a nonempty exact-name map
+with `read` or `write`; no wildcard. Unknown/duplicate fields and malformed
+verifiers are rejected. Client files are bounded to 64KiB. Credential-bearing
+request diagnostics are redacted; policy/verifier/client types do not expose
+secrets through Debug. Files remain sensitive even when they contain verifiers.
+
+Both implicit RUN and explicit BEGIN authorize the effective graph, including
+an omitted database selecting the configured default. Unauthorized graph names
+fail before store lookup. Transactions remain bound to their selected graph.
+The whole parsed Cypher query is checked before execution/ID allocation; read
+scope denies CREATE, MERGE, SET and DETACH DELETE, even behind UNWIND or MATCH.
+A denied RUN discards earlier writes in the same explicit transaction.
+
+Read scope permits the current graph-local schema, index, commit-state, analytics
+and knowledge-rank procedures. Unknown procedures fail closed. `CALL db.memory`
+requires explicit `instance_admin: true`, since its pool telemetry spans graphs;
+that flag still does not grant access to unnamed graphs or online admin commands.
+Local offline CLI/file access retains its separate OS authority.
+
+LOGOFF discards pending writes and queued results before revoking identity;
+RESET cannot restore a revoked login. Invalid or misplaced LOGON closes the
+connection. Impersonation metadata is unsupported and rejected. Token rotation
+and permission changes require replacing the policy **and restarting the server**;
+existing sessions do not hot-reload revocations. Update client secrets coherently.
+Python helpers read credentials when constructing a driver; recreate the driver
+or restart its process after changing the client file. Existing Python pools do
+not automatically reread it. Native probes load the file for each connection,
+and a connected TUI refresh opens a new connection.
+
+## Transport and acceptance boundary
+
+Native clients and this server currently use cleartext Bolt. Use isolated
+loopback or a trusted encrypted tunnel/network boundary; tokens and query data
+must not traverse an untrusted link. Mounted secrets do not provide TLS. The
+protected Docker/Swarm/Kubernetes profiles are single-instance configurations,
+not replication or failover; see [protected containers](protected-containers.md).
+
+[Recorded acceptance](benchmarks/2026-10-12-auth.md) separates driver/native,
+Docker runtime, manifest rendering and mixed-load evidence. These checks do not
+certify the full product or production readiness.

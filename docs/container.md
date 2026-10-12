@@ -5,7 +5,9 @@ single-writer templates and their local validation commands.
 
 The local image packages the **single-node** Bolt server. It is a test
 deployment step toward Kubernetes and Docker Swarm; it does not implement
-replication, failover, authentication or TLS. Use it only on a trusted test
+replication, failover or TLS. Its base profile is unprotected; optional
+[service-token overlays](protected-containers.md) provide named-graph grants.
+Use it only on a trusted/encrypted test
 network. See [server limits](serve.md).
 
 Build and initialize a named Docker volume:

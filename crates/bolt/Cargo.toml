@@ -8,10 +8,13 @@ publish.workspace = true
 [dependencies]
 thiserror.workspace = true
 tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
 
 [dev-dependencies]
 brainwire-core = { path = "../core" }
 brainwire-cypher = { path = "../cypher" }
 brainwire-store = { path = "../store" }
 tempfile.workspace = true
-serde_json.workspace = true

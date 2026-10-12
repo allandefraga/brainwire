@@ -4,16 +4,19 @@ use std::collections::BTreeMap;
 use std::sync::{mpsc, Arc};
 use std::thread;
 
+use brainwire_bolt::auth::{AccessContext, GraphAccess};
 use brainwire_bolt::packstream::PackValue;
 use brainwire_bolt::session::{EngineError, QueryEngine, QueryResult};
 use brainwire_core::value::Value;
-use brainwire_cypher::{ExecError, Out, QueryOutput, QueryTransaction};
+use brainwire_cypher::{ExecError, Out, QueryAccess, QueryOutput, QueryTransaction};
 
 use crate::databases::Databases;
 
 enum Command {
+    SetAccess(AccessContext, mpsc::Sender<Result<(), EngineError>>),
     Begin(Option<String>, mpsc::Sender<Result<(), EngineError>>),
     Run(
+        Option<String>,
         String,
         PackValue,
         mpsc::Sender<Result<QueryResult, EngineError>>,
@@ -30,10 +33,25 @@ pub struct DbEngine {
 
 impl DbEngine {
     pub fn new(databases: Arc<Databases>, default_database: String) -> Result<Self, String> {
+        Self::with_access(databases, default_database, AccessContext::Unrestricted)
+    }
+
+    pub fn new_protected(
+        databases: Arc<Databases>,
+        default_database: String,
+    ) -> Result<Self, String> {
+        Self::with_access(databases, default_database, AccessContext::Unauthenticated)
+    }
+
+    fn with_access(
+        databases: Arc<Databases>,
+        default_database: String,
+        access: AccessContext,
+    ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("brainwire-query".into())
-            .spawn(move || worker(receiver, databases, default_database))
+            .spawn(move || worker(receiver, databases, default_database, access))
             .map_err(|e| format!("cannot start query worker: {e}"))?;
         Ok(Self { sender })
     }
@@ -51,17 +69,28 @@ impl DbEngine {
 }
 
 impl QueryEngine for DbEngine {
+    fn set_access(&mut self, access: AccessContext) -> Result<(), EngineError> {
+        self.ask(|reply| Command::SetAccess(access, reply))
+    }
+
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
         self.ask(|reply| Command::Begin(db.map(str::to_owned), reply))
     }
 
     fn run(
         &mut self,
-        _db: Option<&str>,
+        db: Option<&str>,
         query: &str,
         params: &PackValue,
     ) -> Result<QueryResult, EngineError> {
-        self.ask(|reply| Command::Run(query.to_owned(), params.clone(), reply))
+        self.ask(|reply| {
+            Command::Run(
+                db.map(str::to_owned),
+                query.to_owned(),
+                params.clone(),
+                reply,
+            )
+        })
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
@@ -73,6 +102,24 @@ impl QueryEngine for DbEngine {
     }
 }
 
+fn forbidden() -> EngineError {
+    error("Neo.ClientError.Security.Forbidden", "access denied")
+}
+
+fn graph_access(access: &AccessContext, graph: &str) -> Result<QueryAccess, EngineError> {
+    match access {
+        AccessContext::Unrestricted => Ok(QueryAccess::UNRESTRICTED),
+        AccessContext::Unauthenticated => Err(forbidden()),
+        AccessContext::Authenticated(principal) => {
+            let grant = principal.graphs.get(graph).ok_or_else(forbidden)?;
+            Ok(QueryAccess {
+                write: matches!(grant, GraphAccess::Write),
+                instance_admin: principal.instance_admin,
+            })
+        }
+    }
+}
+
 fn worker_error() -> EngineError {
     error(
         "Neo.DatabaseError.General.UnknownError",
@@ -80,11 +127,27 @@ fn worker_error() -> EngineError {
     )
 }
 
-fn worker(receiver: mpsc::Receiver<Command>, databases: Arc<Databases>, default_database: String) {
+fn worker(
+    receiver: mpsc::Receiver<Command>,
+    databases: Arc<Databases>,
+    default_database: String,
+    mut access: AccessContext,
+) {
     while let Ok(command) = receiver.recv() {
         match command {
+            Command::SetAccess(next, reply) => {
+                access = next;
+                let _ = reply.send(Ok(()));
+            }
             Command::Begin(name, reply) => {
                 let name = name.as_deref().unwrap_or(&default_database);
+                let query_access = match graph_access(&access, name) {
+                    Ok(access) => access,
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
+                };
                 let Some(database) = databases.get(name) else {
                     let _ = reply.send(Err(error(
                         "Neo.ClientError.Database.DatabaseNotFound",
@@ -106,10 +169,26 @@ fn worker(receiver: mpsc::Receiver<Command>, databases: Arc<Databases>, default_
                 let _ = reply.send(Ok(()));
                 while let Ok(command) = receiver.recv() {
                     match command {
-                        Command::Run(query, params, reply) => {
+                        Command::SetAccess(next, reply) => {
+                            transaction.rollback();
+                            access = next;
+                            let _ = reply.send(Ok(()));
+                            break;
+                        }
+                        Command::Run(requested, query, params, reply) => {
+                            if requested
+                                .as_deref()
+                                .is_some_and(|requested| requested != name)
+                            {
+                                transaction.rollback();
+                                let _ = reply.send(Err(forbidden()));
+                                continue;
+                            }
                             let result = params_from_pack(&params)
                                 .and_then(|params| {
-                                    transaction.run(&query, &params).map_err(execution_error)
+                                    transaction
+                                        .run_with_access(&query, &params, query_access)
+                                        .map_err(execution_error)
                                 })
                                 .and_then(output_to_bolt);
                             // Conversion errors happen outside QueryTransaction::run;
@@ -142,7 +221,7 @@ fn worker(receiver: mpsc::Receiver<Command>, databases: Arc<Databases>, default_
             Command::Abort(reply) => {
                 let _ = reply.send(Ok(()));
             }
-            Command::Run(_, _, reply) => {
+            Command::Run(_, _, _, reply) => {
                 let _ = reply.send(Err(error(
                     "Neo.ClientError.Transaction.TransactionNotFound",
                     "no active transaction",
@@ -275,6 +354,7 @@ fn output_to_bolt(output: QueryOutput) -> Result<QueryResult, EngineError> {
 fn error_code(error: &ExecError) -> &'static str {
     match error {
         ExecError::Syntax(_) | ExecError::Unsupported(_) => "Neo.ClientError.Statement.SyntaxError",
+        ExecError::Forbidden(_) => "Neo.ClientError.Security.Forbidden",
         ExecError::Semantic(_) => "Neo.ClientError.Statement.SemanticError",
         ExecError::ParameterMissing(_) => "Neo.ClientError.Statement.ParameterMissing",
         ExecError::ConstraintViolation(_) => "Neo.ClientError.Schema.ConstraintValidationFailed",
@@ -466,6 +546,347 @@ mod tests {
         b.run(None, "RETURN $text", &params).unwrap();
         b.commit().unwrap();
         assert_eq!(dbs.query_pool().usage().reserved_bytes, 0);
+    }
+
+    fn scoped_engine_fixture() -> (tempfile::TempDir, Arc<Databases>, DbEngine) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = directory.path().join("data");
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        let databases = Arc::new(Databases::open_all(&config).unwrap());
+        databases.create("other").unwrap();
+        let mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        databases
+            .get("client_memory")
+            .unwrap()
+            .apply_ontology(&mapping)
+            .unwrap();
+        let engine =
+            DbEngine::new_protected(Arc::clone(&databases), "client_memory".into()).unwrap();
+        (directory, databases, engine)
+    }
+
+    fn grant(graph: &str, access: GraphAccess) -> AccessContext {
+        AccessContext::Authenticated(brainwire_bolt::auth::Principal {
+            id: "synthetic-client".into(),
+            graphs: BTreeMap::from([(graph.into(), access)]),
+            instance_admin: false,
+        })
+    }
+
+    #[test]
+    fn protected_engine_checks_default_and_explicit_graph_before_lookup() {
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        for name in [None, Some("other"), Some("missing")] {
+            assert_eq!(
+                engine.begin(name).unwrap_err().code,
+                "Neo.ClientError.Security.Forbidden"
+            );
+        }
+        engine
+            .set_access(grant("other", GraphAccess::Read))
+            .unwrap();
+        assert_eq!(
+            engine.begin(None).unwrap_err().code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        engine.begin(Some("other")).unwrap();
+        assert_eq!(
+            engine
+                .run(None, "RETURN 1", &PackValue::Map(vec![]))
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::Int(1)]]
+        );
+        engine.commit().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        engine.set_access(AccessContext::Unauthenticated).unwrap();
+        assert_eq!(
+            engine.begin(Some("other")).unwrap_err().code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+    }
+
+    #[test]
+    fn graph_reader_cannot_mutate_and_writer_cannot_read_instance_telemetry() {
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        let empty = PackValue::Map(vec![]);
+        engine
+            .set_access(grant("client_memory", GraphAccess::Read))
+            .unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "CALL db.schema() YIELD version RETURN version",
+                &empty,
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .run(None, "MERGE (c:Customer {entity_id:'denied'})", &empty)
+                .err()
+                .unwrap()
+                .code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        assert!(engine.commit().is_err());
+        engine.abort().unwrap();
+        let db = databases.get("client_memory").unwrap();
+        assert_eq!(db.stats().unwrap().nodes, 0);
+        engine
+            .set_access(grant("client_memory", GraphAccess::Write))
+            .unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(None, "CREATE (c:Customer {entity_id:'pending'})", &empty)
+            .unwrap();
+        assert_eq!(
+            engine
+                .run(
+                    None,
+                    "CALL db.memory() YIELD poolLimitBytes RETURN poolLimitBytes",
+                    &empty
+                )
+                .err()
+                .unwrap()
+                .code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        assert!(engine.commit().is_err());
+        engine.abort().unwrap();
+        assert_eq!(db.stats().unwrap().nodes, 0);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn privilege_change_and_graph_switch_discard_pending_writes() {
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        let empty = PackValue::Map(vec![]);
+        let db = databases.get("client_memory").unwrap();
+        for change_principal in [true, false] {
+            engine
+                .set_access(grant("client_memory", GraphAccess::Write))
+                .unwrap();
+            engine.begin(None).unwrap();
+            engine
+                .run(None, "CREATE (c:Customer {entity_id:'pending'})", &empty)
+                .unwrap();
+            if change_principal {
+                engine.set_access(AccessContext::Unauthenticated).unwrap();
+            } else {
+                assert_eq!(
+                    engine
+                        .run(Some("other"), "RETURN 1", &empty)
+                        .err()
+                        .unwrap()
+                        .code,
+                    "Neo.ClientError.Security.Forbidden"
+                );
+            }
+            assert!(engine.commit().is_err());
+            engine.abort().unwrap();
+            assert_eq!(db.stats().unwrap().nodes, 0);
+            assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        }
+    }
+
+    fn service_credentials(principal: &str) -> PackValue {
+        PackValue::Map(vec![
+            ("scheme".into(), PackValue::String("basic".into())),
+            ("principal".into(), PackValue::String(principal.into())),
+            (
+                "credentials".into(),
+                PackValue::String(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+                ),
+            ),
+        ])
+    }
+
+    fn protected_session(engine: DbEngine) -> Session<DbEngine> {
+        let policy = brainwire_bolt::auth::AuthPolicy::from_json(br#"{"principals":[{"id":"writer","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"client_memory":"write"},"instance_admin":false},{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"client_memory":"read"},"instance_admin":false}]}"#).unwrap();
+        let mut session = Session::new(engine, AuthMode::Required(Arc::new(policy)));
+        session.handle(Request::Hello {
+            extra: PackValue::Map(vec![]),
+        });
+        assert!(matches!(
+            session.handle(Request::Logon {
+                auth: service_credentials("writer")
+            })[0],
+            Response::Success(_)
+        ));
+        session
+    }
+
+    fn stage_session_write(session: &mut Session<DbEngine>, databases: &Databases, explicit: bool) {
+        let empty = PackValue::Map(vec![]);
+        if explicit {
+            assert!(matches!(
+                session.handle(Request::Begin {
+                    extra: empty.clone()
+                })[0],
+                Response::Success(_)
+            ));
+        }
+        let result = session.handle(Request::Run {
+            query: "CREATE (c:Customer {entity_id:'pending-auth'}) RETURN 'pending-row'".into(),
+            params: empty.clone(),
+            extra: empty,
+        });
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], Response::Success(_)));
+        assert_eq!(
+            session.state(),
+            if explicit {
+                brainwire_bolt::session::State::TxStreaming
+            } else {
+                brainwire_bolt::session::State::Streaming
+            }
+        );
+        assert!(databases.query_pool().usage().reserved_bytes > 0);
+        assert_eq!(
+            databases
+                .get("client_memory")
+                .unwrap()
+                .stats()
+                .unwrap()
+                .nodes,
+            0
+        );
+    }
+
+    fn assert_session_write_discarded(databases: &Databases) {
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert_eq!(
+            databases
+                .get("client_memory")
+                .unwrap()
+                .stats()
+                .unwrap()
+                .nodes,
+            0
+        );
+    }
+
+    fn check_protected_logoff(explicit: bool) {
+        let (_directory, databases, engine) = scoped_engine_fixture();
+        let mut session = protected_session(engine);
+        stage_session_write(&mut session, &databases, explicit);
+        let result = session.handle(Request::Logoff);
+        assert_eq!(result, vec![Response::Success(vec![])]);
+        assert_eq!(
+            session.state(),
+            brainwire_bolt::session::State::Authentication
+        );
+        assert_session_write_discarded(&databases);
+
+        assert!(matches!(
+            session.handle(Request::Logon {
+                auth: service_credentials("reader")
+            })[0],
+            Response::Success(_)
+        ));
+        // A new identity cannot fetch the old identity's unconsumed result.
+        let result = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![]),
+        });
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], Response::Failure { .. }));
+        session.handle(Request::Reset);
+        session.handle(Request::Run {
+            query: "MATCH (c:Customer) RETURN count(*)".into(),
+            params: PackValue::Map(vec![]),
+            extra: PackValue::Map(vec![]),
+        });
+        let result = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![]),
+        });
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], Response::Record(vec![PackValue::Int(0)]));
+        assert!(matches!(result[1], Response::Success(_)));
+        let denied = session.handle(Request::Run {
+            query: "CREATE (c:Customer {entity_id:'reader-write'})".into(),
+            params: PackValue::Map(vec![]),
+            extra: PackValue::Map(vec![]),
+        });
+        assert!(
+            matches!(&denied[0], Response::Failure { code, .. } if code == "Neo.ClientError.Security.Forbidden")
+        );
+        assert_session_write_discarded(&databases);
+    }
+
+    #[test]
+    fn protected_session_logoff_aborts_implicit_write_and_unconsumed_rows() {
+        check_protected_logoff(false);
+    }
+
+    #[test]
+    fn protected_session_logoff_aborts_explicit_write_and_unconsumed_rows() {
+        check_protected_logoff(true);
+    }
+
+    #[test]
+    fn protected_session_reset_cannot_restore_logged_out_access() {
+        for explicit in [false, true] {
+            let (_directory, databases, engine) = scoped_engine_fixture();
+            let mut session = protected_session(engine);
+            stage_session_write(&mut session, &databases, explicit);
+            session.handle(Request::Logoff);
+            assert!(matches!(
+                session.handle(Request::Reset)[0],
+                Response::Failure { .. }
+            ));
+            assert_eq!(session.state(), brainwire_bolt::session::State::Defunct);
+            for request in [
+                Request::Logon {
+                    auth: service_credentials("writer"),
+                },
+                Request::Run {
+                    query: "RETURN 1".into(),
+                    params: PackValue::Map(vec![]),
+                    extra: PackValue::Map(vec![]),
+                },
+                Request::Pull {
+                    extra: PackValue::Map(vec![]),
+                },
+                Request::Commit,
+            ] {
+                assert!(session.handle(request).is_empty());
+            }
+            assert_session_write_discarded(&databases);
+        }
+    }
+
+    #[test]
+    fn protected_session_repeated_or_invalid_logon_aborts_streaming_writes() {
+        for explicit in [false, true] {
+            for valid_credentials in [false, true] {
+                let (_directory, databases, engine) = scoped_engine_fixture();
+                let mut session = protected_session(engine);
+                stage_session_write(&mut session, &databases, explicit);
+                let auth = if valid_credentials {
+                    service_credentials("writer")
+                } else {
+                    PackValue::Map(vec![])
+                };
+                let result = session.handle(Request::Logon { auth });
+                assert_eq!(result.len(), 1);
+                assert!(matches!(result[0], Response::Failure { .. }));
+                assert_eq!(session.state(), brainwire_bolt::session::State::Defunct);
+                assert!(session
+                    .handle(Request::Pull {
+                        extra: PackValue::Map(vec![])
+                    })
+                    .is_empty());
+                assert!(session.handle(Request::Commit).is_empty());
+                assert!(session.handle(Request::Reset).is_empty());
+                assert_session_write_discarded(&databases);
+            }
+        }
     }
 
     #[test]

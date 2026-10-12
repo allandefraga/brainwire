@@ -74,8 +74,9 @@ replacement. Source hashing reads the complete file on every resumed invocation.
 ## Run a local synthetic graph
 
 From the Brainwire repository root, choose an unused loopback port and fresh
-storage/file paths. The current server has no authentication; use an isolated
-local test. Shared deployment remains blocked on the October security work.
+storage/file paths. For this unprotected example use an isolated local test. The server now also
+supports [protected service-token connections](bolt-auth.md); shared deployment
+still requires the transport and operational gates.
 The [protected Bolt checklist](beta-auth-checklist.md) records the next dependency.
 
 ```sh

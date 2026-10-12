@@ -52,6 +52,15 @@ pub(super) fn eval(
                 ))
             }
         },
+        Expr::Coalesce(args) => {
+            for argument in args {
+                let value = eval(argument, row, ctx)?;
+                if value != Binding::Value(Value::Null) {
+                    return Ok(value);
+                }
+            }
+            Value::Null
+        }
         Expr::Size(inner) => {
             let length = match scalar(eval(inner, row, ctx)?)? {
                 Value::Null => return Ok(Binding::Value(Value::Null)),

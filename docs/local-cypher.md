@@ -172,3 +172,21 @@ The gain depends on how many unrelated edges the start node has. This does not
 change CSR projection or PageRank execution. See the
 [mixed-type hub measurements](benchmarks/2026-10-06-typed-adjacency.md)
 for the synthetic workload, raw samples and reproduction commands.
+
+## Nullable values with coalesce
+
+`coalesce(expr, ...)` returns the first non-null argument, evaluated left-to-right.
+It requires at least one argument and returns null when all arguments are null.
+False, zero, empty text, lists/maps and node bindings are valid non-null results.
+For example, `RETURN coalesce(null, 'normal') AS priority` supplies a default, and
+`MATCH (t:Ticket) RETURN t.entity_id, coalesce(t.priority, 'normal') AS priority LIMIT 20`
+works on optional ticket properties.
+
+Later runtime evaluation stops after a result: `coalesce('normal', $missing)` does
+not require the later parameter; `coalesce(null, $missing)` still fails. Variable
+names and aggregate shapes in every argument are validated, even when a branch
+is skipped or MATCH returns no rows. Existing nesting and allocation guards remain.
+
+Protected Bolt sessions also check the complete parsed query against graph and
+operation grants before execution. A read-only token cannot hide MERGE/SET behind
+UNWIND or MATCH. See [service-token permissions](bolt-auth.md).

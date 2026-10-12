@@ -91,6 +91,8 @@ pub enum Expr {
     CountStar,
     Count(Box<Expr>),
     Size(Box<Expr>),
+    /// Lazily choose the first non-null argument; an all-null list returns null.
+    Coalesce(Vec<Expr>),
     List(Vec<Expr>),
     Map(Vec<(String, Expr)>),
     Cmp(Box<Expr>, CmpOp, Box<Expr>),

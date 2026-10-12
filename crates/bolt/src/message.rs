@@ -2,7 +2,7 @@
 
 use crate::packstream::PackValue;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Request {
     Hello {
         extra: PackValue,
@@ -31,6 +31,27 @@ pub enum Request {
     Reset,
     Goodbye,
     Route,
+}
+
+// Message payloads may contain credentials, including legacy HELLO metadata.
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Hello { .. } => "Hello [redacted]",
+            Self::Logon { .. } => "Logon [redacted]",
+            Self::Logoff => "Logoff",
+            Self::Telemetry => "Telemetry",
+            Self::Run { .. } => "Run",
+            Self::Pull { .. } => "Pull",
+            Self::Discard { .. } => "Discard",
+            Self::Begin { .. } => "Begin",
+            Self::Commit => "Commit",
+            Self::Rollback => "Rollback",
+            Self::Reset => "Reset",
+            Self::Goodbye => "Goodbye",
+            Self::Route => "Route",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

@@ -161,7 +161,11 @@ def main():
     args = parser.parse_args()
     from neo4j import GraphDatabase
 
-    with GraphDatabase.driver(args.uri, auth=None) as driver:
+    if __package__:
+        from .connection import auth_from_env
+    else:
+        from connection import auth_from_env
+    with GraphDatabase.driver(args.uri, auth=auth_from_env()) as driver:
         offset = ingest(driver, args.database, args.file, args.source_id,
                         args.batch_size, args.batch_bytes, args.line_bytes)
     print(f"Source {args.source_id}: durable next_offset={offset} bytes")

@@ -1,6 +1,7 @@
 //! Brainwire configuration, synthetic observatory and embedded Cypher CLI.
 
 mod admin;
+mod client_auth;
 mod config;
 mod cypher;
 mod databases;

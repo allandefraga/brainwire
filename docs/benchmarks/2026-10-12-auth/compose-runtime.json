@@ -1,0 +1,41 @@
+{
+  "result": "PASS",
+  "image": "brainwire:auth-20261012",
+  "imageId": "sha256:db8bc4c2a8569d8788b8254f155a0876c3c531dc50db70f7c2d2ae73c53d2b8f",
+  "project": "brainwire-auth-b599d6e22237",
+  "containers": [
+    "3c46a23d10de23377589fc752612bbbe9876fed0419bb4f9b4048184785bcae1",
+    "89c570a5db48f90a970e911b7f2b1e4cf1a1122a0d9dd0aa27dd4188a7169d93"
+  ],
+  "kernel": "Linux 7.0.12-linuxkit",
+  "database": "client_memory",
+  "driverVersion": "6.3.0",
+  "volume": "brainwire-auth-b599d6e22237_brainwire-data",
+  "store": "RocksDB",
+  "secretMountsReadOnly": true,
+  "rows": 1000,
+  "memory": {
+    "cache": "256MiB",
+    "memtables": "32MiB",
+    "query": "256MiB",
+    "containerLimit": "2GiB"
+  },
+  "checks": [
+    "missing and invalid policy refuse startup",
+    "mounted read-only monitor credential makes inherited readiness healthy",
+    "anonymous and wrong-token connections rejected",
+    "protected reader coalesce preserves fallback and false",
+    "reader RETURN succeeds; MERGE denied before mutation",
+    "writer commits 1000 indexed MERGE/SET records",
+    "protected explicit transaction sees pending CREATE/index update; separate reader sees only committed records",
+    "SIGKILL/recreate discards pending CREATE and index update; old indexed value and 1000 committed rows survive",
+    "offline graph/index audit succeeds"
+  ],
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "scope": "single-node Docker Compose only",
+  "ownedResourcesRemoved": true
+}

@@ -120,7 +120,8 @@ with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
         print(session.run("RETURN 1 AS ready").single()["ready"])
 ```
 
-The server is single-node and currently has no authentication or TLS, so the
+The server is single-node. This example uses unprotected development mode;
+[service-token connections](bolt-auth.md) are optional and native TLS is pending, so the
 example is for a trusted local test network. The [server guide](serve.md)
 covers configuration and transaction behavior.
 

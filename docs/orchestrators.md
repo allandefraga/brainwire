@@ -3,7 +3,9 @@
 The templates run one durable server with multiple named graphs. Replication
 is not implemented: increasing replicas creates independent stores. Keep one
 writer per RocksDB directory. Use a trusted isolated test network because the
-current server has no authentication or TLS.
+development server is unprotected unless the optional
+[service-token policy](bolt-auth.md) is configured. Native TLS remains pending;
+see [protected overlays](protected-containers.md).
 
 ## Docker Compose
 

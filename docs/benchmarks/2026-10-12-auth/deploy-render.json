@@ -1,0 +1,11 @@
+{
+  "mode": "local-render-only",
+  "checks": [
+    "Compose requires both secret paths and retains the loopback binding",
+    "compose: policy/client mount paths and inherited ready probe",
+    "Swarm validates external secrets, UID 10001/mode 0400 and retained single replica",
+    "swarm: policy/client mount paths and inherited ready probe",
+    "Kubernetes required read-only Secret projection, fsGroup, probes and retained single replica",
+    "Development Compose and Kubernetes profiles remain without auth mounts"
+  ]
+}

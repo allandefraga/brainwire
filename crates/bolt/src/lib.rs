@@ -6,3 +6,5 @@ pub mod message;
 pub mod packstream;
 pub mod server;
 pub mod session;
+
+pub mod auth;

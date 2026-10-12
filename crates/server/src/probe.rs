@@ -77,8 +77,13 @@ impl BoltClient {
         }
         client.send(0x01, vec![PackValue::Map(vec![])])?;
         success(client.receive()?)?;
-        client.send(0x6a, vec![PackValue::Map(vec![])])?;
-        success(client.receive()?)?;
+        let credentials = crate::client_auth::Credentials::load()?;
+        let auth = credentials
+            .as_ref()
+            .map(|credentials| credentials.logon())
+            .unwrap_or(PackValue::Map(vec![]));
+        client.send(0x6a, vec![auth])?;
+        success(client.receive()?).map_err(|_| "Bolt authentication failed".to_string())?;
         Ok(client)
     }
 

@@ -53,6 +53,8 @@ pub enum ExecError {
     ParameterMissing(String),
     #[error("constraint violation: {0}")]
     ConstraintViolation(String),
+    #[error("forbidden: {0}")]
+    Forbidden(&'static str),
     #[error("query allocation guard exceeded: attempted {attempted} bytes, limit {limit} bytes")]
     MemoryLimit { limit: usize, attempted: usize },
     #[error("query execution deadline exceeded")]
@@ -107,6 +109,47 @@ pub enum QueryTransactionState {
     Failed,
     Committed,
     RolledBack,
+}
+
+/// Operation permissions applied to every clause before query execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueryAccess {
+    pub write: bool,
+    pub instance_admin: bool,
+}
+
+impl QueryAccess {
+    pub const UNRESTRICTED: Self = Self {
+        write: true,
+        instance_admin: true,
+    };
+
+    fn authorize(self, query: &Query) -> Result<(), ExecError> {
+        for clause in &query.clauses {
+            match clause {
+                Clause::Create(_) | Clause::Merge(_) | Clause::Set(_) | Clause::DetachDelete(_) => {
+                    if !self.write {
+                        return Err(ExecError::Forbidden("graph write access required"));
+                    }
+                }
+                Clause::Call { name, .. } => match name.as_str() {
+                    "db.schema" | "db.indexes" | "db.commitState" | "graph.project"
+                    | "graph.degree" | "graph.reachable" | "graph.shortestPath"
+                    | "graph.pagerank" | "knowledge.rank" => {}
+                    "db.memory" => {
+                        if !self.instance_admin {
+                            return Err(ExecError::Forbidden(
+                                "instance administrator access required",
+                            ));
+                        }
+                    }
+                    _ => return Err(ExecError::Forbidden("procedure is not authorized")),
+                },
+                Clause::Match { .. } | Clause::Unwind { .. } | Clause::Return { .. } => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A borrowed storage snapshot and write overlay shared by multiple queries.
@@ -203,6 +246,16 @@ impl<'db> QueryTransaction<'db> {
         query: &str,
         params: &BTreeMap<String, Value>,
     ) -> Result<QueryOutput, ExecError> {
+        self.run_with_access(query, params, QueryAccess::UNRESTRICTED)
+    }
+
+    /// Authorize the entire query before execution. A denial discards all prior runs.
+    pub fn run_with_access(
+        &mut self,
+        query: &str,
+        params: &BTreeMap<String, Value>,
+        access: QueryAccess,
+    ) -> Result<QueryOutput, ExecError> {
         self.require_active()?;
         if query.len() > self.limits.memory_bytes {
             let error = ExecError::MemoryLimit {
@@ -214,7 +267,13 @@ impl<'db> QueryTransaction<'db> {
         }
         let source_bytes = query.len();
         match parse(query) {
-            Ok(query) => self.run_parsed(&query, params, source_bytes),
+            Ok(query) => {
+                if let Err(error) = access.authorize(&query) {
+                    self.fail();
+                    return Err(error);
+                }
+                self.run_parsed(&query, params, source_bytes)
+            }
             Err(error) => {
                 self.fail();
                 Err(error.into())

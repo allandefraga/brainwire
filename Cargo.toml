@@ -18,3 +18,5 @@ rocksdb = "0.25"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
+sha2 = "0.10"
+subtle = "2.6"

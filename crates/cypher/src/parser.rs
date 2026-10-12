@@ -22,13 +22,14 @@
 //! expr      := or;  or := and (OR and)*;  and := not (AND not)*;  not := [NOT] cmp
 //! cmp       := primary [('=' | '<>' | '<' | '<=' | '>' | '>=') primary]
 //! primary   := literal | '$' name | var ['.' key] | count '(' ('*' | expr) ')'
-//!            | size '(' expr ')' | '[' [expr (',' expr)*] ']' | map | '(' expr ')'
+//!            | size '(' expr ')' | coalesce '(' expr (',' expr)* ')'
+//!            | '[' [expr (',' expr)*] ']' | map | '(' expr ')'
 //! literal   := integer | float | string | TRUE | FALSE | NULL | '-' number
 //! ```
 //!
 //! Anything else (`OPTIONAL MATCH`, `WITH`, `ORDER BY`, `SKIP`,
 //! variable-length relationships, several labels, several hops, functions
-//! other than `count` and `size`, `DELETE` without `DETACH`) is rejected with a
+//! other than `count`, `size` and `coalesce`, `DELETE` without `DETACH`) is rejected with a
 //! `ParseError` whose message starts with `not supported yet: `.
 //!
 //! Nesting through parentheses, lists and maps (including function
@@ -717,12 +718,31 @@ impl<'a> Parser<'a> {
         }
         if self.peek_at(1) == Some(&Tok::LParen) {
             let size = name.eq_ignore_ascii_case("size");
-            if !size && !name.eq_ignore_ascii_case("count") {
+            let coalesce = name.eq_ignore_ascii_case("coalesce");
+            if !size && !coalesce && !name.eq_ignore_ascii_case("count") {
                 return Err(self.error_at(start, format!("not supported yet: function {name}")));
             }
             self.advance(); // function name
             return self.with_nesting(|p| {
                 p.expect(Tok::LParen, "'('")?;
+                if coalesce {
+                    let mut args = Vec::new();
+                    let mut max_depth = 0;
+                    loop {
+                        let argument = p.parse_expr_depth()?;
+                        max_depth = max_depth.max(argument.depth);
+                        args.push(argument.expr);
+                        if !p.check(&Tok::Comma) {
+                            break;
+                        }
+                        p.advance();
+                    }
+                    p.expect(Tok::RParen, "')'")?;
+                    return Ok(ParsedExpr {
+                        expr: Expr::Coalesce(args),
+                        depth: p.checked_depth(max_depth, start)?,
+                    });
+                }
                 if !size && p.check(&Tok::Star) {
                     p.advance();
                     p.expect(Tok::RParen, "')'")?;

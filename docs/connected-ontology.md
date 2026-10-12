@@ -23,7 +23,8 @@ unknown names fail rather than switching to the default database. `--connect`
 cannot be combined with `--overview`, `--demo`, `--config` or `--estimated`.
 Connected mode currently supports only the Ontology view. Other real overview
 panels remain offline; this does not provide a live query editor or disk browser.
-The existing server has no authentication/TLS; retain its trusted-test-network scope.
+The server supports optional [service-token authentication](bolt-auth.md),
+while native TLS is pending; retain a trusted/encrypted transport boundary.
 
 ## Snapshot and refresh
 
@@ -71,7 +72,8 @@ properties need not be promoted to catalog columns. Timeline stream metadata and
 per-index progress are not returned. Readiness does not imply any instance data
 exists; the TUI says “no declared indexes” when there are none.
 
-Use the same query through the existing Python Bolt driver:
+Development-mode example of the same query through the Python Bolt driver
+on isolated loopback (protected credentials are described below):
 
 ```python
 from neo4j import GraphDatabase
@@ -113,3 +115,11 @@ instead. Pagination and an asynchronous refresh loop are follow-up work.
 
 [Actual terminal captures and integration checks](design/assets/2026-10-05-connected/README.md)
 include a server failure, restart with a changed schema, and concurrent Python writes.
+
+## Protected service sessions
+
+Set `BRAINWIRE_BOLT_AUTH_FILE` to a private `{principal,credentials}` JSON file
+for a principal with read access to the selected graph. The shared native client
+authenticates before acquiring schema; denied login/graph access fails the fetch.
+See [protected Bolt connections](bolt-auth.md). No token argument or new panel
+is added. Native clients still require a trusted loopback/encrypted tunnel boundary.

@@ -130,6 +130,26 @@ atomic source progress, update/null/index behavior, replay, SIGKILL and fresh
 checkpoint restore. This is not the full 100K/1M target or an endurance certificate.
 Next queued dependency: October 11 authentication, before shared deployment.
 
+## Progress recorded October 12
+
+One explicitly requested hour advances the October 11–14 authentication and API
+work: optional strict token policy, exact graph read/write grants, pre-execution
+Cypher authorization, lifecycle cleanup and separate process telemetry permission.
+Python and native connected TUI/probes share a credentials-file connection path.
+Cypher also gains lazy `coalesce(...)` for null/default handling.
+
+[Protected connections](bolt-auth.md) and [container overlays](protected-containers.md)
+are documented. Real Python drivers 5 and 6 and a fresh Linux Docker/Compose image
+passed protected ingestion, denied access and retained-volume crash/restart checks.
+Swarm and Kubernetes auth profiles were rendered locally, without deploying a
+cluster. [Evidence](benchmarks/2026-10-12-auth.md) distinguishes these checks.
+
+Native TLS, replicated failover and protected target-cluster execution are still
+pending. The next security dependency is to validate the chosen encrypted transport
+and run the actual authorized deployment target. The October 16 DuckLake snapshot
+contract remains next in the source integration queue; this work does not create CDC.
+A longer requested session does not configure recurring automatic development.
+
 ## Daily execution queue — October 9–31
 
 Dates allocate a session, not guaranteed completion. Each deliverable needs a
