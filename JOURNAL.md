@@ -39,6 +39,56 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-12 — Distributed systems concepts only
+
+- **Requested:** one hour of distributed systems concepts only, starting
+  2026-10-12 14:29:41 UTC / 16:29:41 Europe/Amsterdam. The session's requested
+  end was 15:29:41 UTC / 17:29:41 local. Conceptual work and verification
+  completed at 15:29:48 UTC, after the full requested hour. No engine, API,
+  TUI or deployment implementation was performed; all work remains local.
+- **Done:** [consistency and recovery contracts](docs/design/2026-10-12-distributed-concepts.md),
+  [21 future failure exercises](docs/design/2026-10-12-distributed-scenarios.md)
+  and [capacity/operations concepts](docs/design/2026-10-12-distributed-capacity.md).
+  Developed durable commitment versus published apply, separate graph/system
+  store recovery, proposal-aware conflicts, pre-COMMIT ID reservations,
+  read barriers/bookmarks, pending and retained retry deduplication, graph
+  incarnation and recovery lineage, whole-instance snapshots, safe member
+  replacement, version/policy compatibility and source-cursor boundaries.
+- **Decided:** retain the approved direction of a complete-instance Raft group;
+  three independent voters is the proposed first topology, not sharding.
+  Container scheduling does not provide database consensus. Retained-volume
+  restart, learner replacement and disaster restore are separate procedures.
+  Object storage is initially proposed for independent backup/snapshot/blob
+  artifacts; each voter still needs durable filesystem storage. A partition
+  can require safe refusal. Full-copy replication does not preserve deleted
+  history or recover commits newer than a disaster backup.
+- **Open integration choices:** deterministic command format and size bounds;
+  serialized admission versus pending conflict/operation reservations;
+  graph/system publication and lifecycle replay; bulk durability/activation;
+  retry retirement and lineage; policy generations, peer identity, compatible
+  feature activation and consistent snapshot install/retention. The approved
+  WAL-disabled bulk wording needs an explicit distributed recovery contract;
+  current Python resumable batches use synchronous transactions.
+- **Educational visual:** eight independent proposed failure scenarios in
+  `/Users/fraga/.codex/visualizations/2026/09/26/01a0de61-91ef-7403-b7d7-5f354611fe90/brainwire-distributed-failures.html`.
+  Browser checks covered every selector case, narrow/wide layout and no
+  JavaScript errors. It is not a Raft simulator or a running cluster. Owned
+  temporary preview server and browser tab were closed.
+- **Verification:** primary Raft/OpenRaft, RocksDB, etcd, Bolt, Kubernetes and
+  Docker documentation checked; focused Astra conceptual reviews incorporated.
+  Majority/placement arithmetic, document links/fences and whitespace checked.
+  The failure exercises were not executed and no distributed benchmark was
+  claimed. The current binary remains single-node.
+- **Next step:** review the mutation/apply contract before any distributed
+  implementation. A bounded experiment should first cover one fixed graph's
+  node/index/edge/cursor changes, exact replay identity and publication crash
+  boundaries, then integrate three authenticated members and apply the failure
+  ledger. Define graph lifecycle limits explicitly rather than bypass consensus.
+- **Blockers:** replication, routing and bookmarks are not implemented. Target
+  failure domains, durability assumptions, recovery/RPO promises and the open
+  contracts above need concrete acceptance before a production claim. This
+  conceptual session does not approve or begin a new implementation phase.
+
 ### 2026-10-12 — Protected Cypher, connection APIs and deployment profiles
 
 - **Requested:** one hour starting 13:26:17 UTC / 15:26:17 Europe/Amsterdam;
