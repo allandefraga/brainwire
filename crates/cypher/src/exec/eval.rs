@@ -61,6 +61,33 @@ pub(super) fn eval(
             }
             Value::Null
         }
+        Expr::ToLower(inner) | Expr::ToUpper(inner) => {
+            let text = match scalar(eval(inner, row, ctx)?)? {
+                Value::Null => return Ok(Binding::Value(Value::Null)),
+                Value::Str(text) => text,
+                _ => {
+                    return Err(ExecError::Semantic(
+                        "case conversion expects a string or null".into(),
+                    ))
+                }
+            };
+            // Unicode maps at most three scalars (12 bytes); allow String capacity growth too.
+            // shortcut: refine this conservative charge if measured normalization workloads hit it.
+            let allocation = text
+                .len()
+                .checked_mul(24)
+                .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Value>()))
+                .ok_or_else(|| ExecError::Semantic("case conversion size overflow".into()))?;
+            ctx.budget.charge(allocation)?;
+            // Whole-string casing preserves contextual Greek final sigma; locale-independent.
+            let converted = if matches!(expr, Expr::ToLower(_)) {
+                text.to_lowercase()
+            } else {
+                text.to_uppercase()
+            };
+            ctx.budget.check_deadline()?;
+            return Ok(Binding::Value(Value::Str(converted)));
+        }
         Expr::Size(inner) => {
             let length = match scalar(eval(inner, row, ctx)?)? {
                 Value::Null => return Ok(Binding::Value(Value::Null)),

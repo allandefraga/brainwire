@@ -1,13 +1,13 @@
 # Brainwire October 31, 2026 beta roadmap
 
-Revised October 8 at Allan's request: retain October 31 as the beta target,
-with **20 minutes of active development per day**. October 8's implementation
-session is complete; October 9–31 provides 23 sessions, **460 minutes (7h40)**.
-This revision supersedes the older full-scope execution dates and uses an
-updated remaining-days count for the twenty-minute cadence.
+Revised October 12 after Allan's additional one-hour MVP implementation session:
+retain October 31 as the beta target, with **20 minutes of active development per
+day**. October 13–31 provides 19 sessions, **380 minutes (6h20)**. Today's extra
+hour brought forward source export and connected inspection; it does not change
+the standing daily cadence or configure automatic work.
 
 The complete requested product remains the target described by the feature
-matrix below. Delivering every pending row in 7h40 is not a credible commitment.
+matrix below. Delivering every pending row in 6h20 is not a credible commitment.
 The executable schedule proposes a **controlled single-node client beta**;
 it does not rename that subset as a completed distributed/full-feature beta.
 Reduced October acceptance scope is a visible planning proposal, not an assertion
@@ -78,8 +78,9 @@ restoration, failure and workload acceptance pass and deployment is authorized.
   exact checkpoint receipts and a bounded immutable-JSONL Python importer whose
   source cursor commits atomically with each data batch (October 7). DuckLake
   change capture, general source deletion handling and replicated apply remain pending.
-- Real offline graph/pipeline/memory/disk/ontology panels and connected ontology
-  inspection. Other connected panels, query execution and live job progress remain
+- Real offline graph/pipeline/memory/disk/ontology panels and connected ontology,
+  memory and index inspection. Connected memory is shared query reservation
+  accounting, not RSS or RocksDB cache. Other connected panels, query execution and live job progress remain
   work. Preserve the chosen strong-green Observatory identity and EN/PT-BR display.
 
 The [October 6 measurements](benchmarks/2026-10-06-typed-adjacency.md) cover a
@@ -150,7 +151,26 @@ and run the actual authorized deployment target. The October 16 DuckLake snapsho
 contract remains next in the source integration queue; this work does not create CDC.
 A longer requested session does not configure recurring automatic development.
 
-## Daily execution queue — October 9–31
+An additional requested hour adds bounded DuckDB SELECT export into the existing
+immutable-input importer, preserving nulls/lists and refusing partial/overwritten
+final input. It verifies active caller-transaction refusal before BEGIN, rather
+than using a nested BEGIN probe. A read-only local SQLite DuckLake exporter now
+requires an explicit version and existing managed data, with overrides/implicit
+extension installation disabled. Synthetic pinned snapshots survive later source
+UPDATE/DELETE; live client catalog/backends, mapping and CDC remain open.
+Connected Memory and Indexes now use authenticated server procedures, complete
+bounded snapshots, EN/PT explanations, sample age and stale refresh status.
+Memory requires instance administration; ordinary graph readers can inspect indexes.
+
+Bolt now bounds assembled request payloads independently of TCP read boundaries,
+rejects trailing PackStream bytes, and has a ten-second absolute negotiation IO
+deadline and a separate ten-second authentication IO budget through login replies.
+LOGOFF renews the authentication budget; synchronous engine work can delay
+enforcement. Established-session idle bounds, responsive cancellation and native
+drain remain separate work. The [MVP evidence](benchmarks/2026-10-12-mvp.md)
+records real run sizes, candidate hashes and qualification limits.
+
+## Daily execution queue — October 13–31
 
 Dates allocate a session, not guaranteed completion. Each deliverable needs a
 runnable check or evidence; unfinished security/recovery work takes priority over
@@ -159,36 +179,57 @@ visible. Do not split a storage invariant merely to mark a day complete.
 
 | Date | Task | Reviewable result / check |
 | --- | --- | --- |
-| Oct 9 | Freeze the client workload and proposed beta support boundary | Entity/relationship mapping, stable identities, required properties, important queries, volume/resource profile and targets; source assumptions listed |
-| Oct 10 | Assemble the bounded Python integration fixture | Executable ontology + MERGE/SET import/query script, separate named graph, configurable batch rows/bytes and expected answers |
-| Oct 11 | Add token verification at Bolt session boundary | Accepted/denied authentication, no token leakage; first replay/overwrite tests retained |
-| Oct 12 | Enforce graph selection and transaction authorization; feasibility gate | Explicit/implicit transaction modes and database selection cannot bypass scope; assess remaining blockers/capacity |
-| Oct 13 | Close read/write/procedure permissions | Negative tests for reads, writes, CALL and cross-graph access; failed authorization precedes mutation |
-| Oct 14 | Audit administration/TUI access and transport configuration | No admin bypass; unsupported connected operations unavailable; encrypted transport boundary explicit |
-| Oct 15 | Security and API-limit gate | Protected fixture reads/writes, bounded result/query timeout, cancellation and rollback; otherwise reserve later slots for blockers |
-| Oct 16 | Define DuckLake snapshot consistency and source identity | Pinned snapshot identity, stable IDs, mapping and cursor; direct read versus explicit immutable export chosen from tested behavior |
-| Oct 17 | Implement the chosen bounded snapshot bridge | Local DuckLake snapshot fixture if available, or documented export fallback; batch bytes/rows and source consistency enforced |
-| Oct 18 | Exercise import replay/overwrite/failure | Duplicate batch, property change/null, changed input, crash/resume and index audit; source deletes explicitly unsupported unless proven |
-| Oct 19 | Package the single-node runtime | Pinned local release image/configuration, persistent path, fresh install and Python smoke test |
-| Oct 20 | Exercise retained-volume restart | Docker recovery and existing Kubernetes harness where available; acknowledged writes preserved; Swarm execution evidence stated |
-| Oct 21 | Restore a checkpoint into a fresh store and resume import | Exact receipt/counter, data/index/source cursor audit, independent restored graph and restore time |
-| Oct 22 | Run representative release benchmark | Agreed client queries; 100K nodes / 1M edges if within declared profile, representative payloads/two indexes; latency/throughput/RSS/host load |
-| Oct 23 | Run and inspect extended mixed load/failure evidence | One-hour supervised local acceptance, or explicitly incomplete endurance gate; restart/replay and audit under the workload |
-| Oct 24 | Candidate gate and feature freeze | Installs, protected import/query/restart/restore work; performance gaps and blockers recorded; remaining time goes to fixes |
-| Oct 25 | Reconcile real TUI/status and local documentation | Graph/import/index/commit status where implemented, accurate live/offline labels, EN/PT-BR; executable quickstart/limits/runbook |
-| Oct 26 | Rehearse the client shadow pilot locally | Install → schema → source/input → import → queries → restart → restore, with expected answers and provenance |
-| Oct 27 | Prepare upgrade/cutover/rollback and local release package | Version/config compatibility, restore path, support matrix and unresolved limitations; no new major features |
+| Oct 13 | Choose and test the pilot transport boundary | One documented protected route: same-host loopback or an encrypted tunnel/proxy with verified client behavior; no public plaintext Bolt |
+| Oct 14 | Qualify admission and slow-client limits for the pilot | Negotiation/authentication IO budgets and permit cleanup are implemented; reconcile request/batch limits, PackStream decoding allocations outside the query pool and authenticated slow-client exposure |
+| Oct 15 | Resolve shutdown and cancellation support boundary | Test idle handshake, idle transaction, RUN, COMMIT and slow reader during termination; implement safe drain across later sessions or explicitly restrict pilot to supervised stop/recovery |
+| Oct 16 | Validate the real client source contract | Approved ticket/comment columns, IDs, null/deletion policy, important queries, volumes and payloads; DuckLake catalog access remains an external dependency |
+| Oct 17 | Qualify the approved client DuckLake backend | Local SQLite pinning/export is tested; validate actual catalog/storage backend, explicit version and retained managed files; otherwise retain tested local-source/immutable-input profile |
+| Oct 18 | Test source revision ordering and import recovery | Revisions use new source IDs and serial chronological import; duplicates, null/overwrite, missing parent, changed file and lost commit receipt; no CDC/delete synchronization claim |
+| Oct 19 | Freeze the single-instance Docker package | Candidate image digest, protected config/retained path, fresh install, Python and connected TUI smoke; reconcile documented query/value limits |
+| Oct 20 | Qualify the chosen orchestration target | Execute retained-volume recovery on an authorized disposable Kubernetes or Swarm target; otherwise mark that target unqualified and retain validated Docker profile |
+| Oct 21 | Rehearse backup, restore and restart on the candidate | Exact checkpoint/cursor/index receipts, fresh-directory restore, acknowledged writes retained; documented restore time and operator procedure |
+| Oct 22 | Measure representative client queries | Agree latency/throughput/RSS limits before running; 100K nodes / 1M edges only if within declared profile; actual payloads, degree distribution and filters |
+| Oct 23 | Close the sustained-load gate | Extend supervised mixed reads/writes and failure test to one hour; local 30-minute synthetic evidence alone is insufficient; review errors, RSS, p95/p99 and audit |
+| Oct 24 | Candidate decision and feature freeze | Security/source/recovery/workload gates pass or become explicit no-go items; assign remaining slots only to measured blockers |
+| Oct 25 | Reconcile real TUI and local docs release preview | Memory/index/ontology screenshots and permissions; query/source limits; existing docs-site draft reconciled without inventing unsupported tabs or publishing |
+| Oct 26 | Run a complete client shadow rehearsal | Install → schema → authorized source snapshot → import → expected query answers → restart → fresh restore, recorded against the candidate hash |
+| Oct 27 | Prepare upgrade, rollback and beta package | Pin versions, configuration and scope; operator checklist, restore-based rollback, unresolved limitations and local release notes |
 | Oct 28 | Buffer: highest-priority blocker | Correctness/security/recovery first; affected acceptance repeated |
 | Oct 29 | Buffer: integration/performance blocker | Fix measured issue or complete missing evidence; no cosmetic work ahead of blockers |
 | Oct 30 | Final rehearsal and freeze verification | Candidate hashes, install/restore instructions, security/recovery checks and rollback reviewed |
 | Oct 31 | Final beta decision | Ready/conditional/no-go against published checklist; local beta artifacts and release notes; deployment separately authorized |
 
-If authentication/authorization cannot safely be implemented by October 15,
-reserve subsequent feature slots for it. An unauthenticated single-node build may
-remain an isolated developer test, but must not be called shared-production ready.
+Authentication and graph-scoped authorization are implemented. If encrypted
+transport, resource cleanup or the selected source cannot pass their checks,
+reserve subsequent feature slots for them. An unqualified build may remain an
+isolated developer test, but must not be called shared-production ready.
 If the DuckLake bridge cannot pass source consistency/replay tests, ship only the
 validated immutable-input importer and identify direct DuckLake integration as
 incomplete. Neither fallback meets the original full-product beta matrix.
+
+## October release checklist and ownership
+
+The coordinating agent implements, integrates and records local checks; Allan
+owns approval of the real source mapping, workload targets and any external
+deployment. Focused agents can help independent slices, but do not change those
+release dependencies. No infrastructure credential or live data is presumed.
+
+| Gate | October decision evidence | Status on October 12 |
+| --- | --- | --- |
+| Data contract | Explicit authoritative fields/IDs and snapshot identity; null/overwrite/parent semantics; deletes/history unsupported unless independently proven | Synthetic DuckDB/SQLite DuckLake snapshot path passes; real mapping/backend approval pending (Oct 16–18) |
+| Security | Graph grants and denied operations, private credentials, selected encrypted or loopback boundary, documented administration access | Tokens/grants and loopback acceptance pass; selected client route and shared-environment transport pending (Oct 13) |
+| Resource behavior | Declared connection/message/query/result limits, measured slow/disconnected-client cleanup; no RSS or immediate-cancellation claim | Negotiation/authentication admission checks pass; decoded-input allocations, authenticated slow clients and shutdown boundary pending (Oct 14–15) |
+| Recovery | Pending work rolls back, acknowledged writes survive crash, restart/replay and fresh checkpoint restore pass exact audits | Synthetic final-candidate pending cursor/index rollback and fresh restore pass; target operator rehearsal pending (Oct 21/26) |
+| Performance | Agreed client workload/resource envelope with actual p95/p99, throughput, payload/degree distribution and sustained-load duration; synthetic localhost results are supporting evidence | Synthetic 100k-ticket bridge passes; earlier 30-minute and final 10-minute mixed loads pass separately; representative workload and one-hour continuous gate pending (Oct 22–23) |
+| Deployment | Reproducible pinned Docker single-owner package; Kubernetes/Swarm supported only for profiles actually exercised, without replica/failover claims | Final protected Linux Compose acceptance passes; package freeze and chosen protected orchestration target pending (Oct 19–20) |
+| Product | Real EN/PT inspection, executable Python/Cypher examples, local docs preview, limits and operator runbook; no simulated acceptance tab | Connected ontology/memory/indexes and native quickstart pass; reconcile docs-site draft and supported operational UI scope (Oct 25) |
+| Release | Candidate hashes, unresolved risks, rollback rehearsal and explicit ready/conditional/no-go decision on October 31 | Local qualification receipts saved; feature freeze, shadow rehearsal and release/rollback decision pending (Oct 24–31) |
+
+The proposed October beta is suitable first for a rebuildable client shadow
+graph. Putting it on the critical production path is a separate decision based
+on these receipts. Raft, ANN/vector search, temporal history, retention jobs and
+fully connected operation remain requested full-product work; do not hide them
+inside this narrower release label. No guaranteed production SLA is established.
 
 ## Full-product backlog retained beyond the daily beta queue
 
@@ -204,7 +245,7 @@ incomplete. Neither fallback meets the original full-product beta matrix.
 These are not dropped. Their dates require a new capacity decision based on the
 October pilot evidence. The next large engine task remains deterministic apply;
 this revision deliberately puts the client pilot blockers ahead of claiming
-an untested distributed system in a 7h40 development budget.
+an untested distributed system in a 6h20 remaining development budget.
 
 Temporal/history and replication work cannot independently invent transaction or
 snapshot formats. Use the existing approved design's **one Raft group per instance
@@ -256,7 +297,7 @@ intake remains frozen while those blockers are fixed.
   and explicit authorization for the actual production environment. Installation
   instructions or a container image alone do not satisfy this status.
 - **Complete requested beta:** every row of the full feature matrix passes. No claim
-  that this is achievable with the remaining 7h40.
+  that this is achievable with the remaining 6h20.
 
 Open data-loss, authorization, failed restore, unknown source consistency or
 unbounded-memory blockers mean **no-go** for production. Report failed or unrun

@@ -12,16 +12,21 @@ import re
 import secrets
 
 
-def create(directory, graph):
+def create(directory, graph, include_observer=False):
     if not isinstance(graph, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', graph):
         raise ValueError('invalid graph name')
+    if type(include_observer) is not bool:
+        raise ValueError('include_observer must be a boolean')
     directory = Path(directory)
     directory.mkdir(mode=0o700)  # Refuse reuse rather than silently rotating existing clients.
     principals = []
-    for name, access in [('writer', 'write'), ('reader', 'read'), ('health', 'read')]:
+    roles = [('writer', 'write'), ('reader', 'read'), ('health', 'read')]
+    if include_observer:
+        roles.append(('observer', 'read'))
+    for name, access in roles:
         token = secrets.token_hex(32)
         principal = dict(id=name, token_sha256=hashlib.sha256(token.encode()).hexdigest(),
-                         graphs={graph: access}, instance_admin=False)
+                         graphs={graph: access}, instance_admin=name == 'observer')
         principals.append(principal)
         write_private(directory/(name+'.json'), dict(principal=name, credentials=token))
     write_private(directory/'policy.json', dict(principals=principals))
@@ -39,6 +44,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory')
     parser.add_argument('--graph', required=True)
+    parser.add_argument('--include-observer', action='store_true',
+                        help='Also create a graph reader with instance memory telemetry permission')
     args = parser.parse_args()
-    directory = create(args.directory, args.graph)
-    print(f'Created policy.json, writer.json, reader.json and health.json in {directory}; no credentials printed.')
+    directory = create(args.directory, args.graph, args.include_observer)
+    extra = ', observer.json' if args.include_observer else ''
+    print(f'Created policy.json, writer.json, reader.json and health.json{extra} in {directory}; no credentials printed.')

@@ -9,6 +9,20 @@ from create_service_tokens import create
 
 
 class TokenFilesTests(unittest.TestCase):
+    def test_observer_is_explicit_and_cannot_write_or_expand_graph_scope(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)/'auth'
+            create(directory, 'tickets', include_observer=True)
+            entries = json.loads((directory/'policy.json').read_text())['principals']
+            self.assertEqual({entry['id'] for entry in entries}, {'writer', 'reader', 'health', 'observer'})
+            for entry in entries:
+                self.assertEqual(entry['graphs'], {'tickets': 'write' if entry['id'] == 'writer' else 'read'})
+                self.assertEqual(entry['instance_admin'], entry['id'] == 'observer')
+                file = directory/(entry['id']+'.json')
+                token = json.loads(file.read_text())['credentials']
+                self.assertEqual(hashlib.sha256(token.encode()).hexdigest(), entry['token_sha256'])
+                self.assertEqual(stat.S_IMODE(file.stat().st_mode) & 0o077, 0)
+
     def test_private_unique_tokens_match_policy_and_existing_directory_is_preserved(self):
         with tempfile.TemporaryDirectory() as folder:
             directory = Path(folder)/'auth'

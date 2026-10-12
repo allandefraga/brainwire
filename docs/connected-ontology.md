@@ -21,8 +21,8 @@ The graph must already exist on the server. Use its numeric IP and port (IPv6
 uses `[address]:port`), not a `bolt://` URL or DNS name. The graph is required;
 unknown names fail rather than switching to the default database. `--connect`
 cannot be combined with `--overview`, `--demo`, `--config` or `--estimated`.
-Connected mode currently supports only the Ontology view. Other real overview
-panels remain offline; this does not provide a live query editor or disk browser.
+Connected mode also supports [Memory and Indexes](connected-status.md). Other real
+overview panels remain offline; this does not provide a live query editor or disk browser.
 The server supports optional [service-token authentication](bolt-auth.md),
 while native TLS is pending; retain a trusted/encrypted transport boundary.
 

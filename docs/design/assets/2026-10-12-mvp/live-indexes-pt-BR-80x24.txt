@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / ÍNDICES / tickets @ 127.0.0.1:59205                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ SNAPSHOT DO SERVIDOR • idade 0s • CALL db.indexes()                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌ÍNDICES CONFIGURADOS / SOMENTE LEITURA────────────────────────────────────────┐
+│TIPO                        PROPRIEDADE                    ESTADO             │
+│> Type00                    name                           PRONTO             │
+│  Type01                    name                           PRONTO             │
+│  Type02                    name                           PRONTO             │
+│  Type03                    name                           PRONTO             │
+│  Type04                    name                           PRONTO             │
+│  Type05                    name                           PRONTO             │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌O QUE SIGNIFICA?──────────────────────────────────────────────────────────────┐
+│ 1-6 / 20                                                                     │
+│ PRONTO: índice de igualdade para valores escalares suportados.               │
+│ DECLARADO: configuração somente; consultas usam varredura.                   │
+│ Não comprova suporte a valores complexos ou outros tipos de índice.          │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ↑↓ índice • PgUp/Dn rola • r atualiza • q sai                                │
+└──────────────────────────────────────────────────────────────────────────────┘

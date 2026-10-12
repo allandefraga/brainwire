@@ -13,16 +13,20 @@ use crate::message::{parse_request, Response};
 use crate::packstream::{pack, unpack};
 use crate::session::{AuthMode, QueryEngine, Session, State};
 
-/// Default cap on how many bytes of a single Bolt message the server will
-/// buffer before giving up on it. `ChunkReader` has no size limit of its
-/// own: a hostile or merely buggy client that keeps sending complete chunks
-/// but never the zero-size terminator would otherwise grow its internal
-/// buffers without bound. The platform's own bulk writes set the realistic
+/// Default cap on assembled PackStream payload bytes per Bolt message,
+/// excluding chunk framing and NOOPs. Announced chunks are checked even if
+/// the client never sends their body or the message terminator.
+/// The platform's own bulk writes set the realistic
 /// ceiling: a 250,000-row batch reaches about 200 MB in a single parameter,
 /// so 256 MiB leaves headroom above that while still bounding memory. Use
 /// [`serve_with_limit`] to override it.
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
+/// Absolute deadline for reading the handshake and writing its version reply.
+pub const DEFAULT_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Absolute IO budget until successful authentication, renewed after LOGOFF.
+/// Synchronous parsing and engine work can postpone enforcement.
+pub const DEFAULT_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub async fn serve<E, F>(listener: TcpListener, make_engine: F) -> std::io::Result<()>
 where
@@ -131,32 +135,83 @@ fn is_resource_exhausted(err: &std::io::Error) -> bool {
 }
 
 async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + AsyncWrite + Unpin>(
-    mut stream: S,
+    stream: S,
     engine: E,
     max_message_bytes: usize,
     auth: AuthMode,
 ) -> std::io::Result<()> {
-    let mut hello = [0u8; 20];
-    stream.read_exact(&mut hello).await?;
-    if hello[..4] != MAGIC {
-        return Ok(());
-    }
-    let proposals: [u8; 16] = hello[4..].try_into().expect("16 bytes");
-    let version = negotiate(&proposals);
-    stream.write_all(&response(version)).await?;
-    if version.is_none() {
+    handle_connection_with_timeouts(
+        stream,
+        engine,
+        max_message_bytes,
+        auth,
+        DEFAULT_HANDSHAKE_TIMEOUT,
+        DEFAULT_AUTHENTICATION_TIMEOUT,
+    )
+    .await
+}
+
+async fn handle_connection_with_timeouts<
+    E: QueryEngine + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin,
+>(
+    mut stream: S,
+    engine: E,
+    max_message_bytes: usize,
+    auth: AuthMode,
+    handshake_timeout: std::time::Duration,
+    authentication_timeout: std::time::Duration,
+) -> std::io::Result<()> {
+    let negotiated = tokio::time::timeout(handshake_timeout, async {
+        let mut hello = [0u8; 20];
+        stream.read_exact(&mut hello).await?;
+        if hello[..4] != MAGIC {
+            return Ok::<_, std::io::Error>(false);
+        }
+        let proposals: [u8; 16] = hello[4..].try_into().expect("16 bytes");
+        let version = negotiate(&proposals);
+        stream.write_all(&response(version)).await?;
+        Ok(version.is_some())
+    })
+    .await
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "Bolt handshake timed out"))??;
+    if !negotiated {
         return Ok(());
     }
     let mut session = Session::new(engine, auth);
+    let mut authentication_deadline = Some(tokio::time::Instant::now() + authentication_timeout);
     let mut reader = ChunkReader::default();
     let mut buf = vec![0u8; 64 * 1024];
-    let mut pending = 0usize;
     loop {
-        while let Some(payload) = reader.next_message() {
-            pending = 0;
+        loop {
+            check_authentication_deadline(&mut session, authentication_deadline)?;
+            let payload = match reader.next_message_with_limit(max_message_bytes) {
+                Ok(Some(payload)) => payload,
+                Ok(None) => break,
+                Err(_) => {
+                    session.close();
+                    authentication_io(
+                        &mut session,
+                        authentication_deadline,
+                        write_failure(
+                            &mut stream,
+                            "Neo.ClientError.Request.Invalid",
+                            &format!("message larger than {max_message_bytes} bytes"),
+                        ),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
             let mut input = payload.as_slice();
-            match unpack(&mut input).ok().and_then(|v| parse_request(v).ok()) {
+            match unpack(&mut input)
+                .ok()
+                .filter(|_| input.is_empty())
+                .and_then(|v| parse_request(v).ok())
+            {
                 Some(req) => {
+                    let response_deadline = authentication_deadline;
+                    check_authentication_deadline(&mut session, response_deadline)?;
                     // RocksDB calls are synchronous. Keep them off Tokio's IO workers.
                     let (next, responses) = tokio::task::spawn_blocking(move || {
                         let mut session = session;
@@ -166,6 +221,12 @@ async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + Async
                     .await
                     .map_err(|err| std::io::Error::other(format!("query worker failed: {err}")))?;
                     session = next;
+                    check_authentication_deadline(&mut session, response_deadline)?;
+                    // LOGOFF starts a fresh budget before its SUCCESS is written.
+                    if response_deadline.is_none() && session.state() == State::Authentication {
+                        authentication_deadline =
+                            Some(tokio::time::Instant::now() + authentication_timeout);
+                    }
                     let mut out = Vec::new();
                     for r in responses {
                         let mut body = Vec::new();
@@ -173,10 +234,18 @@ async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + Async
                         out.extend_from_slice(&encode_message(&body));
                     }
                     if !out.is_empty() {
-                        stream.write_all(&out).await?;
+                        authentication_io(
+                            &mut session,
+                            authentication_deadline,
+                            stream.write_all(&out),
+                        )
+                        .await?;
                     }
                     if session.state() == State::Defunct {
                         return Ok(());
+                    }
+                    if !matches!(session.state(), State::Connected | State::Authentication) {
+                        authentication_deadline = None;
                     }
                 }
                 None => {
@@ -186,33 +255,64 @@ async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + Async
                     // Tell the client why, then close instead of carrying on
                     // with a session that never saw the failure.
                     session.close();
-                    write_failure(
-                        &mut stream,
-                        "Neo.ClientError.Request.Invalid",
-                        "malformed message",
+                    authentication_io(
+                        &mut session,
+                        authentication_deadline,
+                        write_failure(
+                            &mut stream,
+                            "Neo.ClientError.Request.Invalid",
+                            "malformed message",
+                        ),
                     )
                     .await?;
                     return Ok(());
                 }
             }
         }
-        let n = stream.read(&mut buf).await?;
+        let n =
+            authentication_io(&mut session, authentication_deadline, stream.read(&mut buf)).await?;
         if n == 0 {
-            return Ok(());
-        }
-        pending += n;
-        if pending > max_message_bytes {
-            session.close();
-            write_failure(
-                &mut stream,
-                "Neo.ClientError.Request.Invalid",
-                &format!("message larger than {max_message_bytes} bytes"),
-            )
-            .await?;
             return Ok(());
         }
         reader.push(&buf[..n]);
     }
+}
+
+fn check_authentication_deadline<E: QueryEngine>(
+    session: &mut Session<E>,
+    deadline: Option<tokio::time::Instant>,
+) -> std::io::Result<()> {
+    if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+        session.close();
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Bolt authentication timed out",
+        ));
+    }
+    Ok(())
+}
+
+async fn authentication_io<E: QueryEngine, T>(
+    session: &mut Session<E>,
+    deadline: Option<tokio::time::Instant>,
+    operation: impl std::future::Future<Output = std::io::Result<T>>,
+) -> std::io::Result<T> {
+    check_authentication_deadline(session, deadline)?;
+    let result = match deadline {
+        Some(deadline) => match tokio::time::timeout_at(deadline, operation).await {
+            Ok(result) => result,
+            Err(_) => {
+                session.close();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Bolt authentication timed out",
+                ));
+            }
+        },
+        None => operation.await,
+    };
+    check_authentication_deadline(session, deadline)?;
+    result
 }
 
 /// Packs a FAILURE, chunk-encodes it and writes it to `stream`.
@@ -295,6 +395,265 @@ mod tests {
         let mut handshake_response = [0u8; 4];
         client.read_exact(&mut handshake_response).await.unwrap();
         assert_eq!(handshake_response, [0, 0, 4, 5]);
+    }
+
+    fn authentication_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
+        server: S,
+    ) -> tokio::task::JoinHandle<std::io::Result<()>> {
+        tokio::spawn(handle_connection_with_timeouts(
+            server,
+            StubEngine,
+            64,
+            AuthMode::AllowAll,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_millis(40),
+        ))
+    }
+
+    async fn authentication_timed_out(task: tokio::task::JoinHandle<std::io::Result<()>>) {
+        let err = tokio::time::timeout(std::time::Duration::from_millis(200), task)
+            .await
+            .expect("authentication IO deadline")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_idle_hello_noops_and_partial_logon_do_not_renew_deadline() {
+        for mode in 0..4 {
+            let (server, mut client) = tokio::io::duplex(1024);
+            let task = authentication_connection(server);
+            handshake(&mut client).await;
+            if mode != 0 {
+                send_request(&mut client, 0x01, vec![PackValue::Map(vec![])]).await;
+                read_success(&mut client).await;
+            }
+            let drip = tokio::spawn(async move {
+                if mode == 2 {
+                    loop {
+                        if client.write_all(&[0, 0]).await.is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                } else if mode == 3 {
+                    let bytes = encode_message(&[0xb1, 0x6a, 0xa0]);
+                    for byte in bytes {
+                        if client.write_all(&[byte]).await.is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            });
+            authentication_timed_out(task).await;
+            drip.abort();
+            let _ = drip.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn login_clears_the_deadline_and_logoff_starts_a_fresh_one() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = authentication_connection(server);
+        handshake(&mut client).await;
+        for tag in [0x01, 0x6a] {
+            send_request(&mut client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        assert!(!task.is_finished(), "authenticated idle has no deadline");
+        send_request(&mut client, 0x6b, vec![]).await;
+        read_success(&mut client).await;
+        send_request(&mut client, 0x6a, vec![PackValue::Map(vec![])]).await;
+        read_success(&mut client).await;
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        assert!(
+            !task.is_finished(),
+            "reauthentication clears the fresh deadline"
+        );
+        send_request(&mut client, 0x6b, vec![]).await;
+        read_success(&mut client).await;
+        authentication_timed_out(task).await;
+        let mut bytes = Vec::new();
+        client.read_to_end(&mut bytes).await.unwrap();
+        assert!(bytes.is_empty(), "expiry sends no FAILURE");
+    }
+
+    fn protected_test_policy() -> crate::auth::AuthPolicy {
+        use crate::auth::AuthPolicy;
+        AuthPolicy::from_json(br#"{"principals":[{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"tickets":"read"},"instance_admin":false}]}"#).unwrap()
+    }
+
+    #[tokio::test]
+    async fn authentication_deadline_bounds_success_and_failure_writes() {
+        for mode in [
+            "hello",
+            "logon",
+            "malformed",
+            "oversized",
+            "logoff",
+            "denied",
+        ] {
+            let (server, mut client) = tokio::io::duplex(1);
+            let auth = if mode == "denied" {
+                AuthMode::Required(Arc::new(protected_test_policy()))
+            } else {
+                AuthMode::AllowAll
+            };
+            let task = tokio::spawn(handle_connection_with_timeouts(
+                server,
+                StubEngine,
+                64,
+                auth,
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_millis(40),
+            ));
+            handshake(&mut client).await;
+            if matches!(mode, "logon" | "logoff" | "denied") {
+                send_request(&mut client, 0x01, vec![PackValue::Map(vec![])]).await;
+                read_success(&mut client).await;
+            }
+            if mode == "logoff" {
+                send_request(&mut client, 0x6a, vec![PackValue::Map(vec![])]).await;
+                read_success(&mut client).await;
+            }
+            match mode {
+                "hello" => send_request(&mut client, 0x01, vec![PackValue::Map(vec![])]).await,
+                "logon" | "denied" => {
+                    send_request(&mut client, 0x6a, vec![PackValue::Map(vec![])]).await
+                }
+                "logoff" => send_request(&mut client, 0x6b, vec![]).await,
+                "malformed" => client.write_all(&encode_message(&[0xe0])).await.unwrap(),
+                "oversized" => client.write_all(&[0, 65]).await.unwrap(),
+                _ => unreachable!(),
+            }
+            authentication_timed_out(task).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn authentication_timeout_releases_the_owned_connection_permit() {
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().unwrap();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let engine = BeginProbe(calls.clone());
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(async move {
+            let _permit = permit;
+            handle_connection_with_timeouts(
+                server,
+                engine,
+                64,
+                AuthMode::AllowAll,
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_millis(40),
+            )
+            .await
+        });
+        handshake(&mut client).await;
+        assert!(permits.clone().try_acquire_owned().is_err());
+        authentication_timed_out(task).await;
+        assert!(permits.clone().try_acquire_owned().is_ok());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let mut bytes = Vec::new();
+        client.read_to_end(&mut bytes).await.unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn silent_and_slow_drip_handshakes_time_out_and_release_the_permit() {
+        for slow_drip in [false, true] {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let permits = Arc::new(Semaphore::new(1));
+            let permit = permits.clone().try_acquire_owned().unwrap();
+            let (server, mut client) = tokio::io::duplex(1024);
+            let engine = BeginProbe(calls.clone());
+            let task = tokio::spawn(async move {
+                let _permit = permit;
+                handle_connection_with_timeouts(
+                    server,
+                    engine,
+                    64,
+                    AuthMode::AllowAll,
+                    std::time::Duration::from_millis(50),
+                    DEFAULT_AUTHENTICATION_TIMEOUT,
+                )
+                .await
+            });
+            assert!(permits.clone().try_acquire_owned().is_err());
+            let drip = tokio::spawn(async move {
+                if slow_drip {
+                    for byte in MAGIC.into_iter().chain([0; 16]) {
+                        if client.write_all(&[byte]).await.is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            });
+            let err = tokio::time::timeout(std::time::Duration::from_millis(200), task)
+                .await
+                .expect("absolute handshake deadline")
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert!(permits.clone().try_acquire_owned().is_ok());
+            drip.abort();
+            let _ = drip.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_handshake_with_a_deadline_keeps_established_sessions_open() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(handle_connection_with_timeouts(
+            server,
+            BeginProbe(calls.clone()),
+            64,
+            AuthMode::AllowAll,
+            std::time::Duration::from_millis(50),
+            DEFAULT_AUTHENTICATION_TIMEOUT,
+        ));
+        handshake(&mut client).await;
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+        assert!(!task.is_finished(), "deadline ends after negotiation");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        drop(client);
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn handshake_deadline_includes_a_blocked_version_reply() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(1);
+        let task = tokio::spawn(handle_connection_with_timeouts(
+            server,
+            BeginProbe(calls.clone()),
+            64,
+            AuthMode::AllowAll,
+            std::time::Duration::from_millis(50),
+            DEFAULT_AUTHENTICATION_TIMEOUT,
+        ));
+        let mut hello = MAGIC.to_vec();
+        hello.extend_from_slice(&[0, 0, 4, 5]);
+        hello.extend_from_slice(&[0; 12]);
+        client.write_all(&hello).await.unwrap();
+        // The single-byte transport cannot fit the reply until the peer reads.
+        let err = tokio::time::timeout(std::time::Duration::from_millis(200), task)
+            .await
+            .expect("deadline includes version write")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     /// Decodes the single chunk-framed FAILURE expected in `bytes` (read
@@ -472,6 +831,119 @@ mod tests {
         }
     }
 
+    struct BeginProbe(Arc<std::sync::atomic::AtomicUsize>);
+    impl QueryEngine for BeginProbe {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+    }
+
+    struct SlowLogon(BeginProbe);
+    impl QueryEngine for SlowLogon {
+        fn set_access(
+            &mut self,
+            access: crate::auth::AccessContext,
+        ) -> Result<(), crate::session::EngineError> {
+            if matches!(access, crate::auth::AccessContext::Unrestricted) {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+            }
+            Ok(())
+        }
+        fn begin(&mut self, db: Option<&str>) -> Result<(), crate::session::EngineError> {
+            self.0.begin(db)
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn expired_authentication_after_blocking_logon_never_executes_buffered_begin() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(handle_connection_with_timeouts(
+            server,
+            SlowLogon(BeginProbe(calls.clone())),
+            64,
+            AuthMode::AllowAll,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_millis(40),
+        ));
+        handshake(&mut client).await;
+        let mut pipeline = Vec::new();
+        for tag in [0x01, 0x6a, 0x11] {
+            pipeline.extend_from_slice(&encode_message(&[0xb1, tag, 0xa0]));
+        }
+        client.write_all(&pipeline).await.unwrap();
+        read_success(&mut client).await;
+        authentication_timed_out(task).await;
+        let mut bytes = Vec::new();
+        client.read_to_end(&mut bytes).await.unwrap();
+        assert!(
+            bytes.is_empty(),
+            "expired LOGON sends no SUCCESS or FAILURE"
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn trailing_payload_bytes_fail_before_calling_the_engine() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(handle_connection(
+            server,
+            BeginProbe(calls.clone()),
+            64,
+            AuthMode::AllowAll,
+        ));
+        handshake(&mut client).await;
+        for tag in [0x01, 0x6a] {
+            send_request(&mut client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+        }
+        client
+            .write_all(&encode_message(&[0xb1, 0x11, 0xa0, 0xe0]))
+            .await
+            .unwrap();
+        let mut failure = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.read_to_end(&mut failure),
+        )
+        .await
+        .expect("close on trailing bytes")
+        .unwrap();
+        assert_eq!(decode_failure(&failure).1, "malformed message");
+        task.await.unwrap().unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
     async fn send_request<S: AsyncWrite + Unpin>(client: &mut S, tag: u8, fields: Vec<PackValue>) {
         let mut bytes = Vec::new();
         pack(&PackValue::Struct { tag, fields }, &mut bytes);
@@ -493,6 +965,79 @@ mod tests {
             unpack(&mut body.as_slice()).unwrap(),
             PackValue::Struct { tag: 0x70, .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn coalesced_messages_each_have_their_own_payload_limit() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(handle_connection(server, StubEngine, 3, AuthMode::AllowAll));
+        handshake(&mut client).await;
+        let mut pipeline = Vec::new();
+        for body in [&[0xb1, 0x01, 0xa0][..], &[0xb1, 0x6a, 0xa0], &[0xb0, 0x02]] {
+            pipeline.extend_from_slice(&encode_message(body));
+        }
+        client.write_all(&pipeline).await.unwrap();
+        read_success(&mut client).await;
+        read_success(&mut client).await;
+        let mut rest = Vec::new();
+        client.read_to_end(&mut rest).await.unwrap();
+        assert!(rest.is_empty());
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn fragmented_second_message_keeps_its_accumulated_payload_size() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(handle_connection(
+            server,
+            StubEngine,
+            32,
+            AuthMode::AllowAll,
+        ));
+        handshake(&mut client).await;
+        let mut bytes = encode_message(&[0xb1, 0x01, 0xa0]);
+        bytes.extend_from_slice(&[0, 20]);
+        bytes.extend_from_slice(&[0; 20]);
+        client.write_all(&bytes).await.unwrap();
+        read_success(&mut client).await;
+        // This header announces a total payload of 33 bytes, without a body
+        // or terminator. The first message must not erase the second's size.
+        client.write_all(&[0]).await.unwrap();
+        client.write_all(&[13]).await.unwrap();
+        let mut failure = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.read_to_end(&mut failure),
+        )
+        .await
+        .expect("close on oversized announcement")
+        .unwrap();
+        assert!(decode_failure(&failure).1.contains("32 bytes"));
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_chunk_header_is_rejected_without_waiting_for_body() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = tokio::spawn(handle_connection(
+            server,
+            StubEngine,
+            64,
+            AuthMode::AllowAll,
+        ));
+        handshake(&mut client).await;
+        client.write_all(&[0xff]).await.unwrap();
+        client.write_all(&[0xff]).await.unwrap();
+        let mut failure = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.read_to_end(&mut failure),
+        )
+        .await
+        .expect("close on oversized header")
+        .unwrap();
+        assert!(decode_failure(&failure).1.contains("64 bytes"));
+        task.await.unwrap().unwrap();
     }
 
     async fn login_and_begin<S: AsyncRead + AsyncWrite + Unpin>(client: &mut S) {
@@ -518,7 +1063,7 @@ mod tests {
             ));
             login_and_begin(&mut client).await;
             if oversized {
-                client.write_all(&[0u8; 65]).await.unwrap();
+                client.write_all(&[0, 65]).await.unwrap();
             } else {
                 client.write_all(&encode_message(&[0xe0])).await.unwrap();
             }
@@ -586,8 +1131,8 @@ mod tests {
 
     #[tokio::test]
     async fn protected_listener_applies_policy_to_each_connection() {
-        use crate::auth::{AccessContext, AuthPolicy, GraphAccess};
-        let policy=AuthPolicy::from_json(br#"{"principals":[{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"tickets":"read"},"instance_admin":false}]}"#).unwrap();
+        use crate::auth::{AccessContext, GraphAccess};
+        let policy = protected_test_policy();
         let access = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received = access.clone();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

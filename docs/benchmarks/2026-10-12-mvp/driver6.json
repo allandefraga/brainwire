@@ -1,0 +1,30 @@
+{
+  "driver": "6.3.0",
+  "binary_sha256": "1c17dbf01accf788202a6a93b0181439dda15b8c2f83512be2658e21693fd2d2",
+  "scope": "synthetic localhost service-token auth, not TLS or distributed acceptance",
+  "audit": {
+    "database": "allowed",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checks": [
+    "invalid policy fails before bind",
+    "diagnostic redaction",
+    "missing/wrong credentials",
+    "default/explicit graph grants",
+    "implicit and explicit transactions",
+    "readonly mutation denial",
+    "instance admin telemetry",
+    "1000-row indexed importer",
+    "authenticated module and direct-script Customer CLI connections",
+    "atomic multi-RUN overwrite and rollback",
+    "coalesce lazy evaluation",
+    "authenticated Python snapshot CLI",
+    "readonly sparse analytics and explainable ranking",
+    "native probe and connected ontology",
+    "SIGKILL retained data",
+    "restart token revocation",
+    "offline graph/index audit"
+  ],
+  "result": "PASS"
+}

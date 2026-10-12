@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / MEMÓRIA / tickets @ 127.0.0.1:59205                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ SNAPSHOT DO SERVIDOR • idade 0s • CALL db.memory()                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌POOL DE CONSULTAS / SOMENTE LEITURA───────────────────────────────────────────┐
+│ Pool de consultas compartilhado por todos os grafos do servidor.             │
+│                                                                              │
+│ LIMITE  64.00 MiB (67108864 B)                                               │
+│ Limite configurado de reservas do pool compartilhado de consultas.           │
+│ RESERVADO  318 B                                                             │
+│ Reservas contabilizadas agora, incluindo a consulta desta amostra.           │
+│ PICO  1.53 KiB (1568 B)                                                      │
+│ Maior reserva contabilizada durante a vida deste servidor.                   │
+│ REJEIÇÕES  0                                                                 │
+│ Reservas rejeitadas durante a vida deste servidor.                           │
+│ Contabilidade de reservas; não é RSS, RAM total ou cache.                    │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ r atualiza • q sai                                                           │
+└──────────────────────────────────────────────────────────────────────────────┘

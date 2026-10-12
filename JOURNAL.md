@@ -39,6 +39,65 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-12 — Protected client MVP source bridge and connected inspection
+
+- **Requested:** one additional hour, as much useful MVP implementation as possible,
+  then reorganize the beta queue through October 31. Started at 17:01:27 UTC /
+  19:01:27 Europe/Amsterdam; requested end 18:01:27 UTC / 20:01:27 local.
+  Session closed at 2026-10-12 18:01:33 UTC / 20:01:33 local, after the full requested hour.
+  All implementation and release artifacts remain local; no remote publication.
+- **Done:** bounded DuckDB SELECT → normalized immutable JSONL export and optional
+  read-only local SQLite DuckLake export pinned to an explicit snapshot version.
+  Both reuse the client mapping/importer; active caller transactions, partial
+  publication and destination overwrite are rejected. DuckLake path overrides and
+  implicit extension installation are disabled. Synthetic old snapshots survived
+  newer source UPDATE/DELETE. Added Unicode `toLower`/`toUpper` with null/type
+  semantics, conservative allocation accounting and indexed SET/rollback tests.
+- **Done:** authenticated connected Memory/Indexes TUI panes, EN/PT explanations,
+  exact/human byte units, manual refresh, sample age, stale/recovered state and
+  index selection/scrolling. Memory requires instance administration; graph readers
+  can inspect indexes. Seven actual interactive PTY screenshots preserve the green
+  identity. The optional observer credential is explicit and private; default
+  writer/reader/health grants remain non-administrative.
+- **Done:** independent assembled Bolt request caps, early announced-oversize
+  rejection and trailing PackStream rejection; absolute ten-second negotiation
+  and authentication IO deadlines including response writes and LOGOFF re-login.
+  A read cursor removes repeated buffer shifts while decoding NOOPs/coalesced
+  messages; structural fragmentation/compaction regressions cover the optimization.
+  Blocking engine work is not cancelled. Real listener tests exhausted/released
+  64 slots before and after HELLO; Python drivers 5.28.6/6.3.0 and protected Linux
+  Compose passed denial, import, transaction isolation, SIGKILL/reopen and audits.
+- **Evidence:** [MVP qualification](docs/benchmarks/2026-10-12-mvp.md) records
+  candidate hashes and separate build phases. Final protected DuckLake bridge:
+  100K tickets + 200K comments + 200K edges, 300K input rows / 291,493,330 bytes,
+  export 3.032s and import 28.080s on this synthetic local workload. A separate
+  100K-ticket recovery harness exercises lost receipts, pending data/cursor
+  rollback, replay and independent checkpoint restore. Workspace checks and
+  Python helper tests passed; final counters are in the qualification receipt.
+  The earlier-build 30-minute mixed load passed with 9.38M reads and 32K updates.
+  Final candidate additionally passed 10 continuous minutes with 4.08M reads,
+  10,681 updates, point/index p95 1.045/1.072ms and sampled RSS peak 93,424 KiB.
+  Both verified latest acknowledged values after SIGKILL/reopen and audited indexes;
+  these separate periods do not satisfy the one-hour continuous endurance gate.
+- **Decided:** propose a controlled single-node client shadow beta by October 31,
+  with 19 remaining 20-minute sessions / 6h20. The full requested product matrix
+  remains visible; replication, ANN/search, history, maintenance, object-storage
+  support, fully connected operation and MCP are not silently declared complete.
+  Source row throughput is not graph-mutation throughput or production capacity.
+- **Next step:** October 13 protected transport boundary (same-host loopback or
+  verified encrypted tunnel/proxy), then admission/slow-client qualification and
+  the supervised shutdown/recovery boundary. Run the
+  [local MVP quickstart](docs/mvp-quickstart.md); see the
+  [dated beta queue](docs/2026-10-pilot-roadmap.md) for source mapping, actual backend,
+  packaging, target execution, restore, performance and release decision gates.
+- **Blockers/limits:** actual client mappings, catalog/storage access and SLOs
+  need Allan's input. No TLS, native drain, authenticated idle bound or replicated
+  failover claim. Connected refresh is synchronous; memory shows query reservations,
+  not RSS/cache. SELECT is trusted, external mutable files are not transaction-pinned,
+  and source filename publication is not directory-fsynced for power-loss durability.
+  DuckLake managed files must survive snapshot retention. Kubernetes/Swarm protected
+  target execution and one-hour continuous candidate endurance remain unqualified.
+
 ### 2026-10-12 — Pods, machines and load-balancing concepts
 
 - **Requested:** 30 more minutes focused on distribution, Kubernetes, Docker,

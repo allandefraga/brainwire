@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "binary_sha256": "1c17dbf01accf788202a6a93b0181439dda15b8c2f83512be2658e21693fd2d2",
+  "production_handshake_timeout_seconds": 10,
+  "silent_sockets": 64,
+  "observed_close_wait_seconds": 9.896994792,
+  "request_payload_cap_bytes": 32,
+  "production_authentication_timeout_seconds": 10,
+  "unauthenticated_sockets": 64,
+  "observed_auth_close_wait_seconds": 10.000743042,
+  "checks": [
+    "65th connection rejected",
+    "64 silent sockets expire",
+    "permits reusable",
+    "64 HELLO-without-LOGON sockets expire; permits reusable",
+    "coalesced requests and NOOPs accepted",
+    "announced oversize rejected before body",
+    "trailing PackStream byte rejected"
+  ],
+  "scope": "native isolated loopback; no authenticated idle/drain test"
+}

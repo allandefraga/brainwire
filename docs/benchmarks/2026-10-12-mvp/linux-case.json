@@ -1,0 +1,14 @@
+{
+  "fields": [
+    "lower",
+    "upper",
+    "empty"
+  ],
+  "rows": [
+    [
+      "open",
+      "STRASSE",
+      null
+    ]
+  ]
+}

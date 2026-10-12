@@ -1,0 +1,77 @@
+{
+  "synthetic": true,
+  "duckdb": "1.5.5",
+  "driver": "6.3.0",
+  "binary_sha256": "1c17dbf01accf788202a6a93b0181439dda15b8c2f83512be2658e21693fd2d2",
+  "fixture": {
+    "synthetic": true,
+    "tickets": 10000,
+    "comments": 20000,
+    "relationships": 20000,
+    "status_counts": {
+      "open": 3334,
+      "pending": 3333,
+      "solved": 3333
+    },
+    "priority_counts": {
+      "high": 2000,
+      "normal": 8000
+    },
+    "comment_body_characters": 1024,
+    "source_bytes": 25970455
+  },
+  "export": {
+    "rows": 30000,
+    "tickets": 10000,
+    "comments": 20000,
+    "bytes": 29039330,
+    "mapping_contract_id": "client-zendesk-snapshot-v1",
+    "sha256": "5f536fdfc61f71c3e1905ec6e25d578bc9cef8636dbbd942305f7e85341f237d"
+  },
+  "source_mode": "read-only DuckDB file",
+  "export_seconds": 0.24937883301754482,
+  "import_seconds": 3.1542541660019197,
+  "input_rows_per_second": 9510.964691227024,
+  "indexes": [
+    {
+      "label": "Ticket",
+      "property": "status",
+      "state": "scalar_equality_ready"
+    },
+    {
+      "label": "Ticket",
+      "property": "priority",
+      "state": "scalar_equality_ready"
+    },
+    {
+      "label": "TicketComment",
+      "property": "ticket_entity_id",
+      "state": "scalar_equality_ready"
+    },
+    {
+      "label": "TicketComment",
+      "property": "is_public",
+      "state": "scalar_equality_ready"
+    }
+  ],
+  "audit": {
+    "database": "shadow",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "commit_sequence": "154",
+  "checks": [
+    "SQL export",
+    "null/list roundtrip",
+    "protected import",
+    "indexed counts",
+    "Unicode case functions and indexed SET",
+    "final source cursor consistency",
+    "completed replay no writes",
+    "reader telemetry denied",
+    "EN/PT connected ontology/memory/indexes",
+    "SIGKILL reopen",
+    "replay after restart",
+    "offline integrity audit"
+  ]
+}

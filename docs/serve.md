@@ -57,13 +57,28 @@ for keys, live data, memtables and level-0 files. These are offline snapshots,
 not exact graph counts or total process memory.
 
 Each connection has one scoped query worker, with at most 64 concurrent
-connections. RocksDB execution runs outside Tokio's IO threads. Results are
+connections. Negotiating the 20-byte handshake and version reply has one absolute
+10-second deadline; silent/slow-drip peers cannot retain a connection slot forever
+before negotiation. After negotiation, authentication has a separate absolute
+10-second IO budget, retained through HELLO, partial messages, NOOPs and the login
+reply. LOGOFF starts a fresh authentication budget. Expiry closes the session and
+releases its slot; synchronous parsing, engine work and cleanup can delay
+enforcement. Established-session idle, transaction-drain and engine initialization
+are not bounded by these IO deadlines. RocksDB execution runs
+outside Tokio's IO threads. Results are
 still materialized in memory, while simple reads process intermediate rows
 incrementally. `memory.query` bounds conservative per-RUN accounting and the
 shared server reservation pool; `CALL db.memory()` exposes pool telemetry.
 `server.query_timeout_ms` sets a cooperative execution deadline (30 seconds by
 default). Resource failures roll back the complete transaction. These are not
 hard RSS or wall-clock ceilings. See [query limits](query-allocation-guards.md).
+`server.max_message` / `BRAINWIRE_SERVER_MAX_MESSAGE` limits assembled PackStream
+payload bytes **per request**, excluding chunk headers and NOOPs. Multiple valid
+messages in one TCP read each have their own cap. An announced chunk exceeding
+the remaining budget is rejected before waiting for its body; trailing bytes
+after a PackStream request are a fatal protocol violation. The default is
+256 MiB; this is not a process-memory cap or a recommendation for ingestion batch
+size. Keep the separate bounded Python input defaults for the pilot.
 The supported Cypher subset is documented in
 [local queries](local-cypher.md). The Graph/Query/Memory/Disk TUI demo remains
 synthetic; `shell --overview` reads real named local graphs while the server is
@@ -82,6 +97,9 @@ reads a complete schema snapshot while this server is running. It uses the same
 `CALL db.schema()` procedure available to Python Bolt clients; `r` refreshes and
 failed refreshes retain an explicitly stale snapshot. See the
 [connected ontology guide](connected-ontology.md) for bounds and controls.
+Connected `--view memory` and `--view indexes` inspect real telemetry and configured
+index state; see [connected status](connected-status.md). Memory requires instance
+administration permission as well as graph read access.
 
 ## Optional protected connections
 

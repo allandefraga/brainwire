@@ -109,6 +109,7 @@ materialized and subject to conservative accounting.
 - `RETURN` values or nodes, top-level `count` aggregation and grouping,
   nonnegative integer `LIMIT`, parameters and three-valued boolean logic.
 - Scalar `size(expression)` for lists and strings; null propagates.
+- String-only `toLower(expression)` and `toUpper(expression)`; null propagates.
 - Read-only `CALL graph.project`, `graph.degree` and `graph.pagerank`, with
   explicit `YIELD`, aliases, optional `WHERE` and final `RETURN`/`LIMIT`.
   See [sparse analytics](sparse-analytics.md) for runnable examples and limits.
@@ -117,8 +118,9 @@ Unsupported constructs return an explicit error. Relationship variables and
 relationship property filters are not implemented. The executor streams
 supported read pipelines; writes, grouped aggregates,
 CALL and final query results remain materialized. `memory.query` enforces
-conservative accounting rather than a hard RSS ceiling. Full Cypher, authorization,
-range/vector search and the connected TUI remain separate work. The
+conservative accounting rather than a hard RSS ceiling. Full Cypher and
+range/vector search remain separate work. Optional graph-scoped authorization
+and connected ontology/memory/index inspection are implemented. The
 durable Bolt server uses the same executor and store.
 
 The CLI uses configured `memory.query` as a [conservative allocation guard](query-allocation-guards.md).
@@ -172,6 +174,41 @@ The gain depends on how many unrelated edges the start node has. This does not
 change CSR projection or PageRank execution. See the
 [mixed-type hub measurements](benchmarks/2026-10-06-typed-adjacency.md)
 for the synthetic workload, raw samples and reproduction commands.
+
+## String normalization
+
+`toLower(expr)` and `toUpper(expr)` each accept exactly one string or null.
+Function names are case-insensitive; numeric, Boolean, list, map and node inputs
+raise an error rather than being coerced. Missing properties return null.
+They compose with `coalesce`, `size`, predicates, SET and top-level `count`:
+
+```cypher
+RETURN toLower('OPEN') AS status, toUpper('straße') AS title
+MATCH (c:Customer {entity_id:$id}) SET c.email=toLower(c.email)
+MATCH (c:Customer {email:$normalized_email}) RETURN c.entity_id
+```
+
+The example returns `open` and `STRASSE`. Indexed SET removes the old equality
+entry and writes the new value atomically; failure in a later row rolls back the
+whole query/transaction. A predicate such as `WHERE toLower(c.email)=$email` does
+not gain an equality seek from this function: normalize before writing and use
+a plain indexed property predicate when possible.
+
+Brainwire uses Rust whole-string Unicode casing, independent of locale. Unicode
+expansion can change length (`toUpper('ß')` is `SS`), and whole-string lowercasing
+preserves contextual Greek final sigma. It is not grapheme normalization,
+case-insensitive collation or a promise of exact casing compatibility with every
+Neo4j/JVM Unicode version. Null and string-only semantics follow the
+[Cypher string function contract](https://neo4j.com/docs/cypher-manual/current/functions/string/).
+
+Before conversion the existing budget/shared query pool reserves a deliberately
+conservative allowance: 24 times input UTF-8 bytes plus value overhead. Total query
+accounting also includes input/output and validation-time evaluations; it is not
+simply one 24-times charge. Long strings can therefore be rejected despite lower
+actual allocation. A measured normalization workload hitting this guard is the
+trigger to refine it. Cooperative deadlines are checked before/after conversion;
+one standard-library conversion can overshoot the deadline. No hard RSS or
+immediate-cancellation guarantee is added.
 
 ## Nullable values with coalesce
 

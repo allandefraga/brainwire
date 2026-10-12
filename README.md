@@ -22,6 +22,11 @@ adapter; the platform remains the first integration target.
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
 > progress in [JOURNAL.md](JOURNAL.md).
 
+Start with the [protected local MVP quickstart](docs/mvp-quickstart.md) to create
+a named client shadow graph, import through Python and inspect the running
+server in the TUI. The [October beta queue](docs/2026-10-pilot-roadmap.md) records
+remaining release gates and the full-product backlog.
+
 The terminal backoffice design is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
 graph/query workflows, explained memory settings, disk inspection and concept
@@ -43,6 +48,9 @@ It uses quick count estimates and remains an offline, read-only inspector.
 For a running server, `brainwire shell --connect 127.0.0.1:7687 --graph tickets --view ontology`
 fetches a real read-only server snapshot, with manual refresh and stale-error status.
 See the [connected ontology guide](docs/connected-ontology.md) and `CALL db.schema()`.
+Connected `--view memory` explains the real shared query-pool counters; `--view indexes`
+lists ready versus declared indexes with selection and stale refresh status.
+See [connected status](docs/connected-status.md) for permissions, bounds and controls.
 
 For real graph reads and writes, run `brainwire serve` to connect over Bolt, or
 use the embedded `brainwire cypher --database <directory> --query <text>` command
@@ -51,8 +59,8 @@ reopening. The [server guide](docs/serve.md) covers configuration, driver access
 and current limits; the [single-node container guide](docs/container.md) covers
 the local image and retained-volume test. The [local query guide](docs/local-cypher.md)
 walks through ontology initialization, parameters, bulk JSON files and JSON output,
-including lazy `coalesce(...)` defaults. The Ontology panel can connect to the running server; other real TUI panels
-still require offline access. Real offline file metadata
+including lazy `coalesce(...)` defaults. Ontology, Memory and Indexes can connect to
+the running server; other real TUI panels still require offline access. Real offline file metadata
 browsing is available in the Disk panel. Offline
 index readiness, RocksDB counters and shared memory accounting are available
 in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a
@@ -60,6 +68,11 @@ bounded JSONL importer, MERGE/SET semantics and crash-recovery acceptance.
 The [client shadow guide](docs/client-shadow.md) adds a synthetic Zendesk-shaped
 Ticket/Comment snapshot, source-qualified identities, atomic HAS_COMMENT links
 and a cursor bound to both input digest and mapping contract.
+It also includes an optional DuckDB SELECT exporter that publishes complete,
+validated immutable JSONL for this importer, preserving null/list values and
+refusing to overwrite an existing snapshot. A separate read-only SQLite DuckLake
+exporter requires an explicit version and existing local managed files. Live
+source qualification and DuckLake CDC remain pending.
 [Protected Bolt connections](docs/bolt-auth.md) cover Python/native credentials,
 graph permissions and the optional [container overlays](docs/protected-containers.md).
 

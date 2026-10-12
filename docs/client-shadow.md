@@ -129,13 +129,111 @@ Ontology and pipeline show real schema/index state; this task does not add a liv
 TUI import-job editor or connected query UI. Existing EN/PT-BR display and selected
 Observatory identity are unchanged.
 
+## Export a DuckDB snapshot first
+
+`examples/client/export_snapshot.py` provides an optional source bridge for the
+candidate ticket/comment contract. It reads one trusted SELECT from a read-only
+DuckDB file, normalizes every row with the same adapter used by ingestion and
+publishes a new immutable JSONL file. It does not change the Rust dependency tree.
+Tested optional versions are DuckDB **1.5.5** and Neo4j Python driver **6.3.0**.
+
+From the repository root, prepare a `source` table/view with the explicit required
+fields above. Adapt [the candidate SQL](../examples/client/export_snapshot.sql)
+to your source schema; provider IDs must already be nonempty strings:
+
+```sh
+uv run --no-project --with duckdb==1.5.5 python -m examples.client.export_snapshot \
+  --database /private/path/source.duckdb \
+  --query-file examples/client/export_snapshot.sql \
+  --output /private/path/snapshot-001.jsonl \
+  --fetch-rows 250 --line-bytes 65536 --max-output-bytes 1073741824
+
+export BRAINWIRE_BOLT_AUTH_FILE=/private/path/writer.json
+uv run --no-project --with neo4j==6.3.0 python -m examples.client.ingest_snapshot \
+  /private/path/snapshot-001.jsonl --database client-shadow \
+  --uri bolt://127.0.0.1:17687 --source-id zendesk-snapshot-001
+```
+
+The exporter returns counts, encoded bytes, SHA256 and mapping contract only after
+successful source COMMIT and exclusive final-file publication. Tickets must precede
+all comments across batches. Nulls/lists are preserved; invalid types, late ticket
+rows, duplicate result-column names, multiple statements and non-SELECT statements
+are rejected. SELECT validation is **not a SQL sandbox**; run trusted queries only.
+Do not mutate the published input before or during ingestion.
+
+The helper accepts a caller-prepared connection and requires exclusive use with no
+active transaction. It checks fully fetched transaction IDs before BEGIN because
+nested BEGIN in the tested DuckDB version can invalidate an existing transaction.
+Refusal preserves the caller's staged data; the helper never closes the connection.
+The CLI always creates its own read-only connection. DuckDB's transaction provides
+a consistent view of DuckDB tables. [Transactions](https://duckdb.org/docs/current/sql/statements/transactions),
+[Python API](https://duckdb.org/docs/stable/clients/python/reference/).
+
+`--fetch-rows` bounds fetched Python row count; it does not bound individual values,
+SQL execution memory or process RSS. Encoded line and total-output byte limits are
+checked separately. File contents are flushed/fsynced before source COMMIT; the
+complete temporary file is then linked exclusively, so an existing destination is
+never overwritten. Validation, COMMIT or publication failure leaves no partial final
+input. Abrupt process death or cleanup failure may leave a private `.snapshot-*.tmp`
+file. Directory metadata is not fsynced, so the receipt is not a power-loss durability
+promise for the final pathname. A lost receipt can leave a complete final file;
+do not blindly overwrite or treat a file-exists retry as proof of success.
+
+## Export an explicit DuckLake snapshot
+
+`examples/client/export_ducklake_snapshot.py` reuses the validated publisher for
+a **local SQLite DuckLake catalog and managed local data directory**. Version is
+mandatory; it never silently selects latest. It attaches read-only as `source_lake`,
+with data-path overrides disabled. Catalog/data must already exist and stay
+available for the chosen version. Install optional extensions once, then export:
+
+```sh
+uv run --no-project --with duckdb==1.5.5 python -c \
+  "import duckdb; c=duckdb.connect(); c.execute('INSTALL ducklake'); c.execute('INSTALL sqlite'); c.close()"
+uv run --no-project --with duckdb==1.5.5 python -m examples.client.export_ducklake_snapshot \
+  --catalog /private/path/metadata.sqlite --data-path /private/path/managed-data \
+  --snapshot-version 2 --query-file examples/client/export_ducklake_snapshot.sql \
+  --output /private/path/ducklake-snapshot-002.jsonl \
+  --fetch-rows 250 --line-bytes 65536 --max-output-bytes 1073741824
+```
+
+Adapt the candidate SQL table/columns to an approved source; the example queries
+`source_lake.main.source`. The exporter LOADs cached extensions with automatic
+installation/loading disabled. Missing extensions fail without publication;
+it does not download software silently. Receipts add source type, explicit
+version and loaded DuckDB/DuckLake versions. The tested DuckLake extension reports
+build identifier `d8a1881e`; this is not asserted to be a semantic release.
+
+DuckLake-managed UPDATE/DELETE creates later versions; an old pinned snapshot
+retains the tested original rows and values even when latest has changed. Supplied
+DATA_PATH spelling must match catalog metadata, including an intentional symlink
+alias. The directory is validated but its absolute spelling is preserved. A
+different location is rejected without override or catalog creation; this does
+not migrate a lake. Keep snapshots/managed files retained while exporting:
+concurrent expiration/cleanup can make reads fail, without partial publication.
+[Connection options](https://ducklake.select/docs/stable/duckdb/usage/connecting),
+[time travel](https://ducklake.select/docs/stable/duckdb/usage/time_travel).
+
+This validates a synthetic SQLite/local-files bridge, **not the live client
+DuckLake catalog or its mapping**. PostgreSQL catalogs, object-store data,
+Delta/Arrow and change-feed/deletion handling need independent adapters/checks.
+External Parquet files outside the managed lake must be immutable/versioned:
+a DuckDB transaction alone does not freeze externally rewritten files. One
+snapshot remains rebuildable shadow ingestion rather than CDC.
+
 ## Automated local acceptance
 
 ```sh
 python3 -m unittest discover -s examples/python -p test_resumable_customers.py
 python3 -m unittest discover -s examples/client -p 'test_*.py'
+uv run --no-project --with duckdb==1.5.5 python -m unittest examples.client.test_export_snapshot
+uv run --no-project --with duckdb==1.5.5 python -m unittest examples.client.test_ducklake_snapshot
 uv run --no-project --with neo4j==5.28.6 python \
   docs/benchmarks/2026-10-10-client/acceptance.py --tickets 10000
+uv run --no-project --with duckdb==1.5.5 --with neo4j==6.3.0 python \
+  docs/benchmarks/2026-10-12-mvp/acceptance.py --tickets 10000
+uv run --no-project --with duckdb==1.5.5 --with neo4j==6.3.0 python \
+  docs/benchmarks/2026-10-12-mvp/acceptance.py --tickets 10000 --ducklake
 ```
 
 The harness creates disposable graphs, verifies exact nodes/links/index answers,
@@ -144,7 +242,9 @@ SIGKILL with pending data/cursor, reopen and fresh checkpoint restore/resume. It
 always stops its server and removes temporary storage. See the
 [acceptance evidence](benchmarks/2026-10-10-client.md) for actual run sizes and limits.
 
-This is snapshot input preparation for a future DuckLake bridge. It does not read
-DuckLake/DuckDB/Parquet/Delta directly, resolve cross-source customers, propagate
-source deletes, store ticket history or provide ANN, Raft or shared-environment
-security. The next planned slice is authentication and graph-scoped authorization.
+The [October 12 bridge evidence](benchmarks/2026-10-12-mvp.md) exercises a real
+DuckDB file, protected Bolt, connected EN/PT inspection and SIGKILL/reopen.
+This does not resolve cross-source customers, propagate source deletes, store
+ticket history or provide ANN/Raft. Authentication and graph-scoped authorization
+are implemented; encrypted transport and deployment qualification remain release
+gates. Live client DuckLake catalog access and general Parquet/Delta workflows remain pending.

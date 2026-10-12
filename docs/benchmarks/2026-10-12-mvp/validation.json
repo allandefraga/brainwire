@@ -1,0 +1,56 @@
+{
+  "scope": "synthetic local MVP; no production or distributed qualification",
+  "binary_sha256": "1c17dbf01accf788202a6a93b0181439dda15b8c2f83512be2658e21693fd2d2",
+  "rust": {
+    "passed": 512,
+    "failed": 0,
+    "ignored": 0,
+    "groups": 40
+  },
+  "clippy": "workspace all targets -D warnings PASS",
+  "format": "cargo fmt --all -- --check PASS",
+  "python_examples_tests": 17,
+  "client_tests": 23,
+  "dependencies": {
+    "duckdb": "1.5.5",
+    "neo4j": [
+      "5.28.6",
+      "6.3.0"
+    ]
+  },
+  "advisory_review": "Astra: no blockers in reviewed implementation; main reran checks",
+  "docker_image_id": "sha256:cd69e6d55aff3064d7286bb29fd06c6b7edd8c1a0e75ae6957d622e80192348c",
+  "docker_scope": "single-node Docker Compose only",
+  "docker_resources_removed": true,
+  "session_start_utc": "2026-10-12 17:01:27 UTC",
+  "requested_end_utc": "2026-10-12 18:01:27 UTC",
+  "final_mixed_load": {
+    "requested_seconds": 600,
+    "load_seconds": 600.0039344579855,
+    "rows": 100000,
+    "point": {
+      "requests": 2041625,
+      "p50_ms": 0.513,
+      "p95_ms": 1.045,
+      "p99_ms": 1.493
+    },
+    "scalar": {
+      "requests": 2041622,
+      "p50_ms": 0.528,
+      "p95_ms": 1.072,
+      "p99_ms": 1.542
+    },
+    "writes": {
+      "requests": 10681,
+      "p50_ms": 0.693,
+      "p95_ms": 1.54,
+      "p99_ms": 6.723
+    },
+    "sampled_rss_peak_kib": 93424,
+    "acknowledged_latest_updates_verified": 200,
+    "result": "PASS"
+  },
+  "one_hour_continuous_endurance": "pending",
+  "session_closed_utc": "2026-10-12 18:01:33 UTC",
+  "session_elapsed_seconds": 3606
+}

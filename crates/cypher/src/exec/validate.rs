@@ -14,7 +14,12 @@ fn unsupported(s: impl Into<String>) -> ExecError {
 }
 fn children(e: &Expr) -> Vec<&Expr> {
     match e {
-        Expr::Prop(e, _) | Expr::Count(e) | Expr::Size(e) | Expr::Not(e) => vec![e],
+        Expr::Prop(e, _)
+        | Expr::Count(e)
+        | Expr::Size(e)
+        | Expr::ToLower(e)
+        | Expr::ToUpper(e)
+        | Expr::Not(e) => vec![e],
         Expr::Cmp(a, _, b) | Expr::And(a, b) | Expr::Or(a, b) => vec![a, b],
         Expr::List(es) | Expr::Coalesce(es) => es.iter().collect(),
         Expr::Map(es) => es.iter().map(|(_, e)| e).collect(),

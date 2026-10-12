@@ -8,6 +8,8 @@ mod databases;
 mod engine;
 mod probe;
 mod remote;
+mod remote_indexes;
+mod remote_memory;
 mod serve;
 mod size;
 
@@ -67,7 +69,7 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
-    /// Open the synthetic observatory, local overview or server ontology snapshot.
+    /// Open the synthetic observatory, local overview or read-only server snapshot.
     Shell {
         /// Use the bounded synthetic demo fixture.
         #[arg(long, conflicts_with = "overview")]
@@ -75,7 +77,7 @@ enum Commands {
         /// Inspect every named local graph (requires exclusive database access).
         #[arg(long, conflicts_with = "demo")]
         overview: bool,
-        /// Fetch a read-only ontology snapshot over Bolt (IP:PORT; --view ontology).
+        /// Fetch a read-only server snapshot over Bolt (IP:PORT; ontology, memory or indexes).
         #[arg(long, conflicts_with_all = ["demo", "overview", "config", "estimated"], requires = "graph")]
         connect: Option<String>,
         /// Total connection/fetch deadline in milliseconds (1..10000).
@@ -99,7 +101,7 @@ enum Commands {
         /// Render one plain-text frame without a terminal.
         #[arg(long)]
         snapshot: bool,
-        /// Initial view: graph, query, memory, disk; ontology with --overview or --connect.
+        /// Initial view: graph, query, memory, disk; --connect supports ontology, memory or indexes.
         #[arg(long, default_value = "graph")]
         view: String,
         /// Snapshot columns (80..240).
@@ -289,9 +291,27 @@ fn main() {
                 let graph = graph
                     .as_deref()
                     .expect("clap requires --graph with --connect");
-                brainwire_tui::run_connected_ontology(&options, &address, graph, || {
-                    remote::schema(&address, graph, timeout_ms)
-                })
+                match options.view.as_str() {
+                    "ontology" => {
+                        brainwire_tui::run_connected_ontology(&options, &address, graph, || {
+                            remote::schema(&address, graph, timeout_ms)
+                        })
+                    }
+                    "memory" => {
+                        brainwire_tui::run_connected_memory(&options, &address, graph, || {
+                            remote_memory::memory(&address, graph, timeout_ms)
+                        })
+                    }
+                    "indexes" => {
+                        brainwire_tui::run_connected_indexes(&options, &address, graph, || {
+                            remote_indexes::indexes(&address, graph, timeout_ms)
+                        })
+                    }
+                    _ => Err(
+                        "--connect requires --view ontology, --view memory or --view indexes"
+                            .into(),
+                    ),
+                }
             } else if overview {
                 // Opening the schema should never require a full instance count scan.
                 let quick_counts = estimated || options.view == "ontology";

@@ -23,13 +23,14 @@
 //! cmp       := primary [('=' | '<>' | '<' | '<=' | '>' | '>=') primary]
 //! primary   := literal | '$' name | var ['.' key] | count '(' ('*' | expr) ')'
 //!            | size '(' expr ')' | coalesce '(' expr (',' expr)* ')'
+//!            | toLower '(' expr ')' | toUpper '(' expr ')'
 //!            | '[' [expr (',' expr)*] ']' | map | '(' expr ')'
 //! literal   := integer | float | string | TRUE | FALSE | NULL | '-' number
 //! ```
 //!
 //! Anything else (`OPTIONAL MATCH`, `WITH`, `ORDER BY`, `SKIP`,
 //! variable-length relationships, several labels, several hops, functions
-//! other than `count`, `size` and `coalesce`, `DELETE` without `DETACH`) is rejected with a
+//! other than `count`, `size`, `coalesce`, `toLower` and `toUpper`, `DELETE` without `DETACH`) is rejected with a
 //! `ParseError` whose message starts with `not supported yet: `.
 //!
 //! Nesting through parentheses, lists and maps (including function
@@ -719,7 +720,9 @@ impl<'a> Parser<'a> {
         if self.peek_at(1) == Some(&Tok::LParen) {
             let size = name.eq_ignore_ascii_case("size");
             let coalesce = name.eq_ignore_ascii_case("coalesce");
-            if !size && !coalesce && !name.eq_ignore_ascii_case("count") {
+            let lower = name.eq_ignore_ascii_case("toLower");
+            let upper = name.eq_ignore_ascii_case("toUpper");
+            if !size && !coalesce && !lower && !upper && !name.eq_ignore_ascii_case("count") {
                 return Err(self.error_at(start, format!("not supported yet: function {name}")));
             }
             self.advance(); // function name
@@ -743,7 +746,7 @@ impl<'a> Parser<'a> {
                         depth: p.checked_depth(max_depth, start)?,
                     });
                 }
-                if !size && p.check(&Tok::Star) {
+                if !size && !lower && !upper && p.check(&Tok::Star) {
                     p.advance();
                     p.expect(Tok::RParen, "')'")?;
                     return Ok(ParsedExpr::leaf(Expr::CountStar));
@@ -754,6 +757,10 @@ impl<'a> Parser<'a> {
                 Ok(ParsedExpr {
                     expr: if size {
                         Expr::Size(Box::new(inner.expr))
+                    } else if lower {
+                        Expr::ToLower(Box::new(inner.expr))
+                    } else if upper {
+                        Expr::ToUpper(Box::new(inner.expr))
                     } else {
                         Expr::Count(Box::new(inner.expr))
                     },

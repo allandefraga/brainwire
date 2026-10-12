@@ -1,0 +1,69 @@
+{
+  "synthetic": true,
+  "driver": "6.3.0",
+  "profile": "release",
+  "binary_sha256": "1c17dbf01accf788202a6a93b0181439dda15b8c2f83512be2658e21693fd2d2",
+  "fixture": {
+    "synthetic": true,
+    "tickets": 100000,
+    "comments": 200000,
+    "relationships": 200000,
+    "status_counts": {
+      "open": 33334,
+      "pending": 33333,
+      "solved": 33333
+    },
+    "priority_counts": {
+      "high": 20000,
+      "normal": 80000
+    },
+    "comment_body_characters": 1024,
+    "source_bytes": 260304455
+  },
+  "import_seconds": 28.733608666982036,
+  "input_rows_per_second": 10440.735219754413,
+  "rollback_allocator_counter_advanced": false,
+  "large_write_guard_rejected": true,
+  "audit": {
+    "database": "client-shadow-synthetic",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "validation_audit": {
+    "database": "client-validation",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checkpoint": {
+    "commit_sequence": "1496",
+    "commit_sequence_tracked": true,
+    "database": "client-shadow-synthetic",
+    "destination": "/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-client-yaux5vsr/data/restored",
+    "scope": "single_graph_committed_native_checkpoint",
+    "status": "checkpoint_created"
+  },
+  "restore_audit": {
+    "database": "restored",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checks": [
+    "exact node/edge/index counts",
+    "no-op replay",
+    "mapping mismatch",
+    "overwrite/null indexes",
+    "duplicate edge replay",
+    "immutable/missing parents",
+    "conflicting duplicate parents",
+    "graph isolation",
+    "changed source rejected",
+    "lost-acknowledgement partial resume",
+    "callback rollback",
+    "bounded write/guard rollback",
+    "SIGKILL pending data/cursor",
+    "reopen/replay",
+    "independent checkpoint restore/resume/audit"
+  ],
+  "result": "PASS",
+  "scope": "localhost single-node synthetic snapshot; no CDC, auth, Raft, ANN or production performance certification"
+}
