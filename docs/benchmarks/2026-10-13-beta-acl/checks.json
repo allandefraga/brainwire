@@ -1,0 +1,10 @@
+{
+  "workspaceExit": 0,
+  "clippyExit": 0,
+  "fmtExit": 0,
+  "pythonUnitExit": 0,
+  "rustTestsPassed": 590,
+  "rustTestsIgnored": 0,
+  "pythonUnits": 21,
+  "nativeSha256": "843054cdc5d0a4eb78ba23642382824e54758bcff5c2c92bfb795e17eeb5dd00"
+}

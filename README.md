@@ -13,7 +13,8 @@ adapter; the platform remains the first integration target.
 > configuration commands, a Cypher subset parser and atomic executor, and an
 > interactive terminal backoffice and connected read-only workspace. The server is single-node and disables
 > authentication by default; optional service-token protection now grants read/write
-> access per named graph. Native TLS, human-password login and JWT validation are
+> access per named graph. Optional trusted static node-visibility policies now
+> filter queries, traversal, analytics and the connected Graph pane. Native TLS, human-password login and JWT validation are
 > pending. Conservative per-RUN guards, a shared query reservation pool and
 > cooperative execution deadlines are enforced; a hard process-memory ceiling
 > remains pending. Decoded request allocations and authenticated network IO now
@@ -37,6 +38,10 @@ frozen candidate's 20 validated evidence receipts: a full-hour mixed load, pinne
 of 100k nodes each, strict TLS/permissions and real connected TUI captures.
 Measurements are synthetic localhost observations; client node ACL integration
 and protected target-cluster qualification remain separate release gates.
+The [ACL/incremental follow-up](docs/benchmarks/2026-10-13-beta-acl.md) binds
+private-ACL, Python partial mutation, pinned snapshot differences and local
+Compose/Kubernetes/Swarm recovery to the corrected candidate. Actual quorum
+replication and dynamic client adapter integration are still pending.
 
 The terminal backoffice design is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
@@ -86,10 +91,17 @@ and a cursor bound to both input digest and mapping contract.
 It also includes an optional DuckDB SELECT exporter that publishes complete,
 validated immutable JSONL for this importer, preserving null/list values and
 refusing to overwrite an existing snapshot. A separate read-only SQLite DuckLake
-exporter requires an explicit version and existing local managed files. Live
-source qualification and DuckLake CDC remain pending. The
+exporter requires an explicit version and existing local managed files.
+[Version-pinned snapshot differences](docs/ducklake-incremental.md) now apply
+inserts, updates and physical deletes with baseline verification, ordered source
+versions and a durable batch cursor. This is snapshot diff, not native CDC;
+live client source qualification remains pending. The
 [client contract comparison](docs/client-contract-gap.md) records actual adapter
-and node-level ACL gaps; the synthetic importer is not a production drop-in.
+and adapter gaps; the synthetic importer is not a production drop-in.
+[Node ACL](docs/node-acl.md) describes private stamping, static reader policies
+and remaining dynamic-user/ingestion integration limits. The
+[small Python client](docs/python-client.md) supports individual/batch upserts
+and partial node/edge property updates/removal over the same Bolt/Cypher engine.
 [Protected Bolt connections](docs/bolt-auth.md) cover Python/native credentials,
 graph permissions and the optional [container overlays](docs/protected-containers.md).
 The [TLS proxy guide](docs/protected-transport.md) documents strict Python driver
@@ -110,9 +122,13 @@ example, options, memory limits and a reproducible volume workload.
 domain using explicit authority, author relevance, usage, certification and
 freshness signals. It returns per-signal contributions and uses bounded top-K
 selection with the existing term index. See [knowledge ranking](docs/knowledge-ranking.md)
-for the synthetic example, policy and limits; automated evidence collection and
-per-source permission-aware ranking are not implemented; protected readers still
-need a grant on the selected graph.
+for the synthetic example, policy and limits; configured node visibility filters
+candidates before ranking. Automated evidence collection remains pending, and
+protected readers still need a grant on the selected graph.
+
+[Deterministic apply](docs/deterministic-apply.md) is an experimental per-store
+foundation with ordered mutations and atomic applied-index persistence. It is
+not activated in the server and does not implement consensus or quorum durability.
 
 ## Local development
 

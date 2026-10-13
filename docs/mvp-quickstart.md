@@ -163,3 +163,16 @@ Build a local Linux image for the current checkout with
 [protected container guide](protected-containers.md) for credentials, retained
 storage and loopback exposure. Native `cypher --database` takes a store directory;
 administrative `db` and connected `--graph` commands take configured graph names.
+
+## Partial and incremental Python mutations
+
+Use the [Python helper](python-client.md) for single/batch upserts and property
+patches. Omitted fields are preserved; `None` or `remove` removes a property.
+Use the [pinned DuckLake snapshot-diff importer](ducklake-incremental.md) for
+durable source progress, replay and deletes. These helpers use the same Bolt,
+Cypher and RocksDB transaction path.
+
+Generated reader credentials without `node_visibility` are legacy graph-wide
+service identities. For governed users configure [private node ACL](node-acl.md);
+an empty visibility policy denies ordinary nodes. The dynamic client adapter
+and authoritative ACL ingestion are still pending.

@@ -1,0 +1,39 @@
+WARN `--no-project` was provided, but no project was found
+creating isolated kind cluster brainwire-k8s-c85ed031e300
+loaded local image; applying retained-PVC StatefulSet
+[#E6C9]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 59075)) (ResolvedIPv4Address(('127.0.0.1', 59075))): ConnectionResetError(54, 'Connection reset by peer')
+verified container-stop-zero-timeout, same retained PVC
+[#E7B4]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 59303)) (ResolvedIPv4Address(('127.0.0.1', 59303))): ConnectionResetError(54, 'Connection reset by peer')
+verified pod-recreation, same retained PVC
+{
+  "result": "PASS",
+  "image": "brainwire:beta-acl-20261013",
+  "kubernetes": "v1.36.4",
+  "rows": 1000,
+  "cluster": "brainwire-k8s-c85ed031e300",
+  "pvcUid": "01f18136-502e-4f8d-bc1c-4b0fb7d94f34",
+  "recoveries": [
+    {
+      "action": "container-stop-zero-timeout",
+      "podUid": "f6f9ab7c-43ae-485a-9764-edb735b5e2ac",
+      "restartCount": 1
+    },
+    {
+      "action": "pod-recreation",
+      "podUid": "928b12b1-90d4-417d-b261-4e265da45db0",
+      "restartCount": 0
+    }
+  ],
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checkpointAudit": {
+    "database": "checkpoint-k8s",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "scope": "single kind node, retained local PVC; not replication or node loss"
+}
+removed isolated cluster brainwire-k8s-c85ed031e300

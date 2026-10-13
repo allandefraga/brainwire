@@ -1,0 +1,591 @@
+use brainwire_core::{acl::ReadVisibility, schema::GraphMapping, value::Value};
+use brainwire_cypher::{
+    execute, ExecError, Out, QueryAccess, QueryOutput, QueryTransaction, QueryTransactionState,
+};
+use brainwire_store::db::{Database, Resources, StoreConfig};
+use std::collections::BTreeMap;
+
+fn open(path: &std::path::Path) -> Database {
+    Database::open(path, &Resources::new(StoreConfig::for_tests())).unwrap()
+}
+fn setup() -> (tempfile::TempDir, Database) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = open(dir.path());
+    let schema:GraphMapping=serde_json::from_str(r#"{"version":"1","nodes":[{"label":"Doc","properties":["title","term","authority","document_id","ACL_Secret"],"indexed_fields":["title","term","ACL_Secret"]}],"edges":[{"type":"LINK","from":{"label":"Doc"},"to":{"label":"Doc"},"properties":["weight"]}]}"#).unwrap();
+    db.apply_ontology(&schema).unwrap();
+    execute(&db,"CREATE (a:Doc {entity_id:'a',title:'A',term:'needle',authority:0.2}),(b:Doc {entity_id:'b',title:'B',term:'needle',authority:0.8}),(h:Doc {entity_id:'hidden',title:'Hidden',term:'needle',authority:99}),(m:Doc {entity_id:'missing',title:'Missing'}),(d:Doc {entity_id:'denied',title:'Denied'}),(x:Doc {entity_id:'document',document_id:'source-document',title:'Document',term:'other'}) CREATE (a)-[:LINK {weight:1}]->(b) CREATE (b)-[:LINK {weight:1}]->(a) CREATE (a)-[:LINK {weight:'invalid-hidden-weight'}]->(h) CREATE (h)-[:LINK]->(b) CREATE (h)-[:LINK]->(m)",&BTreeMap::new()).unwrap();
+    for (id, allow, deny) in [
+        ("a", vec!["alice"], vec![]),
+        ("b", vec!["alice"], vec![]),
+        ("hidden", vec!["bob"], vec![]),
+        ("denied", vec!["alice"], vec!["alice"]),
+        ("document", vec!["alice"], vec![]),
+    ] {
+        stamp(&db, id, allow, deny);
+    }
+    (dir, db)
+}
+fn stamp(db: &Database, id: &str, allow: Vec<&str>, deny: Vec<&str>) {
+    let params = BTreeMap::from([
+        ("id".into(), Value::Str(id.into())),
+        (
+            "allow".into(),
+            Value::List(allow.into_iter().map(|v| Value::Str(v.into())).collect()),
+        ),
+        (
+            "deny".into(),
+            Value::List(deny.into_iter().map(|v| Value::Str(v.into())).collect()),
+        ),
+    ]);
+    let result=execute(db,"CALL db.setNodeAcl({label:'Doc',entityId:$id,allow:$allow,deny:$deny}) YIELD updated RETURN updated",&params).unwrap();
+    assert_eq!(result.rows, vec![vec![Out::Value(Value::Bool(true))]]);
+}
+fn policy() -> ReadVisibility {
+    ReadVisibility {
+        principals: vec!["alice".into()],
+        ..Default::default()
+    }
+}
+fn restricted(db: &Database, query: &str) -> Result<QueryOutput, ExecError> {
+    let mut transaction = QueryTransaction::begin(db)?.with_read_visibility(policy())?;
+    let output = transaction.run_with_access(
+        query,
+        &BTreeMap::new(),
+        QueryAccess {
+            write: false,
+            instance_admin: false,
+        },
+    )?;
+    assert_eq!(transaction.commit()?, None);
+    Ok(output)
+}
+fn string(value: &str) -> Out {
+    Out::Value(Value::Str(value.into()))
+}
+fn int(value: i64) -> Out {
+    Out::Value(Value::Int(value))
+}
+
+#[test]
+fn acl_filters_scans_primary_keys_indexes_bound_variables_counts_and_both_edge_directions() {
+    let (_dir, db) = setup();
+    assert_eq!(
+        restricted(&db, "MATCH (n:Doc) RETURN n.entity_id")
+            .unwrap()
+            .rows,
+        vec![
+            vec![string("a")],
+            vec![string("b")],
+            vec![string("document")]
+        ]
+    );
+    for (id, title) in [
+        ("hidden", "Hidden"),
+        ("missing", "Missing"),
+        ("denied", "Denied"),
+    ] {
+        for query in [
+            format!("MATCH (n:Doc {{entity_id:'{id}'}}) RETURN count(*) AS n"),
+            format!("MATCH (n:Doc) WHERE n.title='{title}' RETURN count(n) AS n"),
+        ] {
+            assert_eq!(
+                restricted(&db, &query).unwrap().rows,
+                vec![vec![int(0)]],
+                "{query}"
+            );
+        }
+    }
+    assert_eq!(
+        restricted(
+            &db,
+            "MATCH (n:Doc {entity_id:'a'}) MATCH (n:Doc) RETURN count(n)"
+        )
+        .unwrap()
+        .rows,
+        vec![vec![int(1)]]
+    );
+    for query in [
+        "MATCH (a:Doc)-[:LINK]->(b:Doc) RETURN a.entity_id,b.entity_id",
+        "MATCH (b:Doc)<-[:LINK]-(a:Doc) RETURN b.entity_id,a.entity_id",
+    ] {
+        assert_eq!(
+            restricted(&db, query).unwrap().rows,
+            vec![
+                vec![string("a"), string("b")],
+                vec![string("b"), string("a")]
+            ]
+        );
+    }
+    assert_eq!(
+        restricted(&db, "MATCH (a:Doc)-[:LINK]->(b:Doc) RETURN count(*)")
+            .unwrap()
+            .rows,
+        vec![vec![int(2)]]
+    );
+}
+
+#[test]
+fn private_acl_properties_are_stripped_from_scalar_and_whole_node_outputs_even_legacy() {
+    let (_dir, db) = setup();
+    // Simulate a pre-reservation legacy row without using today's rejected property writes.
+    let catalog = db.catalog().unwrap().unwrap();
+    let ty = catalog.node_type("Doc").unwrap();
+    let mut transaction = db.begin();
+    let id = brainwire_store::graph::find_by_entity_id(&transaction, "a", Some(ty.id)).unwrap()[0];
+    let mut record = brainwire_store::graph::get_node(&transaction, id)
+        .unwrap()
+        .unwrap();
+    record
+        .row
+        .extra
+        .insert("ACL_Secret".into(), Value::Str("secret-a".into()));
+    record.row.extra.insert(
+        "acl_allow".into(),
+        Value::List(vec![Value::Str("private-alice".into())]),
+    );
+    let mut encoded = (record.entity_id.len() as u32).to_be_bytes().to_vec();
+    encoded.extend_from_slice(record.entity_id.as_bytes());
+    encoded.extend_from_slice(&brainwire_core::codec::encode_row(&record.row));
+    transaction.put(
+        brainwire_store::txn::Cf::Node,
+        id.0.to_be_bytes().to_vec(),
+        encoded,
+    );
+    transaction.commit().unwrap();
+    for visibility in [false, true] {
+        let result = if visibility {
+            restricted(
+                &db,
+                "MATCH (n:Doc {entity_id:'a'}) RETURN n,n.ACL_Secret,n.acl_allow",
+            )
+            .unwrap()
+        } else {
+            execute(
+                &db,
+                "MATCH (n:Doc {entity_id:'a'}) RETURN n,n.ACL_Secret,n.acl_allow",
+                &BTreeMap::new(),
+            )
+            .unwrap()
+        };
+        let Out::Node(node) = &result.rows[0][0] else {
+            panic!("node")
+        };
+        assert!(node
+            .props
+            .keys()
+            .all(|key| !key.to_ascii_lowercase().starts_with("acl_")));
+        assert_eq!(
+            &result.rows[0][1..],
+            &[Out::Value(Value::Null), Out::Value(Value::Null)]
+        );
+    }
+    assert!(restricted(
+        &db,
+        "MATCH (n:Doc) WHERE n.ACL_Secret='secret-a' RETURN n.entity_id"
+    )
+    .unwrap()
+    .rows
+    .is_empty());
+}
+
+#[test]
+fn every_csr_analytics_procedure_and_knowledge_rank_uses_only_visible_nodes_and_edges() {
+    let (_dir, db) = setup();
+    assert_eq!(restricted(&db,"CALL graph.project() YIELD nodeCount,relationshipCount,nonZeroCount RETURN nodeCount,relationshipCount,nonZeroCount").unwrap().rows,vec![vec![int(3),int(2),int(2)]]);
+    assert!(matches!(restricted(&db,"CALL graph.project() YIELD scannedRelationshipCount RETURN scannedRelationshipCount LIMIT 0"),Err(ExecError::Forbidden(_))));
+    assert_eq!(restricted(&db,"CALL graph.degree() YIELD node,outDegree,inDegree RETURN node.entity_id,outDegree,inDegree").unwrap().rows,vec![vec![string("a"),int(1),int(1)],vec![string("b"),int(1),int(1)],vec![string("document"),int(0),int(0)]]);
+    for name in ["graph.wcc", "graph.scc"] {
+        assert_eq!(restricted(&db,&format!("CALL {name}() YIELD node,component,size RETURN node.entity_id,component.entity_id,size")).unwrap().rows,vec![vec![string("a"),string("a"),int(2)],vec![string("b"),string("a"),int(2)],vec![string("document"),string("document"),int(1)]]);
+    }
+    assert_eq!(restricted(&db,"CALL graph.reachable({source:'a',sourceLabel:'Doc'}) YIELD node,depth RETURN node.entity_id,depth").unwrap().rows,vec![vec![string("a"),int(0)],vec![string("b"),int(1)]]);
+    assert_eq!(restricted(&db,"CALL graph.shortestPath({source:'a',sourceLabel:'Doc',target:'b',targetLabel:'Doc'}) YIELD node,depth RETURN node.entity_id,depth").unwrap().rows,vec![vec![string("a"),int(0)],vec![string("b"),int(1)]]);
+    let page=restricted(&db,"CALL graph.pagerank({weightProperty:'weight'}) YIELD node,score RETURN node.entity_id,score").unwrap();
+    assert_eq!(page.rows.len(), 3);
+    assert!(page
+        .rows
+        .iter()
+        .all(|row| ![string("hidden"), string("missing"), string("denied")].contains(&row[0])));
+    assert_eq!(restricted(&db,"CALL knowledge.rank({label:'Doc',term:'needle',topK:1}) YIELD node,score RETURN node.entity_id").unwrap().rows,vec![vec![string("b")]]);
+    for id in ["hidden", "not-found"] {
+        let error = restricted(
+            &db,
+            &format!(
+                "CALL graph.reachable({{source:'{id}',sourceLabel:'Doc'}}) YIELD node RETURN node"
+            ),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "semantic error: source node not found");
+        let error=restricted(&db,&format!("CALL graph.shortestPath({{source:'a',sourceLabel:'Doc',target:'{id}',targetLabel:'Doc'}}) YIELD node RETURN node")).unwrap_err();
+        assert_eq!(error.to_string(), "semantic error: target node not found");
+    }
+}
+
+#[test]
+fn policy_is_trusted_immutable_and_rejects_all_mutations_before_execution() {
+    let (_dir, db) = setup();
+    for query in ["CREATE (n:Doc {entity_id:'new'})","MERGE (n:Doc {entity_id:'new'})","MATCH (n:Doc {entity_id:'a'}) SET n.title='changed'","MATCH (n:Doc {entity_id:'a'}) DETACH DELETE n","CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:['bob']}) YIELD updated RETURN updated LIMIT 0"] {
+        let mut tx=QueryTransaction::begin(&db).unwrap().with_read_visibility(policy()).unwrap();assert!(matches!(tx.run(query,&BTreeMap::new()),Err(ExecError::Forbidden(_))),"{query}");assert_eq!(tx.state(),QueryTransactionState::Failed);
+    }
+    assert_eq!(
+        execute(
+            &db,
+            "MATCH (n:Doc {entity_id:'a'}) RETURN n.title",
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .rows,
+        vec![vec![string("A")]]
+    );
+    let attached = QueryTransaction::begin(&db)
+        .unwrap()
+        .with_read_visibility(policy())
+        .unwrap();
+    assert!(attached
+        .with_read_visibility(ReadVisibility {
+            allow_all: true,
+            ..Default::default()
+        })
+        .is_err());
+    let mut used = QueryTransaction::begin(&db).unwrap();
+    used.run("RETURN 1", &BTreeMap::new()).unwrap();
+    assert!(used.with_read_visibility(policy()).is_err());
+    let invalid = ReadVisibility {
+        principals: vec![String::new()],
+        ..Default::default()
+    };
+    assert!(QueryTransaction::begin(&db)
+        .unwrap()
+        .with_read_visibility(invalid)
+        .is_err());
+}
+
+#[test]
+fn stamp_requires_both_privileges_validates_whole_metadata_and_is_transactional() {
+    let (dir, db) = setup();
+    let query="CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:['bob'],connectorIds:['c1'],sourceTable:'clean/table',sources:['s1']}) YIELD updated AS ok RETURN ok";
+    for access in [
+        QueryAccess {
+            write: false,
+            instance_admin: true,
+        },
+        QueryAccess {
+            write: true,
+            instance_admin: false,
+        },
+        QueryAccess {
+            write: false,
+            instance_admin: false,
+        },
+    ] {
+        let mut tx = QueryTransaction::begin(&db).unwrap();
+        assert!(matches!(
+            tx.run_with_access(query, &BTreeMap::new(), access),
+            Err(ExecError::Forbidden(_))
+        ));
+    }
+    for options in [
+        "{label:'Doc',entityId:'a',allow:[1]}",
+        "{label:'Doc',entityId:'a',allow:['']}",
+        "{label:'Doc',entityId:'a',sourceTable:''}",
+        "{label:'Doc',entityId:'a',unknown:[]}",
+        "{label:'Doc',entityId:'a',deny:null}",
+    ] {
+        let query = format!("CALL db.setNodeAcl({options}) YIELD updated RETURN updated LIMIT 0");
+        assert!(execute(&db, &query, &BTreeMap::new()).is_err(), "{query}");
+    }
+    assert!(execute(&db,
+        "CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:['bob']}) YIELD updated RETURN unknown LIMIT 0",
+        &BTreeMap::new()).is_err());
+    let too_many = BTreeMap::from([(
+        "allow".into(),
+        Value::List((0..257).map(|_| Value::Str("alice".into())).collect()),
+    )]);
+    assert!(execute(&db,
+        "CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:$allow}) YIELD updated RETURN updated LIMIT 0",
+        &too_many).is_err());
+    let null_source = execute(&db,
+        "CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:['alice'],sourceTable:null}) YIELD updated RETURN updated",
+        &BTreeMap::new()).unwrap();
+    assert_eq!(null_source.rows, vec![vec![Out::Value(Value::Bool(true))]]);
+    let mut old = QueryTransaction::begin(&db)
+        .unwrap()
+        .with_read_visibility(policy())
+        .unwrap();
+    let mut writer = QueryTransaction::begin(&db).unwrap();
+    assert_eq!(
+        writer.run(query, &BTreeMap::new()).unwrap().rows,
+        vec![vec![Out::Value(Value::Bool(true))]]
+    );
+    writer.rollback();
+    drop(writer);
+    assert_eq!(
+        restricted(&db, "MATCH (n:Doc {entity_id:'a'}) RETURN n.entity_id")
+            .unwrap()
+            .rows,
+        vec![vec![string("a")]]
+    );
+    let mut writer = QueryTransaction::begin(&db).unwrap();
+    writer.run(query, &BTreeMap::new()).unwrap();
+    assert!(writer.commit().unwrap().is_some());
+    drop(writer);
+    assert_eq!(
+        old.run(
+            "MATCH (n:Doc {entity_id:'a'}) RETURN n.entity_id",
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .rows,
+        vec![vec![string("a")]]
+    );
+    old.rollback();
+    drop(old);
+    assert!(
+        restricted(&db, "MATCH (n:Doc {entity_id:'a'}) RETURN n.entity_id")
+            .unwrap()
+            .rows
+            .is_empty()
+    );
+    drop(db);
+    let reopened = open(dir.path());
+    assert!(restricted(
+        &reopened,
+        "MATCH (n:Doc {entity_id:'a'}) RETURN n.entity_id"
+    )
+    .unwrap()
+    .rows
+    .is_empty());
+}
+
+#[test]
+fn authoritative_document_grants_override_allow_all_when_actual_document_id_is_present() {
+    let (_dir, db) = setup();
+    let mut tx = QueryTransaction::begin(&db)
+        .unwrap()
+        .with_read_visibility(ReadVisibility {
+            allow_all: true,
+            knowledge_grants: Some(vec![]),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(tx
+        .run(
+            "MATCH (n:Doc {entity_id:'document'}) RETURN n.entity_id",
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .rows
+        .is_empty());
+    assert_eq!(
+        tx.run("MATCH (n:Doc) RETURN count(*)", &BTreeMap::new())
+            .unwrap()
+            .rows,
+        vec![vec![int(5)]]
+    );
+}
+
+#[test]
+fn large_hidden_rows_are_precharged_before_decode_and_release_query_pool_on_rejection() {
+    use brainwire_cypher::{ExecutionLimits, QueryMemoryPool};
+    use std::sync::Arc;
+    let (_dir, db) = setup();
+    execute(
+        &db,
+        "CREATE (n:Doc {entity_id:'large-hidden',payload:$payload})",
+        &BTreeMap::from([("payload".into(), Value::Str("x".repeat(16_384)))]),
+    )
+    .unwrap();
+    stamp(&db, "large-hidden", vec!["bob"], vec![]);
+    let query = "MATCH (n:Doc {entity_id:'large-hidden'}) RETURN n.entity_id";
+    let mut small = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 4096,
+            timeout: None,
+        },
+    )
+    .unwrap()
+    .with_read_visibility(policy())
+    .unwrap();
+    assert!(matches!(
+        small.run(query, &BTreeMap::new()),
+        Err(ExecError::MemoryLimit { .. })
+    ));
+    assert_eq!(small.state(), QueryTransactionState::Failed);
+    let pool = Arc::new(QueryMemoryPool::new(8192));
+    let mut pooled =
+        QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+            .unwrap()
+            .with_read_visibility(policy())
+            .unwrap();
+    let error = pooled.run(query, &BTreeMap::new()).unwrap_err();
+    assert!(
+        matches!(error,ExecError::MemoryPoolExhausted{requested,..} if requested>16_384),
+        "{error:?}"
+    );
+    assert_eq!(pool.usage().reserved_bytes, 0);
+    assert_eq!(pool.usage().rejections, 1);
+    let mut reuse =
+        QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+            .unwrap()
+            .with_read_visibility(policy())
+            .unwrap();
+    reuse.run("RETURN 1", &BTreeMap::new()).unwrap();
+    reuse.commit().unwrap();
+    assert_eq!(pool.usage().reserved_bytes, 0);
+}
+
+#[test]
+fn null_heavy_hidden_and_visible_lists_use_decoded_estimates_before_allocation() {
+    use brainwire_cypher::{ExecutionLimits, QueryMemoryPool};
+    use std::sync::Arc;
+    let (_dir, db) = setup();
+    let params = BTreeMap::from([("payload".into(), Value::List(vec![Value::Null; 4096]))]);
+    for (id, principal) in [("null-visible", "alice"), ("null-hidden", "bob")] {
+        execute(
+            &db,
+            &format!("CREATE (n:Doc {{entity_id:'{id}',payload:$payload}})"),
+            &params,
+        )
+        .unwrap();
+        stamp(&db, id, vec![principal], vec![]);
+    }
+    for (id, restricted_policy) in [
+        ("null-visible", false),
+        ("null-visible", true),
+        ("null-hidden", true),
+    ] {
+        let query = format!("MATCH (n:Doc {{entity_id:'{id}'}}) RETURN n.entity_id");
+        let mut transaction = QueryTransaction::begin_with_limits(
+            &db,
+            ExecutionLimits {
+                memory_bytes: 48 * 1024,
+                timeout: None,
+            },
+        )
+        .unwrap();
+        if restricted_policy {
+            transaction = transaction.with_read_visibility(policy()).unwrap();
+        }
+        assert!(
+            matches!(
+                transaction.run(&query, &BTreeMap::new()),
+                Err(ExecError::MemoryLimit { .. })
+            ),
+            "{id} restricted={restricted_policy}"
+        );
+        assert_eq!(transaction.state(), QueryTransactionState::Failed);
+        let pool = Arc::new(QueryMemoryPool::new(48 * 1024));
+        let mut transaction =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap();
+        if restricted_policy {
+            transaction = transaction.with_read_visibility(policy()).unwrap();
+        }
+        let error = transaction.run(&query, &BTreeMap::new()).unwrap_err();
+        assert!(
+            matches!(error,ExecError::MemoryPoolExhausted{requested,..} if requested>48*1024),
+            "{error:?}"
+        );
+        assert_eq!(pool.usage().reserved_bytes, 0);
+        assert_eq!(pool.usage().rejections, 1);
+        let mut reuse =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap();
+        reuse.run("RETURN 1", &BTreeMap::new()).unwrap();
+        reuse.rollback();
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+}
+
+#[test]
+fn acl_stamp_of_null_heavy_node_fits_metadata_budget_without_decoding_its_payload() {
+    use brainwire_cypher::ExecutionLimits;
+    let (_dir, db) = setup();
+    let catalog = db.catalog().unwrap().unwrap();
+    let mut offline = db.begin();
+    brainwire_store::graph::merge_node(
+        &mut offline,
+        &catalog,
+        "Doc",
+        "stamp-null-heavy",
+        &BTreeMap::from([("payload".into(), Value::List(vec![Value::Null; 4096]))]),
+    )
+    .unwrap();
+    offline.commit().unwrap();
+    let mut admin = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 16 * 1024,
+            timeout: None,
+        },
+    )
+    .unwrap();
+    let result = admin.run_with_access(
+        "CALL db.setNodeAcl({label:'Doc',entityId:'stamp-null-heavy',allow:['alice']}) YIELD updated RETURN updated",
+        &BTreeMap::new(),
+        QueryAccess { write: true, instance_admin: true },
+    ).unwrap();
+    assert_eq!(result.rows, vec![vec![Out::Value(Value::Bool(true))]]);
+    assert!(admin.commit().unwrap().is_some());
+    let mut reader = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 48 * 1024,
+            timeout: None,
+        },
+    )
+    .unwrap()
+    .with_read_visibility(policy())
+    .unwrap();
+    assert!(matches!(
+        reader.run(
+            "MATCH (n:Doc {entity_id:'stamp-null-heavy'}) RETURN n.entity_id",
+            &BTreeMap::new(),
+        ),
+        Err(ExecError::MemoryLimit { .. })
+    ));
+    // Functional budgets complement inspection of the store setter's nonallocating path.
+    assert_eq!(reader.state(), QueryTransactionState::Failed);
+}
+
+#[test]
+fn malformed_stored_node_acl_stamp_fails_and_rolls_back_all_prior_metadata_changes() {
+    let (_dir, db) = setup();
+    let catalog = db.catalog().unwrap().unwrap();
+    let ty = catalog.node_type("Doc").unwrap();
+    let mut offline = db.begin();
+    let missing =
+        brainwire_store::graph::find_by_entity_id(&offline, "missing", Some(ty.id)).unwrap()[0];
+    let allowed = brainwire_store::graph::find_by_entity_id(&offline, "a", Some(ty.id)).unwrap()[0];
+    assert!(brainwire_store::graph::get_node_acl(&offline, missing)
+        .unwrap()
+        .is_none());
+    offline.put(
+        brainwire_store::txn::Cf::Node,
+        missing.0.to_be_bytes().to_vec(),
+        Vec::new(),
+    );
+    offline.commit().unwrap();
+    let mut admin = QueryTransaction::begin(&db).unwrap();
+    admin.run(
+        "CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:['bob']}) YIELD updated RETURN updated",
+        &BTreeMap::new(),
+    ).unwrap();
+    assert!(admin.run(
+        "CALL db.setNodeAcl({label:'Doc',entityId:'missing',allow:['alice']}) YIELD updated RETURN updated",
+        &BTreeMap::new(),
+    ).is_err());
+    assert_eq!(admin.state(), QueryTransactionState::Failed);
+    assert!(admin.commit().is_err());
+    let inspected = db.begin();
+    assert!(brainwire_store::graph::get_node_acl(&inspected, missing)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        brainwire_store::graph::get_node_acl(&inspected, allowed)
+            .unwrap()
+            .unwrap()
+            .allow,
+        vec!["alice"]
+    );
+}

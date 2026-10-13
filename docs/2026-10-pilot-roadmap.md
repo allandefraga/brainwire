@@ -19,6 +19,21 @@ Keep implementation, docs previews and release artifacts local. No push,
 publication, DNS changes or deployment to an existing environment without explicit
 authorization. This is a work queue, not a configured automatic daily run.
 
+## October 13 follow-up implementation
+
+Private node ACL now filters MATCH, traversals, ranking and sparse algorithms;
+protected static policies and privileged stamping are available. The dynamic
+client adapter and atomic authoritative ACL ingestion remain open. Python has
+single/batch upserts and partial property addition/removal on nodes and edges.
+A separate pinned DuckLake snapshot-diff importer resumes updates and deletes,
+with synthetic tests against the actual engine. It is not native CDC.
+
+The [candidate report](benchmarks/2026-10-13-beta-acl.md) records deployment and
+recovery evidence by binary/image hash. Multiple pods do not provide replication.
+The experimental deterministic apply ledger is a storage foundation only:
+consensus, network replication, quorum acknowledgement and leader election remain
+unimplemented. Keep them as a separate dependency-heavy workstream.
+
 ## Capacity and release rule
 
 Spend each daily session on one dependency: approximately 3 minutes reviewing
@@ -47,8 +62,9 @@ evidence, not a promise to deploy regardless of failed gates.
 - DuckLake stays the priority source. Start with a pinned source snapshot exported
   to bounded immutable input and the existing importer, if direct snapshot reads
   cannot be validated in time. Call this **snapshot ingestion**, not DuckLake CDC.
-  Source deletes, out-of-order events and arbitrary schema evolution remain
-  unsupported until their independent contracts/tests pass.
+  Pinned snapshot differences now handle source deletes for exclusively owned
+  shadow records. Native CDC, arbitrary out-of-order events and schema evolution
+  remain unsupported until their independent contracts/tests pass.
 - Token authentication and graph-scoped read/write/admin access are release blockers
   for any shared or production environment. Document the encrypted transport boundary.
 - A supported Docker single-instance profile, retained storage, restart/checkpoint/
@@ -72,15 +88,19 @@ restoration, failure and workload acceptance pass and deployment is authorized.
 - String/Boolean/numeric equality indexes, typed adjacency seeks, bounded simple
   read pipelines, conservative query memory accounting and cooperative deadlines.
 - Rich primitive/list/map values, scalar Cypher size() for list/Unicode text,
-  CSR analytics, weighted-edge PageRank, degree, reachability/shortest path and OntoRank-inspired source ranking.
+  CSR analytics, weighted-edge PageRank, degree, reachability/shortest path, WCC/SCC
+  and OntoRank-inspired source ranking; governed projections apply private node ACL.
 - Local checkpoints, integrity audit, retained-volume Docker/Compose/Kubernetes
-  acceptance; Swarm templates have narrower execution evidence.
+  acceptance and protected one-engine Swarm recovery/restore evidence. This is
+  process/container recovery, not replicated machine-loss acceptance.
 - Durable per-store commit sequence, snapshot inspection through Cypher/CLI,
   exact checkpoint receipts and a bounded immutable-JSONL Python importer whose
   source cursor commits atomically with each data batch (October 7). DuckLake
-  change capture, general source deletion handling and replicated apply remain pending.
+  pinned snapshot differences cover update/delete/replay for owned sources. Native
+  CDC and general source reconciliation remain pending. Deterministic per-store
+  apply is experimental and not wired into consensus or serving.
 - Real offline graph/pipeline/memory/disk/ontology panels and connected ontology,
-  memory and index inspection. Connected memory is shared query reservation
+  memory, index and typed graph-neighbor inspection. Connected memory is shared query reservation
   accounting, not RSS or RocksDB cache. Other connected panels, query execution and live job progress remain
   work. Preserve the chosen strong-green Observatory identity and EN/PT-BR display.
 
@@ -184,7 +204,9 @@ Python producers check pooled connection liveness after 30 seconds. Drivers 5/6
 passed native default-timeout reconnect and strict certificate/hostname TLS proxy
 reconnect after the proxy's 60-second expiry. The proxy terminates TLS on localhost;
 its single-host Docker bridge backend remains plaintext. Native TUI TLS and actual
-protected Kubernetes/Swarm deployment remain pending. Abrupt SIGTERM qualification
+protected Kubernetes deployment remain pending. The follow-up candidate now has
+protected one-engine Swarm recovery evidence and unprotected private-kind PVC
+recovery evidence; neither is multi-machine deployment acceptance. Abrupt SIGTERM qualification
 covers acknowledged indexed writes, pending transactions, an unacknowledged RUN
 and a stopped reader; it does not identify an exact COMMIT/blocked-write phase.
 
@@ -200,10 +222,11 @@ The final sustained-load and source/recovery receipts are recorded in the
 [October 13 qualification report](benchmarks/2026-10-13-beta.md); local evidence
 must not be extended into a real client deployment or replicated reliability.
 A read-only [client port comparison](client-contract-gap.md) found no Brainwire
-adapter in the real conformance suite. Node-level ACL expressions, query pagination,
+adapter in the real conformance suite. Private engine node ACL is now implemented;
+dynamic adapter visibility binding, query pagination,
 online DDL/introspection and per-request timeout contracts remain concrete blockers
 to a production drop-in. The next adapter slice must gate its ingestion subset and
-fail clearly on unsupported governed reads.
+fail clearly on unsupported dynamic governed-read contracts.
 
 ## Daily execution queue — October 13–31
 

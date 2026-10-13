@@ -1,0 +1,5 @@
+    Checking brainwire-store v0.1.0 (/Users/fraga/Documents/brainwire/crates/store)
+    Checking brainwire-cypher v0.1.0 (/Users/fraga/Documents/brainwire/crates/cypher)
+    Checking brainwire-bolt v0.1.0 (/Users/fraga/Documents/brainwire/crates/bolt)
+    Checking brainwire-server v0.1.0 (/Users/fraga/Documents/brainwire/crates/server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.63s

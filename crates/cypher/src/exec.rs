@@ -16,7 +16,7 @@ mod stream;
 mod validate;
 
 use crate::{ast::*, parse, ParseError};
-use brainwire_core::{ids::NodeId, schema::Catalog, value::Value};
+use brainwire_core::{acl::ReadVisibility, ids::NodeId, schema::Catalog, value::Value};
 use brainwire_store::{
     db::{Database, StoreError},
     graph::GraphError,
@@ -100,6 +100,7 @@ struct Context<'a, 'db> {
     catalog: &'a Catalog,
     params: &'a BTreeMap<String, Value>,
     budget: &'a Budget<'a>,
+    visibility: Option<&'a ReadVisibility>,
 }
 
 /// Lifecycle of a shared query transaction. Terminal states cannot be reused.
@@ -136,6 +137,11 @@ impl QueryAccess {
                     "db.schema" | "db.indexes" | "db.commitState" | "graph.project"
                     | "graph.degree" | "graph.reachable" | "graph.shortestPath"
                     | "graph.pagerank" | "graph.wcc" | "graph.scc" | "knowledge.rank" => {}
+                    "db.setNodeAcl" => {
+                        if !self.write || !self.instance_admin {
+                            return Err(ExecError::Forbidden("node ACL updates require graph write and instance administrator access"));
+                        }
+                    }
                     "db.memory" => {
                         if !self.instance_admin {
                             return Err(ExecError::Forbidden(
@@ -167,6 +173,8 @@ pub struct QueryTransaction<'db> {
     state: QueryTransactionState,
     limits: ExecutionLimits,
     reservation: Option<budget::Reservation>,
+    visibility: Option<ReadVisibility>,
+    ran: bool,
 }
 
 impl<'db> QueryTransaction<'db> {
@@ -204,6 +212,8 @@ impl<'db> QueryTransaction<'db> {
             state: QueryTransactionState::Active,
             limits,
             reservation: None,
+            visibility: None,
+            ran: false,
         })
     }
 
@@ -218,6 +228,22 @@ impl<'db> QueryTransaction<'db> {
         let mut transaction = Self::begin_with_limits(db, limits)?;
         transaction.reservation = Some(budget::Reservation::new(pool));
         Ok(transaction)
+    }
+
+    /// Attach a trusted immutable read policy before the first RUN.
+    /// User-supplied Cypher options cannot change this transaction policy.
+    pub fn with_read_visibility(mut self, policy: ReadVisibility) -> Result<Self, ExecError> {
+        self.require_active()?;
+        if self.ran || self.visibility.is_some() {
+            return Err(ExecError::Semantic(
+                "read visibility must be attached once before the first RUN".into(),
+            ));
+        }
+        policy
+            .validate()
+            .map_err(|error| ExecError::Semantic(error.to_string()))?;
+        self.visibility = Some(policy);
+        Ok(self)
     }
 
     pub fn state(&self) -> QueryTransactionState {
@@ -257,6 +283,7 @@ impl<'db> QueryTransaction<'db> {
         access: QueryAccess,
     ) -> Result<QueryOutput, ExecError> {
         self.require_active()?;
+        self.ran = true;
         if query.len() > self.limits.memory_bytes {
             let error = ExecError::MemoryLimit {
                 limit: self.limits.memory_bytes,
@@ -287,6 +314,7 @@ impl<'db> QueryTransaction<'db> {
         params: &BTreeMap<String, Value>,
         source_bytes: usize,
     ) -> Result<QueryOutput, ExecError> {
+        self.ran = true;
         let result = execute_clauses(
             self.txn.as_mut().expect("active transaction"),
             &self.catalog,
@@ -295,6 +323,7 @@ impl<'db> QueryTransaction<'db> {
             self.limits,
             source_bytes,
             self.reservation.as_ref(),
+            self.visibility.as_ref(),
         );
         match result {
             Ok((output, wrote)) => {
@@ -372,6 +401,7 @@ pub fn execute_with_limits(
     Ok(output)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_clauses(
     txn: &mut Txn<'_>,
     catalog: &Catalog,
@@ -380,7 +410,20 @@ fn execute_clauses(
     limits: ExecutionLimits,
     source_bytes: usize,
     reservation: Option<&budget::Reservation>,
+    visibility: Option<&ReadVisibility>,
 ) -> Result<(QueryOutput, bool), ExecError> {
+    if visibility.is_some()
+        && query.clauses.iter().any(|clause| {
+            matches!(
+                clause,
+                Clause::Create(_) | Clause::Merge(_) | Clause::Set(_) | Clause::DetachDelete(_)
+            ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl")
+        })
+    {
+        return Err(ExecError::Forbidden(
+            "read visibility transactions cannot mutate the graph or ACL metadata",
+        ));
+    }
     let budget = Budget::new(limits, reservation);
     budget.charge(source_bytes)?;
     budget.charge(budget::map_bytes(params))?;
@@ -392,6 +435,7 @@ fn execute_clauses(
             catalog,
             params,
             budget: &budget,
+            visibility,
         },
     )?;
     if stream::supports(query) {
@@ -401,6 +445,7 @@ fn execute_clauses(
                 catalog,
                 params,
                 budget: &budget,
+                visibility,
             },
             query,
         )
@@ -419,6 +464,7 @@ fn execute_clauses(
             catalog,
             params,
             budget: &budget,
+            visibility,
         };
         match clause {
             Clause::Call {
@@ -427,8 +473,25 @@ fn execute_clauses(
                 yields,
                 where_,
             } => {
-                rows = procedures::run(name, args, yields, &ctx)?;
+                if name == "db.setNodeAcl" {
+                    let (id, acl, prepared_rows) =
+                        procedures::prepare_node_acl(args, yields, &ctx)?;
+                    brainwire_store::graph::set_node_acl(txn, id, &acl)?;
+                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                    overlay_bytes = txn.estimated_memory_bytes();
+                    wrote = true;
+                    rows = prepared_rows;
+                } else {
+                    rows = procedures::run(name, args, yields, &ctx)?;
+                }
                 if let Some(predicate) = where_ {
+                    let ctx = Context {
+                        txn,
+                        catalog,
+                        params,
+                        budget: &budget,
+                        visibility,
+                    };
                     let mut filtered = Vec::new();
                     for row in rows {
                         if eval::boolean(eval(predicate, &row, &ctx)?)? == Some(true) {
@@ -497,6 +560,7 @@ fn execute_clauses(
                         catalog,
                         params,
                         budget: &budget,
+                        visibility,
                     };
                     let mut changes: BTreeMap<NodeId, BTreeMap<String, Value>> = BTreeMap::new();
                     for item in items {
@@ -513,6 +577,7 @@ fn execute_clauses(
                                 catalog,
                                 params,
                                 budget: &budget,
+                                visibility,
                             },
                             id,
                         )?;

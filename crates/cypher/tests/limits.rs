@@ -80,6 +80,16 @@ fn label_index_hop_analytics_and_staged_writes_obey_the_guard() {
         .len(),
         1
     );
+    // Repeated scalar reads decode sequential temporary records, not four retained rows.
+    let repeated = execute_with_limits(
+        &db,
+        "MATCH (p:Page) WHERE p.entity_id='p-0' RETURN p.entity_id,p.text,p.entity_id,p.text",
+        &BTreeMap::new(),
+        limits(4096),
+    )
+    .unwrap();
+    assert_eq!(repeated.rows.len(), 1);
+    assert_eq!(repeated.rows[0].len(), 4);
     let mut tx = QueryTransaction::begin_with_limits(&db, limits(8192)).unwrap();
     for i in 0..100 {
         if tx

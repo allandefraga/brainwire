@@ -1,0 +1,7 @@
+{
+  "exitCode": 0,
+  "testsPassed": 11,
+  "skipped": 0,
+  "binarySha256": "843054cdc5d0a4eb78ba23642382824e54758bcff5c2c92bfb795e17eeb5dd00",
+  "source": "DuckDB 1.5.5 / real DuckLake engine, synthetic managed-Parquet fixtures"
+}

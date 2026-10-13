@@ -10,6 +10,7 @@ brainwire-core = { path = "../core" }
 rocksdb.workspace = true
 thiserror.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

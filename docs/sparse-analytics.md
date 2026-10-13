@@ -240,8 +240,9 @@ approximately `8 * (N + 1) + 12 * E` bytes. Building it has a higher peak.
 This is single-process analytics. The embedded CLI needs exclusive database
 access; the Bolt server can run the same procedures against a selected named
 database. There is no distributed execution, persistent projection registry,
-vector similarity index, permission filtering or live graph TUI integration
-yet. The server's shared query pool and per-RUN guard account conservatively for
+vector similarity index or live algorithm visualization in the TUI yet.
+Configured [node visibility](node-acl.md) filters topology before algorithms;
+restricted callers cannot request `scannedRelationshipCount`. The server's shared query pool and per-RUN guard account conservatively for
 projection growth before allocation. Components also reserve their algorithm
 buffers before execution and check deadlines during traversal. These are
 accounting guardrails, not allocator-enforced RSS limits. Storage calls and CSR

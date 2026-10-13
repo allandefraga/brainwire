@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use crate::packstream::PackValue;
+use brainwire_core::acl::ReadVisibility;
 
 #[derive(Clone)]
 pub enum AuthMode {
@@ -30,6 +31,8 @@ pub struct Principal {
     pub id: String,
     pub graphs: BTreeMap<String, GraphAccess>,
     pub instance_admin: bool,
+    /// Trusted static service policy; absence preserves legacy graph-wide access.
+    pub node_visibility: Option<ReadVisibility>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +72,14 @@ struct PolicyPrincipal {
     #[serde(deserialize_with = "unique_grants")]
     graphs: BTreeMap<String, GraphAccess>,
     instance_admin: bool,
+    #[serde(default, deserialize_with = "non_null_visibility")]
+    node_visibility: Option<ReadVisibility>,
+}
+
+fn non_null_visibility<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ReadVisibility>, D::Error> {
+    ReadVisibility::deserialize(deserializer).map(Some)
 }
 
 fn unique_grants<'de, D: Deserializer<'de>>(
@@ -134,6 +145,10 @@ impl AuthPolicy {
                 || entry.graphs.is_empty()
                 || entry.graphs.keys().any(|g| !valid_name(g))
                 || principals.iter().any(|v| v.principal.id == entry.id)
+                || entry
+                    .node_visibility
+                    .as_ref()
+                    .is_some_and(|policy| policy.validate().is_err())
             {
                 return Err(AuthError::InvalidPolicy);
             }
@@ -143,6 +158,7 @@ impl AuthPolicy {
                     id: entry.id,
                     graphs: entry.graphs,
                     instance_admin: entry.instance_admin,
+                    node_visibility: entry.node_visibility,
                 },
                 digest,
             });
@@ -219,9 +235,50 @@ mod tests {
         assert_eq!(principal.id, "reader");
         assert_eq!(principal.graphs.get("tickets"), Some(&GraphAccess::Read));
         assert!(!principal.instance_admin);
+        assert!(principal.node_visibility.is_none());
         assert!(!format!("{principal:?}").contains(TOKEN));
         assert!(!format!("{principal:?}").contains(HASH));
         assert!(policy.authenticate(&auth(&TOKEN.to_uppercase())).is_err());
+    }
+
+    #[test]
+    fn static_node_visibility_is_trusted_validated_and_cannot_be_null() {
+        let mut value: serde_json::Value = serde_json::from_str(&policy_json()).unwrap();
+        value["principals"][0]["node_visibility"] =
+            serde_json::json!({"principals":["user:tenant:alice"]});
+        let policy = AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(
+            policy
+                .authenticate(&auth(TOKEN))
+                .unwrap()
+                .node_visibility
+                .unwrap()
+                .principals,
+            vec!["user:tenant:alice"]
+        );
+        value["principals"][0]["node_visibility"] = serde_json::json!({});
+        let policy = AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(policy
+            .authenticate(&auth(TOKEN))
+            .unwrap()
+            .node_visibility
+            .unwrap()
+            .principals
+            .is_empty());
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!({"unknown":true}),
+            serde_json::json!({"principals":[""]}),
+            serde_json::json!({"principals":["x".repeat(257)]}),
+        ] {
+            value["principals"][0]["node_visibility"] = invalid;
+            assert!(AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
+        let PackValue::Map(mut fields) = auth(TOKEN) else {
+            unreachable!()
+        };
+        fields.push(("node_visibility".into(), PackValue::Map(vec![])));
+        assert!(policy.authenticate(&PackValue::Map(fields)).is_err());
     }
 
     #[test]

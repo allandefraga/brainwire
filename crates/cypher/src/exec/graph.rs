@@ -1,22 +1,29 @@
 use super::*;
 use brainwire_store::graph::*;
 
+pub(super) fn visible(ctx: &Context<'_, '_>, id: NodeId) -> Result<bool, ExecError> {
+    let _scope = ctx.budget.scope();
+    match ctx.visibility {
+        None => Ok(true),
+        Some(policy) => {
+            node_visible_with_control::<ExecError>(ctx.txn, ctx.catalog, id, policy, |bytes| {
+                ctx.budget.charge(bytes)
+            })
+        }
+    }
+}
+fn acl_property(name: &str) -> bool {
+    name.get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("acl_"))
+}
 fn node_record(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeRecord, ExecError> {
-    let record = get_node(ctx.txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
-    ctx.budget.charge(
-        record.entity_id.len().saturating_add(
-            record
-                .row
-                .columns
-                .values()
-                .chain(record.row.extra.values())
-                .fold(128usize, |sum, value| {
-                    sum.saturating_add(128)
-                        .saturating_add(budget::value_bytes(value))
-                }),
-        ),
-    )?;
-    Ok(record)
+    if !visible(ctx, id)? {
+        return Err(ExecError::Forbidden("node is not readable"));
+    }
+    Ok(
+        get_node_with_control::<ExecError>(ctx.txn, id, |bytes| ctx.budget.charge(bytes))?
+            .ok_or(GraphError::NodeNotFound(id))?,
+    )
 }
 fn node_type<'a>(
     ctx: &'a Context<'_, '_>,
@@ -39,6 +46,7 @@ pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, Exe
         }
     }
     props.extend(record.row.extra);
+    props.retain(|name, _| !acl_property(name));
     props.insert("entity_id".into(), Value::Str(record.entity_id));
     Ok(NodeOut {
         id,
@@ -54,22 +62,32 @@ pub(super) fn node_property(
     id: NodeId,
     name: &str,
 ) -> Result<Value, ExecError> {
-    let mut record = node_record(ctx, id)?;
-    let ty = node_type(ctx, id)?;
-    if name == "entity_id" {
-        return Ok(Value::Str(record.entity_id));
-    }
-    Ok(record
-        .row
-        .extra
-        .remove(name)
-        .or_else(|| {
-            ty.columns
-                .iter()
-                .find(|column| column.name == name)
-                .and_then(|column| record.row.columns.remove(&column.id))
-        })
-        .unwrap_or(Value::Null))
+    let value = {
+        let _scope = ctx.budget.scope();
+        let mut record = node_record(ctx, id)?;
+        let ty = node_type(ctx, id)?;
+        if acl_property(name) {
+            Value::Null
+        } else if name == "entity_id" {
+            Value::Str(record.entity_id)
+        } else {
+            record
+                .row
+                .extra
+                .remove(name)
+                .or_else(|| {
+                    ty.columns
+                        .iter()
+                        .find(|column| column.name == name)
+                        .and_then(|column| record.row.columns.remove(&column.id))
+                })
+                .unwrap_or(Value::Null)
+        }
+    };
+    // Only the extracted value survives; cover retained container capacity as well as contents.
+    ctx.budget
+        .charge(budget::value_bytes(&value).saturating_mul(2))?;
+    Ok(value)
 }
 pub(super) fn bound_node(row: &Bindings, name: &str) -> Result<NodeId, ExecError> {
     match row.get(name) {
@@ -105,6 +123,11 @@ fn matches(
     pat: &NodePat,
     id: NodeId,
 ) -> Result<Option<Bindings>, ExecError> {
+    // Stored rows/ACLs used only to test the candidate are dropped before its bindings escape.
+    let _scope = ctx.budget.scope();
+    if !visible(ctx, id)? {
+        return Ok(None);
+    }
     let Some(row) = bind(row, pat, id) else {
         return Ok(None);
     };
@@ -266,6 +289,7 @@ pub(super) fn write_pattern(
         catalog,
         params,
         budget,
+        visibility: None,
     };
     if let Some((rel, end)) = &pat.hop {
         let a = bound_node(row, pat.start.var.as_deref().expect("validated endpoint"))?;

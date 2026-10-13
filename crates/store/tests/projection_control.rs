@@ -130,9 +130,10 @@ fn weighted_decode_reservation_precedes_selected_edge_reservation() {
     options.relationship_type = None;
     options.weight_property = Some("weight".into());
     let tx = db.begin();
-    let mut encoded_len = 0;
+    let mut decode_estimate = 0;
     tx.visit_prefix::<ProjectionError>(brainwire_store::txn::Cf::Out, &[], |_, value| {
-        encoded_len = value.len();
+        decode_estimate =
+            brainwire_core::codec::estimate_row_allocation(value).unwrap() + value.len();
         Ok(())
     })
     .unwrap();
@@ -144,6 +145,6 @@ fn weighted_decode_reservation_precedes_selected_edge_reservation() {
         Ok(())
     })
     .unwrap();
-    assert_eq!(charged, [128, 128, encoded_len * 4, 128]);
+    assert_eq!(charged, [128, 128, decode_estimate, 128]);
     assert_eq!(projection.relationship_count, 1);
 }

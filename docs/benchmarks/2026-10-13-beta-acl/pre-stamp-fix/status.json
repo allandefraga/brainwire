@@ -1,0 +1,5 @@
+{
+  "status": "SUPERSEDED",
+  "reason": "new private ACL setter decoded node properties unnecessarily; final candidate will use allocation-free existence validation",
+  "hourLoad": "interrupted intentionally; not a passing hour receipt"
+}

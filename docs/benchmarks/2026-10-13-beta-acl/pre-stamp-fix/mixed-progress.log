@@ -1,0 +1,27 @@
+WARN `--no-project` was provided, but no project was found
+{"phase": "load", "elapsed_seconds": 0.0, "rss_kib": 45248, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 55.2, "rss_kib": 35920, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 115.4, "rss_kib": 55792, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 175.6, "rss_kib": 77440, "poolReservedBytes": 6156, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 235.9, "rss_kib": 66640, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 296.1, "rss_kib": 74944, "poolReservedBytes": 6819, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 356.3, "rss_kib": 48080, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 416.6, "rss_kib": 52880, "poolReservedBytes": 945, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 476.7, "rss_kib": 59520, "poolReservedBytes": 1021, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 537.0, "rss_kib": 65232, "poolReservedBytes": 12030, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 597.3, "rss_kib": 44064, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+{"phase": "load", "elapsed_seconds": 657.4, "rss_kib": 68208, "poolReservedBytes": 282, "poolPeakBytes": 6078835, "poolRejections": 0}
+[#C85B]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 51280)) (ResolvedIPv4Address(('127.0.0.1', 51280))): OSError('No data')
+[#C859]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('127.0.0.1', 51280)) (ResolvedIPv4Address(('127.0.0.1', 51280))): ConnectionResetError(54, 'Connection reset by peer')
+Traceback (most recent call last):
+  File "/Users/fraga/Documents/brainwire/docs/benchmarks/2026-10-13-beta-acl/mixed_load.py", line 165, in <module>
+    args=parser.parse_args(); run(args.binary.resolve(),args.rows,args.seconds,args.hot_reads)
+                              ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/fraga/Documents/brainwire/docs/benchmarks/2026-10-13-beta-acl/mixed_load.py", line 130, in run
+    stop_event.wait(min(5,max(.01,seconds-(time.perf_counter()-began))))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/fraga/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/threading.py", line 670, in wait
+    signaled = self._cond.wait(timeout)
+  File "/Users/fraga/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/threading.py", line 373, in wait
+    gotit = waiter.acquire(True, timeout)
+KeyboardInterrupt

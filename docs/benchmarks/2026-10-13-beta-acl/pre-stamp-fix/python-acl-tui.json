@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "nodes": 1000,
+  "nodeLoadSeconds": 0.03875070798676461,
+  "nodeLoadRowsPerSecond": 25805.98012148713,
+  "serverSha256": "cdc7a529d854d5ddb6b12e2b49f03746e24d04d085e588e8777d928c4e299217",
+  "driver": "neo4j==6.3.0",
+  "checks": [
+    "bounded Python batches",
+    "node partial update/remove",
+    "edge upsert/update/remove",
+    "index maintenance",
+    "private ACL stamp",
+    "ACL count/PK/traversal/WCC/SCC",
+    "restricted mutation denial",
+    "hidden scan count denial",
+    "TUI filtered graph",
+    "restart",
+    "private ACL checkpoint restore",
+    "offline audit"
+  ],
+  "scope": "synthetic protected single-node localhost; no live-source or replication claim"
+}

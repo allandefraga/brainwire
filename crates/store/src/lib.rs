@@ -3,6 +3,7 @@
 pub mod alloc;
 pub mod db;
 pub mod graph;
+pub mod replicated_apply;
 pub mod txn;
 
 #[cfg(test)]

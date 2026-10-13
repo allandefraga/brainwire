@@ -37,6 +37,13 @@ pub trait QueryEngine {
     /// Begin one transaction, bound to this database until completion.
     /// A failure may leave partial state: the session will call `abort`.
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError>;
+    /// Legacy engines must not silently treat a READ transaction as writable.
+    fn begin_read_only(&mut self, _db: Option<&str>) -> Result<(), EngineError> {
+        Err(EngineError {
+            code: "Neo.ClientError.Security.Forbidden".into(),
+            message: "engine does not support read-only transactions".into(),
+        })
+    }
     /// Commit and optionally return an engine-owned bookmark.
     /// Return success only after completion; a failure is followed by `abort`.
     fn commit(&mut self) -> Result<Option<String>, EngineError>;
@@ -66,6 +73,9 @@ impl QueryEngine for StubEngine {
     // Synthetic results have no persistent state or durable bookmark.
     fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
         Ok(())
+    }
+    fn begin_read_only(&mut self, db: Option<&str>) -> Result<(), EngineError> {
+        self.begin(db)
     }
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
         Ok(None)
@@ -237,11 +247,24 @@ impl<E: QueryEngine> Session<E> {
 
     fn begin(&mut self, extra: &PackValue) -> Result<(), Response> {
         self.db = Self::database(extra)?;
+        if matches!(extra, PackValue::Map(fields) if fields.iter().filter(|(name, _)| name == "mode").count() > 1)
+        {
+            return Err(invalid("duplicate transaction mode"));
+        }
+        let read_only = match extra.get("mode") {
+            None => false,
+            Some(PackValue::String(mode)) if mode == "w" => false,
+            Some(PackValue::String(mode)) if mode == "r" => true,
+            _ => return Err(invalid("mode must be r or w")),
+        };
         // A failed begin may still own partially initialized engine state.
         self.pending = true;
-        self.engine
-            .begin(self.db.as_deref())
-            .map_err(Self::engine_failure)
+        if read_only {
+            self.engine.begin_read_only(self.db.as_deref())
+        } else {
+            self.engine.begin(self.db.as_deref())
+        }
+        .map_err(Self::engine_failure)
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
@@ -507,6 +530,36 @@ mod tests {
     }
 
     struct ThreeRows;
+
+    #[test]
+    fn transaction_mode_is_validated_and_legacy_read_support_fails_closed() {
+        for extra in [
+            map(&[("mode", PackValue::Null)]),
+            map(&[("mode", PackValue::String("READ".into()))]),
+            map(&[
+                ("mode", PackValue::String("r".into())),
+                ("mode", PackValue::String("w".into())),
+            ]),
+        ] {
+            let mut session = ready(StubEngine);
+            assert!(matches!(
+                session.handle(Request::Begin { extra })[0],
+                Response::Failure { .. }
+            ));
+        }
+        let mut session = ready(ThreeRows);
+        assert!(
+            matches!(&session.handle(Request::Begin { extra:map(&[("mode", PackValue::String("r".into()))]) })[0], Response::Failure { code, .. } if code == "Neo.ClientError.Security.Forbidden")
+        );
+        let mut session = ready(StubEngine);
+        assert!(matches!(
+            session.handle(Request::Begin {
+                extra: map(&[("mode", PackValue::String("r".into()))])
+            })[0],
+            Response::Success(_)
+        ));
+    }
+
     impl QueryEngine for ThreeRows {
         fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
             Ok(())
@@ -756,6 +809,7 @@ mod tests {
                 id: "reader".into(),
                 graphs: Default::default(),
                 instance_admin: false,
+                node_visibility: None,
             }))
             .is_err());
     }

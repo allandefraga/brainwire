@@ -1,0 +1,179 @@
+"""Small Python convenience API over the supported Brainwire Bolt/Cypher path.
+
+Pass an existing Neo4j driver and named database. Missing properties are unchanged;
+None removes a property. Node batches are atomic individually, not across a load.
+"""
+import itertools
+import json
+import math
+import re
+
+
+def identifier(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", value):
+        raise ValueError("schema identifiers must be ASCII names of at most 128 characters")
+    if value.lower().startswith("acl_"):
+        raise ValueError("ACL metadata requires the privileged ACL API")
+    return value
+
+
+def _value(value, depth=0):
+    if depth > 32:
+        raise ValueError("value nesting exceeds 32")
+    if value is None or isinstance(value, (str, bool)):
+        return
+    if type(value) is int and -(1 << 63) <= value < (1 << 63):
+        return
+    if type(value) is float and math.isfinite(value):
+        return
+    if isinstance(value, list):
+        for item in value:
+            _value(item, depth + 1)
+        return
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        for item in value.values():
+            _value(item, depth + 1)
+        return
+    raise ValueError("use null, bool, int64, finite float, string, list or string-keyed map")
+
+
+def _properties(properties, remove=()):
+    if not isinstance(properties, dict) or isinstance(remove, (str, bytes)):
+        raise ValueError("properties must be a dict; remove must be a collection of names")
+    result = dict(properties)
+    for name in remove:
+        identifier(name)
+        if name in result:
+            raise ValueError("cannot set and remove the same property")
+        result[name] = None
+    for name, value in result.items():
+        identifier(name)
+        if name == "entity_id":
+            raise ValueError("entity_id is immutable")
+        _value(value)
+    return result
+
+
+def _entity(value):
+    if not isinstance(value, str) or not value:
+        raise ValueError("entity_id must be a nonempty string")
+    return value
+
+
+def _set(variable, names, prefix):
+    return " SET " + ", ".join(f"{variable}.{name}={prefix}.{name}" for name in names) if names else ""
+
+
+def _parameters(properties):
+    # The current parser supports direct parameters, not $map.property syntax.
+    names = sorted(properties)
+    return [(name, f"property_{index}") for index, name in enumerate(names)], {
+        f"property_{index}":properties[name] for index, name in enumerate(names)
+    }
+
+
+class GraphClient:
+    def __init__(self, driver, database, *, batch_size=250, batch_bytes=1 << 20):
+        _entity(database)
+        if any(type(value) is not int or value <= 0 for value in (batch_size, batch_bytes)):
+            raise ValueError("batch bounds must be positive integers")
+        self.driver, self.database = driver, database
+        self.batch_size, self.batch_bytes = batch_size, batch_bytes
+
+    def _write(self, operation):
+        with self.driver.session(database=self.database) as session:
+            return session.execute_write(operation)
+
+    def upsert_node(self, label, entity_id, properties=None):
+        return self.load_nodes(label, [{"entity_id": _entity(entity_id), **_properties({} if properties is None else properties)}])
+
+    def load_nodes(self, label, rows):
+        """Consume an iterable of flat dicts containing entity_id and supplied properties.
+
+        Bounds count compact UTF-8 JSON input bytes, not Bolt wire bytes/RSS.
+        For restartable immutable files use the durable-checkpoint importer instead.
+        """
+        label = identifier(label)
+        total, batch, size = 0, [], 0
+
+        def apply(tx, items):
+            written = 0
+            # Consecutive groups preserve input ordering for repeated identities.
+            for names, group in itertools.groupby(items, lambda row: tuple(sorted(row["properties"]))):
+                records = [{"entity_id":row["entity_id"], **row["properties"]} for row in group]
+                query = f"UNWIND $rows AS row MERGE (n:{label} {{entity_id:row.entity_id}})"
+                query += _set("n", names, "row") + " RETURN count(*) AS processed"
+                written += tx.run(query, rows=records).single()["processed"]
+            return written
+
+        for row in rows:
+            if not isinstance(row, dict) or "entity_id" not in row:
+                raise ValueError("each node row must be a dict containing entity_id")
+            props = _properties({key: value for key, value in row.items() if key != "entity_id"})
+            normalized = {"entity_id": _entity(row["entity_id"]), "properties": props}
+            encoded = json.dumps(normalized, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+            if len(encoded) > self.batch_bytes:
+                raise ValueError("one node exceeds the batch byte limit")
+            if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
+                total += self._write(lambda tx: apply(tx, batch))
+                batch, size = [], 0
+            batch.append(json.loads(encoded))
+            size += len(encoded)
+        if batch:
+            total += self._write(lambda tx: apply(tx, batch))
+        return total
+
+    def update_node(self, label, entity_id, properties=None, *, remove=()):
+        label, entity_id = identifier(label), _entity(entity_id)
+        props = _properties({} if properties is None else properties, remove)
+        fields, params = _parameters(props)
+        query = f"MATCH (n:{label} {{entity_id:$id}})"
+        if fields:
+            query += " SET " + ", ".join(f"n.{name}=${parameter}" for name, parameter in fields)
+        query += " RETURN count(*) AS processed"
+        return self._write(lambda tx: tx.run(query, id=entity_id, **params).single()["processed"] == 1)
+
+    def _edge(self, source, relationship, target, properties, remove, require_existing):
+        if not isinstance(source, tuple) or not isinstance(target, tuple) or len(source) != 2 or len(target) != 2:
+            raise ValueError("endpoints must be (label, entity_id) tuples")
+        left, right, relationship = identifier(source[0]), identifier(target[0]), identifier(relationship)
+        props = _properties({} if properties is None else properties, remove)
+        assignments, values = _parameters(props)
+        params = {"source": _entity(source[1]), "target": _entity(target[1]), **values}
+        match = f"MATCH (a:{left} {{entity_id:$source}}), (b:{right} {{entity_id:$target}})"
+        fields = ", ".join(f"{name}:${parameter}" for name, parameter in assignments)
+        edge = f"MERGE (a)-[:{relationship}" + (" {" + fields + "}" if fields else "") + "]->(b) RETURN count(*) AS processed"
+
+        def apply(tx):
+            if require_existing:
+                query = f"MATCH (a:{left} {{entity_id:$source}})-[:{relationship}]->(b:{right} {{entity_id:$target}}) RETURN count(*) AS processed"
+                count = tx.run(query, **params).single()["processed"]
+                if count == 0:
+                    return False
+                if count != 1:
+                    raise ValueError("edge update requires one merged relationship per endpoint pair/type")
+            count = tx.run(match + " " + edge, **params).single()["processed"]
+            if count != 1:
+                raise ValueError("both edge endpoints must already exist")
+            return True
+        return self._write(apply)
+
+    def upsert_edge(self, source, relationship, target, properties=None):
+        """Create/update the public MERGE edge identified by endpoint pair and type."""
+        return self._edge(source, relationship, target, properties, (), False)
+
+    def update_edge(self, source, relationship, target, properties=None, *, remove=()):
+        return self._edge(source, relationship, target, properties, remove, True)
+
+    def set_node_acl(self, label, entity_id, acl):
+        """Replace private metadata; server requires graph-write + instance-admin.
+
+        This is a trusted service operation, not ordinary property editing.
+        Omitted ACL fields reset to empty; missing ACL denies restricted readers.
+        """
+        names = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
+        if not isinstance(acl, dict) or not set(acl).issubset(names):
+            raise ValueError("invalid ACL metadata fields")
+        _value(acl)
+        options = {"label":identifier(label), "entityId":_entity(entity_id), **acl}
+        return self._write(lambda tx: tx.run("CALL db.setNodeAcl($options) YIELD updated RETURN updated", options=options).single()["updated"])

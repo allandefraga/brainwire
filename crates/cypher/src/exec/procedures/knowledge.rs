@@ -125,6 +125,9 @@ pub(super) fn run(
                 "knowledge.rank exceeded maxCandidates; no partial ranking is returned",
             ));
         }
+        if !graph::visible(ctx, id)? {
+            return Ok(());
+        }
         let node = graph::node_out(ctx, id)?;
         if node.props.get("term") != Some(&term)
             || domain

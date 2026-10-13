@@ -11,6 +11,7 @@ pub mod ast;
 pub mod lexer;
 pub mod parser;
 
+pub use brainwire_core::acl::ReadVisibility;
 pub use parser::{parse, ParseError};
 
 pub mod exec;

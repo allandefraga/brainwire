@@ -183,6 +183,7 @@ dependencies = [
  "brainwire-core",
  "rocksdb",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
 ]

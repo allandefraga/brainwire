@@ -39,6 +39,52 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-13 — Governed ingestion and recoverable deployment candidate
+
+- **Requested:** node ACL, DuckLake incremental ingestion, local container
+  deployment/recovery, qualification and operation; steering added competitive
+  feature targets and easy Python single/batch/property mutations. Started
+  10:37:06 UTC / 12:37:06 Europe/Amsterdam. Final evidence verified at
+  12:51:55 UTC / 14:51:55. No remote actions.
+- **Done:** bounded private ACL persisted separately from user properties;
+  protected static identity policies filter reads, traversals, ranking and sparse
+  components before results. Privileged `db.setNodeAcl` and Python helper stamp
+  metadata; READ-mode Bolt transactions forbid mutation. Predecode structured
+  allocation estimates and borrowed ACL stamping avoid large NULL-list/property
+  decoding before budget checks. Policies cannot be supplied through query params.
+- **Ingestion:** Python GraphClient supports single/batch upserts and partial
+  property addition/removal for nodes/edges. A separate pinned DuckLake full-
+  snapshot diff importer covers updates/deletes and resumes durable batch/source
+  progress after lost acknowledgement. It uses real DuckLake with synthetic
+  managed Parquet fixtures, not the live client catalog or native CDC.
+- **Replication foundation:** canonical concrete-mutation batches, SHA-256,
+  strict contiguous per-store ledger, synchronous atomic state+ledger and latest
+  replay idempotency. Three-store/checkpoint/failed-commit tests pass. No consensus,
+  serving integration, leader election, quorum or machine-loss guarantee.
+- **Verification:** 590 workspace tests, zero ignored; Clippy with warnings denied,
+  fmt and 21 Python units passed. DuckLake 11 tests and protected API/ACL/TUI
+  restart/checkpoint fixture passed against native SHA256 `843054cd…5dd00`.
+  Compose, isolated protected Swarm and private-kind Kubernetes recovery/restore
+  passed against image `01eb88e2…334cb`, with owned-resource cleanup. Full
+  3,600.010-second 100k synthetic load passed: 4,991,261 reads, 59,427 writes,
+  no query-pool rejections; point p50/p95/p99 1.421/9.783/16.160ms, scalar
+  1.485/10.061/16.546ms, write 4.911/17.790/29.583ms. Sampled RSS peak
+  76.625MiB. SIGKILL/reopen preserved 100k nodes and latest 200 acknowledged
+  updates/indexes; audit passed. See final candidate report/strict verifier.
+- **Review:** Astra reviewed integrated paths and the final borrowed setter. An
+  earlier candidate was superseded and its partial hour intentionally stopped;
+  evidence stays in `docs/benchmarks/2026-10-13-beta-acl/pre-stamp-fix/`. The corrected
+  candidate is qualified separately. One existing authentication timing test failed
+  under concurrent builds; isolated and final full runs passed without changing it.
+- **Next step:** obtain the real source catalog/mapping and authoritative ACL
+  source; implement a capability-gated client adapter and atomic ACL ingestion;
+  qualify representative governed workload. Replication is a separate reviewed
+  workstream in `docs/design/replication-next-gates.md`, not extra replicas.
+- **Limits:** ACL list bound 256 vs larger client knowledge-grant corpus; static
+  service policy only, no dynamic per-request binding. Snapshot differences scan
+  full pinned snapshots and need exclusive source ownership. No live catalog
+  provided, no production cutover, native CDC, ANN/text index or history claim.
+
 ### 2026-10-13 — Weak/strong connected components through Cypher
 
 - **Requested:** graph algorithms in Cypher, steering the session after a request

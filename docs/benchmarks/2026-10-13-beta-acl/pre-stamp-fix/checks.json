@@ -1,0 +1,10 @@
+{
+  "workspacePassed": 586,
+  "workspaceFailed": 0,
+  "workspaceIgnored": 0,
+  "groups": 46,
+  "clippy": "PASS",
+  "format": "PASS",
+  "pythonUnitTests": 21,
+  "astraReview": "no additional source blocker; runtime qualification pending"
+}

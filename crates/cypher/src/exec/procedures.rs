@@ -1,6 +1,8 @@
 //! Read-only, transaction-local analytics and inspection procedures.
 use super::*;
-use brainwire_store::graph::{sparse_projection_with_control, ProjectionError, ProjectionOptions};
+use brainwire_store::graph::{
+    sparse_projection_with_visibility_and_control, ProjectionError, ProjectionOptions,
+};
 mod knowledge;
 mod schema;
 
@@ -12,6 +14,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
     match name {
         "db.schema" => Ok(&["version", "nodes", "relationships", "indexesReady"]),
         "db.commitState" => Ok(&["sequence", "tracked", "scope"]),
+        "db.setNodeAcl" => Ok(&["updated"]),
         "db.indexes" => Ok(&["label", "property", "state"]),
         "db.memory" => Ok(&[
             "poolLimitBytes",
@@ -163,7 +166,19 @@ pub(super) fn validate(
     ctx: &Context<'_, '_>,
 ) -> Result<(), ExecError> {
     let available = fields(name)?;
-    if matches!(
+    if ctx.visibility.is_some()
+        && name == "graph.project"
+        && yields
+            .iter()
+            .any(|item| item.field == "scannedRelationshipCount")
+    {
+        return Err(ExecError::Forbidden(
+            "physical relationship scan counts are unavailable with read visibility",
+        ));
+    }
+    if name == "db.setNodeAcl" {
+        acl_options(args, ctx)?;
+    } else if matches!(
         name,
         "db.indexes" | "db.memory" | "db.schema" | "db.commitState"
     ) {
@@ -188,6 +203,88 @@ pub(super) fn validate(
         }
     }
     Ok(())
+}
+
+fn acl_options(
+    args: &[Expr],
+    ctx: &Context<'_, '_>,
+) -> Result<(String, String, brainwire_core::acl::NodeAcl), ExecError> {
+    if args.len() != 1 {
+        return Err(semantic("db.setNodeAcl requires one options map"));
+    }
+    let Value::Map(map) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+        return Err(semantic("db.setNodeAcl options must be a map"));
+    };
+    if map.keys().any(|key| {
+        ![
+            "label",
+            "entityId",
+            "allow",
+            "deny",
+            "connectorIds",
+            "sourceTable",
+            "sources",
+        ]
+        .contains(&key.as_str())
+    }) {
+        return Err(semantic("unknown db.setNodeAcl option"));
+    }
+    let label = text(&map, "label")?.ok_or_else(|| semantic("label is required"))?;
+    if ctx.catalog.node_type(&label).is_none() {
+        return Err(semantic("unknown node label"));
+    }
+    let entity_id = text(&map, "entityId")?.ok_or_else(|| semantic("entityId is required"))?;
+    if entity_id.len() > 1024 {
+        return Err(semantic("entityId exceeds 1024 bytes"));
+    }
+    // Cover escaped JSON plus list/string metadata clones before validating/serializing it.
+    ctx.budget
+        .charge(budget::map_bytes(&map).saturating_mul(6))?;
+    let list = |name: &str| -> Result<Vec<String>, ExecError> {
+        match map.get(name) {
+            None => Ok(Vec::new()),
+            Some(Value::List(values)) => values
+                .iter()
+                .map(|value| match value {
+                    Value::Str(value) => Ok(value.clone()),
+                    _ => Err(semantic(format!("{name} requires a list of strings"))),
+                })
+                .collect(),
+            _ => Err(semantic(format!("{name} requires a list of strings"))),
+        }
+    };
+    let acl = brainwire_core::acl::NodeAcl {
+        allow: list("allow")?,
+        deny: list("deny")?,
+        connector_ids: list("connectorIds")?,
+        source_table: match map.get("sourceTable") {
+            None | Some(Value::Null) => None,
+            _ => text(&map, "sourceTable")?,
+        },
+        sources: list("sources")?,
+    };
+    acl.validate()
+        .map_err(|error| semantic(error.to_string()))?;
+    Ok((label, entity_id, acl))
+}
+
+pub(super) fn prepare_node_acl(
+    args: &[Expr],
+    yields: &[YieldItem],
+    ctx: &Context<'_, '_>,
+) -> Result<(NodeId, brainwire_core::acl::NodeAcl, Vec<Bindings>), ExecError> {
+    let (label, entity_id, acl) = acl_options(args, ctx)?;
+    let ty = ctx.catalog.node_type(&label).expect("validated label");
+    let id = brainwire_store::graph::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))?
+        .first()
+        .copied()
+        .ok_or_else(|| semantic("node not found"))?;
+    let row: Bindings = yields
+        .iter()
+        .map(|item| (item.alias.clone(), Binding::Value(Value::Bool(true))))
+        .collect();
+    ctx.budget.bindings(&row)?;
+    Ok((id, acl, vec![row]))
 }
 
 fn projection_error(error: ProjectionError) -> ExecError {
@@ -289,12 +386,17 @@ pub(super) fn run(
     let opts = options(name, args, ctx)?;
     // Preserve the exact execution/pool error across the store callback boundary.
     let mut budget_error = None;
-    let projected = sparse_projection_with_control(ctx.txn, &opts.projection, |bytes| {
-        ctx.budget.charge(bytes).map_err(|error| {
-            budget_error = Some(error);
-            ProjectionError::Interrupted
-        })
-    });
+    let projected = sparse_projection_with_visibility_and_control(
+        ctx.txn,
+        &opts.projection,
+        ctx.visibility,
+        |bytes| {
+            ctx.budget.charge(bytes).map_err(|error| {
+                budget_error = Some(error);
+                ProjectionError::Interrupted
+            })
+        },
+    );
     if let Some(error) = budget_error {
         return Err(error);
     }
@@ -370,7 +472,7 @@ pub(super) fn run(
             let source = projection
                 .nodes
                 .binary_search(node)
-                .map_err(|_| semantic("source node absent from projection"))?;
+                .map_err(|_| semantic("source node not found"))?;
             if let Some((entity_id, label)) = &opts.target {
                 let ty = ctx
                     .catalog
@@ -384,7 +486,7 @@ pub(super) fn run(
                 let target = projection
                     .nodes
                     .binary_search(&target)
-                    .map_err(|_| semantic("target node absent from projection"))?;
+                    .map_err(|_| semantic("target node not found"))?;
                 let path = projection
                     .matrix
                     .shortest_path(source, target, opts.max_depth)

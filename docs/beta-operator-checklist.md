@@ -1,7 +1,8 @@
 # Single-node shadow beta operator checklist
 
 Use this checklist with the [protected quickstart](mvp-quickstart.md),
-[October qualification](benchmarks/2026-10-13-beta.md) and
+[protected transport qualification](benchmarks/2026-10-13-beta.md) and
+[ACL/incremental candidate qualification](benchmarks/2026-10-13-beta-acl.md) and
 [remaining gates](2026-10-pilot-roadmap.md). It is an operator rehearsal for a
 rebuildable shadow graph, not authorization to replace client's production
 store. Every live-source/deployment step needs an explicit selected environment.
@@ -22,13 +23,25 @@ store. Every live-source/deployment step needs an explicit selected environment.
    verification. Native TUI/probe clients use plaintext on the trusted side.
 5. Freeze source IDs, authoritative fields, null/overwrite semantics, ontology and
    source snapshot identity before importing. For DuckLake use an explicit version
-   and existing retained local managed files. The bridge provides snapshot ingest,
-   not CDC, delete propagation or retention of ticket revisions.
+   and existing retained local managed files. The original bridge provides snapshot
+   ingest. The separate [incremental importer](ducklake-incremental.md) compares
+   pinned full snapshots and resumes update/delete batches; it is not native CDC
+   or ticket-revision retention. Use one importer per exclusively owned source.
 6. Set explicit encoded/decoded/query/cache/memtable/IO limits for the workload.
    The tested quickstart uses encoded 8 MiB, decoded 16 MiB, query/cache 64 MiB,
    memtables 16 MiB and authenticated network IO 300 seconds. These are independent
    accounting limits, not a 144 MiB process RSS ceiling. Container memory and disk
    capacity require their own selected resource envelope.
+
+## Governed readers
+
+Use a static `node_visibility` policy on protected identities and a trusted
+write/admin service to stamp private node ACLs. Missing policy preserves legacy
+graph-wide service access; an empty policy denies ordinary nodes. These are not
+interchangeable defaults. Policy cannot come from query parameters. Restricted
+queries and analytics filter nodes and both relationship endpoints before results.
+See [ACL rules and limits](node-acl.md). The snapshot/diff importer does not yet
+stamp authoritative ACLs atomically; qualify that integration before human reads.
 
 ## While running
 

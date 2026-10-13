@@ -1,0 +1,61 @@
+{
+  "result": "PASS",
+  "image": "brainwire:beta-acl-20261013",
+  "imageId": "sha256:01eb88e2dadc449a2fbd4862b6ddc37742af992eb898cfcd9ca9b8637cf334cb",
+  "driverVersion": "6.3.0",
+  "dindImage": "docker:29.7.2-dind",
+  "dindImageId": "sha256:3ef33f2e220b79ed3ef3b99d81746f06f306cd6340e2cb7331d17ae996e74cb6",
+  "dindRepoDigests": [
+    "docker@sha256:3ef33f2e220b79ed3ef3b99d81746f06f306cd6340e2cb7331d17ae996e74cb6"
+  ],
+  "outerDaemon": "brainwire-swarm-e94143691f79",
+  "hostSwarmBefore": {
+    "LocalNodeState": "inactive",
+    "NodeID": "",
+    "ControlAvailable": false
+  },
+  "rows": 1000,
+  "innerNodeId": "zizwmweei8oyi3nr19jcoutcr",
+  "serviceTaskContainers": [
+    "5552708d7e6f",
+    "ad00f175cc7d"
+  ],
+  "volume": "brainwire-swarm-data",
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "restore_audit": {
+    "database": "restored",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checkpoint": {
+    "commit_sequence": "6",
+    "commit_sequence_tracked": true,
+    "database": "client_memory",
+    "destination": "/data/restored",
+    "scope": "single_graph_committed_native_checkpoint",
+    "status": "checkpoint_created"
+  },
+  "manifest_sha256": {
+    "swarm.yaml": "60dbf8d7476755fa7f81bcae771d9f658d50579d422ff437a742451efc992902",
+    "swarm.auth.yaml": "060e928483ecc59fa81ceda20cd6e84ac43e9b5c231ec40b7dc314be2c063201"
+  },
+  "checks": [
+    "actual retained-owner Swarm manifests with one replica and protected external secrets",
+    "bounded writer commits indexed rows; reader writes denied",
+    "SIGKILL reschedules one task on the same volume; pending CREATE/index overwrite rolled back",
+    "scale to zero before offline audit; checkpoint restores into a fresh graph and passes queries/audit",
+    "original protected service resumes with acknowledged rows intact"
+  ],
+  "scope": "isolated privileged DinD, one Swarm engine and retained local volume; no replication, machine-loss or distributed failover qualification",
+  "hostSwarmAfter": {
+    "LocalNodeState": "inactive",
+    "NodeID": "",
+    "ControlAvailable": false
+  },
+  "hostSwarmUnchanged": true,
+  "ownedResourcesRemoved": true
+}

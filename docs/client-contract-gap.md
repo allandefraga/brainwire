@@ -11,7 +11,7 @@ Neo4j (line 49; fixture branches 158–218). There is no Brainwire adapter branc
 
 | Contract area | Concrete compatibility gap | Beta dependency |
 | --- | --- | --- |
-| Node visibility | `run_read_cypher`/`read_nodes` require fail-closed `AclPredicate` enforcement. Existing adapters inject `any`/`all` predicates on `acl_allow`/`acl_deny` and connector provenance. Brainwire service tokens grant graph-level access; list comprehensions and `STARTS WITH` are unsupported | Do not substitute graph grants for node ACL. Add equivalent supported engine enforcement or separately tested application mediation before governed reads |
+| Node visibility | `run_read_cypher`/`read_nodes` require fail-closed `AclPredicate` enforcement. Existing adapters inject `any`/`all` predicates on `acl_allow`/`acl_deny` and connector provenance. Brainwire now enforces equivalent private engine ACL predicates through a trusted static `node_visibility` policy; existing adapters still emit unsupported list expressions and `STARTS WITH` | Add a capability-gated adapter and trusted per-request visibility binding; do not substitute graph grants or query parameters for node ACL |
 | Query surface | Existing reads emit ORDER BY/SKIP and accept broader Cypher; ACL rewriting also introduces unsupported expressions | Freeze actual required queries; reject unsupported operations rather than silently changing pagination or visibility |
 | Index provisioning | `ensure_index(label, prop)` emits online CREATE INDEX in current adapters | Provision scalar indexes through ontology while stopped; adapter may check `CALL db.indexes()` readiness, never pretend unsupported DDL executed |
 | Schema introspection | Adapters use `db.labels()`, `db.relationshipTypes()`, `keys(n)` and SHOW INDEXES | Map declared labels/signatures/indexes through Brainwire `db.schema()`/`db.indexes()`; property-key sampling requires a supported separate contract |
@@ -39,8 +39,14 @@ engine. Explicitly reject unsupported governed read/pagination/DDL/timeout metho
 This is an ingestion prototype, not full port conformance or a production adapter.
 
 Before broadening it, obtain the real authoritative mapping, required query fixtures,
-visibility predicates and source/backend contract. Per-node ACL is a concrete
-integration blocker, alongside actual DuckLake access and protected deployment.
+visibility predicates and source/backend contract. Private engine ACL is implemented and tested, but the dynamic adapter and atomic
+authoritative ACL ingestion remain integration blockers alongside actual DuckLake
+source access. Engine ACL lists are bounded at 256 entries, below client
+knowledge-grant profiles of up to 5,000; oversized policies fail closed.
+Synthetic pinned-snapshot diffs now cover updates/deletes/replay; this is not live
+source qualification or native CDC. See [node ACL](node-acl.md),
+[incremental ingestion](ducklake-incremental.md) and
+[candidate qualification](benchmarks/2026-10-13-beta-acl.md).
 The controlled rebuildable shadow beta and critical production cutover are separate
 decisions. These findings belong in the remaining October queue rather than being
 hidden by a successful synthetic graph/index audit.

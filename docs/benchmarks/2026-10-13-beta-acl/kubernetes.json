@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "image": "brainwire:beta-acl-20261013",
+  "kubernetes": "v1.36.4",
+  "rows": 1000,
+  "cluster": "brainwire-k8s-c85ed031e300",
+  "pvcUid": "01f18136-502e-4f8d-bc1c-4b0fb7d94f34",
+  "recoveries": [
+    {
+      "action": "container-stop-zero-timeout",
+      "podUid": "f6f9ab7c-43ae-485a-9764-edb735b5e2ac",
+      "restartCount": 1
+    },
+    {
+      "action": "pod-recreation",
+      "podUid": "928b12b1-90d4-417d-b261-4e265da45db0",
+      "restartCount": 0
+    }
+  ],
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checkpointAudit": {
+    "database": "checkpoint-k8s",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "scope": "single kind node, retained local PVC; not replication or node loss",
+  "ownedResourcesRemoved": true,
+  "imageId": "sha256:01eb88e2dadc449a2fbd4862b6ddc37742af992eb898cfcd9ca9b8637cf334cb",
+  "imageIdEvidence": "local tag verified before and after run; kind harness loads this tag; no independent pod imageID receipt"
+}

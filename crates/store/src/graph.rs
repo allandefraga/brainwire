@@ -4,7 +4,8 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use brainwire_core::codec::{decode_row, encode_row, Row};
+use brainwire_core::acl::{AclError, NodeAcl, ReadVisibility, MAX_ACL_BYTES};
+use brainwire_core::codec::{decode_row, encode_row, estimate_row_allocation, Row};
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
 use brainwire_core::schema::{Catalog, Column, GraphMapping, NodeType};
@@ -28,6 +29,8 @@ pub enum GraphError {
     BadSignature(String),
     #[error("property {0} is reserved")]
     ReservedProperty(String),
+    #[error(transparent)]
+    Acl(#[from] AclError),
     #[error("node {0:?} not found")]
     NodeNotFound(NodeId),
     #[error(
@@ -151,8 +154,24 @@ pub fn sparse_projection(
 pub fn sparse_projection_with_control(
     txn: &Txn<'_>,
     options: &ProjectionOptions,
+    control: impl FnMut(usize) -> Result<(), ProjectionError>,
+) -> Result<SparseGraphProjection, ProjectionError> {
+    sparse_projection_with_visibility_and_control(txn, options, None, control)
+}
+
+/// Filter private node ACLs before creating CSR indices or computing degrees.
+/// Physical node/edge scan caps still include hidden records.
+pub fn sparse_projection_with_visibility_and_control(
+    txn: &Txn<'_>,
+    options: &ProjectionOptions,
+    visibility: Option<&ReadVisibility>,
     mut control: impl FnMut(usize) -> Result<(), ProjectionError>,
 ) -> Result<SparseGraphProjection, ProjectionError> {
+    if let Some(policy) = visibility {
+        policy
+            .validate()
+            .map_err(|e| ProjectionError::Invalid(e.to_string()))?;
+    }
     control(0)?;
     if options.max_nodes == 0 || options.max_relationships == 0 {
         return Err(ProjectionError::Invalid("limits must be positive".into()));
@@ -183,16 +202,34 @@ pub fn sparse_projection_with_control(
             }
         };
     let mut nodes = Vec::new();
-    txn.visit_prefix::<ProjectionError>(Cf::Node, &[], |key, _| {
+    let mut hidden_nodes = Vec::new();
+    let mut scanned_nodes = 0;
+    txn.visit_prefix::<ProjectionError>(Cf::Node, &[], |key, value| {
         control(0)?;
-        if nodes.len() == options.max_nodes {
+        if scanned_nodes == options.max_nodes {
             return Err(ProjectionError::Limit {
                 resource: "maxNodes",
                 limit: options.max_nodes,
             });
         }
+        scanned_nodes += 1;
         reserve(128, &mut control)?;
-        nodes.push(node_id_value(key)?);
+        let id = node_id_value(key)?;
+        if let Some(policy) = visibility {
+            reserve(estimate_node_allocation(value)?, &mut control)?;
+            let (_, row) =
+                decode_node(value).map_err(|e| ProjectionError::Invalid(e.to_string()))?;
+            let acl_bytes = txn.get(Cf::Acl, key)?;
+            if let Some(bytes) = &acl_bytes {
+                reserve(estimate_acl_allocation(bytes)?, &mut control)?;
+            }
+            let acl = acl_bytes.as_deref().map(decode_node_acl).transpose()?;
+            if !policy.is_visible(acl.as_ref(), has_document_id(catalog.as_ref(), id, &row)) {
+                hidden_nodes.push(id);
+                return Ok(());
+            }
+        }
+        nodes.push(id);
         Ok(())
     })?;
     let mut out_degrees = vec![0; nodes.len()];
@@ -219,18 +256,26 @@ pub fn sparse_projection_with_control(
         {
             return Ok(());
         }
-        let row = nodes
-            .binary_search(&source)
-            .map_err(|_| ProjectionError::MissingNode)?;
-        let col = nodes
-            .binary_search(&target)
-            .map_err(|_| ProjectionError::MissingNode)?;
+        let row = nodes.binary_search(&source).ok();
+        let col = nodes.binary_search(&target).ok();
+        if (row.is_none() && hidden_nodes.binary_search(&source).is_err())
+            || (col.is_none() && hidden_nodes.binary_search(&target).is_err())
+        {
+            return Err(ProjectionError::MissingNode);
+        }
+        let (Some(row), Some(col)) = (row, col) else {
+            return Ok(());
+        };
         let weight = if let Some(name) = &options.weight_property {
             let edge_schema = catalog
                 .as_ref()
                 .and_then(|c| c.edge_types.iter().find(|ty| ty.id == edge_type))
                 .ok_or_else(|| StoreError::Corrupt("edge type absent from catalog".into()))?;
-            reserve(value.len().saturating_mul(4), &mut control)?;
+            let estimate = estimate_row_allocation(value)
+                .map_err(StoreError::from)?
+                .checked_add(value.len())
+                .ok_or_else(|| StoreError::Corrupt("edge allocation estimate overflow".into()))?;
+            reserve(estimate, &mut control)?;
             let record = decode_row(value).map_err(StoreError::from)?;
             let property = edge_schema
                 .columns
@@ -537,6 +582,23 @@ fn encode_node(entity_id: &str, row: &Row) -> Vec<u8> {
     out
 }
 
+fn estimate_node_allocation(bytes: &[u8]) -> Result<usize, StoreError> {
+    let corrupt = || StoreError::Corrupt("node value".into());
+    let header: [u8; 4] = bytes
+        .get(..4)
+        .ok_or_else(corrupt)?
+        .try_into()
+        .map_err(|_| corrupt())?;
+    let len = u32::from_be_bytes(header) as usize;
+    let raw = bytes[4..].get(..len).ok_or_else(corrupt)?;
+    std::str::from_utf8(raw).map_err(|_| corrupt())?;
+    estimate_row_allocation(&bytes[4 + len..])?
+        .checked_add(len)
+        .and_then(|estimate| estimate.checked_add(std::mem::size_of::<NodeRecord>()))
+        .and_then(|estimate| estimate.checked_add(bytes.len()))
+        .ok_or_else(|| StoreError::Corrupt("node allocation estimate overflow".into()))
+}
+
 fn decode_node(bytes: &[u8]) -> Result<(String, Row), StoreError> {
     let corrupt = || StoreError::Corrupt("node value".into());
     let len: [u8; 4] = bytes
@@ -646,7 +708,165 @@ pub fn merge_node(
 }
 
 pub fn get_node(txn: &Txn, id: NodeId) -> Result<Option<NodeRecord>, GraphError> {
-    Ok(read_node(txn, id)?.map(|(entity_id, row)| NodeRecord { id, entity_id, row }))
+    get_node_with_control(txn, id, |_| Ok(()))
+}
+
+/// Preflight and reserve a node's owned decode storage before decoding borrowed
+/// persisted bytes. Includes entity identity and one raw-storage byte allowance;
+/// subsequent result/property clones and allocator overhead remain separate.
+pub fn get_node_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    id: NodeId,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<Option<NodeRecord>, E> {
+    control(0)?;
+    let key = id.0.to_be_bytes();
+    let mut record = None;
+    txn.visit_prefix::<E>(Cf::Node, &key, |found, bytes| {
+        if found == key {
+            control(estimate_node_allocation(bytes)?)?;
+            let (entity_id, row) = decode_node(bytes)?;
+            record = Some(NodeRecord { id, entity_id, row });
+        }
+        Ok(())
+    })?;
+    Ok(record)
+}
+
+fn estimate_acl_allocation(bytes: &[u8]) -> Result<usize, StoreError> {
+    if bytes.len() > MAX_ACL_BYTES || bytes.first() != Some(&1) {
+        return Err(StoreError::Corrupt(
+            "invalid private node ACL version or length".into(),
+        ));
+    }
+    bytes
+        .len()
+        .checked_mul(32)
+        .and_then(|size| size.checked_add(1024))
+        .ok_or_else(|| StoreError::Corrupt("ACL allocation estimate overflow".into()))
+}
+
+fn decode_node_acl(bytes: &[u8]) -> Result<NodeAcl, StoreError> {
+    if bytes.len() > MAX_ACL_BYTES || bytes.first() != Some(&1) {
+        return Err(StoreError::Corrupt(
+            "invalid private node ACL version or length".into(),
+        ));
+    }
+    let acl: NodeAcl = serde_json::from_slice(&bytes[1..])
+        .map_err(|_| StoreError::Corrupt("invalid private node ACL encoding".into()))?;
+    acl.validate()
+        .map_err(|e| StoreError::Corrupt(format!("invalid private node ACL: {e}")))?;
+    Ok(acl)
+}
+
+/// Read private metadata; absence never implies a row grant.
+pub fn get_node_acl(txn: &Txn, id: NodeId) -> Result<Option<NodeAcl>, GraphError> {
+    txn.get(Cf::Acl, &node_key(id))?
+        .as_deref()
+        .map(decode_node_acl)
+        .transpose()
+        .map_err(GraphError::from)
+}
+
+/// Trusted metadata API. Authorization belongs to the service entry point,
+/// never to a public node property or a caller-provided visibility parameter.
+pub fn set_node_acl(txn: &mut Txn, id: NodeId, acl: &NodeAcl) -> Result<(), GraphError> {
+    acl.validate()?;
+    let json = serde_json::to_vec(acl).map_err(catalog_error)?;
+    let mut encoded = Vec::with_capacity(json.len() + 1);
+    encoded.push(1);
+    encoded.extend_from_slice(&json);
+    let key = id.0.to_be_bytes();
+    let mut found = false;
+    txn.visit_prefix_for_update::<GraphError>(Cf::Node, &key, |node_key, bytes| {
+        if node_key == key {
+            // Validate the borrowed encoded row; stamping must not decode its properties.
+            estimate_node_allocation(bytes)?;
+            found = true;
+        }
+        Ok(())
+    })?;
+    if !found {
+        return Err(GraphError::NodeNotFound(id));
+    }
+    txn.visit_prefix_for_update::<GraphError>(Cf::Acl, &key, |_, _| Ok(()))?;
+    txn.put(Cf::Acl, node_key(id), encoded);
+    Ok(())
+}
+
+fn has_document_id(catalog: Option<&Catalog>, id: NodeId, row: &Row) -> bool {
+    let declared = catalog
+        .and_then(|catalog| catalog.node_types.iter().find(|ty| ty.id == id.type_id()))
+        .and_then(|ty| {
+            ty.columns
+                .iter()
+                .find(|column| column.name == "document_id")
+        })
+        .and_then(|column| row.columns.get(&column.id));
+    row.extra
+        .get("document_id")
+        .is_some_and(|value| !matches!(value, Value::Null))
+        || declared.is_some_and(|value| !matches!(value, Value::Null))
+}
+
+pub fn node_visible(
+    txn: &Txn,
+    catalog: &Catalog,
+    id: NodeId,
+    policy: &ReadVisibility,
+) -> Result<bool, GraphError> {
+    node_visible_with_control(txn, catalog, id, policy, |_| Ok(()))
+}
+
+/// Reserve decoded-row and private-ACL work before decoding either borrowed
+/// storage value. Callback errors retain the caller's exact error type.
+/// Estimates cover decoded container growth, not allocator overhead or RSS.
+pub fn node_visible_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    catalog: &Catalog,
+    id: NodeId,
+    policy: &ReadVisibility,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<bool, E> {
+    policy.validate().map_err(GraphError::from)?;
+    control(0)?;
+    let key = id.0.to_be_bytes();
+    let mut visible = false;
+    txn.visit_prefix::<E>(Cf::Node, &key, |node_key, node_bytes| {
+        if node_key != key {
+            return Ok(());
+        }
+        let mut evaluate = |acl_bytes: Option<&[u8]>| -> Result<bool, E> {
+            let node_charge = estimate_node_allocation(node_bytes)?;
+            let acl_charge = acl_bytes
+                .map(estimate_acl_allocation)
+                .transpose()?
+                .unwrap_or(0);
+            node_charge.checked_add(acl_charge).ok_or_else(|| {
+                StoreError::Corrupt("visibility allocation estimate overflow".into())
+            })?;
+            control(node_charge)?;
+            if acl_charge != 0 {
+                control(acl_charge)?;
+            }
+            let (_, row) = decode_node(node_bytes)?;
+            let acl = acl_bytes.map(decode_node_acl).transpose()?;
+            Ok(policy.is_visible(acl.as_ref(), has_document_id(Some(catalog), id, &row)))
+        };
+        let mut found_acl = false;
+        txn.visit_prefix::<E>(Cf::Acl, &key, |acl_key, acl_bytes| {
+            if acl_key == key {
+                found_acl = true;
+                visible = evaluate(Some(acl_bytes))?;
+            }
+            Ok(())
+        })?;
+        if !found_acl {
+            visible = evaluate(None)?;
+        }
+        Ok(())
+    })?;
+    Ok(visible)
 }
 
 /// Lists nodes of one type in partition zero by their encoded id order.
@@ -889,6 +1109,7 @@ pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
     }
     txn.delete(Cf::Pk, pk_key(&entity_id, id.type_id()));
     txn.delete(Cf::Node, node_key(id));
+    txn.delete(Cf::Acl, node_key(id));
     Ok(())
 }
 
@@ -993,6 +1214,17 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
             }
         }
     }
+    txn.visit_prefix::<StoreError>(Cf::Acl, &[], |key, value| {
+        let id = node_id_value(key)?;
+        if txn.get(Cf::Node, &node_key(id))?.is_none() {
+            return Err(StoreError::Corrupt(
+                "private ACL references a missing node".into(),
+            ));
+        }
+        decode_node_acl(value)?;
+        Ok(())
+    })
+    .map_err(|e| err(&e))?;
     for (cf, mirror) in [(Cf::Out, Cf::In), (Cf::In, Cf::Out)] {
         for (key, _) in txn.scan_prefix(cf, &[]).map_err(|e| err(&e))? {
             let (a, ty, b, id) = decode_edge_key(&key).map_err(|e| err(&e))?;

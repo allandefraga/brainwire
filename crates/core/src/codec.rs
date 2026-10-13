@@ -28,6 +28,8 @@ pub enum CodecError {
     VarintOverflow,
     #[error("value nested deeper than 64 levels")]
     TooDeep,
+    #[error("row allocation estimate exceeds addressable capacity")]
+    AllocationOverflow,
 }
 
 const T_NULL: u8 = 0;
@@ -197,6 +199,117 @@ pub fn decode_row(bytes: &[u8]) -> Result<Row, CodecError> {
     })
 }
 
+fn estimate_add(total: &mut usize, bytes: usize) -> Result<(), CodecError> {
+    *total = total
+        .checked_add(bytes)
+        .ok_or(CodecError::AllocationOverflow)?;
+    Ok(())
+}
+fn estimate_take<'a>(input: &mut &'a [u8], len: usize) -> Result<&'a [u8], CodecError> {
+    if input.len() < len {
+        return Err(CodecError::Truncated);
+    }
+    let (head, rest) = input.split_at(len);
+    *input = rest;
+    Ok(head)
+}
+fn estimate_string(input: &mut &[u8], total: &mut usize) -> Result<(), CodecError> {
+    let len = usize::try_from(get_varint(input)?).map_err(|_| CodecError::AllocationOverflow)?;
+    let raw = estimate_take(input, len)?;
+    std::str::from_utf8(raw).map_err(|_| CodecError::BadUtf8)?;
+    estimate_add(total, len)
+}
+fn estimate_count(input: &mut &[u8], minimum: usize) -> Result<usize, CodecError> {
+    let count = usize::try_from(get_varint(input)?).map_err(|_| CodecError::AllocationOverflow)?;
+    if count
+        .checked_mul(minimum)
+        .is_none_or(|bytes| bytes > input.len())
+    {
+        return Err(CodecError::Truncated);
+    }
+    Ok(count)
+}
+fn estimate_map(total: &mut usize, count: usize) -> Result<(), CodecError> {
+    if count != 0 {
+        estimate_add(total, 1024)?;
+        estimate_add(
+            total,
+            count
+                .checked_mul(256)
+                .ok_or(CodecError::AllocationOverflow)?,
+        )?;
+    }
+    Ok(())
+}
+fn estimate_value(input: &mut &[u8], depth: usize, total: &mut usize) -> Result<(), CodecError> {
+    if depth > MAX_DEPTH {
+        return Err(CodecError::TooDeep);
+    }
+    let tag = estimate_take(input, 1)?[0];
+    match tag {
+        T_NULL | T_FALSE | T_TRUE => {}
+        T_INT => {
+            get_varint(input)?;
+        }
+        T_FLOAT => {
+            estimate_take(input, 8)?;
+        }
+        T_STR => estimate_string(input, total)?,
+        T_LIST => {
+            let count = estimate_count(input, 1)?;
+            if count != 0 {
+                let slots = count
+                    .checked_mul(2)
+                    .and_then(|n| n.checked_add(4))
+                    .ok_or(CodecError::AllocationOverflow)?;
+                estimate_add(
+                    total,
+                    slots
+                        .checked_mul(std::mem::size_of::<Value>())
+                        .ok_or(CodecError::AllocationOverflow)?,
+                )?;
+            }
+            for _ in 0..count {
+                estimate_value(input, depth + 1, total)?;
+            }
+        }
+        T_MAP => {
+            let count = estimate_count(input, 2)?;
+            estimate_map(total, count)?;
+            for _ in 0..count {
+                estimate_string(input, total)?;
+                estimate_value(input, depth + 1, total)?;
+            }
+        }
+        other => return Err(CodecError::UnknownTag(other)),
+    }
+    Ok(())
+}
+
+/// Nonallocating preflight of owned decoded Row storage. Strings, list growth
+/// and conservative BTreeMap backing storage are charged using checked sums.
+/// Input bytes, allocator metadata/reallocation peaks and later clones are excluded.
+/// Like decode_row, trailing bytes after a complete row are ignored.
+pub fn estimate_row_allocation(bytes: &[u8]) -> Result<usize, CodecError> {
+    let mut input = bytes;
+    let mut total = std::mem::size_of::<Row>();
+    get_varint(&mut input)?;
+    get_varint(&mut input)?;
+    let columns = estimate_count(&mut input, 2)?;
+    estimate_map(&mut total, columns)?;
+    for _ in 0..columns {
+        get_varint(&mut input)?;
+        estimate_value(&mut input, 0, &mut total)?;
+    }
+    let extra = estimate_count(&mut input, 2)?;
+    estimate_map(&mut total, extra)?;
+    for _ in 0..extra {
+        estimate_string(&mut input, &mut total)?;
+        estimate_value(&mut input, 0, &mut total)?;
+    }
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,6 +459,80 @@ mod tests {
         ) {
             let row = Row { schema_version, acl_set, columns, extra };
             prop_assert_eq!(decode_row(&encode_row(&row)).unwrap(), row);
+        }
+    }
+    #[test]
+    fn allocation_preflight_covers_null_lists_nested_singletons_maps_and_long_strings() {
+        let mut row = Row::default();
+        row.extra
+            .insert("values".into(), Value::List(vec![Value::Null; 4097]));
+        let bytes = encode_row(&row);
+        let estimate = estimate_row_allocation(&bytes).unwrap();
+        assert!(estimate > bytes.len() * 4);
+        let decoded = decode_row(&bytes).unwrap();
+        let Value::List(items) = &decoded.extra["values"] else {
+            panic!()
+        };
+        assert!(estimate >= items.capacity() * std::mem::size_of::<Value>());
+        let mut nested = Value::Str("x".repeat(200_000));
+        for _ in 0..64 {
+            nested = Value::List(vec![nested]);
+        }
+        row.extra.insert("nested".into(), nested);
+        row.columns
+            .insert(1, Value::Map(BTreeMap::from([("key".into(), Value::Null)])));
+        assert!(estimate_row_allocation(&encode_row(&row)).unwrap() > 200_000 + estimate);
+        assert!(
+            estimate_row_allocation(&encode_row(&Row::default())).unwrap()
+                >= std::mem::size_of::<Row>()
+        );
+    }
+    #[test]
+    fn allocation_preflight_matches_decoder_errors_without_allocating_announced_storage() {
+        for bytes in [
+            vec![1, 0, 1, 0, 99],
+            vec![1, 0, 1, 0, 5, 1, 255],
+            vec![
+                1, 0, 1, 0, 6, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1,
+            ],
+        ] {
+            assert_eq!(
+                estimate_row_allocation(&bytes).unwrap_err(),
+                decode_row(&bytes).unwrap_err()
+            );
+        }
+        let mut bytes = vec![1, 0, 1, 0];
+        for _ in 0..65 {
+            bytes.extend([T_LIST, 1]);
+        }
+        bytes.extend([T_NULL, 0]);
+        assert_eq!(estimate_row_allocation(&bytes), Err(CodecError::TooDeep));
+    }
+    fn decoded_value_backing(value: &Value) -> usize {
+        match value {
+            Value::Str(value) => value.capacity(),
+            Value::List(items) => {
+                items.capacity() * std::mem::size_of::<Value>()
+                    + items.iter().map(decoded_value_backing).sum::<usize>()
+            }
+            Value::Map(items) => {
+                items.len() * std::mem::size_of::<(String, Value)>()
+                    + items
+                        .iter()
+                        .map(|(key, value)| key.capacity() + decoded_value_backing(value))
+                        .sum::<usize>()
+            }
+            _ => 0,
+        }
+    }
+    proptest! {
+        #[test]
+        fn allocation_preflight_covers_decoded_recursive_value_backing(value in arb_value()) {
+            let row=Row{extra:BTreeMap::from([("value".into(),value)]),..Row::default()};
+            let bytes=encode_row(&row);let decoded=decode_row(&bytes).unwrap();
+            let estimate=estimate_row_allocation(&bytes).unwrap();
+            let lower_bound=std::mem::size_of::<Row>()+decoded.extra.iter().map(|(key,value)|key.capacity()+decoded_value_backing(value)).sum::<usize>();
+            prop_assert!(estimate>=lower_bound);
         }
     }
 }

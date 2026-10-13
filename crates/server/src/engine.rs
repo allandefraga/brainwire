@@ -14,7 +14,7 @@ use crate::databases::Databases;
 
 enum Command {
     SetAccess(AccessContext, mpsc::Sender<Result<(), EngineError>>),
-    Begin(Option<String>, mpsc::Sender<Result<(), EngineError>>),
+    Begin(Option<String>, bool, mpsc::Sender<Result<(), EngineError>>),
     Run(
         Option<String>,
         String,
@@ -74,7 +74,11 @@ impl QueryEngine for DbEngine {
     }
 
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, reply))
+    }
+
+    fn begin_read_only(&mut self, db: Option<&str>) -> Result<(), EngineError> {
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, reply))
     }
 
     fn run(
@@ -139,15 +143,18 @@ fn worker(
                 access = next;
                 let _ = reply.send(Ok(()));
             }
-            Command::Begin(name, reply) => {
+            Command::Begin(name, read_only, reply) => {
                 let name = name.as_deref().unwrap_or(&default_database);
-                let query_access = match graph_access(&access, name) {
+                let mut query_access = match graph_access(&access, name) {
                     Ok(access) => access,
                     Err(error) => {
                         let _ = reply.send(Err(error));
                         continue;
                     }
                 };
+                if read_only {
+                    query_access.write = false;
+                }
                 let Some(database) = databases.get(name) else {
                     let _ = reply.send(Err(error(
                         "Neo.ClientError.Database.DatabaseNotFound",
@@ -166,6 +173,17 @@ fn worker(
                         continue;
                     }
                 };
+                if let AccessContext::Authenticated(principal) = &access {
+                    if let Some(visibility) = &principal.node_visibility {
+                        transaction = match transaction.with_read_visibility(visibility.clone()) {
+                            Ok(transaction) => transaction,
+                            Err(err) => {
+                                let _ = reply.send(Err(execution_error(err)));
+                                continue;
+                            }
+                        };
+                    }
+                }
                 let _ = reply.send(Ok(()));
                 while let Ok(command) = receiver.recv() {
                     match command {
@@ -209,7 +227,7 @@ fn worker(
                             let _ = reply.send(Ok(()));
                             break;
                         }
-                        Command::Begin(_, reply) => {
+                        Command::Begin(_, _, reply) => {
                             let _ = reply.send(Err(error(
                                 "Neo.ClientError.Transaction.TransactionStartFailed",
                                 "transaction already active",
@@ -574,7 +592,137 @@ mod tests {
             id: "synthetic-client".into(),
             graphs: BTreeMap::from([(graph.into(), access)]),
             instance_admin: false,
+            node_visibility: None,
         })
+    }
+
+    #[test]
+    fn trusted_node_visibility_survives_runs_and_resets_on_identity_change() {
+        use brainwire_core::acl::{NodeAcl, ReadVisibility};
+        use brainwire_store::graph::{find_by_entity_id, set_node_acl};
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine.begin(None).unwrap();
+        engine.run(None, "MERGE (a:Customer {entity_id:'alice'}) MERGE (b:Customer {entity_id:'bob'}) MERGE (u:Customer {entity_id:'untagged'})", &PackValue::Map(vec![])).unwrap();
+        engine.commit().unwrap();
+        let database = databases.get("client_memory").unwrap();
+        let mut tx = database.begin();
+        for name in ["alice", "bob"] {
+            let id = find_by_entity_id(&tx, name, None).unwrap()[0];
+            set_node_acl(
+                &mut tx,
+                id,
+                &NodeAcl {
+                    allow: vec![name.into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let access = |name: &str| {
+            AccessContext::Authenticated(brainwire_bolt::auth::Principal {
+                id: name.into(),
+                graphs: BTreeMap::from([("client_memory".into(), GraphAccess::Read)]),
+                instance_admin: false,
+                node_visibility: Some(ReadVisibility {
+                    principals: vec![name.into()],
+                    ..Default::default()
+                }),
+            })
+        };
+        engine.set_access(access("alice")).unwrap();
+        engine.begin(None).unwrap();
+        let spoof = PackValue::Map(vec![(
+            "acl_principals".into(),
+            PackValue::List(vec![PackValue::String("bob".into())]),
+        )]);
+        assert_eq!(
+            engine
+                .run(None, "MATCH (c:Customer) RETURN c.entity_id", &spoof)
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::String("alice".into())]]
+        );
+        assert_eq!(
+            engine
+                .run(
+                    None,
+                    "MATCH (c:Customer) RETURN count(*)",
+                    &PackValue::Map(vec![])
+                )
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::Int(1)]]
+        );
+        // Identity replacement aborts the old snapshot; the new transaction gets its own policy.
+        engine.set_access(access("bob")).unwrap();
+        assert!(engine.commit().is_err());
+        engine.begin(None).unwrap();
+        assert_eq!(
+            engine
+                .run(
+                    None,
+                    "MATCH (c:Customer) RETURN c.entity_id",
+                    &PackValue::Map(vec![])
+                )
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::String("bob".into())]]
+        );
+        engine.commit().unwrap();
+        engine.set_access(AccessContext::Unauthenticated).unwrap();
+        assert_eq!(
+            engine.begin(None).unwrap_err().code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine.begin(None).unwrap();
+        assert_eq!(
+            engine
+                .run(
+                    None,
+                    "MATCH (c:Customer) RETURN count(*)",
+                    &PackValue::Map(vec![])
+                )
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::Int(3)]]
+        );
+        engine.abort().unwrap();
+    }
+
+    #[test]
+    fn read_only_transaction_disallows_writes_and_acl_stamp_for_admin() {
+        let (_directory, _databases, mut engine) = scoped_engine_fixture();
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        for query in ["MERGE (n:Customer {entity_id:'read-write'})", "CALL db.setNodeAcl({label:'Customer',entityId:'read-write',allow:['user']}) YIELD updated RETURN updated"] {
+            engine.begin_read_only(None).unwrap();
+            assert_eq!(engine.run(None, query, &PackValue::Map(vec![])).err().expect("read mode must deny mutation").code, "Neo.ClientError.Security.Forbidden");
+            engine.abort().unwrap();
+        }
+        engine.begin_read_only(None).unwrap();
+        assert_eq!(
+            engine
+                .run(
+                    None,
+                    "MATCH (n:Customer) RETURN count(*)",
+                    &PackValue::Map(vec![])
+                )
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::Int(0)]]
+        );
+        engine.commit().unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "MERGE (n:Customer {entity_id:'write-mode'})",
+                &PackValue::Map(vec![]),
+            )
+            .unwrap();
+        engine.commit().unwrap();
     }
 
     #[test]

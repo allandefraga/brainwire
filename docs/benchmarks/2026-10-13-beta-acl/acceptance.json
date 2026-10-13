@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "scope": "local synthetic single-owner candidate only",
+  "nativeSha256": "843054cdc5d0a4eb78ba23642382824e54758bcff5c2c92bfb795e17eeb5dd00",
+  "imageId": "sha256:01eb88e2dadc449a2fbd4862b6ddc37742af992eb898cfcd9ca9b8637cf334cb",
+  "pending": [
+    "live client source",
+    "dynamic adapter/atomic ACL ingestion",
+    "consensus and machine-loss replication"
+  ]
+}
