@@ -1,6 +1,6 @@
 //! Read-only, transaction-local analytics and inspection procedures.
 use super::*;
-use brainwire_store::graph::{sparse_projection, ProjectionError, ProjectionOptions};
+use brainwire_store::graph::{sparse_projection_with_control, ProjectionError, ProjectionOptions};
 mod knowledge;
 mod schema;
 
@@ -27,6 +27,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "csrBytes",
         ]),
         "graph.degree" => Ok(&["node", "outDegree", "inDegree"]),
+        "graph.wcc" | "graph.scc" => Ok(&["node", "component", "size"]),
         "graph.reachable" | "graph.shortestPath" => Ok(&["node", "depth"]),
         "graph.pagerank" => Ok(&["node", "score", "iterations", "converged", "residual"]),
         "knowledge.rank" => Ok(&["node", "score", "contributions"]),
@@ -192,6 +193,7 @@ pub(super) fn validate(
 fn projection_error(error: ProjectionError) -> ExecError {
     match error {
         ProjectionError::Store(error) => error.into(),
+        ProjectionError::Interrupted => ExecError::TimedOut,
         ProjectionError::MemoryLimit { limit, attempted } => {
             ExecError::MemoryLimit { limit, attempted }
         }
@@ -285,14 +287,18 @@ pub(super) fn run(
         return knowledge::run(args, ctx, bind);
     }
     let opts = options(name, args, ctx)?;
-    let projection = sparse_projection(ctx.txn, &opts.projection).map_err(projection_error)?;
-    ctx.budget.charge(
-        projection
-            .nodes
-            .len()
-            .saturating_mul(128)
-            .saturating_add(projection.relationship_count.saturating_mul(128)),
-    )?;
+    // Preserve the exact execution/pool error across the store callback boundary.
+    let mut budget_error = None;
+    let projected = sparse_projection_with_control(ctx.txn, &opts.projection, |bytes| {
+        ctx.budget.charge(bytes).map_err(|error| {
+            budget_error = Some(error);
+            ProjectionError::Interrupted
+        })
+    });
+    if let Some(error) = budget_error {
+        return Err(error);
+    }
+    let projection = projected.map_err(projection_error)?;
     match name {
         "graph.project" => Ok(vec![bind(vec![
             int(projection.nodes.len()),
@@ -313,6 +319,47 @@ pub(super) fn run(
                 ])
             })
             .collect(),
+        "graph.wcc" | "graph.scc" => {
+            let bytes = projection
+                .nodes
+                .len()
+                .checked_mul(128)
+                .and_then(|bytes| {
+                    projection
+                        .matrix
+                        .non_zero_count()
+                        .checked_mul(16)
+                        .and_then(|edges| bytes.checked_add(edges))
+                })
+                .ok_or(ExecError::MemoryLimit {
+                    limit: ctx.budget.remaining(),
+                    attempted: usize::MAX,
+                })?;
+            // Covers component/DFS/transpose buffers before core allocation, excluding CSR.
+            ctx.budget.charge(bytes)?;
+            let interrupted = || ctx.budget.check_deadline().is_err();
+            let result = if name == "graph.wcc" {
+                projection.matrix.weak_components_with_check(interrupted)
+            } else {
+                projection.matrix.strong_components_with_check(interrupted)
+            }
+            .map_err(|error| match error {
+                brainwire_core::sparse::SparseMatrixError::Interrupted => ExecError::TimedOut,
+                error => semantic(error.to_string()),
+            })?;
+            result
+                .components
+                .iter()
+                .enumerate()
+                .map(|(index, representative)| {
+                    bind(vec![
+                        Binding::Node(projection.nodes[index]),
+                        Binding::Node(projection.nodes[*representative]),
+                        int(result.sizes[*representative]),
+                    ])
+                })
+                .collect()
+        }
         "graph.reachable" | "graph.shortestPath" => {
             let (entity_id, label) = opts.source.as_ref().expect("validated source");
             let ty = ctx.catalog.node_type(label).expect("validated label");

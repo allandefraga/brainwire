@@ -135,7 +135,7 @@ impl QueryAccess {
                 Clause::Call { name, .. } => match name.as_str() {
                     "db.schema" | "db.indexes" | "db.commitState" | "graph.project"
                     | "graph.degree" | "graph.reachable" | "graph.shortestPath"
-                    | "graph.pagerank" | "knowledge.rank" => {}
+                    | "graph.pagerank" | "graph.wcc" | "graph.scc" | "knowledge.rank" => {}
                     "db.memory" => {
                         if !self.instance_admin {
                             return Err(ExecError::Forbidden(

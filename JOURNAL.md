@@ -39,6 +39,47 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-13 — Weak/strong connected components through Cypher
+
+- **Requested:** graph algorithms in Cypher, steering the session after a request
+  for node ACL, adapter integration and distributed deployment/replication.
+  Started 09:24:52 UTC / 11:24:52 Europe/Amsterdam. Work remains local.
+- **Done:** `CALL graph.wcc` and `CALL graph.scc` return `node`, representative
+  `component` node and component `size`. Representatives use minimum internal
+  NodeId; aliases, representative properties, WHERE/count and graph readers work.
+  All nodes participate, including isolates after relationship-type filtering.
+  Unit topology ignores stored weight values; `weightProperty` is rejected.
+  WCC uses union by size/path compression; SCC uses iterative Kosaraju with a
+  sparse transpose. No recursion, fallible algorithm buffers and periodic
+  interruption checks, including high-degree scans and transpose construction.
+- **Memory:** all CSR analytics projections now reserve conservative growth
+  through the existing shared query pool before allocation, preserving original
+  pool/per-query/deadline errors. Components precharge their algorithm allowance.
+  Accounting remains conservative, not an allocator/RSS cap; storage calls and
+  CSR sorting can overrun cooperative deadlines. Results remain eager, and
+  WHERE/LIMIT apply after computation. No new dependency.
+- **Verification:** 554 workspace tests passed, zero failures or ignored tests;
+  workspace Clippy with warnings denied, formatting and whitespace checks passed.
+  Differential connectivity tests, 100k chains/rings, overlay/snapshot/rollback/
+  reopen, strict validation, read-only access and pool rejection/release passed.
+  Astra reviewed the integrated change without blocking findings.
+  Protected Python Neo4j 6.3.0/Bolt qualification passed for WCC/SCC exact rows,
+  zero-weight edges, reader access/write denial and server restart; owned server
+  processes and temporary databases were removed.
+- **Measured:** release example asserts 1,000 WCC and 50,500 SCC on 100k nodes.
+  Final five-warm-sample medians: 99,500 edges WCC 379.60 ms / SCC 303.98 ms;
+  972,500 edges WCC 325.17 ms / SCC 391.07 ms. Host/load/cache variation means
+  these small sets are not a scaling law or production percentiles. Timings
+  include projection and eager Cypher output; 256 MiB accounting limit, no RSS
+  measurement. See `docs/benchmarks/2026-10-13-components.md`, raw receipts and
+  source/binary provenance. Earlier frozen beta image/receipts were not changed.
+- **Next step / pending:** node-level ACL, the actual client adapter contract,
+  Kubernetes/Swarm qualification of the new candidate and real replication
+  remain outstanding. Algorithms are single-process over one graph snapshot;
+  neither distributed execution nor persistent community IDs were introduced.
+  No UI changes or remote push/publication. Preserve user-owned untracked
+  `docs-site/` and `.DS_Store` files.
+
 ### 2026-10-13 — Protected beta workspace and comprehensive failure qualification
 
 - **Requested:** full two hours toward beta, followed by a large final simulation.

@@ -90,6 +90,8 @@ impl SparseGraphProjection {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectionError {
+    #[error("projection interrupted by caller control")]
+    Interrupted,
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
@@ -141,6 +143,17 @@ pub fn sparse_projection(
     txn: &Txn<'_>,
     options: &ProjectionOptions,
 ) -> Result<SparseGraphProjection, ProjectionError> {
+    sparse_projection_with_control(txn, options, |_| Ok(()))
+}
+
+/// Control receives conservative allocation deltas before allocation and zero
+/// at scan/construction checkpoints. Caller errors stop the read-only projection.
+pub fn sparse_projection_with_control(
+    txn: &Txn<'_>,
+    options: &ProjectionOptions,
+    mut control: impl FnMut(usize) -> Result<(), ProjectionError>,
+) -> Result<SparseGraphProjection, ProjectionError> {
+    control(0)?;
     if options.max_nodes == 0 || options.max_relationships == 0 {
         return Err(ProjectionError::Invalid("limits must be positive".into()));
     }
@@ -156,26 +169,29 @@ pub fn sparse_projection(
         return Err(ProjectionError::Invalid("unknown relationship type".into()));
     }
     let mut estimated_bytes = 0usize;
-    let mut reserve = |bytes: usize| {
-        estimated_bytes = estimated_bytes.saturating_add(bytes);
-        if estimated_bytes > options.max_bytes {
-            Err(ProjectionError::MemoryLimit {
-                limit: options.max_bytes,
-                attempted: estimated_bytes,
-            })
-        } else {
-            Ok(())
-        }
-    };
+    let mut reserve =
+        |bytes: usize, control: &mut dyn FnMut(usize) -> Result<(), ProjectionError>| {
+            control(bytes)?;
+            estimated_bytes = estimated_bytes.saturating_add(bytes);
+            if estimated_bytes > options.max_bytes {
+                Err(ProjectionError::MemoryLimit {
+                    limit: options.max_bytes,
+                    attempted: estimated_bytes,
+                })
+            } else {
+                Ok(())
+            }
+        };
     let mut nodes = Vec::new();
     txn.visit_prefix::<ProjectionError>(Cf::Node, &[], |key, _| {
+        control(0)?;
         if nodes.len() == options.max_nodes {
             return Err(ProjectionError::Limit {
                 resource: "maxNodes",
                 limit: options.max_nodes,
             });
         }
-        reserve(128)?;
+        reserve(128, &mut control)?;
         nodes.push(node_id_value(key)?);
         Ok(())
     })?;
@@ -185,6 +201,7 @@ pub fn sparse_projection(
     let mut scanned = 0;
     let mut selected = 0;
     txn.visit_prefix::<ProjectionError>(Cf::Out, &[], |key, value| {
+        control(0)?;
         if scanned == options.max_relationships {
             return Err(ProjectionError::Limit {
                 resource: "maxRelationships",
@@ -213,7 +230,7 @@ pub fn sparse_projection(
                 .as_ref()
                 .and_then(|c| c.edge_types.iter().find(|ty| ty.id == edge_type))
                 .ok_or_else(|| StoreError::Corrupt("edge type absent from catalog".into()))?;
-            reserve(value.len().saturating_mul(4))?;
+            reserve(value.len().saturating_mul(4), &mut control)?;
             let record = decode_row(value).map_err(StoreError::from)?;
             let property = edge_schema
                 .columns
@@ -248,12 +265,15 @@ pub fn sparse_projection(
         selected += 1;
         out_degrees[row] += 1;
         in_degrees[col] += 1;
-        reserve(128)?;
+        reserve(128, &mut control)?;
         entries.push((row, col, weight));
         Ok(())
     })?;
+    control(0)?;
+    let matrix = SparseMatrix::from_entries(nodes.len(), nodes.len(), entries)?;
+    control(0)?;
     Ok(SparseGraphProjection {
-        matrix: SparseMatrix::from_entries(nodes.len(), nodes.len(), entries)?,
+        matrix,
         nodes,
         relationship_count: selected,
         scanned_relationship_count: scanned,

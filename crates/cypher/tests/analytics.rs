@@ -279,3 +279,266 @@ fn filters_and_selected_fields_cannot_hide_bad_arguments_or_bad_return() {
         assert_eq!(db.stats().unwrap().nodes, 0);
     }
 }
+
+fn component_seed(db: &Database) {
+    run(db, "CREATE (a:Page {entity_id:'a'}), (b:Page {entity_id:'b'}), (c:Page {entity_id:'c'}), (d:Page {entity_id:'d'}), (e:Page {entity_id:'e'}), (f:Page {entity_id:'f'}), (z:Page {entity_id:'z'}) CREATE (a)-[:LINK {weight:0}]->(b) CREATE (b)-[:LINK {weight:-2}]->(a) CREATE (b)-[:LINK]->(c) CREATE (c)-[:LINK]->(d) CREATE (d)-[:LINK]->(c) CREATE (d)-[:LINK]->(e) CREATE (e)-[:OTHER]->(f) CREATE (f)-[:LINK]->(f)");
+}
+fn component_rows(db: &Database, procedure: &str, options: &str) -> Vec<Vec<Out>> {
+    run(db,&format!("CALL {procedure}({options}) YIELD node, component, size RETURN node.entity_id AS id, component.entity_id AS representative, size")).rows
+}
+fn component_expected(values: &[(&str, &str, i64)]) -> Vec<Vec<Out>> {
+    values
+        .iter()
+        .map(|(id, representative, size)| {
+            vec![
+                Out::Value(Value::Str((*id).into())),
+                Out::Value(Value::Str((*representative).into())),
+                int(*size),
+            ]
+        })
+        .collect()
+}
+
+#[test]
+fn weak_and_strong_components_include_isolates_and_ignore_stored_weight_properties() {
+    let (_dir, db) = setup();
+    component_seed(&db);
+    let weak = component_expected(&[
+        ("a", "a", 5),
+        ("b", "a", 5),
+        ("c", "a", 5),
+        ("d", "a", 5),
+        ("e", "a", 5),
+        ("f", "f", 1),
+        ("z", "z", 1),
+    ]);
+    let strong = component_expected(&[
+        ("a", "a", 2),
+        ("b", "a", 2),
+        ("c", "c", 2),
+        ("d", "c", 2),
+        ("e", "e", 1),
+        ("f", "f", 1),
+        ("z", "z", 1),
+    ]);
+    assert_eq!(
+        component_rows(&db, "graph.wcc", "{relationship:'LINK'}"),
+        weak
+    );
+    assert_eq!(
+        component_rows(&db, "graph.scc", "{relationship:'LINK'}"),
+        strong
+    );
+    for (procedure, expected) in [("graph.wcc", 3), ("graph.scc", 5)] {
+        assert_eq!(run(&db,&format!("CALL {procedure}({{relationship:'LINK'}}) YIELD node,component WHERE node.entity_id=component.entity_id RETURN count(*) AS components")).rows,vec![vec![int(expected)]]);
+    }
+    let all = component_rows(&db, "graph.wcc", "{}");
+    assert_eq!(
+        all,
+        component_expected(&[
+            ("a", "a", 6),
+            ("b", "a", 6),
+            ("c", "a", 6),
+            ("d", "a", 6),
+            ("e", "a", 6),
+            ("f", "a", 6),
+            ("z", "z", 1)
+        ])
+    );
+    let aliased=run(&db,"CALL graph.scc({relationship:'LINK'}) YIELD node AS member, component AS representative, size AS members WHERE members=2 AND representative.entity_id='a' RETURN member.entity_id, representative.entity_id, members");
+    assert_eq!(aliased.rows, strong[..2]);
+    for procedure in ["graph.wcc", "graph.scc"] {
+        let query=format!("CALL {procedure}({{relationship:'LINK'}}) YIELD component AS c, size WHERE size>1 RETURN c.entity_id LIMIT 1");
+        let mut read = QueryTransaction::begin(&db).unwrap();
+        let output = read
+            .run_with_access(
+                &query,
+                &BTreeMap::new(),
+                brainwire_cypher::QueryAccess {
+                    write: false,
+                    instance_admin: false,
+                },
+            )
+            .unwrap();
+        assert_eq!(output.rows, vec![vec![Out::Value(Value::Str("a".into()))]]);
+        assert_eq!(read.commit().unwrap(), None);
+    }
+}
+
+#[test]
+fn component_projection_observes_staged_overlay_snapshot_rollback_and_reopen() {
+    let (dir, db) = setup();
+    component_seed(&db);
+    let before = component_rows(&db, "graph.scc", "{relationship:'LINK'}");
+    let mut old = QueryTransaction::begin(&db).unwrap();
+    let mut staged = QueryTransaction::begin(&db).unwrap();
+    staged
+        .run(
+            "MATCH (e:Page {entity_id:'e'}),(a:Page {entity_id:'a'}) CREATE (e)-[:LINK]->(a)",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    let query="CALL graph.scc({relationship:'LINK'}) YIELD node,component,size RETURN node.entity_id,component.entity_id,size";
+    assert_eq!(
+        staged.run(query, &BTreeMap::new()).unwrap().rows[4],
+        component_expected(&[("e", "a", 5)])[0]
+    );
+    assert_eq!(run(&db, query).rows, before);
+    staged.rollback();
+    assert_eq!(run(&db, query).rows, before);
+    let mut writer = QueryTransaction::begin(&db).unwrap();
+    writer
+        .run(
+            "MATCH (e:Page {entity_id:'e'}),(a:Page {entity_id:'a'}) CREATE (e)-[:LINK]->(a)",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    writer.commit().unwrap();
+    drop(writer);
+    assert_eq!(old.run(query, &BTreeMap::new()).unwrap().rows, before);
+    old.rollback();
+    drop(old);
+    drop(staged);
+    let after = run(&db, query).rows;
+    assert_eq!(after[4], component_expected(&[("e", "a", 5)])[0]);
+    drop(db);
+    let reopened = open(dir.path());
+    assert_eq!(run(&reopened, query).rows, after);
+}
+
+#[test]
+fn component_validation_and_caps_cannot_be_hidden_by_empty_graph_or_limit_zero() {
+    let (_dir, db) = setup();
+    for procedure in ["graph.wcc", "graph.scc"] {
+        let empty=run(&db,&format!("CALL {procedure}() YIELD component AS representative,size RETURN representative.entity_id,size"));
+        assert_eq!(empty.fields, ["representative.entity_id", "size"]);
+        assert!(empty.rows.is_empty());
+        for options in [
+            "{weightProperty:'weight'}",
+            "{relationship:'UNKNOWN'}",
+            "{maxNodes:0}",
+            "{maxRelationships:0}",
+            "{source:'a'}",
+            "'invalid'",
+        ] {
+            let query = format!("CALL {procedure}({options}) YIELD node RETURN node LIMIT 0");
+            assert!(execute(&db, &query, &BTreeMap::new()).is_err(), "{query}");
+        }
+        for tail in [
+            "YIELD missing RETURN missing LIMIT 0",
+            "YIELD node AS duplicate,component AS duplicate RETURN duplicate LIMIT 0",
+            "YIELD component RETURN unknown LIMIT 0",
+            "YIELD component WHERE 123 RETURN component LIMIT 0",
+        ] {
+            let query = format!("CALL {procedure}() {tail}");
+            assert!(execute(&db, &query, &BTreeMap::new()).is_err(), "{query}");
+        }
+    }
+    component_seed(&db);
+    for procedure in ["graph.wcc", "graph.scc"] {
+        for cap in ["maxNodes:6", "maxRelationships:7"] {
+            let query = format!("CALL {procedure}({{{cap}}}) YIELD node RETURN node LIMIT 0");
+            assert!(execute(&db, &query, &BTreeMap::new()).is_err(), "{query}");
+        }
+    }
+}
+
+#[test]
+fn component_projection_preserves_pool_exhaustion_and_releases_failed_reservations() {
+    use brainwire_cypher::{ExecError, ExecutionLimits, QueryMemoryPool};
+    use std::sync::Arc;
+    let (_dir, db) = setup();
+    component_seed(&db);
+    let params = BTreeMap::from([("text".into(), Value::Str("x".repeat(128)))]);
+    let probe = Arc::new(QueryMemoryPool::new(64_000));
+    let mut holder =
+        QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&probe))
+            .unwrap();
+    holder.run("RETURN $text", &params).unwrap();
+    let held = probe.usage().reserved_bytes;
+    holder.rollback();
+    assert_eq!(probe.usage().reserved_bytes, 0);
+    for procedure in ["graph.wcc", "graph.scc", "graph.project"] {
+        let pool = Arc::new(QueryMemoryPool::new(held + 1000));
+        let mut holder =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap();
+        holder.run("RETURN $text", &params).unwrap();
+        assert_eq!(pool.usage().reserved_bytes, held);
+        let mut constrained =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap();
+        let query = if procedure == "graph.project" {
+            "CALL graph.project() YIELD nodeCount RETURN nodeCount".into()
+        } else {
+            format!("CALL {procedure}() YIELD node,component,size RETURN node.entity_id,component.entity_id,size")
+        };
+        let error = constrained.run(&query, &BTreeMap::new()).unwrap_err();
+        // A 128-byte allocation delta identifies the controlled projection precharge.
+        assert!(
+            matches!(error, ExecError::MemoryPoolExhausted { requested: 128, .. }),
+            "{error:?}"
+        );
+        assert_eq!(constrained.state(), QueryTransactionState::Failed);
+        assert!(constrained.commit().is_err());
+        assert_eq!(pool.usage().reserved_bytes, held);
+        assert_eq!(pool.usage().rejections, 1);
+        holder.rollback();
+        assert_eq!(pool.usage().reserved_bytes, 0);
+        let mut fresh =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap();
+        fresh.run("RETURN 1", &BTreeMap::new()).unwrap();
+        fresh.commit().unwrap();
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+    for procedure in ["graph.wcc", "graph.scc"] {
+        let pool = Arc::new(QueryMemoryPool::new(64_000));
+        let mut transaction =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap();
+        transaction.run(&format!("CALL {procedure}() YIELD node,component,size RETURN node.entity_id,component.entity_id,size"),&BTreeMap::new()).unwrap();
+        assert!(pool.usage().reserved_bytes > 0);
+        transaction.rollback();
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+}
+
+#[test]
+fn components_enforce_query_memory_and_cooperative_deadlines_without_leaking_pool() {
+    use brainwire_cypher::{execute_with_limits, ExecError, ExecutionLimits, QueryMemoryPool};
+    use std::{sync::Arc, time::Duration};
+    let (_dir, db) = setup();
+    component_seed(&db);
+    for procedure in ["graph.wcc", "graph.scc"] {
+        let query=format!("CALL {procedure}() YIELD node,component,size RETURN node.entity_id,component.entity_id,size LIMIT 0");
+        assert!(matches!(
+            execute_with_limits(
+                &db,
+                &query,
+                &BTreeMap::new(),
+                ExecutionLimits {
+                    memory_bytes: 1200,
+                    timeout: None
+                }
+            ),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+        let pool = Arc::new(QueryMemoryPool::new(64_000));
+        let mut expired = QueryTransaction::begin_with_pool(
+            &db,
+            ExecutionLimits {
+                memory_bytes: 64_000,
+                timeout: Some(Duration::ZERO),
+            },
+            Arc::clone(&pool),
+        )
+        .unwrap();
+        assert!(matches!(
+            expired.run(&query, &BTreeMap::new()),
+            Err(ExecError::TimedOut)
+        ));
+        assert_eq!(expired.state(), QueryTransactionState::Failed);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+}

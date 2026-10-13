@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "nodes": 6,
+  "relationships": 5,
+  "driver": "neo4j",
+  "phases": [
+    "initial",
+    "reopened"
+  ],
+  "checks": [
+    "wcc",
+    "scc",
+    "zero-weight topology",
+    "reader access",
+    "write denied"
+  ],
+  "serverSha256": "de80cbb78b9990fb00f028405f86d0536f56a057383e8bfb383eeb52952f320e"
+}

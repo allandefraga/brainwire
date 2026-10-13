@@ -22,6 +22,64 @@ pub struct PageRankResult {
     pub residual: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentsResult {
+    /// Minimum CSR node index of each node's component.
+    pub components: Vec<usize>,
+    /// Component size at its representative; zero at other indices.
+    pub sizes: Vec<usize>,
+}
+
+struct ComponentCheck<F> {
+    should_stop: F,
+    remaining: usize,
+}
+impl<F: FnMut() -> bool> ComponentCheck<F> {
+    fn check(&mut self) -> Result<(), SparseMatrixError> {
+        if (self.should_stop)() {
+            return Err(SparseMatrixError::Interrupted);
+        }
+        self.remaining = 1024;
+        Ok(())
+    }
+    fn step(&mut self) -> Result<(), SparseMatrixError> {
+        if self.remaining == 0 {
+            self.check()?;
+        }
+        self.remaining -= 1;
+        Ok(())
+    }
+    fn buffer<T>(&mut self, count: usize) -> Result<Vec<T>, SparseMatrixError> {
+        self.check()?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|_| SparseMatrixError::Capacity)?;
+        Ok(values)
+    }
+    fn filled<T: Copy>(&mut self, count: usize, value: T) -> Result<Vec<T>, SparseMatrixError> {
+        let mut values = self.buffer(count)?;
+        for _ in 0..count {
+            self.step()?;
+            values.push(value);
+        }
+        Ok(values)
+    }
+}
+
+fn component_root<F: FnMut() -> bool>(
+    parents: &mut [usize],
+    mut node: usize,
+    check: &mut ComponentCheck<F>,
+) -> Result<usize, SparseMatrixError> {
+    while parents[node] != node {
+        check.step()?;
+        parents[node] = parents[parents[node]];
+        node = parents[node];
+    }
+    Ok(node)
+}
+
 impl SparseMatrix {
     /// Builds a CSR matrix from `(row, column, value)` entries.
     /// Duplicate coordinates are summed, which is useful when several graph
@@ -184,6 +242,189 @@ impl SparseMatrix {
         Ok(())
     }
 
+    /// Weak connectivity ignores direction and weights of nonzero CSR entries.
+    /// Union by size and path compression use 3*N usize slots of requested
+    /// backing storage, including results; allocator overhead is excluded.
+    pub fn weak_components(&self) -> Result<ComponentsResult, SparseMatrixError> {
+        self.weak_components_with_check(|| false)
+    }
+
+    /// Checks before allocation and after at most 1024 node/edge/root steps.
+    pub fn weak_components_with_check(
+        &self,
+        should_stop: impl FnMut() -> bool,
+    ) -> Result<ComponentsResult, SparseMatrixError> {
+        self.validate_component_shape()?;
+        let mut check = ComponentCheck {
+            should_stop,
+            remaining: 0,
+        };
+        let mut parents = check.buffer(self.rows)?;
+        for node in 0..self.rows {
+            check.step()?;
+            parents.push(node);
+        }
+        let mut sizes = check.filled(self.rows, 1usize)?;
+        for row in 0..self.rows {
+            check.step()?;
+            for edge in self.row_offsets[row]..self.row_offsets[row + 1] {
+                check.step()?;
+                let mut a = component_root(&mut parents, row, &mut check)?;
+                let mut b = component_root(&mut parents, self.column_indices[edge], &mut check)?;
+                if a != b {
+                    if sizes[a] < sizes[b] {
+                        std::mem::swap(&mut a, &mut b);
+                    }
+                    parents[b] = a;
+                    sizes[a] += sizes[b];
+                }
+            }
+        }
+        let mut minima = check.filled(self.rows, usize::MAX)?;
+        for node in 0..self.rows {
+            check.step()?;
+            let root = component_root(&mut parents, node, &mut check)?;
+            parents[node] = root;
+            minima[root] = minima[root].min(node);
+        }
+        for size in &mut sizes {
+            check.step()?;
+            *size = 0;
+        }
+        for parent in &mut parents {
+            check.step()?;
+            *parent = minima[*parent];
+            sizes[*parent] += 1;
+        }
+        check.check()?;
+        Ok(ComponentsResult {
+            components: parents,
+            sizes,
+        })
+    }
+
+    /// Iterative Kosaraju traversal over nonzero directed topology, including isolates.
+    /// Requested algorithm storage is at most 48*N + 8*NNZ + 8 bytes on 64-bit
+    /// platforms, excluding the input CSR, allocator metadata and result clones.
+    pub fn strong_components(&self) -> Result<ComponentsResult, SparseMatrixError> {
+        self.strong_components_with_check(|| false)
+    }
+
+    /// Checks before allocation and after at most 1024 node/edge steps.
+    pub fn strong_components_with_check(
+        &self,
+        should_stop: impl FnMut() -> bool,
+    ) -> Result<ComponentsResult, SparseMatrixError> {
+        self.validate_component_shape()?;
+        let mut check = ComponentCheck {
+            should_stop,
+            remaining: 0,
+        };
+        let mut visited = check.filled(self.rows, false)?;
+        let mut order = check.buffer(self.rows)?;
+        let mut frames = check.buffer::<(usize, usize)>(self.rows)?;
+        for start in 0..self.rows {
+            check.step()?;
+            if visited[start] {
+                continue;
+            }
+            visited[start] = true;
+            frames.push((start, self.row_offsets[start]));
+            while let Some(&(node, edge)) = frames.last() {
+                check.step()?;
+                if edge < self.row_offsets[node + 1] {
+                    frames.last_mut().expect("nonempty frames").1 += 1;
+                    let target = self.column_indices[edge];
+                    if !visited[target] {
+                        visited[target] = true;
+                        frames.push((target, self.row_offsets[target]));
+                    }
+                } else {
+                    frames.pop();
+                    order.push(node);
+                }
+            }
+        }
+        drop(visited);
+        drop(frames);
+        let offset_count = self
+            .rows
+            .checked_add(1)
+            .ok_or(SparseMatrixError::Capacity)?;
+        let mut offsets = check.filled(offset_count, 0usize)?;
+        for &target in &self.column_indices {
+            check.step()?;
+            offsets[target + 1] += 1;
+        }
+        for node in 1..offset_count {
+            check.step()?;
+            offsets[node] += offsets[node - 1];
+        }
+        let mut next = check.buffer(self.rows)?;
+        for &offset in &offsets[..self.rows] {
+            check.step()?;
+            next.push(offset);
+        }
+        let mut targets = check.filled(self.column_indices.len(), 0usize)?;
+        for row in 0..self.rows {
+            check.step()?;
+            for edge in self.row_offsets[row]..self.row_offsets[row + 1] {
+                check.step()?;
+                let target = self.column_indices[edge];
+                targets[next[target]] = row;
+                next[target] += 1;
+            }
+        }
+        drop(next);
+        let mut components = check.filled(self.rows, usize::MAX)?;
+        let mut sizes = check.filled(self.rows, 0usize)?;
+        let mut minima = check.filled(self.rows, usize::MAX)?;
+        let mut stack = check.buffer(self.rows)?;
+        for &start in order.iter().rev() {
+            check.step()?;
+            if components[start] != usize::MAX {
+                continue;
+            }
+            components[start] = start;
+            stack.push(start);
+            while let Some(node) = stack.pop() {
+                check.step()?;
+                minima[start] = minima[start].min(node);
+                sizes[start] += 1;
+                for &target in &targets[offsets[node]..offsets[node + 1]] {
+                    check.step()?;
+                    if components[target] == usize::MAX {
+                        components[target] = start;
+                        stack.push(target);
+                    }
+                }
+            }
+        }
+        for component in &mut components {
+            check.step()?;
+            *component = minima[*component];
+        }
+        for root in 0..self.rows {
+            check.step()?;
+            if sizes[root] != 0 && minima[root] != root {
+                sizes[minima[root]] = sizes[root];
+                sizes[root] = 0;
+            }
+        }
+        check.check()?;
+        Ok(ComponentsResult { components, sizes })
+    }
+
+    fn validate_component_shape(&self) -> Result<(), SparseMatrixError> {
+        if self.rows != self.cols {
+            return Err(SparseMatrixError::NotSquare {
+                rows: self.rows,
+                cols: self.cols,
+            });
+        }
+        Ok(())
+    }
+
     /// Multiplies the sparse matrix by a dense vector without materializing
     /// zero entries.
     pub fn matvec(&self, vector: &[f32]) -> Result<Vec<f32>, SparseMatrixError> {
@@ -317,6 +558,8 @@ impl SparseMatrix {
 pub enum SparseMatrixError {
     #[error("matrix dimensions or allocation exceed addressable capacity")]
     Capacity,
+    #[error("graph component traversal interrupted")]
+    Interrupted,
     #[error("PageRank maxIterations must be between 1 and 1000")]
     InvalidIterations,
     #[error("PageRank tolerance must be finite and non-negative")]
@@ -553,5 +796,111 @@ mod tests {
         assert!(rank[1] > rank[0]);
         assert!(rank[1] > rank[2] * 0.9);
         assert!((rank.iter().sum::<f32>() - 1.0).abs() < 0.0001);
+    }
+    #[test]
+    fn components_are_canonical_and_include_isolates_self_loops_and_directed_cycles() {
+        let matrix = SparseMatrix::from_entries(
+            7,
+            7,
+            [
+                (0, 1, 1.0),
+                (1, 0, 2.0),
+                (1, 2, -1.0),
+                (2, 3, 1.0),
+                (3, 2, 1.0),
+                (4, 4, 1.0),
+                (0, 1, 1.0),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            matrix.weak_components().unwrap(),
+            ComponentsResult {
+                components: vec![0, 0, 0, 0, 4, 5, 6],
+                sizes: vec![4, 0, 0, 0, 1, 1, 1]
+            }
+        );
+        assert_eq!(
+            matrix.strong_components().unwrap(),
+            ComponentsResult {
+                components: vec![0, 0, 2, 2, 4, 5, 6],
+                sizes: vec![2, 0, 2, 0, 1, 1, 1]
+            }
+        );
+        let empty = SparseMatrix::from_entries(0, 0, []).unwrap();
+        assert!(empty.weak_components().unwrap().components.is_empty());
+        assert!(empty.strong_components().unwrap().sizes.is_empty());
+        let nonsquare = SparseMatrix::from_entries(2, 3, []).unwrap();
+        assert!(matches!(
+            nonsquare.weak_components(),
+            Err(SparseMatrixError::NotSquare { .. })
+        ));
+        assert!(matches!(
+            nonsquare.strong_components(),
+            Err(SparseMatrixError::NotSquare { .. })
+        ));
+    }
+
+    #[test]
+    fn components_handle_100k_chain_and_ring_without_recursive_dfs() {
+        let n = 100_000;
+        let chain = SparseMatrix::from_entries(n, n, (0..n - 1).map(|i| (i, i + 1, 1.0))).unwrap();
+        assert_eq!(chain.weak_components().unwrap().sizes[0], n);
+        assert_eq!(
+            chain.strong_components().unwrap().components,
+            (0..n).collect::<Vec<_>>()
+        );
+        let ring = SparseMatrix::from_entries(n, n, (0..n).map(|i| (i, (i + 1) % n, 1.0))).unwrap();
+        let result = ring.strong_components().unwrap();
+        assert_eq!(result.components, vec![0; n]);
+        assert_eq!(result.sizes[0], n);
+    }
+
+    #[test]
+    fn component_checks_interrupt_before_allocation_and_during_high_degree_work() {
+        let matrix =
+            SparseMatrix::from_entries(10_000, 10_000, (1..10_000).map(|i| (0, i, 1.0))).unwrap();
+        assert_eq!(
+            matrix.weak_components_with_check(|| true),
+            Err(SparseMatrixError::Interrupted)
+        );
+        assert_eq!(
+            matrix.strong_components_with_check(|| true),
+            Err(SparseMatrixError::Interrupted)
+        );
+        for limit in [2, 10, 30, 60] {
+            let mut calls = 0;
+            assert_eq!(
+                matrix.weak_components_with_check(|| {
+                    calls += 1;
+                    calls > limit
+                }),
+                Err(SparseMatrixError::Interrupted)
+            );
+            let mut calls = 0;
+            assert_eq!(
+                matrix.strong_components_with_check(|| {
+                    calls += 1;
+                    calls > limit
+                }),
+                Err(SparseMatrixError::Interrupted)
+            );
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn components_match_independent_dense_reachability(entries in prop::collection::vec((0usize..7,0usize..7),0..50)) {
+            let matrix=SparseMatrix::from_entries(7,7,entries.iter().map(|&(a,b)|(a,b,1.0))).unwrap();
+            let mut directed=[[false;7];7];let mut undirected=[[false;7];7];
+            for i in 0..7 {directed[i][i]=true;undirected[i][i]=true;}
+            for &(a,b) in &entries {directed[a][b]=true;undirected[a][b]=true;undirected[b][a]=true;}
+            for via in 0..7 {for a in 0..7 {for b in 0..7 {directed[a][b]|=directed[a][via]&&directed[via][b];undirected[a][b]|=undirected[a][via]&&undirected[via][b];}}}
+            for (result,strong) in [(matrix.weak_components().unwrap(),false),(matrix.strong_components().unwrap(),true)] {
+                let mut expected=vec![0;7];let mut sizes=vec![0;7];
+                for a in 0..7 {expected[a]=(0..7).find(|&b|if strong{directed[a][b]&&directed[b][a]}else{undirected[a][b]}).unwrap();sizes[expected[a]]+=1;}
+                prop_assert_eq!(result.components,expected);prop_assert_eq!(result.sizes,sizes);
+            }
+        }
     }
 }

@@ -1,0 +1,37 @@
+{
+  "fanout": 1,
+  "importMs": 707.2779999999999,
+  "nodes": 100000,
+  "note": "local synthetic rings/chains; timings include RocksDB projection, algorithm and eager Cypher bindings; five warm samples, not production percentiles or RSS",
+  "profile": "release",
+  "queryMemoryLimitBytes": 268435456,
+  "relationships": 99500,
+  "results": [
+    {
+      "expectedComponents": 1000,
+      "maxMs": 482.1185,
+      "medianMs": 379.602917,
+      "procedure": "wcc",
+      "samplesMs": [
+        354.666792,
+        377.167875,
+        379.602917,
+        421.811084,
+        482.1185
+      ]
+    },
+    {
+      "expectedComponents": 50500,
+      "maxMs": 365.90520799999996,
+      "medianMs": 303.975416,
+      "procedure": "scc",
+      "samplesMs": [
+        299.73387499999995,
+        301.73,
+        303.975416,
+        333.304875,
+        365.90520799999996
+      ]
+    }
+  ]
+}

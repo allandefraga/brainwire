@@ -101,7 +101,8 @@ recovery; graceful drain and immediate cancellation are not implemented.
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
 and `graph.pagerank`, plus directed `graph.reachable` hop distances and
-`graph.shortestPath` node paths, with CSR projections built from the transaction
+`graph.shortestPath` node paths and `graph.wcc`/`graph.scc` connected groups,
+with CSR projections built from the transaction
 snapshot. See the [analytics guide](docs/sparse-analytics.md) for a complete
 example, options, memory limits and a reproducible volume workload.
 

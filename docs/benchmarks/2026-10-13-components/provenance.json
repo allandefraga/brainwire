@@ -1,0 +1,16 @@
+{
+  "sha256": {
+    "crates/core/src/sparse.rs": "9ef6d7623947fb4e3e2c65511e990a09224aae556c45691fc0f5b78430b95aec",
+    "crates/store/src/graph.rs": "b7ea38d77938b73e1b1132026ddff03cb7c7f6c3c9c8cab6341dfb2393a6dacc",
+    "crates/cypher/src/exec/procedures.rs": "8f414a04773ee1e835f8a7de3bd4516932ecf5e5790e5c28e60c800a09638389",
+    "crates/cypher/examples/components.rs": "1b77cee1c28d60c922e09dbecf0e11e768198f1a9c5a5f31f0ee6e185e45acc8",
+    "examples/analytics/qualify_components.py": "b23d665a9e9441177901a17ad56ab5578dae9f675cfde26b29b9e097ce70e3ff",
+    "target/release/examples/components": "d98b2bf5d2c7a2a92a42e5c9b567c3b7a3835e2b57fc86dd657f7a48ceb8e675",
+    "target/release/brainwire": "de80cbb78b9990fb00f028405f86d0536f56a057383e8bfb383eeb52952f320e"
+  },
+  "workspaceTests": 554,
+  "clippy": "PASS",
+  "format": "PASS",
+  "hardware": "Apple M5, Mac17,2, 32 GiB",
+  "rssMeasured": false
+}

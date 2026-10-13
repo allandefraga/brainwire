@@ -1,7 +1,7 @@
 # Sparse graph analytics through Cypher
 
 Brainwire can build a CSR adjacency matrix from the local RocksDB graph and
-run PageRank, inspect node degrees or compute directed reachability through
+run PageRank, inspect node degrees, identify connected components or compute directed reachability through
 the existing `brainwire cypher`
 command. These are implemented local procedures, not examples of future syntax.
 
@@ -47,6 +47,72 @@ unreachable returns no rows; unknown endpoints are errors. The path is
 unweighted, rejects `weightProperty` and builds the full bounded projection.
 It is a Brainwire procedure, not Cypher's `shortestPath()` pattern syntax or
 weighted Dijkstra.
+
+## Discover connected groups
+
+```cypher
+CALL graph.wcc({relationship:'LINK'})
+YIELD node, component, size
+RETURN node.entity_id, component.entity_id AS group, size
+LIMIT 20
+```
+
+Weak connected components (WCC) ignore relationship direction: a chain
+`a → b → c` belongs to one group. Strong connected components (SCC) require
+mutual directed reachability: that chain has three groups, while
+`a → b → c → a` has one. Replace `graph.wcc` with `graph.scc` in the query
+to select the directed interpretation.
+
+Each node produces one row. `component` is the representative **node**, chosen
+by the smallest internal NodeId in its group; `size` is the number of nodes in
+that group. This representative is deterministic for the same snapshot, but is
+not a permanent community identifier across deletions, imports or merges.
+Aliases and node properties work for both `node` and `component`:
+
+```cypher
+CALL graph.scc({relationship:'LINK'})
+YIELD node AS member, component AS representative, size
+WHERE member.entity_id = representative.entity_id
+RETURN representative.entity_id, size
+```
+
+To count groups, use that same filter and `RETURN count(*) AS groups`.
+The same procedures work through Python's Neo4j driver against a named
+Brainwire graph with read access:
+
+```python
+from neo4j import GraphDatabase
+from examples.python.connection import auth_from_env
+
+with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
+                          liveness_check_timeout=30) as driver:
+    with driver.session(database="pages") as session:
+        rows = session.run(
+            "CALL graph.scc({relationship:$relationship}) "
+            "YIELD node, component, size "
+            "RETURN node.entity_id AS member, component.entity_id AS group, size "
+            "LIMIT 20",
+            relationship="LINK",
+        ).data()
+        print(rows)
+```
+
+Create `pages` with the Page/LINK ontology and import nodes before running this
+snippet; set `BRAINWIRE_BOLT_AUTH_FILE` to a reader's credentials on protected
+servers. See [the protected quickstart](mvp-quickstart.md) for server setup.
+
+All graph nodes participate, including isolates and nodes with no relationship
+of the selected type. Their groups have size one. These procedures use unit
+topology weights and reject `weightProperty`; zero or negative values stored
+in an edge property do not remove its connection. Result order is ascending
+NodeId, without ranking by group size.
+
+WCC uses union by size with path compression. SCC uses iterative Kosaraju
+traversal and a sparse transpose, avoiding recursion on long chains. The
+algorithm stages use O(N + E) memory; WCC time is O((N + E) α(N)), and SCC time
+is O(N + E). The complete query also pays for the RocksDB scan, endpoint lookup,
+CSR sorting and eager result binding. `WHERE` and `LIMIT` apply afterwards and
+do not reduce that work or bypass projection limits.
 
 ## Run the complete example
 
@@ -112,6 +178,8 @@ analytics sees those staged changes and rollback still discards them.
 | `graph.degree` | `node`, `outDegree`, `inDegree` | One row per node in NodeId order; counts selected relationships, including parallel edges, self-loops and zero-weight edges. |
 | `graph.reachable` | `node`, `depth` | Each reachable node once in NodeId order, including source at depth zero; minimum unweighted directed hop depth. |
 | `graph.shortestPath` | `node`, `depth` | Ordered nodes on one minimum-hop directed path; empty if unreachable. |
+| `graph.wcc` | `node`, `component`, `size` | One row per node; groups ignore direction, including isolates. |
+| `graph.scc` | `node`, `component`, `size` | One row per node; groups require mutual directed reachability, including isolates. |
 | `graph.pagerank` | `node`, `score`, `iterations`, `converged`, `residual` | One row per node, descending score then ascending NodeId for ties. `LIMIT` selects from that order. Empty graphs return no rows. |
 
 `RETURN count(*)` and the existing projection/aggregation rules also work.
@@ -173,8 +241,12 @@ This is single-process analytics. The embedded CLI needs exclusive database
 access; the Bolt server can run the same procedures against a selected named
 database. There is no distributed execution, persistent projection registry,
 vector similarity index, permission filtering or live graph TUI integration
-yet. Production deployment still needs a shared query pool, streaming execution and
-a measured hard memory envelope beyond the conservative per-RUN guard.
+yet. The server's shared query pool and per-RUN guard account conservatively for
+projection growth before allocation. Components also reserve their algorithm
+buffers before execution and check deadlines during traversal. These are
+accounting guardrails, not allocator-enforced RSS limits. Storage calls and CSR
+construction/sorting can overshoot a cooperative deadline. Streaming execution
+and a measured hard memory envelope remain work for production scale.
 
 ## Reproduce the volume workload
 
@@ -192,3 +264,18 @@ top node, prints JSON timings, and removes its own temporary database on exit.
 The workload combines ring links and a common hub, so PageRank is nonuniform.
 It uses a 64 MiB RocksDB cache and 16 MiB memtable budget. Results from the first
 measured run are in [the benchmark report](benchmarks/2026-09-30-sparse-analytics.md).
+
+For disconnected directed rings and chains, with asserted group counts after
+closing/reopening RocksDB and five warm end-to-end query samples:
+
+```sh
+cargo run --release --locked --offline -p brainwire-cypher --example components -- 100000
+```
+
+This creates and removes its own synthetic temporary database. It exercises
+100,000 nodes and 99,500 relationships under a 256 MiB query accounting limit;
+it does not measure RSS or establish production latency percentiles.
+Append `10` after the node count for a denser 972,500-relationship fixture with
+the same asserted component counts and memory accounting limit.
+The [measured component report](benchmarks/2026-10-13-components.md) records
+the 100,000-node workload and protected Python/Bolt restart verification.

@@ -205,7 +205,10 @@ pub(super) fn query(query: &Query, ctx: &Context<'_, '_>) -> Result<(), ExecErro
                 for item in yields {
                     scope.insert(
                         item.alias.clone(),
-                        if item.field == "node" {
+                        if item.field == "node"
+                            || (item.field == "component"
+                                && matches!(name.as_str(), "graph.wcc" | "graph.scc"))
+                        {
                             Kind::Node
                         } else {
                             Kind::Value
