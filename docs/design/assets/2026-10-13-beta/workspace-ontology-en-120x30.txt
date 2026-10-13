@@ -1,0 +1,30 @@
+┌NAVIGATION────────┐┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ READ ONLY        ││ BRAINWIRE / ONTOLOGY / tickets @ 127.0.0.1:56356                                                 │
+│                  │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│ > 1 Ontology     │┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                  ││ SERVER SNAPSHOT • schema v1 • age 0s • indexes ready                                             │
+│   2 Memory       │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│                  │┌TYPES • ↑↓──────────┐┌CONNECTIONS • PgUp/PgDn─────────────────────┐┌INSPECTOR • Enter/F1──────────┐
+│   3 Indexes      ││> Ticket            ││Ticket                                      ││Ticket                        │
+│                  ││  TicketComment     ││Schema • declared connections               ││                              │
+│   4 Graph        ││  ImportCheckpoint  ││                                            ││PROPERTIES                    │
+│                  ││                    ││HAS_COMMENT                                 ││  entity_id                   │
+│ Tab / Shift+Tab  ││                    ││┌───────────┐                  ┌───────────┐││  tenant_id                   │
+│ switch panes     ││                    │││Ticket     │─HAS_COMMENT─────>│TicketComm…│││  connector_id                │
+│                  ││                    ││└───────────┘                  └───────────┘││  external_id                 │
+│                  ││                    ││                                            ││  subject                     │
+│                  ││                    ││                                            ││  status                      │
+│                  ││                    ││                                            ││  priority                    │
+│                  ││                    ││                                            ││  tags                        │
+│                  ││                    ││                                            ││                              │
+│                  ││                    ││                                            ││DECLARED INDEXES              │
+│                  ││                    ││                                            ││  status                      │
+│                  ││                    ││                                            ││  priority                    │
+│                  ││                    ││                                            ││                              │
+│                  ││                    ││                                            ││OUTGOING                      │
+│                  ││                    ││                                            ││Ticket -[:HAS_COMMENT]->      │
+│                  ││                    ││                                            ││TicketComment                 │
+│                  │└────────────────────┘└────────────────────────────────────────────┘└──────────────────────────────┘
+│                  │┌↑↓ type • Enter/F1 inspect • PgUp/Dn scroll───────────────────────────────────────────────────────┐
+│                  ││ 1 Ontology  2 Memory  3 Indexes  4 Graph • Tab • r refresh • q quit                              │
+└──────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────┘

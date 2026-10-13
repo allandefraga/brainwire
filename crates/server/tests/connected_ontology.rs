@@ -182,6 +182,6 @@ fn connected_flags_cannot_fall_back_to_offline_or_demo() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("--view ontology"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("cannot connect"));
     assert!(!dir.path().join("data").exists());
 }

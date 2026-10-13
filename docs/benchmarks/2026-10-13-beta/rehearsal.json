@@ -1,0 +1,27 @@
+{
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "scope": "four local synthetic scenarios; not real client or replication",
+  "phases": {
+    "ducklake-100000": {
+      "exit_code": 0,
+      "seconds": 53.258502,
+      "receipt_sha256": "699f5b264603b2bf73491eb90de314a61244081125117e9048de5348af52d548"
+    },
+    "recovery-100000": {
+      "exit_code": 0,
+      "seconds": 52.573479,
+      "receipt_sha256": "3bc96322b9b4033c21c80ae593b4c21d067f52f2fe35d5b8e0b446b155a5bc4d"
+    },
+    "multigraph-100000": {
+      "exit_code": 0,
+      "seconds": 12.36304,
+      "receipt_sha256": "42c375604b28240b7a2beaab902e33c4dd0aa91a8ef002acd2a6d83e9b4d539b"
+    },
+    "typed-neighborhood-100000": {
+      "exit_code": 0,
+      "seconds": 4.336724,
+      "receipt_sha256": "3337abcdd9db6d86cae45280970c08eb1a8dae0890720c703786417cde3625dd"
+    }
+  },
+  "result": "PASS"
+}

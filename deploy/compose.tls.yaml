@@ -1,0 +1,24 @@
+# Optional single-host TLS edge. Requires Docker Compose >= 2.24.4; uses !reset.
+# Always combine with compose.yaml and compose.auth.yaml.
+services:
+  brainwire:
+    ports: !reset []
+  tls:
+    image: ${BRAINWIRE_TLS_IMAGE:-haproxy:3.2.24-alpine@sha256:1aca32ee932b96d2a75f1882909325839dd23c138ba9c6fd26e4d88179f30f13}
+    restart: unless-stopped
+    depends_on:
+      brainwire:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BRAINWIRE_TLS_PORT:-7688}:7688"
+    volumes:
+      - type: bind
+        source: ./haproxy.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        read_only: true
+      - type: bind
+        source: ${BRAINWIRE_TLS_PEM_FILE:?Set the server certificate chain and private key PEM file path}
+        target: /run/secrets/brainwire-tls.pem
+        read_only: true
+    mem_limit: 128m
+    stop_grace_period: 10s

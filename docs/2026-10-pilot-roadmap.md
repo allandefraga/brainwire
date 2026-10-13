@@ -1,13 +1,14 @@
 # Brainwire October 31, 2026 beta roadmap
 
-Revised October 12 after Allan's additional one-hour MVP implementation session:
-retain October 31 as the beta target, with **20 minutes of active development per
-day**. October 13–31 provides 19 sessions, **380 minutes (6h20)**. Today's extra
-hour brought forward source export and connected inspection; it does not change
-the standing daily cadence or configure automatic work.
+Revised October 13 during Allan's requested two-hour beta qualification session.
+Retain October 31 as the beta target, with **20 minutes of active development per
+day**. After today's session, October 14–31 provides 18 sessions, **360 minutes
+(6 hours)**. The additional session brought forward protected transport, connection
+limits and connected inspection. It does not change the standing daily cadence
+or configure automatic work.
 
 The complete requested product remains the target described by the feature
-matrix below. Delivering every pending row in 6h20 is not a credible commitment.
+matrix below. Delivering every pending row in 6 hours is not a credible commitment.
 The executable schedule proposes a **controlled single-node client beta**;
 it does not rename that subset as a completed distributed/full-feature beta.
 Reduced October acceptance scope is a visible planning proposal, not an assertion
@@ -170,6 +171,40 @@ enforcement. Established-session idle bounds, responsive cancellation and native
 drain remain separate work. The [MVP evidence](benchmarks/2026-10-12-mvp.md)
 records real run sizes, candidate hashes and qualification limits.
 
+## Progress recorded October 13
+
+The frozen candidate adds independent requested-owned PackStream allocation quotas
+before reservation, a 300-second authenticated complete-request IO deadline and
+per-frame response encoding. Incomplete bytes/NOOPs cannot renew a request budget;
+IO failure closes the session and aborts pending transactions. Synchronous engine
+work remains outside the network timer. This is not a process RSS limit, streaming
+query engine, responsive cancellation or graceful shutdown implementation.
+
+Python producers check pooled connection liveness after 30 seconds. Drivers 5/6
+passed native default-timeout reconnect and strict certificate/hostname TLS proxy
+reconnect after the proxy's 60-second expiry. The proxy terminates TLS on localhost;
+its single-host Docker bridge backend remains plaintext. Native TUI TLS and actual
+protected Kubernetes/Swarm deployment remain pending. Abrupt SIGTERM qualification
+covers acknowledged indexed writes, pending transactions, an unacknowledged RUN
+and a stopped reader; it does not identify an exact COMMIT/blocked-write phase.
+
+The connected shell now defaults to one navigable Ontology/Memory/Indexes/Graph
+workspace. Graph fetches source existence and a typed outgoing neighbor sample
+in one read transaction; it returns at most 20 rows and a further-row marker.
+Actual synthetic 100,000-node captures cover all panes, compact Portuguese,
+scrolling, stale recovery and navigation after forbidden Memory access. The
+pre-existing static docs-site was audited without edits; its unsupported search,
+index and replication examples are recorded in the
+[documentation reconciliation queue](docs-site-beta-reconciliation.md).
+The final sustained-load and source/recovery receipts are recorded in the
+[October 13 qualification report](benchmarks/2026-10-13-beta.md); local evidence
+must not be extended into a real client deployment or replicated reliability.
+A read-only [client port comparison](client-contract-gap.md) found no Brainwire
+adapter in the real conformance suite. Node-level ACL expressions, query pagination,
+online DDL/introspection and per-request timeout contracts remain concrete blockers
+to a production drop-in. The next adapter slice must gate its ingestion subset and
+fail clearly on unsupported governed reads.
+
 ## Daily execution queue — October 13–31
 
 Dates allocate a session, not guaranteed completion. Each deliverable needs a
@@ -189,7 +224,7 @@ visible. Do not split a storage invariant merely to mark a day complete.
 | Oct 20 | Qualify the chosen orchestration target | Execute retained-volume recovery on an authorized disposable Kubernetes or Swarm target; otherwise mark that target unqualified and retain validated Docker profile |
 | Oct 21 | Rehearse backup, restore and restart on the candidate | Exact checkpoint/cursor/index receipts, fresh-directory restore, acknowledged writes retained; documented restore time and operator procedure |
 | Oct 22 | Measure representative client queries | Agree latency/throughput/RSS limits before running; 100K nodes / 1M edges only if within declared profile; actual payloads, degree distribution and filters |
-| Oct 23 | Close the sustained-load gate | Extend supervised mixed reads/writes and failure test to one hour; local 30-minute synthetic evidence alone is insufficient; review errors, RSS, p95/p99 and audit |
+| Oct 23 | Qualify sustained load for the selected client profile | Local one-hour synthetic gate completed Oct 13; run/review the selected representative resource/query profile, errors, RSS, p95/p99 and recovery rather than substituting localhost evidence |
 | Oct 24 | Candidate decision and feature freeze | Security/source/recovery/workload gates pass or become explicit no-go items; assign remaining slots only to measured blockers |
 | Oct 25 | Reconcile real TUI and local docs release preview | Memory/index/ontology screenshots and permissions; query/source limits; existing docs-site draft reconciled without inventing unsupported tabs or publishing |
 | Oct 26 | Run a complete client shadow rehearsal | Install → schema → authorized source snapshot → import → expected query answers → restart → fresh restore, recorded against the candidate hash |
@@ -214,15 +249,15 @@ owns approval of the real source mapping, workload targets and any external
 deployment. Focused agents can help independent slices, but do not change those
 release dependencies. No infrastructure credential or live data is presumed.
 
-| Gate | October decision evidence | Status on October 12 |
+| Gate | October decision evidence | Status on October 13 |
 | --- | --- | --- |
 | Data contract | Explicit authoritative fields/IDs and snapshot identity; null/overwrite/parent semantics; deletes/history unsupported unless independently proven | Synthetic DuckDB/SQLite DuckLake snapshot path passes; real mapping/backend approval pending (Oct 16–18) |
-| Security | Graph grants and denied operations, private credentials, selected encrypted or loopback boundary, documented administration access | Tokens/grants and loopback acceptance pass; selected client route and shared-environment transport pending (Oct 13) |
-| Resource behavior | Declared connection/message/query/result limits, measured slow/disconnected-client cleanup; no RSS or immediate-cancellation claim | Negotiation/authentication admission checks pass; decoded-input allocations, authenticated slow clients and shutdown boundary pending (Oct 14–15) |
-| Recovery | Pending work rolls back, acknowledged writes survive crash, restart/replay and fresh checkpoint restore pass exact audits | Synthetic final-candidate pending cursor/index rollback and fresh restore pass; target operator rehearsal pending (Oct 21/26) |
-| Performance | Agreed client workload/resource envelope with actual p95/p99, throughput, payload/degree distribution and sustained-load duration; synthetic localhost results are supporting evidence | Synthetic 100k-ticket bridge passes; earlier 30-minute and final 10-minute mixed loads pass separately; representative workload and one-hour continuous gate pending (Oct 22–23) |
+| Security | Graph grants and denied operations, private credentials, selected encrypted or loopback boundary, documented administration access | Tokens/grants and strict single-host TLS proxy acceptance pass with drivers 5/6; selected client route and protected target execution pending |
+| Resource behavior | Declared connection/message/query/result limits, measured slow/disconnected-client cleanup; no RSS or immediate-cancellation claim | Decoded-input quotas, authenticated complete-request IO budgets, idle transaction rollback and default 300s timeout pass; immediate cancellation/global RSS ceiling/drain remain unsupported |
+| Recovery | Pending work rolls back, acknowledged writes survive crash, restart/replay and fresh checkpoint restore pass exact audits | Final 100k-ticket pending cursor/index rollback, fresh restore, three-graph SIGKILL and abrupt SIGTERM audits pass; selected operator/runtime rehearsal pending (Oct 21/26) |
+| Performance | Agreed client workload/resource envelope with actual p95/p99, throughput, payload/degree distribution and sustained-load duration; synthetic localhost results are supporting evidence | Synthetic 100k-ticket bridge passes; final one-hour synthetic 100k-node mixed load passes with measured latency/RSS and crash audit; representative client workload/SLO envelope still pending (Oct 22) |
 | Deployment | Reproducible pinned Docker single-owner package; Kubernetes/Swarm supported only for profiles actually exercised, without replica/failover claims | Final protected Linux Compose acceptance passes; package freeze and chosen protected orchestration target pending (Oct 19–20) |
-| Product | Real EN/PT inspection, executable Python/Cypher examples, local docs preview, limits and operator runbook; no simulated acceptance tab | Connected ontology/memory/indexes and native quickstart pass; reconcile docs-site draft and supported operational UI scope (Oct 25) |
+| Product | Real EN/PT inspection, executable Python/Cypher examples, local docs preview, limits and operator runbook; no simulated acceptance tab | Four connected EN/PT panes and actual 100k-node captures pass; Graph is a sampled selected neighborhood. Reconcile docs-site draft and operational UI scope (Oct 25) |
 | Release | Candidate hashes, unresolved risks, rollback rehearsal and explicit ready/conditional/no-go decision on October 31 | Local qualification receipts saved; feature freeze, shadow rehearsal and release/rollback decision pending (Oct 24–31) |
 
 The proposed October beta is suitable first for a rebuildable client shadow
@@ -245,7 +280,7 @@ inside this narrower release label. No guaranteed production SLA is established.
 These are not dropped. Their dates require a new capacity decision based on the
 October pilot evidence. The next large engine task remains deterministic apply;
 this revision deliberately puts the client pilot blockers ahead of claiming
-an untested distributed system in a 6h20 remaining development budget.
+an untested distributed system in a 6-hour remaining development budget.
 
 Temporal/history and replication work cannot independently invent transaction or
 snapshot formats. Use the existing approved design's **one Raft group per instance
@@ -297,7 +332,7 @@ intake remains frozen while those blockers are fixed.
   and explicit authorization for the actual production environment. Installation
   instructions or a container image alone do not satisfy this status.
 - **Complete requested beta:** every row of the full feature matrix passes. No claim
-  that this is achievable with the remaining 6h20.
+  that this is achievable with the remaining 6 hours.
 
 Open data-loss, authorization, failed restore, unknown source consistency or
 unbounded-memory blockers mean **no-go** for production. Report failed or unrun

@@ -58,6 +58,6 @@ if __name__ == "__main__":
         from .connection import auth_from_env
     else:
         from connection import auth_from_env
-    with open(args.file) as stream, GraphDatabase.driver(args.uri, auth=auth_from_env()) as driver:
+    with open(args.file) as stream, GraphDatabase.driver(args.uri, auth=auth_from_env(), liveness_check_timeout=30) as driver:
         total = ingest(driver, args.database, read_rows(stream), args.batch_size)
     print(f"Committed {total} input rows to {args.database}; repeated IDs update existing nodes.")

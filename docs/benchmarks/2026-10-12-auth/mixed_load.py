@@ -39,9 +39,9 @@ def percentiles(hist):
 
 
 def run(binary,rows,seconds,hot_reads=False):
-    if not 1000<=rows<=100000 or not 1<=seconds<=1800: raise ValueError('rows 1000..100000, seconds 1..1800')
+    if not 1000<=rows<=100000 or not 1<=seconds<=3600: raise ValueError('rows 1000..100000, seconds 1..3600')
     report=dict(driver=__version__,binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),host=platform.platform(),rows=rows,requested_seconds=seconds,
-                synthetic=True,hot_point_reads=hot_reads,profile='release localhost, 4 readers and 1 writer, no Raft/history/search',limits=dict(cache_mib=64,memtables_mib=16,query_mib=64),latency_bucket_us=1)
+                synthetic=True,hot_point_reads=hot_reads,profile='release localhost, 4 readers and 1 writer, no Raft/history/search',limits=dict(cache_mib=64,memtables_mib=16,query_mib=64,message_mib=8,decoded_message_mib=16,io_timeout_ms=300000),latency_bucket_us=1)
     with tempfile.TemporaryDirectory(prefix='brainwire-auth-load-') as folder:
         path=Path(folder); source=path/'source.jsonl'; random_source=random.Random(123)
         with source.open('w') as stream:
@@ -57,7 +57,7 @@ def run(binary,rows,seconds,hot_reads=False):
         auth=path/'client.json'; auth.write_text(json.dumps(dict(principal='observer',credentials=tokens['observer']))); auth.chmod(0o600)
         with socket.socket() as sock: sock.bind(('127.0.0.1',0)); address='%s:%s'%sock.getsockname()
         env={k:v for k,v in os.environ.items() if not k.startswith('BRAINWIRE_')}
-        env.update(BRAINWIRE_SERVER_DATA_DIR=str(path/'data'),BRAINWIRE_SERVER_LISTEN=address,BRAINWIRE_SERVER_DEFAULT_DATABASE='load',BRAINWIRE_SERVER_AUTH_FILE=str(policy),BRAINWIRE_BOLT_AUTH_FILE=str(auth),BRAINWIRE_MEMORY_CACHE='64MiB',BRAINWIRE_MEMORY_MEMTABLES='16MiB',BRAINWIRE_MEMORY_QUERY='64MiB')
+        env.update(BRAINWIRE_SERVER_DATA_DIR=str(path/'data'),BRAINWIRE_SERVER_LISTEN=address,BRAINWIRE_SERVER_DEFAULT_DATABASE='load',BRAINWIRE_SERVER_AUTH_FILE=str(policy),BRAINWIRE_BOLT_AUTH_FILE=str(auth),BRAINWIRE_MEMORY_CACHE='64MiB',BRAINWIRE_MEMORY_MEMTABLES='16MiB',BRAINWIRE_MEMORY_QUERY='64MiB',BRAINWIRE_SERVER_MAX_MESSAGE='8MiB',BRAINWIRE_SERVER_MAX_DECODED_MESSAGE='16MiB',BRAINWIRE_SERVER_IO_TIMEOUT_MS='300000')
         server=None; log=(path/'server.log').open('w'); stop_event=threading.Event(); threads=[]
         def cli(*args):
             return subprocess.run([str(binary),*args],cwd=ROOT,env=env,capture_output=True,text=True,check=True,timeout=60).stdout

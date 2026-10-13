@@ -1,0 +1,9 @@
+{
+  "source_receipt": "mixed-100000-3600.json",
+  "source_sha256": "2289995a1b98379f9bcd65ac491868bbe9bd6b47e1a0276392b31641e661c6fe",
+  "native_binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "matplotlib": "3.11.2",
+  "output": "one-hour-observations.png",
+  "output_sha256": "fac32d08ed9965e9e8ee6796953811a0c9316fed64283bf35ac8feec51b4ea03",
+  "scope": "plot of actual synthetic localhost receipt; no additional qualification"
+}

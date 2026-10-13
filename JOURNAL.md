@@ -39,6 +39,80 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-13 — Protected beta workspace and comprehensive failure qualification
+
+- **Requested:** full two hours toward beta, followed by a large final simulation.
+  Started 06:48:45 UTC / 08:48:45 Europe/Amsterdam; requested end 08:48:45 UTC /
+  10:48:45 local. Session closed 2026-10-13 08:49:49 UTC /
+  10:49:49 local, after the full requested two hours.
+  All final runtime resources were removed.
+  All work, images and containers remain local; no remote publication or push.
+- **Done:** independent requested-owned PackStream allocation quotas with checked
+  pre-reservation/fallible exact allocation, depth/minimum-encoded-length guards,
+  and independent native-client response decoding bounds. Server configuration
+  adds decoded-message and authenticated complete-request IO settings with file/
+  environment provenance. Default network IO is 300 seconds; incomplete bytes
+  and NOOPs cannot renew it. IO failures close sessions and abort pending state.
+  Blocking engine work remains outside the network deadline. Responses now encode
+  one frame at a time instead of adding an aggregate encoded response vector.
+- **Done:** one connected read-only Ontology/Memory/Indexes/Graph workspace with
+  Tab/1–4, lazy fetches, retained selection, refresh/stale recovery and navigable
+  permission errors. Typed Graph checks existence and samples up to 20 outgoing
+  neighbors in one read transaction; 21st row only indicates further matches.
+  Thirteen actual 100k-node EN/PT PTY images cover all panes, compact layout,
+  scrolling, stale recovery and forbidden Memory navigation. Full PNG decode,
+  dimensions and hashes are verified; chosen green/cyan identity retained.
+- **Done:** optional pinned single-host HAProxy TLS overlay, verified CA/hostname
+  checks on drivers 5.28.6/6.3.0, denied plaintext/CA/hostname/credentials, indexed
+  container writes, restart/audit and reconnection after proxy idle expiry.
+  Producers use liveness_check_timeout=30 below proxy 60/native 300 seconds.
+  Backend bridge and native TUI remain plaintext on the trusted side.
+- **Done:** actual SIGTERM acknowledged-write/pending/uncertain-RUN/stopped-reader
+  recovery, decoded-amplification and authenticated-drip/pool-expiry checks,
+  production ten-second admission with 64 peers, and local protected deployment
+  template rendering. No graceful drain, exact COMMIT-phase kill hook, immediate
+  cancellation or Kubernetes/Swarm runtime qualification is claimed.
+- **Verified:** 541 Rust workspace tests, zero failed/ignored, all-target Clippy
+  warnings denied and formatting; 17 Python-example and 23 client tests.
+  Frozen native SHA-256 1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150;
+  Linux image brainwire:beta-20261013 ID
+  sha256:d08c2e5af98ea237b568b86bf58af99af7d80ae5425ad7aaecdc37f620d821d3.
+- **Verified:** continuous 3,600.003-second synthetic 100k-Customer workload:
+  18,865,545 total primary/scalar reads and 65,927 throttled indexed updates.
+  Read p95 1.557/1.623 ms, write p95 6.214 ms; sampled peak RSS 91.8 MiB over
+  719 observations, zero observed pool rejections. SIGKILL/reopen retained latest
+  200 acknowledged values/indexes; full offline audit OK. Neither RSS ceiling,
+  write saturation, historical versions nor production SLO is inferred.
+- **Verified:** final rehearsal after the completed hour: pinned SQLite DuckLake
+  100k tickets/200k comments/200k edges (8,303 input rows/s), lost-ack/pending-cursor
+  recovery and fresh checkpoint restore, three isolated graphs of 100k nodes
+  with concurrent insert/overwrite/read and restart, and 99,999-neighbor hub with
+  1,000 warm LIMIT-20 reads (p95 0.396 ms) plus 20 complete CLI snapshots.
+  Corrupted independent SST-copy footer fails with exact RocksDB bad-table-magic
+  diagnostic; original/checkpoint remain intact. A corrupted neighboring store
+  blocks eager offline catalog opening; namespaces are not corruption domains.
+- **Evidence:** [qualification report](docs/benchmarks/2026-10-13-beta.md),
+  [20-receipt manifest](docs/benchmarks/2026-10-13-beta/validation.json), hashed logs,
+  actual RSS/latency figure and [TUI captures](docs/design/assets/2026-10-13-beta/README.md).
+  Standard-library collector has negative checks against false PASS, stale verdicts,
+  missing/corrupt/mismatched receipts/assets, insufficient durations and profiles.
+  Advisory final review independently obtained the same passing manifest.
+- **Decided:** preserve the full-product backlog and October 31 target. Remaining
+  October 14–31 cadence is 18 x 20 minutes / six hours; no automatic work scheduled.
+  Synthetic qualification supports a controlled rebuildable single-node shadow
+  beta, not a production or fully distributed release. Pre-existing docs-site and
+  .DS_Store files were preserved; unsupported site examples are queued explicitly.
+- **Next step:** capability-gated client ingestion adapter against a disposable
+  named graph and real required query/mapping fixtures. The actual GraphRepository
+  suite has no Brainwire branch; node ACL, pagination, dynamic DDL/introspection
+  and per-request timeout contracts are concrete compatibility gaps. Governed
+  production reads must fail closed until equivalent enforcement is tested.
+  Then qualify the selected protected runtime and representative workload.
+- **Blockers:** real client mapping/catalog/backend/workload approval, node ACL
+  integration, protected target-cluster execution (kind/node image absent here),
+  graceful drain/cancellation/streaming, native TUI TLS, Raft, search/history/
+  retention/object-storage recovery and reconciled/published docs remain pending.
+
 ### 2026-10-12 — Protected client MVP source bridge and connected inspection
 
 - **Requested:** one additional hour, as much useful MVP implementation as possible,

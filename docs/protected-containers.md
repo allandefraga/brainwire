@@ -6,8 +6,10 @@ with [service-token setup](bolt-auth.md), granting the health principal the
 configured **default database**. Policy/token updates require a server restart;
 secret-file projection alone does not reload Brainwire's in-memory policy.
 
-No manifest supplies Bolt TLS, graph replication, quorum durability or machine-loss
-failover. The server's container listener binds all interfaces. Keep it inside an
+The auth overlays supply no native Bolt TLS, graph replication, quorum durability
+or machine-loss failover. A separate [single-host TLS proxy overlay](protected-transport.md)
+now qualifies Python client-to-proxy encryption; its isolated bridge backend remains
+plaintext. The server's container listener binds all interfaces. Keep it inside an
 appropriate trusted/encrypted transport boundary: Kubernetes networking is
 unencrypted by default, and NetworkPolicy filters traffic rather than encrypting
 it. [Kubernetes multi-tenancy documentation](https://kubernetes.io/docs/concepts/security/multi-tenancy/).
@@ -15,7 +17,7 @@ it. [Kubernetes multi-tenancy documentation](https://kubernetes.io/docs/concepts
 ## Docker Compose
 
 ```sh
-export BRAINWIRE_IMAGE=brainwire:auth-20261012
+export BRAINWIRE_IMAGE=brainwire:local
 export BRAINWIRE_AUTH_POLICY_FILE=/secure/path/policy.json
 export BRAINWIRE_HEALTH_AUTH_FILE=/secure/path/health.json
 # Use the same graph name as the health principal's grants/default database.

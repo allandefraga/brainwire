@@ -1,0 +1,87 @@
+{
+  "result": "PASS",
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "pillow": "12.3.0",
+  "capture_count": 13,
+  "checks": {
+    "workspace-ontology-en-120x30.png": {
+      "sha256": "7884b2f0f3fa450a06cdd0ec0d8131c100be7bcefa390e356cbec31022b53a16",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-memory-en-120x30.png": {
+      "sha256": "034594770216e95d790239c756432d1be699e6e99183f9dae461a00af604c027",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-memory-stale-en-120x30.png": {
+      "sha256": "5565ef4852985e73de0c2e545c9cc7fe7ba3402388c7dbf8462fafb7065938e0",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-memory-recovered-en-120x30.png": {
+      "sha256": "dbf7146242f1aa1ba10b851cb6bc116e817a979e0cfb29e8a25829ffcb843f82",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-indexes-en-120x30.png": {
+      "sha256": "6b6297840c04161abfbb395caff4ee5c644ce7b3e5729003abcc270b8d60ef05",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-graph-en-120x30.png": {
+      "sha256": "099a1bb223b4b8b3574a63c4f62193d348290363962e3cc0b70d341dfedf3aa3",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-graph-scrolled-en-120x30.png": {
+      "sha256": "c8e987950df8581b22e20b9532696da2d2c92cfa89feb4d4d2a9db166b770cc5",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-ontology-pt-BR-80x24.png": {
+      "sha256": "881247091d0d35896ec750559db0a26e4afbef35f50999730a3746135d43bc4a",
+      "width": 880,
+      "height": 576,
+      "fully_decoded": true
+    },
+    "workspace-memory-pt-BR-80x24.png": {
+      "sha256": "5f4d0067c6ce4d2e8d4299a7d31cea9bf4fdf9a01fb9d663f9a8adf61a2ec701",
+      "width": 880,
+      "height": 576,
+      "fully_decoded": true
+    },
+    "workspace-indexes-pt-BR-80x24.png": {
+      "sha256": "4fe526b3b0021f84abbc5e98a84464fc6c3cebedc4682535b45f031a2fe46e8d",
+      "width": 880,
+      "height": 576,
+      "fully_decoded": true
+    },
+    "workspace-graph-pt-BR-80x24.png": {
+      "sha256": "262a2384e021bb7d5db835849b70333a9e97313c4a904e25cbe9b7aa7f7b6e79",
+      "width": 880,
+      "height": 576,
+      "fully_decoded": true
+    },
+    "workspace-reader-memory-forbidden-en-120x30.png": {
+      "sha256": "d7319f7de4300a3f25312de9d8423670159e19a1ea2b7e37c26fd0313ce0c761",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    },
+    "workspace-reader-indexes-after-forbidden-en-120x30.png": {
+      "sha256": "6b6297840c04161abfbb395caff4ee5c644ce7b3e5729003abcc270b8d60ef05",
+      "width": 1320,
+      "height": 720,
+      "fully_decoded": true
+    }
+  },
+  "scope": "full local PNG decode and expected terminal raster dimensions; no screenshot editing"
+}

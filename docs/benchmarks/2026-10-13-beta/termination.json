@@ -1,0 +1,52 @@
+{
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "driver": "6.3.0",
+  "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "signal": "SIGTERM",
+  "synthetic": true,
+  "baseline_rows": 1000,
+  "uncertain_rows": 200,
+  "termination": [
+    {
+      "case": "pending explicit transaction",
+      "exit_code": -15,
+      "exit_seconds": 0.003845
+    },
+    {
+      "case": "RUN submitted without acknowledgement",
+      "exit_code": -15,
+      "exit_seconds": 0.003802
+    },
+    {
+      "case": "PULL first RECORD observed then reader stopped",
+      "exit_code": -15,
+      "exit_seconds": 0.001322
+    },
+    {
+      "case": "offline audit stop",
+      "exit_code": -15,
+      "exit_seconds": 0.003332
+    }
+  ],
+  "checks": [
+    "acknowledged 1000 indexed writes survive; pending explicit CREATE and indexed overwrite disappear",
+    "unacknowledged RUN produces zero or all 200 nodes with matching scalar indexes",
+    "SIGTERM exits within 5 seconds after first large PULL record; restart preserves committed graph"
+  ],
+  "initial_ready_seconds": 0.027513,
+  "pending_recovery_ready_seconds": 0.041701,
+  "uncertain_recovery_ready_seconds": 0.021789,
+  "unacknowledged_outcome": "no mutations committed",
+  "slow_reader_first_record_bytes": 4103,
+  "slow_reader_requested_socket_receive_buffer": 1024,
+  "slow_reader_socket_receive_buffer": 322386,
+  "slow_reader_recovery_ready_seconds": 0.015861,
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "result": "PASS",
+  "scope": "native single-node SIGTERM recovery; abrupt termination, no drain or exact commit/blocked-write phase hook",
+  "ownedResourcesRemoved": true
+}

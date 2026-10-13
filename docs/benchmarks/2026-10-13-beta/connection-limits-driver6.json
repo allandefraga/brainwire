@@ -1,0 +1,24 @@
+{
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "driver": "6.3.0",
+  "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "default_idle": true,
+  "checks": [
+    "unoverridden 300000ms authenticated idle budget expires; liveness pool reconnects"
+  ],
+  "effective_connection_config": [
+    "server.max_message       = 8 MiB          (env BRAINWIRE_SERVER_MAX_MESSAGE)",
+    "server.max_decoded_message = 64 KiB         (env BRAINWIRE_SERVER_MAX_DECODED_MESSAGE)",
+    "server.io_timeout_ms     = 300000         (default)"
+  ],
+  "default_idle_observed_seconds": 300.0021868330077,
+  "liveness_pool": "first reuse succeeded after default expiry",
+  "default_pool": "first reuse failed; explicit new connection succeeded",
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "result": "PASS",
+  "ownedResourcesRemoved": true
+}

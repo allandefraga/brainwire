@@ -17,14 +17,16 @@ set memory budgets appropriate to that container. The default listen address
 is loopback, so a container needs an explicit bind address such as
 `0.0.0.0:7687` plus network access controls. Authentication is optional; without
 `server.auth_file` the server runs unprotected. Native TLS remains unavailable;
-use a trusted/encrypted transport boundary for protected shared connections.
+use the optional [single-host TLS proxy](protected-transport.md) or another
+qualified encrypted boundary for protected shared connections.
 
 Development-mode example using the Neo4j Python driver on isolated loopback:
 
 ```python
 from neo4j import GraphDatabase
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None,
+                          liveness_check_timeout=30) as driver:
     with driver.session(database="client_memory") as session:
         record = session.run("RETURN 1 AS n").single()
         print(record["n"])
@@ -63,11 +65,16 @@ before negotiation. After negotiation, authentication has a separate absolute
 10-second IO budget, retained through HELLO, partial messages, NOOPs and the login
 reply. LOGOFF starts a fresh authentication budget. Expiry closes the session and
 releases its slot; synchronous parsing, engine work and cleanup can delay
-enforcement. Established-session idle, transaction-drain and engine initialization
-are not bounded by these IO deadlines. RocksDB execution runs
-outside Tokio's IO threads. Results are
-still materialized in memory, while simple reads process intermediate rows
-incrementally. `memory.query` bounds conservative per-RUN accounting and the
+enforcement. After authentication, `server.io_timeout_ms` /
+`BRAINWIRE_SERVER_IO_TIMEOUT_MS` gives complete request reads and response writes
+separate absolute IO budgets, defaulting to 300,000 milliseconds. NOOPs and partial
+bytes do not renew the request budget; complete requests and response delivery
+start the next budget. Expiry closes idle explicit transactions and rolls back
+their pending changes. This does not bound synchronous engine initialization,
+execute native query cancellation or provide transaction drain. RocksDB execution
+runs outside Tokio's IO threads. Response encoding handles one frame at a time,
+but session results are still materialized in memory; simple reads process
+intermediate rows incrementally. `memory.query` bounds conservative per-RUN accounting and the
 shared server reservation pool; `CALL db.memory()` exposes pool telemetry.
 `server.query_timeout_ms` sets a cooperative execution deadline (30 seconds by
 default). Resource failures roll back the complete transaction. These are not
@@ -78,7 +85,13 @@ messages in one TCP read each have their own cap. An announced chunk exceeding
 the remaining budget is rejected before waiting for its body; trailing bytes
 after a PackStream request are a fatal protocol violation. The default is
 256 MiB; this is not a process-memory cap or a recommendation for ingestion batch
-size. Keep the separate bounded Python input defaults for the pilot.
+size. `server.max_decoded_message` / `BRAINWIRE_SERVER_MAX_DECODED_MESSAGE`
+separately limits PackStream owned payloads and container backing storage before
+request dispatch, defaulting to 64 MiB per request. Compact encoded containers
+can exceed this decoded budget; rejection is fatal and closes the session. These
+per-connection allowances are not an aggregate RSS cap. Keep the separate bounded
+Python input defaults for the pilot. See [connection limits](connection-limits.md)
+for configuration, idle transactions and Python pool reuse.
 The supported Cypher subset is documented in
 [local queries](local-cypher.md). The Graph/Query/Memory/Disk TUI demo remains
 synthetic; `shell --overview` reads real named local graphs while the server is
@@ -108,3 +121,6 @@ path. Invalid configured policy fails before listening; no configured policy
 retains development mode with a startup warning. See [protected Bolt](bolt-auth.md)
 for graph/read/write grants, native/Python clients, restart-based rotation and
 transport limits. Authenticated containers use the [secret overlays](protected-containers.md).
+The [TLS proxy guide](protected-transport.md) qualifies strict Python certificate
+checks and pool reuse across the proxy's shorter 60-second idle timeout. Native
+SIGTERM remains abrupt; see [termination recovery](termination-recovery.md).

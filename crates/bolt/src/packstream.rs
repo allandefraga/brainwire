@@ -42,6 +42,10 @@ pub enum PackError {
     BadMapKey,
     #[error("value nested deeper than {} levels", MAX_DEPTH)]
     TooDeep,
+    #[error("decoded value exceeds its allocation budget")]
+    DecodedLimit,
+    #[error("decoded value allocation failed")]
+    Allocation,
 }
 
 fn pack_size(out: &mut Vec<u8>, len: usize, tiny: u8, m8: Option<u8>, m16: u8, m32: u8) {
@@ -141,35 +145,106 @@ fn be_len(input: &mut &[u8], width: usize) -> Result<usize, PackError> {
     Ok(raw.iter().fold(0usize, |acc, b| (acc << 8) | *b as usize))
 }
 
-fn string_of(input: &mut &[u8], len: usize) -> Result<String, PackError> {
-    String::from_utf8(take(input, len)?.to_vec()).map_err(|_| PackError::BadUtf8)
+fn charge_storage<T>(len: usize, remaining: &mut usize) -> Result<(), PackError> {
+    let bytes = len
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or(PackError::DecodedLimit)?;
+    *remaining = remaining
+        .checked_sub(bytes)
+        .ok_or(PackError::DecodedLimit)?;
+    Ok(())
 }
 
-fn list_of(input: &mut &[u8], len: usize, depth: usize) -> Result<PackValue, PackError> {
-    let mut items = Vec::with_capacity(len.min(1024));
-    for _ in 0..len {
-        items.push(unpack_at(input, depth + 1)?);
+fn reserve<T>(len: usize, remaining: &mut usize) -> Result<Vec<T>, PackError> {
+    charge_storage::<T>(len, remaining)?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| PackError::Allocation)?;
+    Ok(values)
+}
+
+fn bytes_of_input(
+    input: &mut &[u8],
+    len: usize,
+    remaining: &mut usize,
+) -> Result<Vec<u8>, PackError> {
+    let bytes = take(input, len)?;
+    let mut owned = reserve(len, remaining)?;
+    owned.extend_from_slice(bytes);
+    Ok(owned)
+}
+
+fn string_of(input: &mut &[u8], len: usize, remaining: &mut usize) -> Result<String, PackError> {
+    String::from_utf8(bytes_of_input(input, len, remaining)?).map_err(|_| PackError::BadUtf8)
+}
+
+fn values_of(
+    input: &mut &[u8],
+    len: usize,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<Vec<PackValue>, PackError> {
+    // Every encoded value needs at least one marker: reject hostile lengths before allocating.
+    if input.len() < len {
+        return Err(PackError::Truncated);
     }
-    Ok(PackValue::List(items))
+    let mut items = reserve(len, remaining)?;
+    for _ in 0..len {
+        items.push(unpack_at(input, depth + 1, remaining)?);
+    }
+    Ok(items)
 }
 
-fn map_of(input: &mut &[u8], len: usize, depth: usize) -> Result<PackValue, PackError> {
-    let mut entries = Vec::with_capacity(len.min(1024));
+fn list_of(
+    input: &mut &[u8],
+    len: usize,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<PackValue, PackError> {
+    Ok(PackValue::List(values_of(input, len, depth, remaining)?))
+}
+
+fn map_of(
+    input: &mut &[u8],
+    len: usize,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<PackValue, PackError> {
+    if input.len() < len.checked_mul(2).ok_or(PackError::Truncated)? {
+        return Err(PackError::Truncated);
+    }
+    let mut entries = reserve(len, remaining)?;
     for _ in 0..len {
-        let key = match unpack_at(input, depth + 1)? {
+        let key = match unpack_at(input, depth + 1, remaining)? {
             PackValue::String(s) => s,
             _ => return Err(PackError::BadMapKey),
         };
-        entries.push((key, unpack_at(input, depth + 1)?));
+        entries.push((key, unpack_at(input, depth + 1, remaining)?));
     }
     Ok(PackValue::Map(entries))
 }
 
+/// Decode trusted input without an allocation quota. Network callers use [`unpack_with_limit`].
 pub fn unpack(input: &mut &[u8]) -> Result<PackValue, PackError> {
-    unpack_at(input, 0)
+    unpack_with_limit(input, usize::MAX)
 }
 
-fn unpack_at(input: &mut &[u8], depth: usize) -> Result<PackValue, PackError> {
+/// Decode with a shared quota for owned payloads and container backing storage.
+/// The root value lives on the stack; nested values are charged by their parent.
+/// Allocator overhead, the encoded input and subsequent request processing are excluded.
+pub fn unpack_with_limit(
+    input: &mut &[u8],
+    mut max_decoded_bytes: usize,
+) -> Result<PackValue, PackError> {
+    unpack_at(input, 0, &mut max_decoded_bytes)
+}
+
+fn unpack_at(
+    input: &mut &[u8],
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<PackValue, PackError> {
     if depth > MAX_DEPTH {
         return Err(PackError::TooDeep);
     }
@@ -177,15 +252,12 @@ fn unpack_at(input: &mut &[u8], depth: usize) -> Result<PackValue, PackError> {
     Ok(match marker {
         0x00..=0x7F => PackValue::Int(marker as i64),
         0xF0..=0xFF => PackValue::Int(marker as i8 as i64),
-        0x80..=0x8F => PackValue::String(string_of(input, (marker & 0x0F) as usize)?),
-        0x90..=0x9F => list_of(input, (marker & 0x0F) as usize, depth)?,
-        0xA0..=0xAF => map_of(input, (marker & 0x0F) as usize, depth)?,
+        0x80..=0x8F => PackValue::String(string_of(input, (marker & 0x0F) as usize, remaining)?),
+        0x90..=0x9F => list_of(input, (marker & 0x0F) as usize, depth, remaining)?,
+        0xA0..=0xAF => map_of(input, (marker & 0x0F) as usize, depth, remaining)?,
         0xB0..=0xBF => {
             let tag = take(input, 1)?[0];
-            let mut fields = Vec::new();
-            for _ in 0..(marker & 0x0F) {
-                fields.push(unpack_at(input, depth + 1)?);
-            }
+            let fields = values_of(input, (marker & 0x0F) as usize, depth, remaining)?;
             PackValue::Struct { tag, fields }
         }
         0xC0 => PackValue::Null,
@@ -207,19 +279,19 @@ fn unpack_at(input: &mut &[u8], depth: usize) -> Result<PackValue, PackError> {
         0xCC..=0xCE => {
             let width = 1 << (marker - 0xCC);
             let len = be_len(input, width)?;
-            PackValue::Bytes(take(input, len)?.to_vec())
+            PackValue::Bytes(bytes_of_input(input, len, remaining)?)
         }
         0xD0..=0xD2 => {
             let len = be_len(input, 1 << (marker - 0xD0))?;
-            PackValue::String(string_of(input, len)?)
+            PackValue::String(string_of(input, len, remaining)?)
         }
         0xD4..=0xD6 => {
             let len = be_len(input, 1 << (marker - 0xD4))?;
-            list_of(input, len, depth)?
+            list_of(input, len, depth, remaining)?
         }
         0xD8..=0xDA => {
             let len = be_len(input, 1 << (marker - 0xD8))?;
-            map_of(input, len, depth)?
+            map_of(input, len, depth, remaining)?
         }
         other => return Err(PackError::UnknownMarker(other)),
     })
@@ -348,7 +420,7 @@ mod tests {
     fn a_non_string_map_key_is_rejected() {
         // 0xA1 = tiny map, 1 entry; 0x01 = Int(1) where a String key is
         // required.
-        let mut input: &[u8] = &[0xA1, 0x01];
+        let mut input: &[u8] = &[0xA1, 0x01, 0xc0];
         assert_eq!(unpack(&mut input), Err(PackError::BadMapKey));
     }
 
@@ -373,5 +445,69 @@ mod tests {
         let bytes = vec![0x91u8; 100_000];
         let mut input = bytes.as_slice();
         assert_eq!(unpack(&mut input), Err(PackError::TooDeep));
+    }
+    #[test]
+    fn decoded_scalar_list_budget_has_an_exact_boundary() {
+        let value = PackValue::List(vec![PackValue::Null; 1000]);
+        let bytes = bytes_of(&value);
+        let budget = 1000 * std::mem::size_of::<PackValue>();
+        assert!(bytes.len() < budget / 10);
+        assert_eq!(
+            unpack_with_limit(&mut bytes.as_slice(), budget - 1),
+            Err(PackError::DecodedLimit)
+        );
+        assert_eq!(
+            unpack_with_limit(&mut bytes.as_slice(), budget).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn decoded_nested_storage_and_payloads_share_one_budget() {
+        let value = PackValue::Struct {
+            tag: 1,
+            fields: vec![PackValue::Map(vec![(
+                "key".into(),
+                PackValue::List(vec![
+                    PackValue::String("hello".into()),
+                    PackValue::Bytes(vec![1, 2, 3, 4]),
+                ]),
+            )])],
+        };
+        let budget = 3 * std::mem::size_of::<PackValue>()
+            + std::mem::size_of::<(String, PackValue)>()
+            + 3
+            + 5
+            + 4;
+        let bytes = bytes_of(&value);
+        assert_eq!(
+            unpack_with_limit(&mut bytes.as_slice(), budget - 1),
+            Err(PackError::DecodedLimit)
+        );
+        assert_eq!(
+            unpack_with_limit(&mut bytes.as_slice(), budget).unwrap(),
+            value
+        );
+        assert_eq!(unpack_with_limit(&mut &[0xc0][..], 0), Ok(PackValue::Null));
+    }
+
+    #[test]
+    fn truncated_container_announcements_are_rejected_before_budget_or_allocation() {
+        for bytes in [
+            vec![0xd6, 0xff, 0xff, 0xff, 0xff],
+            vec![0xda, 0xff, 0xff, 0xff, 0xff],
+            vec![0xb1, 1],
+        ] {
+            assert_eq!(
+                unpack_with_limit(&mut bytes.as_slice(), 0),
+                Err(PackError::Truncated)
+            );
+        }
+        let mut remaining = 10;
+        assert_eq!(
+            charge_storage::<PackValue>(usize::MAX, &mut remaining),
+            Err(PackError::DecodedLimit)
+        );
+        assert_eq!(remaining, 10);
     }
 }

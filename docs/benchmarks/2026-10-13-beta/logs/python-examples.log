@@ -1,0 +1,22 @@
+test_absent_file_keeps_development_auth_and_valid_file_returns_tuple (test_connection.ConnectionTests) ... ok
+test_malformed_missing_oversized_and_duplicate_credentials_fail_without_echo (test_connection.ConnectionTests) ... ok
+test_changed_source_during_callback_and_bad_limits_are_rejected (test_resumable_customers.ResumableCustomersTests) ... ok
+test_custom_hooks_require_contract_and_completed_mapping_mismatch_fails (test_resumable_customers.ResumableCustomersTests) ... ok
+test_digest_mismatch_rejects_before_customer_changes (test_resumable_customers.ResumableCustomersTests) ... ok
+test_empty_and_blank_only_sources_commit_checkpoint_without_customers (test_resumable_customers.ResumableCustomersTests) ... ok
+test_interruption_resumes_from_graph_cursor_with_new_import_call (test_resumable_customers.ResumableCustomersTests) ... ok
+test_invalid_cursor_and_invalid_row_do_not_commit (test_resumable_customers.ResumableCustomersTests) ... ok
+test_legacy_checkpoint_accepts_only_default_mapping (test_resumable_customers.ResumableCustomersTests) ... ok
+test_lost_ack_retry_reads_durable_checkpoint_and_resume_is_noop (test_resumable_customers.ResumableCustomersTests) ... ok
+test_malformed_later_row_keeps_earlier_commits_and_does_not_skip_on_resume (test_resumable_customers.ResumableCustomersTests) ... ok
+test_matching_custom_contract_resumes_and_mismatch_rejects_completed_source (test_resumable_customers.ResumableCustomersTests) ... ok
+test_retry_before_commit_replays_identical_batch_and_cursor (test_resumable_customers.ResumableCustomersTests) ... ok
+test_row_and_byte_bounds_blank_lines_and_unterminated_final_line (test_resumable_customers.ResumableCustomersTests) ... ok
+test_writer_failure_does_not_advance_cursor_or_initialize_checkpoint (test_resumable_customers.ResumableCustomersTests) ... ok
+test_observer_is_explicit_and_cannot_write_or_expand_graph_scope (test_service_tokens.TokenFilesTests) ... ok
+test_private_unique_tokens_match_policy_and_existing_directory_is_preserved (test_service_tokens.TokenFilesTests) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.052s
+
+OK

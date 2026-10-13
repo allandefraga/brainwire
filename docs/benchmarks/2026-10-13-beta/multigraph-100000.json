@@ -1,0 +1,171 @@
+{
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "driver": "6.3.0",
+  "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "rows_per_graph": 100000,
+  "batch_rows": 250,
+  "graphs": [
+    "graph_a",
+    "graph_b",
+    "graph_c"
+  ],
+  "synthetic": true,
+  "checks": [
+    "anonymous/wrong tokens denied; per-graph reader write and cross-graph reader/writer/observer denied",
+    "three concurrent bounded writers and readers; overlapping IDs, graph-specific properties and scalar indexes stay isolated",
+    "each explicitly scoped observer reads the same configured shared query pool; counters are reservations, not RSS",
+    "per-graph native default workspace Ontology and standalone Indexes snapshots use each reader's private credentials",
+    "SIGKILL/restart preserves all acknowledged graph A/B/C rows and indexes; pending graph A CREATE/indexed overwrite disappear"
+  ],
+  "initial_ready_seconds": 0.020891834050416946,
+  "concurrent_writers": {
+    "graph_a": {
+      "acknowledged_batches": 800,
+      "initial_rows": 100000,
+      "overwritten_rows": 100000
+    },
+    "graph_b": {
+      "acknowledged_batches": 800,
+      "initial_rows": 100000,
+      "overwritten_rows": 100000
+    },
+    "graph_c": {
+      "acknowledged_batches": 800,
+      "initial_rows": 100000,
+      "overwritten_rows": 100000
+    }
+  },
+  "concurrent_readers": {
+    "graph_a": {
+      "read_cycles": 51,
+      "foreign_rows": 0
+    },
+    "graph_b": {
+      "read_cycles": 49,
+      "foreign_rows": 0
+    },
+    "graph_c": {
+      "read_cycles": 50,
+      "foreign_rows": 0
+    }
+  },
+  "concurrent_import_overwrite_seconds": 6.927491374954116,
+  "before_restart": {
+    "graph_a": {
+      "nodes": 100000,
+      "all_active": true,
+      "sample_point_and_scalar_index_rows": 3,
+      "foreign_graph_email_rows": 0
+    },
+    "graph_b": {
+      "nodes": 100000,
+      "all_active": true,
+      "sample_point_and_scalar_index_rows": 3,
+      "foreign_graph_email_rows": 0
+    },
+    "graph_c": {
+      "nodes": 100000,
+      "all_active": true,
+      "sample_point_and_scalar_index_rows": 3,
+      "foreign_graph_email_rows": 0
+    }
+  },
+  "shared_query_pool_samples": [
+    {
+      "authorized_graph": "graph_a",
+      "poolLimitBytes": 67108864,
+      "poolReservedBytes": 318,
+      "poolPeakBytes": 7245302,
+      "poolRejections": 0
+    },
+    {
+      "authorized_graph": "graph_b",
+      "poolLimitBytes": 67108864,
+      "poolReservedBytes": 318,
+      "poolPeakBytes": 7245302,
+      "poolRejections": 0
+    },
+    {
+      "authorized_graph": "graph_c",
+      "poolLimitBytes": 67108864,
+      "poolReservedBytes": 318,
+      "poolPeakBytes": 7245302,
+      "poolRejections": 0
+    }
+  ],
+  "tui_readonly_snapshots": {
+    "graph_a": {
+      "default_workspace_ontology_sha256": "d37e0770ef24f838502893015560dc6691ffec9a73ec3fdf40961c526553b3fd",
+      "indexes_sha256": "6511a2198c738051cf99a81142861e2b9ca8cae877087e50e21ba12bd9ec384f"
+    },
+    "graph_b": {
+      "default_workspace_ontology_sha256": "ba8d20ca385a0958844d2c4dac33680e6c4291bd9d7cf2e347efbccef1fedf9a",
+      "indexes_sha256": "a28ca82340dbbf76a3073753f4e6b8b7841aa0ec2927115b09f06e7bce3107f5"
+    },
+    "graph_c": {
+      "default_workspace_ontology_sha256": "e60e38318600b7756ec4799b446c240867593d2fd914a3b62042c76a597172ce",
+      "indexes_sha256": "15fc0d94749eca7ef1c2607d3832961456438d3df2cc5a437f17e437f59f8e5d"
+    }
+  },
+  "kill_exit_code": -9,
+  "restart_ready_seconds": 0.03682254202431068,
+  "after_restart": {
+    "graph_a": {
+      "nodes": 100000,
+      "all_active": true,
+      "sample_point_and_scalar_index_rows": 3,
+      "foreign_graph_email_rows": 0
+    },
+    "graph_b": {
+      "nodes": 100000,
+      "all_active": true,
+      "sample_point_and_scalar_index_rows": 3,
+      "foreign_graph_email_rows": 0
+    },
+    "graph_c": {
+      "nodes": 100000,
+      "all_active": true,
+      "sample_point_and_scalar_index_rows": 3,
+      "foreign_graph_email_rows": 0
+    }
+  },
+  "audits": {
+    "graph_a": {
+      "database": "graph_a",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    },
+    "graph_b": {
+      "database": "graph_b",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    },
+    "graph_c": {
+      "database": "graph_c",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    }
+  },
+  "offline_counts": {
+    "graph_a": {
+      "database": "graph_a",
+      "edges": 0,
+      "nodes": 100000
+    },
+    "graph_b": {
+      "database": "graph_b",
+      "edges": 0,
+      "nodes": 100000
+    },
+    "graph_c": {
+      "database": "graph_c",
+      "edges": 0,
+      "nodes": 100000
+    }
+  },
+  "result": "PASS",
+  "scope": "three named graphs on one protected native server; no replication, distributed failover, query latency SLO or aggregate RSS guarantee",
+  "ownedResourcesRemoved": true,
+  "childServerStopped": true,
+  "privateCredentialsAndStorageRemoved": true
+}

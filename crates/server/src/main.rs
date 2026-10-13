@@ -8,6 +8,7 @@ mod databases;
 mod engine;
 mod probe;
 mod remote;
+mod remote_graph;
 mod remote_indexes;
 mod remote_memory;
 mod serve;
@@ -77,7 +78,7 @@ enum Commands {
         /// Inspect every named local graph (requires exclusive database access).
         #[arg(long, conflicts_with = "demo")]
         overview: bool,
-        /// Fetch a read-only server snapshot over Bolt (IP:PORT; ontology, memory or indexes).
+        /// Fetch a read-only server snapshot over Bolt (IP:PORT).
         #[arg(long, conflicts_with_all = ["demo", "overview", "config", "estimated"], requires = "graph")]
         connect: Option<String>,
         /// Total connection/fetch deadline in milliseconds (1..10000).
@@ -89,6 +90,18 @@ enum Commands {
         /// Named graph for --overview or --connect; required with --connect.
         #[arg(long)]
         graph: Option<String>,
+        /// Source node type for the bounded connected Graph preview.
+        #[arg(long, requires = "connect")]
+        node_label: Option<String>,
+        /// Source entity identity for the connected Graph preview (not a Cypher expression).
+        #[arg(long, requires = "connect")]
+        entity_id: Option<String>,
+        /// Outgoing relationship type for the connected Graph preview.
+        #[arg(long, requires = "connect")]
+        edge_type: Option<String>,
+        /// Target node type for the connected Graph preview.
+        #[arg(long, requires = "connect")]
+        target_label: Option<String>,
         /// Use quick RocksDB key-count estimates instead of full scans.
         #[arg(long, requires = "overview")]
         estimated: bool,
@@ -101,9 +114,9 @@ enum Commands {
         /// Render one plain-text frame without a terminal.
         #[arg(long)]
         snapshot: bool,
-        /// Initial view: graph, query, memory, disk; --connect supports ontology, memory or indexes.
-        #[arg(long, default_value = "graph")]
-        view: String,
+        /// Initial view; defaults to workspace with --connect, otherwise graph.
+        #[arg(long)]
+        view: Option<String>,
         /// Snapshot columns (80..240).
         #[arg(long, default_value_t = 160)]
         width: u16,
@@ -270,6 +283,10 @@ fn main() {
             timeout_ms,
             config,
             graph,
+            node_label,
+            entity_id,
+            edge_type,
+            target_label,
             estimated,
             lang,
             no_anim,
@@ -278,6 +295,14 @@ fn main() {
             width,
             height,
         } => {
+            let view = view.unwrap_or_else(|| {
+                if connect.is_some() {
+                    "workspace"
+                } else {
+                    "graph"
+                }
+                .into()
+            });
             let options = brainwire_tui::Options {
                 demo,
                 lang,
@@ -291,7 +316,20 @@ fn main() {
                 let graph = graph
                     .as_deref()
                     .expect("clap requires --graph with --connect");
+                let fetch_graph = || {
+                    let missing = "Graph preview needs --node-label, --entity-id, --edge-type and --target-label";
+                    remote_graph::graph(
+                        &address,
+                        graph,
+                        timeout_ms,
+                        node_label.as_deref().ok_or(missing)?,
+                        entity_id.as_deref().ok_or(missing)?,
+                        edge_type.as_deref().ok_or(missing)?,
+                        target_label.as_deref().ok_or(missing)?,
+                    )
+                };
                 match options.view.as_str() {
+                    "graph" => brainwire_tui::run_connected_graph(&options, &address, graph, fetch_graph),
                     "ontology" => {
                         brainwire_tui::run_connected_ontology(&options, &address, graph, || {
                             remote::schema(&address, graph, timeout_ms)
@@ -307,8 +345,22 @@ fn main() {
                             remote_indexes::indexes(&address, graph, timeout_ms)
                         })
                     }
+                    "workspace" => {
+                        use brainwire_tui::{ConnectedSnapshot, ConnectedView};
+                        brainwire_tui::run_connected_workspace(&options, &address, graph, |view| {
+                            match view {
+                                ConnectedView::Ontology => remote::schema(&address, graph, timeout_ms)
+                                    .map(ConnectedSnapshot::Ontology),
+                                ConnectedView::Memory => remote_memory::memory(&address, graph, timeout_ms)
+                                    .map(ConnectedSnapshot::Memory),
+                                ConnectedView::Indexes => remote_indexes::indexes(&address, graph, timeout_ms)
+                                    .map(ConnectedSnapshot::Indexes),
+                                ConnectedView::Graph => fetch_graph().map(ConnectedSnapshot::Graph),
+                            }
+                        })
+                    }
                     _ => Err(
-                        "--connect requires --view ontology, --view memory or --view indexes"
+                        "--connect requires --view ontology, --view memory, --view indexes, --view graph or --view workspace"
                             .into(),
                     ),
                 }

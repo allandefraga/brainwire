@@ -28,7 +28,9 @@ from examples.client.ingest_snapshot import identity, ingest_snapshot
 
 def run(binary, tickets, captures, ducklake=False):
     report = dict(synthetic=True, duckdb=duckdb.__version__, driver=driver_version,
-                  binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
+                  binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+                  limits=dict(encoded_message_mib=8, decoded_message_mib=16, io_timeout_ms=300000,
+                              cache_mib=64, memtables_mib=16, query_mib=64))
     captures.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="brainwire-mvp-bridge-") as folder:
         path = Path(folder).resolve()
@@ -82,7 +84,8 @@ def run(binary, tickets, captures, ducklake=False):
             BRAINWIRE_SERVER_DEFAULT_DATABASE="shadow", BRAINWIRE_SERVER_LISTEN=address,
             BRAINWIRE_SERVER_AUTH_FILE=str(policy), BRAINWIRE_BOLT_AUTH_FILE=str(auth),
             BRAINWIRE_MEMORY_CACHE="64MiB", BRAINWIRE_MEMORY_MEMTABLES="16MiB",
-            BRAINWIRE_MEMORY_QUERY="64MiB", BRAINWIRE_SERVER_MAX_MESSAGE="8MiB")
+            BRAINWIRE_MEMORY_QUERY="64MiB", BRAINWIRE_SERVER_MAX_MESSAGE="8MiB",
+            BRAINWIRE_SERVER_MAX_DECODED_MESSAGE="16MiB", BRAINWIRE_SERVER_IO_TIMEOUT_MS="300000")
         server = None
         log = (path / "server.log").open("w+")
 

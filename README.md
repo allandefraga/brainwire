@@ -11,12 +11,14 @@ adapter; the platform remains the first integration target.
 > **Status: local MVP development.** The Rust workspace contains the RocksDB
 > storage foundation, graph operations, a local durable Bolt/Cypher server,
 > configuration commands, a Cypher subset parser and atomic executor, and an
-> interactive terminal backoffice demo. The server is single-node and disables
+> interactive terminal backoffice and connected read-only workspace. The server is single-node and disables
 > authentication by default; optional service-token protection now grants read/write
 > access per named graph. Native TLS, human-password login and JWT validation are
 > pending. Conservative per-RUN guards, a shared query reservation pool and
 > cooperative execution deadlines are enforced; a hard process-memory ceiling
-> remains pending. The design is in
+> remains pending. Decoded request allocations and authenticated network IO now
+> have independent limits. A verified single-host TLS proxy is available; native
+> TLS and replicated failover remain pending. The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
 > the implementation tasks in
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
@@ -25,7 +27,16 @@ adapter; the platform remains the first integration target.
 Start with the [protected local MVP quickstart](docs/mvp-quickstart.md) to create
 a named client shadow graph, import through Python and inspect the running
 server in the TUI. The [October beta queue](docs/2026-10-pilot-roadmap.md) records
-remaining release gates and the full-product backlog.
+remaining release gates and the full-product backlog. The
+[operator checklist](docs/beta-operator-checklist.md) covers supported TUI actions,
+import/restart/restore steps and the final simulation boundary.
+
+The [October 13 qualification](docs/benchmarks/2026-10-13-beta.md) records the
+frozen candidate's 20 validated evidence receipts: a full-hour mixed load, pinned
+100k-ticket DuckLake import, checkpoint restore/corruption refusal, three graphs
+of 100k nodes each, strict TLS/permissions and real connected TUI captures.
+Measurements are synthetic localhost observations; client node ACL integration
+and protected target-cluster qualification remain separate release gates.
 
 The terminal backoffice design is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
@@ -48,8 +59,12 @@ It uses quick count estimates and remains an offline, read-only inspector.
 For a running server, `brainwire shell --connect 127.0.0.1:7687 --graph tickets --view ontology`
 fetches a real read-only server snapshot, with manual refresh and stale-error status.
 See the [connected ontology guide](docs/connected-ontology.md) and `CALL db.schema()`.
-Connected `--view memory` explains the real shared query-pool counters; `--view indexes`
-lists ready versus declared indexes with selection and stale refresh status.
+Connected shell defaults to a four-pane workspace: Ontology, Memory, Indexes and
+Graph, navigated with Tab or keys 1–4. Memory explains real shared query-pool
+counters; Indexes lists ready versus declared indexes. Graph inspects a selected
+ontology signature and node through a bounded sample of up to 20 real outgoing
+neighbors, with source existence checked in the same read transaction. Supply
+`--node-label`, `--entity-id`, `--edge-type` and `--target-label` for this pane.
 See [connected status](docs/connected-status.md) for permissions, bounds and controls.
 
 For real graph reads and writes, run `brainwire serve` to connect over Bolt, or
@@ -59,8 +74,8 @@ reopening. The [server guide](docs/serve.md) covers configuration, driver access
 and current limits; the [single-node container guide](docs/container.md) covers
 the local image and retained-volume test. The [local query guide](docs/local-cypher.md)
 walks through ontology initialization, parameters, bulk JSON files and JSON output,
-including lazy `coalesce(...)` defaults. Ontology, Memory and Indexes can connect to
-the running server; other real TUI panels still require offline access. Real offline file metadata
+including lazy `coalesce(...)` defaults. Ontology, Memory, Indexes and the sampled
+Graph pane connect to the running server; disk inspection still requires offline access. Real offline file metadata
 browsing is available in the Disk panel. Offline
 index readiness, RocksDB counters and shared memory accounting are available
 in `shell --overview`. See [Python ingestion](docs/python-ingestion.md) for a
@@ -72,9 +87,17 @@ It also includes an optional DuckDB SELECT exporter that publishes complete,
 validated immutable JSONL for this importer, preserving null/list values and
 refusing to overwrite an existing snapshot. A separate read-only SQLite DuckLake
 exporter requires an explicit version and existing local managed files. Live
-source qualification and DuckLake CDC remain pending.
+source qualification and DuckLake CDC remain pending. The
+[client contract comparison](docs/client-contract-gap.md) records actual adapter
+and node-level ACL gaps; the synthetic importer is not a production drop-in.
 [Protected Bolt connections](docs/bolt-auth.md) cover Python/native credentials,
 graph permissions and the optional [container overlays](docs/protected-containers.md).
+The [TLS proxy guide](docs/protected-transport.md) documents strict Python driver
+certificate/hostname checks and its single-host plaintext backend boundary.
+[Connection limits](docs/connection-limits.md) explain decoded request quotas,
+complete-request deadlines and Python pool liveness.
+[Termination recovery](docs/termination-recovery.md) records abrupt SIGTERM
+recovery; graceful drain and immediate cancellation are not implemented.
 
 Sparse analytics now runs through Cypher: `CALL graph.project`, `graph.degree`
 and `graph.pagerank`, plus directed `graph.reachable` hop distances and

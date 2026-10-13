@@ -64,7 +64,7 @@ from neo4j import GraphDatabase
 from examples.python.connection import auth_from_env
 from examples.client.ingest_snapshot import identity
 
-with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env()) as driver:
+with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(), liveness_check_timeout=30) as driver:
     with driver.session(database="tickets") as session:
         record = session.run(
             "MATCH (t:Ticket {entity_id:$id}) "

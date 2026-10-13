@@ -1,0 +1,51 @@
+{
+  "result": "PASS",
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "rust_tests_passed": 541,
+  "rust_tests_failed": 0,
+  "rust_tests_ignored": 0,
+  "rust_test_groups": 41,
+  "python_examples_passed": 17,
+  "client_python_passed": 23,
+  "clippy_passed": true,
+  "fmt_passed": true,
+  "checks": [
+    "Rust workspace locked/offline",
+    "workspace all-target Clippy warnings denied",
+    "workspace formatting check",
+    "Python example unittest suite",
+    "client exporter/mapping/DuckLake unittest suite"
+  ],
+  "logs": {
+    "workspace": {
+      "path": "logs/workspace.log",
+      "sha256": "baa10d8ab2146870c57de9b786b52ce97ae55a0237579310fc88161ee1fac75f",
+      "exit_code": 0
+    },
+    "clippy": {
+      "path": "logs/clippy.log",
+      "sha256": "ef07d44ac98a70eaa3b1f03798f2959adc14496e221cebc6ea00d1b666554e3c",
+      "exit_code": 0
+    },
+    "fmt": {
+      "path": "logs/fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0
+    },
+    "python-examples": {
+      "path": "logs/python-examples.log",
+      "sha256": "ae23681ed2b16e3758e8b8ecb2fcb1811208fdcae61d277c4c128a8ca7dc86bd",
+      "exit_code": 0
+    },
+    "client-python": {
+      "path": "logs/client-python.log",
+      "sha256": "c9b280568d35a6ebb5d43688330986f936af2c719024a91c45a4092372ffa0ef",
+      "exit_code": 0
+    },
+    "release": {
+      "path": "logs/release.log",
+      "sha256": "0ed9d242356866cb19663a332cce1d9b993c2e2bbf2e177d41d1868eb8648a22",
+      "exit_code": 0
+    }
+  }
+}

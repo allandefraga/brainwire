@@ -19,14 +19,14 @@ pub struct IndexSummary {
 pub struct IndexesSnapshot {
     pub indexes: Vec<IndexSummary>,
 }
-struct State {
-    snapshot: IndexesSnapshot,
-    selected: usize,
-    sampled: Instant,
-    error: Option<String>,
+pub(crate) struct State {
+    pub(crate) snapshot: IndexesSnapshot,
+    pub(crate) selected: usize,
+    pub(crate) sampled: Instant,
+    pub(crate) error: Option<String>,
 }
 impl State {
-    fn new(snapshot: IndexesSnapshot) -> Self {
+    pub(crate) fn new(snapshot: IndexesSnapshot) -> Self {
         Self {
             snapshot,
             selected: 0,
@@ -34,7 +34,7 @@ impl State {
             error: None,
         }
     }
-    fn refresh(&mut self, result: Result<IndexesSnapshot, String>) {
+    pub(crate) fn refresh(&mut self, result: Result<IndexesSnapshot, String>) {
         match result {
             Ok(snapshot) => {
                 self.selected =
@@ -70,6 +70,18 @@ fn render(
     lang: Language,
     no_color: bool,
 ) {
+    render_at(frame, frame.area(), state, address, graph, lang, no_color);
+}
+
+pub(crate) fn render_at(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    state: &mut State,
+    address: &str,
+    graph: &str,
+    lang: Language,
+    no_color: bool,
+) {
     let areas = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(if state.error.is_some() { 5 } else { 3 }),
@@ -77,7 +89,7 @@ fn render(
         Constraint::Length(6),
         Constraint::Length(3),
     ])
-    .split(frame.area());
+    .split(area);
     frame.render_widget(
         Paragraph::new(format!(
             " BRAINWIRE / {} / {} @ {}",

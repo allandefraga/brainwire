@@ -1,0 +1,49 @@
+{
+  "dataset": "synthetic single high-degree ticket",
+  "nodes_requested": 100000,
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "ontology_sha256": "ee19d596b483e2a9861281b3433d2e2b18be0529f73a7616881e53fa64845a29",
+  "capture_method": "controlling PTY -> pyte cells -> Pillow/Menlo",
+  "dimensions": [
+    [
+      120,
+      30
+    ],
+    [
+      80,
+      24
+    ]
+  ],
+  "languages": [
+    "en",
+    "pt-BR"
+  ],
+  "default_workspace_without_view_flag": true,
+  "graph_sample_max_rows": 20,
+  "driver_version": "6.3.0",
+  "actual_nodes": 100000,
+  "actual_edges": 99999,
+  "import_seconds": 3.9990134999970905,
+  "captures": [
+    "workspace-ontology-en-120x30",
+    "workspace-memory-en-120x30",
+    "workspace-memory-stale-en-120x30",
+    "workspace-memory-recovered-en-120x30",
+    "workspace-indexes-en-120x30",
+    "workspace-graph-en-120x30",
+    "workspace-graph-scrolled-en-120x30",
+    "workspace-ontology-pt-BR-80x24",
+    "workspace-memory-pt-BR-80x24",
+    "workspace-indexes-pt-BR-80x24",
+    "workspace-graph-pt-BR-80x24",
+    "workspace-reader-memory-forbidden-en-120x30",
+    "workspace-reader-indexes-after-forbidden-en-120x30"
+  ],
+  "offline_stats": {
+    "database": "tickets",
+    "edges": 99999,
+    "nodes": 100000
+  },
+  "all_child_processes_stopped": true,
+  "temporary_credentials_and_storage_removed_on_context_exit": true
+}

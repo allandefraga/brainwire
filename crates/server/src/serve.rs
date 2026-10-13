@@ -38,6 +38,8 @@ pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
     let protected = matches!(auth, AuthMode::Required(_));
     let max_message = usize::try_from(loaded.config.server.max_message.0)
         .map_err(|_| "server.max_message exceeds platform address size")?;
+    let max_decoded_message = usize::try_from(loaded.config.server.max_decoded_message.0)
+        .map_err(|_| "server.max_decoded_message exceeds platform address size")?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -58,7 +60,7 @@ pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
             loaded.config.memory.memtables,
             loaded.config.memory.query,
         );
-        brainwire_bolt::server::serve_with_auth_and_limit(
+        brainwire_bolt::server::serve_with_connection_limits(
             listener,
             move || {
                 let engine = if protected {
@@ -68,7 +70,11 @@ pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
                 };
                 engine.expect("cannot start query worker")
             },
-            max_message,
+            brainwire_bolt::server::ConnectionLimits {
+                max_message_bytes: max_message,
+                max_decoded_message_bytes: max_decoded_message,
+                io_timeout: std::time::Duration::from_millis(loaded.config.server.io_timeout_ms),
+            },
             auth,
         )
         .await

@@ -1,0 +1,29 @@
+{
+  "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
+  "synthetic": true,
+  "rows": 1000,
+  "scope": "offline local checkpoint footer corruption; not power loss, object storage or cross-version restore",
+  "result": "PASS",
+  "audit": {
+    "database": "original",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "checkpoint_audit": {
+    "database": "checkpoint",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "corrupted_audit_exit_code": 1,
+  "corrupted_error_class": "RocksDB Corruption: Bad table magic number",
+  "neighboring_corruption_blocks_catalog_open": true,
+  "corrupted_error_sha256": "1f2e7fb711acc7c7b95325204e51e99c59a1e184d5a6f53bb5680bd2a862d7f2",
+  "intact_sst_sha256": "7c71e32cd070d754d74fe4d51674f6f39e64ae9cfbee62d3da871d0e6eaab6bd",
+  "checks": [
+    "independent copy breaks checkpoint SST hard links before mutation",
+    "deterministic SST footer corruption fails offline graph/index audit",
+    "neighboring corrupted store fails offline catalog opening closed",
+    "after isolating owned corrupt copy, original and checkpoint retain 1000 nodes and pass audits"
+  ],
+  "ownedResourcesRemoved": true
+}

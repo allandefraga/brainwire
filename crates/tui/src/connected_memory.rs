@@ -18,20 +18,20 @@ pub struct MemorySnapshot {
     pub pool_rejections: Option<u64>,
 }
 
-struct State {
-    snapshot: MemorySnapshot,
-    sampled: Instant,
-    error: Option<String>,
+pub(crate) struct State {
+    pub(crate) snapshot: MemorySnapshot,
+    pub(crate) sampled: Instant,
+    pub(crate) error: Option<String>,
 }
 impl State {
-    fn new(snapshot: MemorySnapshot) -> Self {
+    pub(crate) fn new(snapshot: MemorySnapshot) -> Self {
         Self {
             snapshot,
             sampled: Instant::now(),
             error: None,
         }
     }
-    fn refresh(&mut self, result: Result<MemorySnapshot, String>) {
+    pub(crate) fn refresh(&mut self, result: Result<MemorySnapshot, String>) {
         match result {
             Ok(snapshot) => {
                 self.snapshot = snapshot;
@@ -65,13 +65,25 @@ fn render(
     lang: Language,
     no_color: bool,
 ) {
+    render_at(frame, frame.area(), state, address, graph, lang, no_color);
+}
+
+pub(crate) fn render_at(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    state: &State,
+    address: &str,
+    graph: &str,
+    lang: Language,
+    no_color: bool,
+) {
     let areas = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(if state.error.is_some() { 5 } else { 3 }),
         Constraint::Min(0),
         Constraint::Length(3),
     ])
-    .split(frame.area());
+    .split(area);
     frame.render_widget(
         Paragraph::new(format!(
             " BRAINWIRE / {} / {} @ {}",

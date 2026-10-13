@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "driverVersion": "5.28.6",
+  "image": "brainwire:beta-20261013",
+  "imageId": "sha256:d08c2e5af98ea237b568b86bf58af99af7d80ae5425ad7aaecdc37f620d821d3",
+  "proxyImage": "haproxy:3.2.24-alpine@sha256:1aca32ee932b96d2a75f1882909325839dd23c138ba9c6fd26e4d88179f30f13",
+  "proxyImageId": "sha256:1aca32ee932b96d2a75f1882909325839dd23c138ba9c6fd26e4d88179f30f13",
+  "tlsVersion": "TLSv1.3",
+  "project": "brainwire-tls-dc48cd181521",
+  "rows": 1000,
+  "checks": [
+    "strict bolt+s CA and localhost hostname verification succeeds",
+    "backend host port absent; TLS loopback port only; certificates/config/auth mounts read-only",
+    "TLS 1.2 and 1.3 succeed; TLS 1.1 receives protocol-version rejection",
+    "wrong CA, hostname mismatch and plaintext driver connections rejected",
+    "Bolt auth/grants preserved through TLS; writer imports 1000 indexed records",
+    "65s idle pool crosses 60s proxy expiry; 30s liveness first reuse succeeds on a new TLS connection",
+    "explicit rollback succeeds; committed rows/index survive backend SIGKILL/start and TLS reconnect"
+  ],
+  "audit": {
+    "database": "client_memory",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "idlePool": {
+    "idle_seconds": 65.807,
+    "proxy_idle_timeout_seconds": 60,
+    "liveness_check_timeout_seconds": 30,
+    "first_reuse": "PASS",
+    "new_frontend_peer_observed": true
+  },
+  "scope": "single-host client/proxy TLS; backend plaintext; no Kubernetes/Swarm qualification",
+  "ownedResourcesRemoved": true
+}

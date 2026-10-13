@@ -30,6 +30,8 @@ pub struct ServerSection {
     pub data_dir: PathBuf,
     pub default_database: String,
     pub max_message: ByteSize,
+    pub max_decoded_message: ByteSize,
+    pub io_timeout_ms: u64,
     pub query_timeout_ms: u64,
     pub auth_file: Option<PathBuf>,
 }
@@ -41,6 +43,8 @@ impl Default for ServerSection {
             data_dir: PathBuf::from("./data"),
             default_database: "client_memory".to_string(),
             max_message: ByteSize(256 << 20),
+            max_decoded_message: ByteSize(64 << 20),
+            io_timeout_ms: 300_000,
             query_timeout_ms: 30_000,
             auth_file: None,
         }
@@ -99,11 +103,13 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 9] = [
+pub(crate) const KEYS: [&str; 11] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
     "server.max_message",
+    "server.max_decoded_message",
+    "server.io_timeout_ms",
     "server.query_timeout_ms",
     "server.auth_file",
     "memory.cache",
@@ -150,6 +156,10 @@ struct FileServerSection {
     default_database: Option<String>,
     #[serde(default)]
     max_message: Option<ByteSize>,
+    #[serde(default)]
+    max_decoded_message: Option<ByteSize>,
+    #[serde(default)]
+    io_timeout_ms: Option<u64>,
     #[serde(default)]
     query_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -216,9 +226,21 @@ fn apply_file(
         config.server.max_message = v;
         sources.insert("server.max_message", Source::File(path.to_path_buf()));
     }
+    if let Some(v) = file.server.max_decoded_message {
+        config.server.max_decoded_message = v;
+        sources.insert(
+            "server.max_decoded_message",
+            Source::File(path.to_path_buf()),
+        );
+    }
     if let Some(v) = file.server.query_timeout_ms {
+        // The query and network budgets remain independent.
         config.server.query_timeout_ms = v;
         sources.insert("server.query_timeout_ms", Source::File(path.to_path_buf()));
+    }
+    if let Some(v) = file.server.io_timeout_ms {
+        config.server.io_timeout_ms = v;
+        sources.insert("server.io_timeout_ms", Source::File(path.to_path_buf()));
     }
     if let Some(path_value) = file.server.auth_file {
         config.server.auth_file = Some(auth_file_path(path_value)?);
@@ -270,6 +292,21 @@ fn apply_env(
     }
 
     let var = env_var_name("server.query_timeout_ms");
+    let io_var = env_var_name("server.io_timeout_ms");
+    if let Some(v) = env.get(&io_var) {
+        config.server.io_timeout_ms =
+            v.parse()
+                .map_err(|error: std::num::ParseIntError| ConfigError::BadValue {
+                    key: "server.io_timeout_ms".into(),
+                    message: error.to_string(),
+                })?;
+        sources.insert("server.io_timeout_ms", Source::Env(io_var));
+    }
+    let decoded_var = env_var_name("server.max_decoded_message");
+    if let Some(v) = env.get(&decoded_var) {
+        config.server.max_decoded_message = parse_byte_size(v, "server.max_decoded_message")?;
+        sources.insert("server.max_decoded_message", Source::Env(decoded_var));
+    }
     if let Some(value) = env.get(&var) {
         config.server.query_timeout_ms =
             value
@@ -328,6 +365,16 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if !(1..=3_600_000).contains(&config.server.io_timeout_ms) {
+        return Err(ConfigError::Invalid(
+            "server.io_timeout_ms must be between 1 and 3600000".into(),
+        ));
+    }
+    if config.server.max_decoded_message.0 == 0 {
+        return Err(ConfigError::Invalid(
+            "server.max_decoded_message must be positive".into(),
+        ));
+    }
     if !(1..=3_600_000).contains(&config.server.query_timeout_ms) {
         return Err(ConfigError::Invalid(
             "server.query_timeout_ms must be between 1 and 3600000".into(),
@@ -385,6 +432,10 @@ pub fn default_file() -> String {
          default_database = \"{default_database}\"\n\
          # Largest Bolt message accepted from a client.\n\
          max_message = \"{max_message}\"\n\
+         # Requested owned PackStream allocations per message, before query execution (not RSS).\n\
+         max_decoded_message = \"{max_decoded_message}\"\n\
+         # Complete authenticated request/response IO budget; query execution is separate.\n\
+         io_timeout_ms = {io_timeout_ms}\n\
          \n\
          # Cooperative per-RUN deadline; storage calls and commit can overrun.\n\
          query_timeout_ms = {query_timeout_ms}\n\
@@ -403,6 +454,8 @@ pub fn default_file() -> String {
         data_dir = d.server.data_dir.display(),
         default_database = d.server.default_database,
         max_message = d.server.max_message,
+        max_decoded_message = d.server.max_decoded_message,
+        io_timeout_ms = d.server.io_timeout_ms,
         query_timeout_ms = d.server.query_timeout_ms,
         cache = d.memory.cache,
         memtables = d.memory.memtables,
@@ -437,6 +490,8 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.data_dir" => config.server.data_dir.display().to_string(),
         "server.default_database" => config.server.default_database.clone(),
         "server.max_message" => config.server.max_message.to_string(),
+        "server.max_decoded_message" => config.server.max_decoded_message.to_string(),
+        "server.io_timeout_ms" => config.server.io_timeout_ms.to_string(),
         "server.query_timeout_ms" => config.server.query_timeout_ms.to_string(),
         "server.auth_file" => config
             .server
@@ -472,6 +527,43 @@ mod tests {
     }
 
     #[test]
+    fn decoded_message_limit_has_independent_default_file_and_env_provenance() {
+        let loaded = load(None, &env(&[])).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.max_decoded_message"
+                && value == "64 MiB"
+                && source == "default"));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("brainwire.toml");
+        std::fs::write(&file, "[server]\nmax_decoded_message='16MiB'\n").unwrap();
+        let loaded = load(Some(&file), &env(&[])).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.max_decoded_message"
+                && value == "16 MiB"
+                && source.starts_with("file ")));
+        let loaded = load(
+            Some(&file),
+            &env(&[("BRAINWIRE_SERVER_MAX_DECODED_MESSAGE", "8MiB")]),
+        )
+        .unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.max_decoded_message"
+                && value == "8 MiB"
+                && source == "env BRAINWIRE_SERVER_MAX_DECODED_MESSAGE"));
+        assert_eq!(loaded.config.server.max_message.0, 256 << 20);
+        for invalid in ["0", "invalid", "18446744073709551616"] {
+            assert!(load(
+                None,
+                &env(&[("BRAINWIRE_SERVER_MAX_DECODED_MESSAGE", invalid)])
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn auth_file_defaults_unset_and_reports_path_provenance() {
         let loaded = load(None, &env(&[])).unwrap();
         assert!(describe(&loaded)
@@ -498,6 +590,33 @@ mod tests {
             .any(|(key, value, source)| *key == "server.auth_file"
                 && value == "/run/secrets/override.json"
                 && source == "env BRAINWIRE_SERVER_AUTH_FILE"));
+    }
+
+    #[test]
+    fn io_budget_is_positive_independent_and_reports_provenance() {
+        let loaded = load(None, &env(&[])).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.io_timeout_ms"
+                && value == "300000"
+                && source == "default"));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("brainwire.toml");
+        std::fs::write(&file, "[server]\nio_timeout_ms=1000\n").unwrap();
+        let loaded = load(
+            Some(&file),
+            &env(&[("BRAINWIRE_SERVER_IO_TIMEOUT_MS", "2000")]),
+        )
+        .unwrap();
+        assert_eq!(loaded.config.server.io_timeout_ms, 2000);
+        assert_eq!(loaded.config.server.query_timeout_ms, 30000);
+        assert!(matches!(
+            loaded.sources["server.io_timeout_ms"],
+            Source::Env(_)
+        ));
+        for invalid in ["0", "3600001", "-1", "2.5", ""] {
+            assert!(load(None, &env(&[("BRAINWIRE_SERVER_IO_TIMEOUT_MS", invalid)])).is_err());
+        }
     }
 
     #[test]
@@ -718,6 +837,8 @@ mod tests {
                 ("BRAINWIRE_SERVER_DATA_DIR", "/tmp/brainwire-data"),
                 ("BRAINWIRE_SERVER_DEFAULT_DATABASE", "other_db"),
                 ("BRAINWIRE_SERVER_MAX_MESSAGE", "512MiB"),
+                ("BRAINWIRE_SERVER_MAX_DECODED_MESSAGE", "32MiB"),
+                ("BRAINWIRE_SERVER_IO_TIMEOUT_MS", "12000"),
                 ("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS", "1250"),
                 ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
@@ -733,6 +854,8 @@ mod tests {
         );
         assert_eq!(loaded.config.server.default_database, "other_db");
         assert_eq!(loaded.config.server.max_message.0, 512 << 20);
+        assert_eq!(loaded.config.server.max_decoded_message.0, 32 << 20);
+        assert_eq!(loaded.config.server.io_timeout_ms, 12000);
         assert_eq!(loaded.config.server.query_timeout_ms, 1250);
         assert_eq!(
             loaded.config.server.auth_file.as_deref(),

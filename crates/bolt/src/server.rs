@@ -10,7 +10,9 @@ use tokio::sync::Semaphore;
 use crate::chunk::{encode_message, ChunkReader};
 use crate::handshake::{negotiate, response, MAGIC};
 use crate::message::{parse_request, Response};
-use crate::packstream::{pack, unpack};
+#[cfg(test)]
+use crate::packstream::unpack;
+use crate::packstream::{pack, unpack_with_limit};
 use crate::session::{AuthMode, QueryEngine, Session, State};
 
 /// Default cap on assembled PackStream payload bytes per Bolt message,
@@ -21,12 +23,32 @@ use crate::session::{AuthMode, QueryEngine, Session, State};
 /// so 256 MiB leaves headroom above that while still bounding memory. Use
 /// [`serve_with_limit`] to override it.
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
+/// Default quota for PackStream owned payloads and container backing storage.
+pub const DEFAULT_MAX_DECODED_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
 /// Absolute deadline for reading the handshake and writing its version reply.
 pub const DEFAULT_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Absolute IO budget until successful authentication, renewed after LOGOFF.
 /// Synchronous parsing and engine work can postpone enforcement.
 pub const DEFAULT_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Complete request and response IO budgets; synchronous query work is excluded.
+#[derive(Debug, Clone, Copy)]
+pub struct ConnectionLimits {
+    pub max_message_bytes: usize,
+    pub max_decoded_message_bytes: usize,
+    pub io_timeout: std::time::Duration,
+}
+
+impl Default for ConnectionLimits {
+    fn default() -> Self {
+        Self {
+            max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+            max_decoded_message_bytes: DEFAULT_MAX_DECODED_MESSAGE_BYTES,
+            io_timeout: std::time::Duration::from_secs(300),
+        }
+    }
+}
 
 pub async fn serve<E, F>(listener: TcpListener, make_engine: F) -> std::io::Result<()>
 where
@@ -64,6 +86,52 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    serve_with_auth_and_limits(
+        listener,
+        make_engine,
+        max_message_bytes,
+        DEFAULT_MAX_DECODED_MESSAGE_BYTES,
+        auth,
+    )
+    .await
+}
+
+/// Serve with independent encoded-message and decoded-storage caps.
+pub async fn serve_with_auth_and_limits<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    max_message_bytes: usize,
+    max_decoded_message_bytes: usize,
+    auth: AuthMode,
+) -> std::io::Result<()>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
+    serve_with_connection_limits(
+        listener,
+        make_engine,
+        ConnectionLimits {
+            max_message_bytes,
+            max_decoded_message_bytes,
+            ..ConnectionLimits::default()
+        },
+        auth,
+    )
+    .await
+}
+
+/// Serve with encoded/decoded caps and absolute authenticated IO budgets.
+pub async fn serve_with_connection_limits<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+) -> std::io::Result<()>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
     let make_engine = Arc::new(make_engine);
     let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
     loop {
@@ -95,7 +163,15 @@ where
         let auth = auth.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = handle_connection(stream, make(), max_message_bytes, auth).await;
+            let _ = handle_connection_with_connection_timeouts(
+                stream,
+                make(),
+                limits,
+                auth,
+                DEFAULT_HANDSHAKE_TIMEOUT,
+                DEFAULT_AUTHENTICATION_TIMEOUT,
+            )
+            .await;
         });
     }
 }
@@ -134,6 +210,7 @@ fn is_resource_exhausted(err: &std::io::Error) -> bool {
     matches!(err.raw_os_error(), Some(code) if EXHAUSTED.contains(&code))
 }
 
+#[cfg(test)]
 async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     engine: E,
@@ -151,13 +228,65 @@ async fn handle_connection<E: QueryEngine + Send + 'static, S: AsyncRead + Async
     .await
 }
 
+#[cfg(test)]
 async fn handle_connection_with_timeouts<
+    E: QueryEngine + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin,
+>(
+    stream: S,
+    engine: E,
+    max_message_bytes: usize,
+    auth: AuthMode,
+    handshake_timeout: std::time::Duration,
+    authentication_timeout: std::time::Duration,
+) -> std::io::Result<()> {
+    handle_connection_with_limits_and_timeouts(
+        stream,
+        engine,
+        max_message_bytes,
+        DEFAULT_MAX_DECODED_MESSAGE_BYTES,
+        auth,
+        handshake_timeout,
+        authentication_timeout,
+    )
+    .await
+}
+
+#[cfg(test)]
+async fn handle_connection_with_limits_and_timeouts<
+    E: QueryEngine + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin,
+>(
+    stream: S,
+    engine: E,
+    max_message_bytes: usize,
+    max_decoded_message_bytes: usize,
+    auth: AuthMode,
+    handshake_timeout: std::time::Duration,
+    authentication_timeout: std::time::Duration,
+) -> std::io::Result<()> {
+    handle_connection_with_connection_timeouts(
+        stream,
+        engine,
+        ConnectionLimits {
+            max_message_bytes,
+            max_decoded_message_bytes,
+            ..ConnectionLimits::default()
+        },
+        auth,
+        handshake_timeout,
+        authentication_timeout,
+    )
+    .await
+}
+
+async fn handle_connection_with_connection_timeouts<
     E: QueryEngine + Send + 'static,
     S: AsyncRead + AsyncWrite + Unpin,
 >(
     mut stream: S,
     engine: E,
-    max_message_bytes: usize,
+    limits: ConnectionLimits,
     auth: AuthMode,
     handshake_timeout: std::time::Duration,
     authentication_timeout: std::time::Duration,
@@ -180,23 +309,25 @@ async fn handle_connection_with_timeouts<
     }
     let mut session = Session::new(engine, auth);
     let mut authentication_deadline = Some(tokio::time::Instant::now() + authentication_timeout);
+    let mut request_deadline = None;
     let mut reader = ChunkReader::default();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         loop {
-            check_authentication_deadline(&mut session, authentication_deadline)?;
-            let payload = match reader.next_message_with_limit(max_message_bytes) {
+            check_io_deadline(&mut session, authentication_deadline.or(request_deadline))?;
+            let payload = match reader.next_message_with_limit(limits.max_message_bytes) {
                 Ok(Some(payload)) => payload,
                 Ok(None) => break,
                 Err(_) => {
                     session.close();
-                    authentication_io(
+                    io_with_deadline(
                         &mut session,
-                        authentication_deadline,
+                        authentication_deadline
+                            .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
                         write_failure(
                             &mut stream,
                             "Neo.ClientError.Request.Invalid",
-                            &format!("message larger than {max_message_bytes} bytes"),
+                            &format!("message larger than {} bytes", limits.max_message_bytes),
                         ),
                     )
                     .await?;
@@ -204,14 +335,14 @@ async fn handle_connection_with_timeouts<
                 }
             };
             let mut input = payload.as_slice();
-            match unpack(&mut input)
+            match unpack_with_limit(&mut input, limits.max_decoded_message_bytes)
                 .ok()
                 .filter(|_| input.is_empty())
                 .and_then(|v| parse_request(v).ok())
             {
                 Some(req) => {
                     let response_deadline = authentication_deadline;
-                    check_authentication_deadline(&mut session, response_deadline)?;
+                    check_io_deadline(&mut session, response_deadline.or(request_deadline))?;
                     // RocksDB calls are synchronous. Keep them off Tokio's IO workers.
                     let (next, responses) = tokio::task::spawn_blocking(move || {
                         let mut session = session;
@@ -221,31 +352,31 @@ async fn handle_connection_with_timeouts<
                     .await
                     .map_err(|err| std::io::Error::other(format!("query worker failed: {err}")))?;
                     session = next;
-                    check_authentication_deadline(&mut session, response_deadline)?;
+                    check_io_deadline(&mut session, response_deadline)?;
                     // LOGOFF starts a fresh budget before its SUCCESS is written.
                     if response_deadline.is_none() && session.state() == State::Authentication {
                         authentication_deadline =
                             Some(tokio::time::Instant::now() + authentication_timeout);
                     }
-                    let mut out = Vec::new();
+                    let write_deadline = authentication_deadline
+                        .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout));
                     for r in responses {
+                        check_io_deadline(&mut session, write_deadline)?;
                         let mut body = Vec::new();
                         pack(&r.to_value(), &mut body);
-                        out.extend_from_slice(&encode_message(&body));
+                        let frame = encode_message(&body);
+                        io_with_deadline(&mut session, write_deadline, stream.write_all(&frame))
+                            .await?;
                     }
-                    if !out.is_empty() {
-                        authentication_io(
-                            &mut session,
-                            authentication_deadline,
-                            stream.write_all(&out),
-                        )
-                        .await?;
-                    }
+                    check_io_deadline(&mut session, write_deadline)?;
                     if session.state() == State::Defunct {
                         return Ok(());
                     }
                     if !matches!(session.state(), State::Connected | State::Authentication) {
                         authentication_deadline = None;
+                        request_deadline = Some(tokio::time::Instant::now() + limits.io_timeout);
+                    } else {
+                        request_deadline = None;
                     }
                 }
                 None => {
@@ -255,9 +386,10 @@ async fn handle_connection_with_timeouts<
                     // Tell the client why, then close instead of carrying on
                     // with a session that never saw the failure.
                     session.close();
-                    authentication_io(
+                    io_with_deadline(
                         &mut session,
-                        authentication_deadline,
+                        authentication_deadline
+                            .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
                         write_failure(
                             &mut stream,
                             "Neo.ClientError.Request.Invalid",
@@ -269,16 +401,21 @@ async fn handle_connection_with_timeouts<
                 }
             }
         }
-        let n =
-            authentication_io(&mut session, authentication_deadline, stream.read(&mut buf)).await?;
+        let n = io_with_deadline(
+            &mut session,
+            authentication_deadline.or(request_deadline),
+            stream.read(&mut buf),
+        )
+        .await?;
         if n == 0 {
+            session.close();
             return Ok(());
         }
         reader.push(&buf[..n]);
     }
 }
 
-fn check_authentication_deadline<E: QueryEngine>(
+fn check_io_deadline<E: QueryEngine>(
     session: &mut Session<E>,
     deadline: Option<tokio::time::Instant>,
 ) -> std::io::Result<()> {
@@ -286,18 +423,18 @@ fn check_authentication_deadline<E: QueryEngine>(
         session.close();
         return Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            "Bolt authentication timed out",
+            "Bolt connection IO timed out",
         ));
     }
     Ok(())
 }
 
-async fn authentication_io<E: QueryEngine, T>(
+async fn io_with_deadline<E: QueryEngine, T>(
     session: &mut Session<E>,
     deadline: Option<tokio::time::Instant>,
     operation: impl std::future::Future<Output = std::io::Result<T>>,
 ) -> std::io::Result<T> {
-    check_authentication_deadline(session, deadline)?;
+    check_io_deadline(session, deadline)?;
     let result = match deadline {
         Some(deadline) => match tokio::time::timeout_at(deadline, operation).await {
             Ok(result) => result,
@@ -305,13 +442,16 @@ async fn authentication_io<E: QueryEngine, T>(
                 session.close();
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
-                    "Bolt authentication timed out",
+                    "Bolt connection IO timed out",
                 ));
             }
         },
         None => operation.await,
     };
-    check_authentication_deadline(session, deadline)?;
+    check_io_deadline(session, deadline)?;
+    if result.is_err() {
+        session.close();
+    }
     result
 }
 
@@ -1193,5 +1333,330 @@ mod tests {
         assert!(
             matches!(&access[1],AccessContext::Authenticated(p) if p.id=="reader" && p.graphs.get("tickets")==Some(&GraphAccess::Read))
         );
+    }
+    #[tokio::test]
+    async fn decoded_overbudget_begin_is_fatal_before_engine_and_releases_permit() {
+        for malformed in [false, true] {
+            let (server, mut client) = tokio::io::duplex(1024);
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let permits = Arc::new(Semaphore::new(1));
+            let permit = permits.clone().acquire_owned().await.unwrap();
+            let probe = calls.clone();
+            let task = tokio::spawn(async move {
+                let _permit = permit;
+                handle_connection_with_limits_and_timeouts(
+                    server,
+                    BeginProbe(probe),
+                    4096,
+                    512,
+                    AuthMode::AllowAll,
+                    DEFAULT_HANDSHAKE_TIMEOUT,
+                    DEFAULT_AUTHENTICATION_TIMEOUT,
+                )
+                .await
+            });
+            handshake(&mut client).await;
+            for tag in [0x01, 0x6a] {
+                send_request(&mut client, tag, vec![PackValue::Map(vec![])]).await;
+                read_success(&mut client).await;
+            }
+            if malformed {
+                client
+                    .write_all(&encode_message(&[0xb1, 0x11, 0xda, 0xff, 0xff, 0xff, 0xff]))
+                    .await
+                    .unwrap();
+            } else {
+                send_request(
+                    &mut client,
+                    0x11,
+                    vec![PackValue::Map(vec![(
+                        "metadata".into(),
+                        PackValue::List(vec![PackValue::Null; 100]),
+                    )])],
+                )
+                .await;
+            }
+            let mut failure = Vec::new();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                client.read_to_end(&mut failure),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                decode_failure(&failure).0,
+                "Neo.ClientError.Request.Invalid"
+            );
+            task.await.unwrap().unwrap();
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert!(permits.try_acquire().is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn small_encoded_cap_is_independent_of_decoded_storage_cap() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let probe = calls.clone();
+        let task = tokio::spawn(handle_connection_with_limits_and_timeouts(
+            server,
+            BeginProbe(probe),
+            32,
+            512,
+            AuthMode::AllowAll,
+            DEFAULT_HANDSHAKE_TIMEOUT,
+            DEFAULT_AUTHENTICATION_TIMEOUT,
+        ));
+        handshake(&mut client).await;
+        for tag in [0x01, 0x6a, 0x11] {
+            send_request(&mut client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        client.write_all(&[0, 33]).await.unwrap();
+        let mut failure = Vec::new();
+        client.read_to_end(&mut failure).await.unwrap();
+        assert!(decode_failure(&failure).1.contains("32 bytes"));
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn decoded_overbudget_cleanup_precedes_a_blocked_failure_write() {
+        let (server, mut client) = tokio::io::duplex(32);
+        let aborted = Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(handle_connection_with_limits_and_timeouts(
+            server,
+            CleanupEngine(aborted.clone()),
+            4096,
+            512,
+            AuthMode::AllowAll,
+            DEFAULT_HANDSHAKE_TIMEOUT,
+            DEFAULT_AUTHENTICATION_TIMEOUT,
+        ));
+        login_and_begin(&mut client).await;
+        let mut payload = vec![0xd4, 100];
+        payload.extend_from_slice(&[0xc0; 100]);
+        client.write_all(&encode_message(&payload)).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), aborted.notified())
+            .await
+            .unwrap();
+        assert!(!task.is_finished());
+        let mut failure = Vec::new();
+        client.read_to_end(&mut failure).await.unwrap();
+        assert_eq!(
+            decode_failure(&failure).0,
+            "Neo.ClientError.Request.Invalid"
+        );
+        task.await.unwrap().unwrap();
+    }
+    #[tokio::test]
+    async fn socket_io_error_aborts_before_the_session_is_dropped() {
+        let aborted = Arc::new(tokio::sync::Notify::new());
+        let mut session = Session::new(CleanupEngine(aborted.clone()), AuthMode::AllowAll);
+        for tag in [0x01, 0x6a, 0x11] {
+            let request = parse_request(PackValue::Struct {
+                tag,
+                fields: vec![PackValue::Map(vec![])],
+            })
+            .unwrap();
+            session.handle(request);
+        }
+        assert_eq!(session.state(), State::TxReady);
+        let error = io_with_deadline(&mut session, None, async {
+            Err::<(), _>(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+        tokio::time::timeout(std::time::Duration::from_millis(100), aborted.notified())
+            .await
+            .unwrap();
+        assert_eq!(session.state(), State::Defunct);
+    }
+    fn short_io_connection<E: QueryEngine + Send + 'static>(
+        server: tokio::io::DuplexStream,
+        engine: E,
+    ) -> tokio::task::JoinHandle<std::io::Result<()>> {
+        tokio::spawn(handle_connection_with_connection_timeouts(
+            server,
+            engine,
+            ConnectionLimits {
+                io_timeout: std::time::Duration::from_millis(80),
+                ..ConnectionLimits::default()
+            },
+            AuthMode::AllowAll,
+            DEFAULT_HANDSHAKE_TIMEOUT,
+            DEFAULT_AUTHENTICATION_TIMEOUT,
+        ))
+    }
+
+    #[tokio::test]
+    async fn authenticated_idle_noops_and_partial_requests_expire_and_abort_pending_transaction() {
+        for mode in 0..3 {
+            let (server, mut client) = tokio::io::duplex(1024);
+            let aborted = Arc::new(tokio::sync::Notify::new());
+            let task = short_io_connection(server, CleanupEngine(aborted.clone()));
+            login_and_begin(&mut client).await;
+            let drip = tokio::spawn(async move {
+                if mode != 0 {
+                    let bytes = if mode == 1 { vec![0, 0] } else { vec![0] };
+                    loop {
+                        if client.write_all(&bytes).await.is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                    }
+                } else {
+                    let mut bytes = Vec::new();
+                    client.read_to_end(&mut bytes).await.unwrap();
+                }
+            });
+            let error = tokio::time::timeout(std::time::Duration::from_millis(400), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+            tokio::time::timeout(std::time::Duration::from_millis(100), aborted.notified())
+                .await
+                .unwrap();
+            drip.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_authenticated_requests_renew_the_io_budget() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = short_io_connection(server, StubEngine);
+        handshake(&mut client).await;
+        for tag in [0x01, 0x6a] {
+            send_request(&mut client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+        }
+        for _ in 0..5 {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            send_request(&mut client, 0x54, vec![]).await;
+            read_success(&mut client).await;
+        }
+        send_request(&mut client, 0x02, vec![]).await;
+        task.await.unwrap().unwrap();
+    }
+
+    struct SlowQuery;
+    impl QueryEngine for SlowQuery {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            db: Option<&str>,
+            query: &str,
+            params: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            std::thread::sleep(std::time::Duration::from_millis(160));
+            StubEngine.run(db, query, params)
+        }
+    }
+
+    #[tokio::test]
+    async fn blocking_query_is_excluded_from_authenticated_request_io_budget() {
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = short_io_connection(server, SlowQuery);
+        handshake(&mut client).await;
+        for tag in [0x01, 0x6a] {
+            send_request(&mut client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+        }
+        send_request(
+            &mut client,
+            0x10,
+            vec![
+                PackValue::String("RETURN 1".into()),
+                PackValue::Map(vec![]),
+                PackValue::Map(vec![]),
+            ],
+        )
+        .await;
+        read_success(&mut client).await;
+        send_request(&mut client, 0x0f, vec![]).await;
+        read_success(&mut client).await;
+        send_request(&mut client, 0x02, vec![]).await;
+        task.await.unwrap().unwrap();
+    }
+    struct ManyRows(Arc<tokio::sync::Notify>);
+    impl QueryEngine for ManyRows {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            self.0.notify_one();
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            Ok(crate::session::QueryResult {
+                fields: vec!["value".into()],
+                rows: vec![vec![PackValue::String("x".repeat(100))]; 10],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn all_response_frames_share_one_absolute_write_budget() {
+        let (server, mut client) = tokio::io::duplex(32);
+        let aborted = Arc::new(tokio::sync::Notify::new());
+        let task = short_io_connection(server, ManyRows(aborted.clone()));
+        login_and_begin(&mut client).await;
+        send_request(
+            &mut client,
+            0x10,
+            vec![
+                PackValue::String("RETURN 1".into()),
+                PackValue::Map(vec![]),
+                PackValue::Map(vec![]),
+            ],
+        )
+        .await;
+        read_success(&mut client).await;
+        send_request(
+            &mut client,
+            0x3f,
+            vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+        )
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let size = client.read_u16().await.unwrap() as usize;
+        let mut record = vec![0; size];
+        client.read_exact(&mut record).await.unwrap();
+        assert_eq!(client.read_u16().await.unwrap(), 0);
+        assert!(matches!(
+            unpack(&mut record.as_slice()).unwrap(),
+            PackValue::Struct { tag: 0x71, .. }
+        ));
+        // The first frame consumed 50ms; the second gets only the remaining 30ms,
+        // not a fresh 80ms. Keep the peer open without draining the next frame.
+        let error = tokio::time::timeout(std::time::Duration::from_millis(60), task)
+            .await
+            .expect("write budget must not renew between response frames")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        tokio::time::timeout(std::time::Duration::from_millis(100), aborted.notified())
+            .await
+            .unwrap();
     }
 }

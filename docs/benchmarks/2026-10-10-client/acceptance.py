@@ -137,7 +137,9 @@ def main():
     args = parser.parse_args()
     binary = args.binary.resolve()
     output = {'synthetic': True, 'driver': driver_version, 'profile': binary.parent.name,
-              'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest()}
+              'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+              'limits': dict(encoded_message_mib=8, decoded_message_mib=16, io_timeout_ms=300000,
+                             cache_mib=64, memtables_mib=16, query_mib=64)}
     with tempfile.TemporaryDirectory(prefix='brainwire-client-') as tmp:
         temporary = Path(tmp)
         source = temporary / 'fixture.jsonl'
@@ -151,7 +153,8 @@ def main():
                    BRAINWIRE_SERVER_DATA_DIR=str(temporary / 'data'),
                    BRAINWIRE_SERVER_DEFAULT_DATABASE='client-shadow-synthetic',
                    BRAINWIRE_MEMORY_CACHE='64MiB', BRAINWIRE_MEMORY_MEMTABLES='16MiB',
-                   BRAINWIRE_MEMORY_QUERY='64MiB')
+                   BRAINWIRE_MEMORY_QUERY='64MiB', BRAINWIRE_SERVER_MAX_MESSAGE='8MiB',
+                   BRAINWIRE_SERVER_MAX_DECODED_MESSAGE='16MiB', BRAINWIRE_SERVER_IO_TIMEOUT_MS='300000')
         server = None
         log = (temporary / 'server.log').open('w+')
 

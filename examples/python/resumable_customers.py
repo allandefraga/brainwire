@@ -165,7 +165,7 @@ def main():
         from .connection import auth_from_env
     else:
         from connection import auth_from_env
-    with GraphDatabase.driver(args.uri, auth=auth_from_env()) as driver:
+    with GraphDatabase.driver(args.uri, auth=auth_from_env(), liveness_check_timeout=30) as driver:
         offset = ingest(driver, args.database, args.file, args.source_id,
                         args.batch_size, args.batch_bytes, args.line_bytes)
     print(f"Source {args.source_id}: durable next_offset={offset} bytes")

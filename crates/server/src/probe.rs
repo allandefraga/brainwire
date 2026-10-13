@@ -6,10 +6,12 @@ use std::time::Duration;
 
 use brainwire_bolt::chunk::encode_message;
 use brainwire_bolt::handshake::MAGIC;
-use brainwire_bolt::packstream::{pack, unpack, PackValue};
+use brainwire_bolt::packstream::{pack, unpack_with_limit, PackValue};
 use clap::ValueEnum;
 
 const MAX_PROBE_RESPONSE: usize = 64 * 1024;
+// Requested owned PackStream storage per response, independent of aggregate wire caps.
+const MAX_DECODED_RESPONSE: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Mode {
@@ -178,12 +180,7 @@ impl BoltClient {
             body.resize(start + size, 0);
             self.read(&mut body[start..])?;
         }
-        let mut input = body.as_slice();
-        let value = unpack(&mut input).map_err(|e| format!("invalid Bolt response: {e}"))?;
-        if !input.is_empty() {
-            return Err("trailing bytes in Bolt response".into());
-        }
-        Ok(value)
+        decode_response(&body, MAX_DECODED_RESPONSE)
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), String> {
@@ -212,6 +209,16 @@ impl BoltClient {
             }
         }
     }
+}
+
+fn decode_response(body: &[u8], decoded_limit: usize) -> Result<PackValue, String> {
+    let mut input = body;
+    let value = unpack_with_limit(&mut input, decoded_limit)
+        .map_err(|e| format!("invalid Bolt response: {e}"))?;
+    if !input.is_empty() {
+        return Err("trailing bytes in Bolt response".into());
+    }
+    Ok(value)
 }
 
 pub(crate) fn success(response: PackValue) -> Result<PackValue, String> {
@@ -269,5 +276,40 @@ mod tests {
         };
         assert!(client.receive().unwrap_err().contains("too many empty"));
         writer.join().unwrap();
+    }
+    #[test]
+    fn response_decode_bounds_scalar_amplification_before_owned_allocation() {
+        let count = MAX_DECODED_RESPONSE / std::mem::size_of::<PackValue>() + 1;
+        let mut bytes = vec![0xd6];
+        bytes.extend_from_slice(&(count as u32).to_be_bytes());
+        bytes.resize(5 + count, 0xc0);
+        assert!(bytes.len() < 4 * 1024 * 1024);
+        assert!(decode_response(&bytes, MAX_DECODED_RESPONSE)
+            .unwrap_err()
+            .contains("allocation budget"));
+    }
+
+    #[test]
+    fn response_decode_accepts_exact_storage_boundary_and_rejects_trailing_bytes() {
+        let mut bytes = Vec::new();
+        let value = PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::List(vec![PackValue::String("a".into())])],
+        };
+        pack(&value, &mut bytes);
+        let budget = 2 * std::mem::size_of::<PackValue>() + 1;
+        assert_eq!(decode_response(&bytes, budget).unwrap(), value);
+        assert!(decode_response(&bytes, budget - 1)
+            .unwrap_err()
+            .contains("allocation budget"));
+        bytes.push(0xc0);
+        assert!(decode_response(&bytes, budget)
+            .unwrap_err()
+            .contains("trailing bytes"));
+        assert!(
+            decode_response(&[0xd6, 0xff, 0xff, 0xff, 0xff], MAX_DECODED_RESPONSE)
+                .unwrap_err()
+                .contains("truncated")
+        );
     }
 }

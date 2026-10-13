@@ -41,7 +41,7 @@ property. Unknown extra fields are not sent by this fixed query.
 ```python
 from neo4j import GraphDatabase
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None, liveness_check_timeout=30) as driver:
     with driver.session(database="customers") as session:
         records = session.run(
             "MATCH (c:Customer {email:$email}) RETURN c",

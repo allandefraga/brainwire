@@ -16,17 +16,17 @@ pub struct OntologySnapshot {
     pub indexes_ready: bool,
 }
 
-struct State {
-    snapshot: OntologySnapshot,
-    selected: usize,
-    scroll: u16,
-    inspect: bool,
-    sampled: Instant,
-    error: Option<String>,
+pub(crate) struct State {
+    pub(crate) snapshot: OntologySnapshot,
+    pub(crate) selected: usize,
+    pub(crate) scroll: u16,
+    pub(crate) inspect: bool,
+    pub(crate) sampled: Instant,
+    pub(crate) error: Option<String>,
 }
 
 impl State {
-    fn new(snapshot: OntologySnapshot) -> Self {
+    pub(crate) fn new(snapshot: OntologySnapshot) -> Self {
         Self {
             snapshot,
             selected: 0,
@@ -37,7 +37,7 @@ impl State {
         }
     }
 
-    fn refresh(&mut self, result: Result<OntologySnapshot, String>) {
+    pub(crate) fn refresh(&mut self, result: Result<OntologySnapshot, String>) {
         match result {
             Ok(snapshot) => {
                 let label = self
@@ -73,13 +73,25 @@ fn render(
     lang: Language,
     no_color: bool,
 ) {
+    render_at(frame, frame.area(), state, address, graph, lang, no_color);
+}
+
+pub(crate) fn render_at(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    state: &mut State,
+    address: &str,
+    graph: &str,
+    lang: Language,
+    no_color: bool,
+) {
     let areas = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(if state.error.is_some() { 4 } else { 3 }),
         Constraint::Min(0),
         Constraint::Length(3),
     ])
-    .split(frame.area());
+    .split(area);
     let title = format!(
         " BRAINWIRE / {} / {} @ {}",
         lang.choose("ONTOLOGIA", "ONTOLOGY"),

@@ -5,7 +5,9 @@ single-writer templates and their local validation commands.
 
 The local image packages the **single-node** Bolt server. It is a test
 deployment step toward Kubernetes and Docker Swarm; it does not implement
-replication, failover or TLS. Its base profile is unprotected; optional
+replication, failover or native TLS. The [optional TLS proxy](protected-transport.md)
+provides the qualified single-host encrypted Python entry path. Its base profile
+is unprotected; optional
 [service-token overlays](protected-containers.md) provide named-graph grants.
 Use it only on a trusted/encrypted test
 network. See [server limits](serve.md).

@@ -1,0 +1,29 @@
+WARN `--no-project` was provided, but no project was found
+test_cli_requires_explicit_version_and_emits_receipt (test_ducklake_snapshot.DuckLakeTests.test_cli_requires_explicit_version_and_emits_receipt) ... ok
+test_explicit_snapshot_retains_old_rows_after_update_and_delete (test_ducklake_snapshot.DuckLakeTests.test_explicit_snapshot_retains_old_rows_after_update_and_delete) ... ok
+test_lexical_symlink_path_is_preserved_and_other_directory_is_refused (test_ducklake_snapshot.DuckLakeTests.test_lexical_symlink_path_is_preserved_and_other_directory_is_refused) ... ok
+test_nonexistent_version_and_uninitialized_catalog_do_not_publish (test_ducklake_snapshot.DuckLakeTests.test_nonexistent_version_and_uninitialized_catalog_do_not_publish) ... ok
+test_versions_and_existing_local_paths_are_required (test_ducklake_snapshot.DuckLakeTests.test_versions_and_existing_local_paths_are_required) ... ok
+test_zero_is_valid_snapshot_and_validation_bounds_are_reused (test_ducklake_snapshot.DuckLakeTests.test_zero_is_valid_snapshot_and_validation_bounds_are_reused) ... ok
+test_active_caller_can_commit_after_refusal (test_export_snapshot.ExportTests.test_active_caller_can_commit_after_refusal) ... ok
+test_active_caller_transaction_is_rejected_without_abort (test_export_snapshot.ExportTests.test_active_caller_transaction_is_rejected_without_abort) ... ok
+test_batches_preserve_nulls_lists_identities_and_mapper_compatibility (test_export_snapshot.ExportTests.test_batches_preserve_nulls_lists_identities_and_mapper_compatibility) ... ok
+test_cleanup_failure_preserves_validation_error_and_success_receipt (test_export_snapshot.ExportTests.test_cleanup_failure_preserves_validation_error_and_success_receipt) ... ok
+test_empty_snapshot_and_read_only_cli (test_export_snapshot.ExportTests.test_empty_snapshot_and_read_only_cli) ... ok
+test_encoded_line_and_total_byte_limits (test_export_snapshot.ExportTests.test_encoded_line_and_total_byte_limits) ... ok
+test_existing_output_and_publication_race_leave_original_untouched (test_export_snapshot.ExportTests.test_existing_output_and_publication_race_leave_original_untouched) ... ok
+test_failed_begin_never_rolls_back_or_commits (test_export_snapshot.ExportTests.test_failed_begin_never_rolls_back_or_commits) ... ok
+test_introspection_error_never_begins_or_rolls_back (test_export_snapshot.ExportTests.test_introspection_error_never_begins_or_rolls_back) ... ok
+test_late_invalid_row_and_order_failure_clean_temporary_file (test_export_snapshot.ExportTests.test_late_invalid_row_and_order_failure_clean_temporary_file) ... ok
+test_no_dml_or_multiple_statements (test_export_snapshot.ExportTests.test_no_dml_or_multiple_statements) ... ok
+test_process_exit_mid_read_never_publishes_final_input (test_export_snapshot.ExportTests.test_process_exit_mid_read_never_publishes_final_input) ... ok
+test_source_and_commit_errors_do_not_publish (test_export_snapshot.ExportTests.test_source_and_commit_errors_do_not_publish) ... ok
+test_unique_columns_and_positive_bounds (test_export_snapshot.ExportTests.test_unique_columns_and_positive_bounds) ... ok
+test_identity_is_collision_free_and_nullable_fields_are_authoritative (test_ingest_snapshot.SnapshotTests.test_identity_is_collision_free_and_nullable_fields_are_authoritative) ... ok
+test_missing_ticket_and_parent_changes_fail_before_comment_upsert (test_ingest_snapshot.SnapshotTests.test_missing_ticket_and_parent_changes_fail_before_comment_upsert) ... ok
+test_writer_consumes_queries_and_accounts_for_duplicate_rows (test_ingest_snapshot.SnapshotTests.test_writer_consumes_queries_and_accounts_for_duplicate_rows) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 2.405s
+
+OK
