@@ -7,7 +7,7 @@ use std::sync::{Mutex, MutexGuard};
 use brainwire_core::ids::{EdgeId, NodeId, TypeId};
 
 use crate::db::{Database, StoreError};
-use crate::txn::{Cf, TxnError};
+use crate::txn::{Cf, Txn, TxnError};
 
 #[derive(Default)]
 pub(crate) struct IdAllocator {
@@ -93,6 +93,55 @@ impl Database {
                 Err(TxnError::Store(e)) => return Err(e),
             }
         }
+    }
+}
+
+impl Txn<'_> {
+    pub fn next_node_id(&mut self, ty: TypeId) -> Result<NodeId, StoreError> {
+        if !self.replicated_ids {
+            self.used_standalone_ids = true;
+            return self.database().next_node_id(ty);
+        }
+        NodeId::new(0, ty, 0).map_err(|e| StoreError::Corrupt(e.to_string()))?;
+        let seq = self.replicated_seq(node_counter_key(ty), 0, 1u64 << 42)?;
+        NodeId::new(0, ty, seq).map_err(|e| StoreError::Corrupt(e.to_string()))
+    }
+
+    pub fn next_edge_id(&mut self) -> Result<EdgeId, StoreError> {
+        if !self.replicated_ids {
+            self.used_standalone_ids = true;
+            return self.database().next_edge_id();
+        }
+        let seq = self.replicated_seq(EDGE_COUNTER_KEY.to_vec(), 1, 1u64 << 54)?;
+        EdgeId::new(0, seq).map_err(|e| StoreError::Corrupt(e.to_string()))
+    }
+
+    fn replicated_seq(&mut self, key: Vec<u8>, first: u64, bound: u64) -> Result<u64, StoreError> {
+        let current = self
+            .get_for_update(Cf::Meta, &key)?
+            .map(|bytes| {
+                let raw: [u8; 8] = bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| StoreError::Corrupt("id counter".into()))?;
+                Ok::<_, StoreError>(u64::from_be_bytes(raw))
+            })
+            .transpose()?
+            .unwrap_or(first);
+        if current < first || current >= bound {
+            return Err(StoreError::Corrupt("id sequence exhausted".into()));
+        }
+        let next = current
+            .checked_add(1)
+            .ok_or_else(|| StoreError::Corrupt("id sequence exhausted".into()))?;
+        self.put(Cf::Meta, key, next.to_be_bytes().to_vec());
+        Ok(current)
+    }
+}
+
+impl Database {
+    pub(crate) fn clear_id_cache_after_apply(&self) {
+        self.alloc.lock().clear();
     }
 }
 

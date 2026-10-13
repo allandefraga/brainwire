@@ -2,6 +2,7 @@
 
 mod admin;
 mod client_auth;
+mod cluster;
 mod config;
 mod cypher;
 mod databases;
@@ -42,9 +43,19 @@ enum Commands {
     },
     /// Serve named durable databases over Bolt/Cypher.
     Serve {
+        /// Static three-voter cluster configuration; omitted keeps standalone serving.
+        #[arg(long)]
+        cluster_config: Option<PathBuf>,
         /// Config file; otherwise uses ./brainwire.toml. Environment overrides it.
         #[arg(long)]
         config: Option<PathBuf>,
+    },
+    /// Administer an authenticated private consensus endpoint.
+    Cluster {
+        #[arg(long)]
+        cluster_config: PathBuf,
+        #[command(subcommand)]
+        command: ClusterCommands,
     },
     /// Execute one atomic query against an embedded local store (exclusive access).
     #[command(
@@ -133,6 +144,43 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ClusterCommands {
+    /// Inspect leader, membership and durable progress.
+    Status,
+    /// Provision one new voter once, before cluster initialization; never reuse lost IDs.
+    Provision {
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Audit committed graphs offline after stopping every replica.
+    Audit {
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Initialize the configured three voters, then commit initial graph schemas.
+    Init {
+        #[arg(long)]
+        schemas: PathBuf,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Commit one new named graph and its initial ontology.
+    Create {
+        #[arg(long)]
+        graph: String,
+        #[arg(long)]
+        ontology: PathBuf,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Inspect the durable outcome key reported by an uncertain Bolt commit.
+    Request {
+        #[arg(long)]
+        id: String,
     },
 }
 
@@ -260,7 +308,14 @@ fn main() {
             mode,
             timeout_ms,
         } => probe::run(&address, mode, timeout_ms),
-        Commands::Serve { config } => serve::run(config.as_deref()),
+        Commands::Serve {
+            config,
+            cluster_config,
+        } => serve::run(config.as_deref(), cluster_config.as_deref()),
+        Commands::Cluster {
+            cluster_config,
+            command,
+        } => run_cluster(&cluster_config, command),
         Commands::Cypher {
             database,
             query,
@@ -462,5 +517,100 @@ fn run_config_show(explicit_path: Option<&Path>) -> Result<(), String> {
         println!("{key:<24} = {value:<14} ({origin})");
     }
 
+    Ok(())
+}
+
+fn run_cluster(path: &Path, command: ClusterCommands) -> Result<(), String> {
+    use brainwire_replication::{
+        network::{RpcRequest, RpcResponse},
+        Command,
+    };
+    let config = cluster::ClusterConfig::load(path)?;
+    if let ClusterCommands::Provision {
+        config: server_config,
+    } = &command
+    {
+        return cluster::provision(&config, server_config);
+    }
+    if let ClusterCommands::Audit {
+        config: server_config,
+    } = &command
+    {
+        return cluster::audit(&config, server_config);
+    }
+    let response = match command {
+        ClusterCommands::Audit { .. } | ClusterCommands::Provision { .. } => unreachable!(),
+        ClusterCommands::Status => cluster::control(&config, RpcRequest::Status)?,
+        ClusterCommands::Request { id } => {
+            cluster::control(&config, RpcRequest::Lookup { request_id: id })?
+        }
+        ClusterCommands::Init {
+            schemas,
+            request_id,
+        } => {
+            let bytes = cluster::bounded_read(&schemas, 1 << 20)?;
+            if bytes.len() > 1 << 20 {
+                return Err("schema registry exceeds 1 MiB".into());
+            }
+            let mappings: BTreeMap<String, serde_json::Value> = serde_json::from_slice(&bytes)
+                .map_err(|_| "schema registry must be a graph-name to ontology JSON map")?;
+            let graphs = mappings
+                .into_iter()
+                .map(|(name, value)| serde_json::to_vec(&value).map(|value| (name, value)))
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map_err(|_| "cannot encode schema registry")?;
+            cluster::validate_graphs(&graphs)?;
+            let status = cluster::control(&config, RpcRequest::Status)?;
+            let expected = config.members()?.keys().copied().collect::<Vec<_>>();
+            if !matches!(status,RpcResponse::Status(ref status) if status.membership == expected) {
+                let initialized = cluster::control(
+                    &config,
+                    RpcRequest::Initialize {
+                        members: config.members()?,
+                    },
+                )?;
+                if matches!(initialized, RpcResponse::Rejected { .. }) {
+                    return Err("cluster initialization rejected; inspect status".into());
+                }
+            }
+            cluster::propose_control(
+                &config,
+                Command::Bootstrap {
+                    request_id: request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    graphs,
+                },
+            )?
+        }
+        ClusterCommands::Create {
+            graph,
+            ontology,
+            request_id,
+        } => {
+            let schema = cluster::bounded_read(&ontology, 1 << 20)?;
+            cluster::validate_graphs(&BTreeMap::from([(graph.clone(), schema.clone())]))?;
+            cluster::propose_control(
+                &config,
+                Command::CreateGraph {
+                    request_id: request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    graph,
+                    schema,
+                },
+            )?
+        }
+    };
+    if matches!(
+        response,
+        RpcResponse::Rejected { .. }
+            | RpcResponse::Proposed {
+                reply: brainwire_replication::Reply::Conflict,
+                ..
+            }
+    ) {
+        return Err("cluster control operation rejected; inspect leader/quorum status".into());
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response).map_err(|_| "cannot encode cluster status")?
+    );
     Ok(())
 }

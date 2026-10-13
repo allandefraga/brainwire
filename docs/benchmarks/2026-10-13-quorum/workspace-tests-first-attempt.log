@@ -1,0 +1,127 @@
+   Compiling num-traits v0.2.19
+   Compiling brainwire-bolt v0.1.0 (/Users/fraga/Documents/brainwire/crates/bolt)
+   Compiling rusty-fork v0.3.1
+   Compiling brainwire-cypher v0.1.0 (/Users/fraga/Documents/brainwire/crates/cypher)
+   Compiling rand_chacha v0.9.0
+   Compiling rust_decimal v1.43.0
+   Compiling chrono v0.4.45
+   Compiling proptest v1.11.0
+   Compiling byte-unit v5.2.6
+   Compiling openraft v0.9.25
+   Compiling brainwire-store v0.1.0 (/Users/fraga/Documents/brainwire/crates/store)
+   Compiling brainwire-core v0.1.0 (/Users/fraga/Documents/brainwire/crates/core)
+   Compiling brainwire-replication v0.1.0 (/Users/fraga/Documents/brainwire/crates/replication)
+   Compiling brainwire-server v0.1.0 (/Users/fraga/Documents/brainwire/crates/server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 14s
+     Running unittests src/lib.rs (target/debug/deps/brainwire_bolt-9cb951c6298aa6b1)
+
+running 93 tests
+test auth::tests::hello_and_logon_debug_never_expose_auth_values ... ok
+test auth::tests::rejects_missing_wrong_duplicate_and_unsupported_auth_fields ... ok
+test chunk::tests::big_message_is_split_at_65535 ... ok
+test auth::tests::rejects_policy_ambiguity_unknown_fields_and_invalid_grants ... ok
+test auth::tests::static_node_visibility_is_trusted_validated_and_cannot_be_null ... ok
+test chunk::tests::bounded_reader_accepts_fragmented_exact_boundary_with_noops ... ok
+test chunk::tests::bounded_reader_rejects_announced_payload_before_accepting_chunk_body ... ok
+test chunk::tests::compaction_preserves_a_fragmented_pending_chunk_and_message_payload ... ok
+test auth::tests::authenticates_exact_ascii_token_and_returns_only_access_identity ... ok
+test auth::tests::policy_bounds_count_size_and_names ... ok
+test chunk::tests::reader_waits_for_the_terminator_and_skips_noop_chunks ... ok
+test chunk::tests::small_message_is_one_chunk_and_a_terminator ... ok
+test packstream::tests::decoded_nested_storage_and_payloads_share_one_budget ... ok
+test packstream::tests::decoded_scalar_list_budget_has_an_exact_boundary ... ok
+test chunk::tests::many_noops_and_coalesced_messages_consume_without_shifting_the_buffer ... ok
+test handshake::tests::bolt_4_only_is_refused ... ok
+test handshake::tests::driver_5_28_gets_5_4 ... ok
+test handshake::tests::exact_5_2_is_accepted_and_5_5_is_not ... ok
+test message::tests::parses_run_with_its_three_fields ... ok
+test message::tests::parses_the_simple_messages ... ok
+test message::tests::rejects_bad_input ... ok
+test message::tests::responses_become_structs ... ok
+test packstream::tests::a_non_string_map_key_is_rejected ... ok
+test packstream::tests::deeply_nested_adversarial_input_returns_too_deep ... ok
+test packstream::tests::depth_past_max_is_too_deep ... ok
+test packstream::tests::invalid_utf8_in_a_tiny_string_is_rejected ... ok
+test packstream::tests::map_get ... ok
+test packstream::tests::too_deep_message_is_built_from_max_depth_and_reads_the_same_as_before ... ok
+test packstream::tests::truncated_and_unknown ... ok
+test server::tests::a_message_that_never_terminates_is_capped_instead_of_buffered_forever ... ok
+test packstream::tests::known_encodings ... ok
+test packstream::tests::map_get_returns_the_last_matching_key_not_the_first ... ok
+test packstream::tests::max_depth_nesting_decodes ... ok
+test packstream::tests::truncated_container_announcements_are_rejected_before_budget_or_allocation ... ok
+test server::tests::a_connection_level_error_is_not_resource_exhaustion ... ok
+test packstream::tests::round_trips_every_kind_and_size ... ok
+test server::tests::a_malformed_message_gets_a_failure_then_the_connection_closes ... ok
+test server::tests::emfile_and_enfile_are_resource_exhaustion ... ok
+test server::tests::enobufs_is_resource_exhaustion_with_the_macos_errno ... ok
+test server::tests::coalesced_messages_each_have_their_own_payload_limit ... ok
+test server::tests::decoded_overbudget_cleanup_precedes_a_blocked_failure_write ... ok
+test server::tests::decoded_overbudget_begin_is_fatal_before_engine_and_releases_permit ... ok
+test server::tests::fragmented_second_message_keeps_its_accumulated_payload_size ... ok
+test server::tests::authentication_timeout_releases_the_owned_connection_permit ... ok
+test server::tests::out_of_memory_is_resource_exhaustion_on_every_platform ... ok
+test server::tests::handshake_deadline_includes_a_blocked_version_reply ... ok
+test server::tests::malformed_and_oversize_cleanup_precedes_a_blocked_failure_write ... ok
+test server::tests::oversized_chunk_header_is_rejected_without_waiting_for_body ... ok
+test server::tests::reset_right_after_the_handshake_gets_one_failure_then_the_connection_closes ... ok
+test server::tests::expired_authentication_after_blocking_logon_never_executes_buffered_begin ... ok
+test server::tests::small_encoded_cap_is_independent_of_decoded_storage_cap ... ok
+test server::tests::socket_io_error_aborts_before_the_session_is_dropped ... ok
+test server::tests::protected_listener_applies_policy_to_each_connection ... ok
+test server::tests::socket_eof_aborts_a_pending_transaction ... ok
+test server::tests::trailing_payload_bytes_fail_before_calling_the_engine ... ok
+test session::protected_tests::explicit_run_impersonation_aborts_bound_transaction ... ok
+test session::protected_tests::failed_auth_is_generic_fatal_and_cannot_be_reset ... ok
+test server::tests::all_response_frames_share_one_absolute_write_budget ... ok
+test session::protected_tests::hello_credentials_do_not_authenticate_and_unsupported_engines_fail_closed ... ok
+test session::protected_tests::impersonation_is_rejected_before_begin_or_run ... ok
+test session::protected_tests::logoff_cleanup_failure_still_revokes_and_closes ... ok
+test session::protected_tests::logoff_discards_stream_and_transaction_before_revoking_identity ... ok
+test session::protected_tests::logoff_ready_and_tx_ready_revoke_without_committing ... ok
+test session::protected_tests::logoff_works_in_failed_state_and_allow_all_requires_fresh_login ... ok
+test session::protected_tests::protected_logon_passes_principal_and_reset_preserves_identity ... ok
+test session::protected_tests::repeated_logon_closes_and_revokes_previous_identity ... ok
+test session::tests::a_second_hello_from_ready_is_refused_and_the_session_becomes_defunct ... ok
+test session::request_identity_tests::durable_identity_validates_nested_metadata_and_never_silently_falls_back ... ok
+test session::tests::auto_commit_run_and_pull ... ok
+test session::tests::default_access_hook_rejects_any_protected_context ... ok
+test session::tests::discard_drops_remaining_rows_and_returns_to_ready ... ok
+test session::tests::failure_then_ignored_until_reset ... ok
+test session::tests::goodbye_answers_nothing ... ok
+test session::tests::out_of_place_request_fails_invalid_and_enters_failed ... ok
+test session::tests::pull_in_batches_reports_has_more ... ok
+test session::tests::reset_after_hello_but_before_logon_is_refused_and_the_session_becomes_defunct ... ok
+test session::tests::reset_right_after_the_handshake_is_refused_and_the_session_becomes_defunct ... ok
+test session::tests::rollback_returns_to_ready_without_a_bookmark ... ok
+test session::tests::route_is_refused_with_a_failure ... ok
+test session::tests::run_after_hello_but_before_logon_is_refused_and_the_session_becomes_defunct_not_failed ... ok
+test session::tests::run_failure_inside_a_transaction_goes_to_failed ... ok
+test session::tests::stub_transaction_does_not_fabricate_a_bookmark ... ok
+test session::tests::telemetry_is_acknowledged_in_ready_and_tx_ready_without_changing_state ... ok
+test session::tests::tx_pull_in_batches_reports_has_more_and_stays_in_the_transaction ... ok
+test session::tests::transaction_mode_is_validated_and_legacy_read_support_fails_closed ... ok
+test server::tests::authentication_deadline_bounds_success_and_failure_writes ... FAILED
+test server::tests::valid_handshake_with_a_deadline_keeps_established_sessions_open ... ok
+test server::tests::silent_and_slow_drip_handshakes_time_out_and_release_the_permit ... ok
+test server::tests::login_clears_the_deadline_and_logoff_starts_a_fresh_one ... ok
+test server::tests::blocking_query_is_excluded_from_authenticated_request_io_budget ... ok
+test server::tests::complete_authenticated_requests_renew_the_io_budget ... ok
+test server::tests::authenticated_idle_noops_and_partial_requests_expire_and_abort_pending_transaction ... ok
+test server::tests::unauthenticated_idle_hello_noops_and_partial_logon_do_not_renew_deadline ... ok
+
+failures:
+
+---- server::tests::authentication_deadline_bounds_success_and_failure_writes stdout ----
+
+thread 'server::tests::authentication_deadline_bounds_success_and_failure_writes' (18163786) panicked at crates/bolt/src/server.rs:1090:57:
+called `Result::unwrap()` on an `Err` value: Kind(BrokenPipe)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    server::tests::authentication_deadline_bounds_success_and_failure_writes
+
+test result: FAILED. 92 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+error: test failed, to rerun pass `-p brainwire-bolt --lib`

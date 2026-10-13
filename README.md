@@ -11,7 +11,7 @@ adapter; the platform remains the first integration target.
 > **Status: local MVP development.** The Rust workspace contains the RocksDB
 > storage foundation, graph operations, a local durable Bolt/Cypher server,
 > configuration commands, a Cypher subset parser and atomic executor, and an
-> interactive terminal backoffice and connected read-only workspace. The server is single-node and disables
+> interactive terminal backoffice and connected read-only workspace. The default server is standalone and disables
 > authentication by default; optional service-token protection now grants read/write
 > access per named graph. Optional trusted static node-visibility policies now
 > filter queries, traversal, analytics and the connected Graph pane. Native TLS, human-password login and JWT validation are
@@ -19,7 +19,9 @@ adapter; the platform remains the first integration target.
 > cooperative execution deadlines are enforced; a hard process-memory ceiling
 > remains pending. Decoded request allocations and authenticated network IO now
 > have independent limits. A verified single-host TLS proxy is available; native
-> TLS and replicated failover remain pending. The design is in
+> Bolt TLS remains pending. Opt-in experimental three-voter quorum replication
+> is available with authenticated peer transport and leader election; see
+> [the quorum guide](docs/quorum-replication.md). The design is in
 > [the approved spec](docs/superpowers/specs/2026-09-24-brainwire-design.md),
 > the implementation tasks in
 > [the MVP plan](docs/superpowers/plans/2026-09-26-brainwire-mvp.md), and session
@@ -40,8 +42,10 @@ Measurements are synthetic localhost observations; client node ACL integration
 and protected target-cluster qualification remain separate release gates.
 The [ACL/incremental follow-up](docs/benchmarks/2026-10-13-beta-acl.md) binds
 private-ACL, Python partial mutation, pinned snapshot differences and local
-Compose/Kubernetes/Swarm recovery to the corrected candidate. Actual quorum
-replication and dynamic client adapter integration are still pending.
+Compose/Kubernetes/Swarm recovery to that corrected standalone candidate.
+[Experimental quorum qualification](docs/benchmarks/2026-10-13-quorum.md) separately
+tests three native processes, partitions, leader loss and retained-state restart.
+Dynamic client adapter integration and multi-machine quorum deployment remain pending.
 
 The terminal backoffice design is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with
@@ -126,9 +130,9 @@ for the synthetic example, policy and limits; configured node visibility filters
 candidates before ranking. Automated evidence collection remains pending, and
 protected readers still need a grant on the selected graph.
 
-[Deterministic apply](docs/deterministic-apply.md) is an experimental per-store
-foundation with ordered mutations and atomic applied-index persistence. It is
-not activated in the server and does not implement consensus or quorum durability.
+[Deterministic apply](docs/deterministic-apply.md) captures concrete mutations
+for the optional quorum server. OpenRaft orders committed transactions across
+all named graphs; standalone operation continues to use local commits.
 
 ## Local development
 
@@ -191,10 +195,11 @@ prefix directly, avoiding unrelated edges. See the
 [mixed-type neighborhood benchmark](docs/benchmarks/2026-10-06-typed-adjacency.md)
 and its Python batch, rollback and restart acceptance check.
 [Docker Compose, Kubernetes and Swarm templates](docs/orchestrators.md) package
-a retained single-writer volume and recovery probes; replication remains pending.
+a retained single-writer volume and recovery probes. They have not yet been
+qualified with the new quorum mode.
 The proposed [distributed deployment and routing design](docs/design/2026-10-12-distributed-deployment.md)
 maps future members to Pods/tasks, machines and volumes, with separate client
-entry and authenticated peer paths; these cluster contracts are not implemented.
+entry and authenticated peer paths; multi-machine orchestration and routing qualification remain pending.
 The [October 31 beta roadmap](docs/2026-10-pilot-roadmap.md) now targets working
 minimums across all requested areas, with an October 12 feasibility gate and
 explicit performance/recovery acceptance. It is a target, not an implemented
@@ -213,7 +218,7 @@ configured and no code has been pushed.
 | Topic | Decision |
 |---|---|
 | Motivation | RAM and scale ceilings, a license that works for BYOC, native ACL and events, R&D. Several graphs/databases per instance. |
-| Scale | A graph lives entirely on one node in the current stage. Kubernetes and Docker Swarm are deployment targets; multi-machine replication and later partitioning are explicit goals, not current capabilities. The ID and file formats must not prevent partitioning later. |
+| Scale | Each member holds a full graph copy. Experimental fixed three-voter replication is implemented; Kubernetes/Swarm quorum qualification and graph partitioning remain pending. The ID and file formats must not prevent partitioning later. |
 | Volume | 5 billion elements per graph with 16 GB of RAM. Most of it lives on disk, compact and easy to recover. |
 | Query | Bolt protocol + Cypher, starting from the measured subset (code + `run_cypher` logs), each construct validated against the openCypher TCK. |
 | Events | Entity timeline (today `Event` + `HAD_EVENT`): append-only, read by entity and time range. |

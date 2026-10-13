@@ -20,6 +20,15 @@ pub fn run(
     params_file: Option<&Path>,
     config: Option<&Path>,
 ) -> Result<(), String> {
+    if database
+        .parent()
+        .is_some_and(|parent| parent.join(".brainwire-cluster.json").exists())
+    {
+        return Err(
+            "cluster stores cannot execute embedded local writes; use the quorum Bolt endpoint"
+                .into(),
+        );
+    }
     let params = match params_file {
         Some(path) => {
             let text = std::fs::read_to_string(path)

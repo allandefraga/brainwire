@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 480, in <module>
+    print(json.dumps(self_check() if args.self_check else run(args.binary, args.rows), indent=2))
+                                                          ~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 411, in run
+    report["fresh_follower_catchup"] = caught_up(timeout=60)
+                                       ~~~~~~~~~^^^^^^^^^^^^
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 302, in caught_up
+    raise RuntimeError("all owned replicas did not catch up")
+RuntimeError: all owned replicas did not catch up

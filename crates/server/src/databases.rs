@@ -28,6 +28,25 @@ pub(crate) fn valid_name(name: &str) -> bool {
 
 impl Databases {
     pub fn open_all(config: &Config) -> Result<Self, String> {
+        if config
+            .server
+            .data_dir
+            .join(".brainwire-cluster.json")
+            .exists()
+        {
+            return Err(
+                "cluster stores require serve --cluster-config; standalone access is refused"
+                    .into(),
+            );
+        }
+        Self::open(config, true)
+    }
+
+    pub(crate) fn open_replica(config: &Config) -> Result<Self, String> {
+        Self::open(config, false)
+    }
+
+    fn open(config: &Config, discover: bool) -> Result<Self, String> {
         let data_dir = config.server.data_dir.clone();
         fs::create_dir_all(&data_dir)
             .map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
@@ -55,6 +74,9 @@ impl Databases {
                     .map_err(|_| "memory.query exceeds platform address size")?,
             )),
         };
+        if !discover {
+            return Ok(registry);
+        }
         for entry in fs::read_dir(&registry.data_dir)
             .map_err(|e| format!("cannot list {}: {e}", registry.data_dir.display()))?
         {

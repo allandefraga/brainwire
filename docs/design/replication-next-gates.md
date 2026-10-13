@@ -1,49 +1,39 @@
-# Gates after deterministic apply
+# Gates after initial quorum replication
 
-Status: design queue, not implemented or a distributed beta claim. The current
-[deterministic apply ledger](../deterministic-apply.md) applies concrete mutations
-atomically inside one store. Kubernetes/Swarm qualification exercises one retained
-owner. Neither elects a database leader or replicates acknowledged writes.
+Status: experimental fixed three-voter protocol implemented on October 13.
+See the [operations guide](../quorum-replication.md) and
+[bound qualification report](../benchmarks/2026-10-13-quorum.md).
 
-## Smallest coherent architecture to review next
+One OpenRaft group orders concrete mutations across named graph stores. Votes,
+log entries, committed/applied progress and request deduplication are durable.
+Acknowledgement follows majority commitment and local application. Leader-only
+reads obtain a quorum barrier before opening the graph snapshot. Per-graph apply
+ledgers recover the crash gap before advancing the instance applied marker.
+Graph creation initializes physical stores before publishing the registry.
 
-Use one consensus group per database instance initially, with explicit membership
-and private authenticated peer transport. Named graphs remain isolated stores but
-share the ordered instance log. Do not replay Cypher independently on followers:
-resolve identities, generated IDs, schema and concrete writes before proposing an
-entry. Acknowledgement requires durable quorum commitment and local application.
+## Remaining release gates
 
-The global log index and each graph's contiguous apply sequence are different.
-An entry carries its target graph and graph sequence. The existing per-store ledger
-can recover a crash between graph application and advancement of an instance
-applied marker by replaying the same latest digest. Graph creation/deletion and
-registry metadata need their own recoverable ordering protocol. Multi-graph writes
-are not automatically atomic merely because there is one log.
+1. Implement and review snapshots covering registry, schemas, graph data, IDs,
+   indexes, ACL, cursors, deduplication and per-graph ledgers at one log position.
+   Transfer must have checksums, staging, atomic installation and interrupted
+   installation recovery. Only then enable safe log purging/compaction.
+2. Implement learner catchup and joint membership changes. A permanently erased
+   voter needs a new identity; never reuse an ID after losing its votes/logs.
+   Normal startup deliberately refuses missing identity, Raft state or stores.
+3. Qualify log-cap exhaustion, long-running workloads, sustained write throughput,
+   power loss and storage corruption with a frozen release binary and disks.
+4. Qualify three-machine Kubernetes/Swarm deployments: independent durable whole
+   instance volumes, peer mTLS, leader-aware client routing, readiness, partitions,
+   machine loss, rolling upgrades and explicit measured RPO/RTO.
+5. Decide supported ontology evolution and graph deletion protocols. Current
+   replicated lifecycle supports initial schemas and graph creation only.
 
-Serve linearizable reads only after a quorum read barrier, and create the store
-snapshot after that barrier. Fence stale leaders and followers from writes; do not
-route arbitrary Bolt writes through a generic load balancer to every replica.
-Define a separate explicitly stale follower-read mode only if required.
+The initial acceptance uses three independent native processes on one host,
+200 synthetic nodes, two graphs, partitions, leader death, majority loss and
+retained-state restart. It is not evidence of snapshot transfer, erased-machine
+replacement or target-cluster deployment. Existing standalone orchestrator
+receipts remain evidence for their original frozen candidates only.
 
-Snapshots must bind the registry, schema, allocation state, ACL, import cursors and
-per-graph ledgers to one log position. Snapshot transfer needs checksums, staging,
-atomic installation and interruption recovery. Object storage may hold checkpoints;
-it does not replace consensus, local RocksDB ownership or quorum durability.
-
-## Acceptance before enabling replication
-
-1. Review the consensus library, failure model, entry format, membership changes
-   and idempotency key protocol. Lost acknowledgements must not duplicate writes.
-2. Three independently owned stores receive committed concrete entries; every
-   follower's audit and logical state matches, including private ACL and cursors.
-3. Kill the leader before/after durable commit and before/after apply. A new leader
-   retains every acknowledged write; uncommitted work may disappear.
-4. Partition a minority, reject its writes, continue with quorum and reconcile it.
-   Lose quorum and refuse writes rather than acknowledging unsafe local progress.
-5. Interrupt snapshot installation, restart all members, replace a failed machine
-   and test storage exhaustion. Preserve explicit RPO/RTO evidence by binary hash.
-6. Only then qualify Kubernetes/Swarm membership, routing, readiness, retained
-   volumes and rolling upgrades across multiple machines.
-
-A load-balanced set of containers is not evidence for any of these gates. No Raft
-server, quorum protocol, peer transport or machine-loss guarantee is enabled today.
+Object storage can hold future coordinated snapshots; it does not replace
+consensus, synchronous local durability or majority acknowledgement. A generic
+load balancer must not send arbitrary Bolt transactions to followers.

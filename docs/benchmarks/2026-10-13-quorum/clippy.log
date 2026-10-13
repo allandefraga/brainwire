@@ -1,0 +1,18 @@
+    Blocking waiting for file lock on build directory
+    Checking brainwire-core v0.1.0 (/Users/fraga/Documents/brainwire/crates/core)
+    Checking tempfile v3.27.0
+    Checking num-traits v0.2.19
+    Checking brainwire-tui v0.1.0 (/Users/fraga/Documents/brainwire/crates/tui)
+    Checking rand_chacha v0.9.0
+    Checking rusty-fork v0.3.1
+    Checking rust_decimal v1.43.0
+    Checking chrono v0.4.45
+    Checking proptest v1.11.0
+    Checking brainwire-store v0.1.0 (/Users/fraga/Documents/brainwire/crates/store)
+    Checking brainwire-bolt v0.1.0 (/Users/fraga/Documents/brainwire/crates/bolt)
+    Checking byte-unit v5.2.6
+    Checking brainwire-cypher v0.1.0 (/Users/fraga/Documents/brainwire/crates/cypher)
+    Checking openraft v0.9.25
+    Checking brainwire-replication v0.1.0 (/Users/fraga/Documents/brainwire/crates/replication)
+    Checking brainwire-server v0.1.0 (/Users/fraga/Documents/brainwire/crates/server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 15s

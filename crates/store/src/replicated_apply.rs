@@ -1,15 +1,15 @@
-//! Experimental deterministic per-store apply, deliberately disconnected from serving.
+//! Deterministic per-store apply used by the optional quorum server.
 //!
 //! Trusted concrete CF mutations include all graph/index/identity/ACL/cursor bytes;
-//! this module does not capture normal commits, decode graph semantics, run Raft,
-//! acknowledge a quorum, synchronize ID allocator caches or atomically update a
+//! this module does not capture ordinary commits, decode graph semantics, run Raft,
+//! acknowledge a quorum or atomically update a
 //! server's graph registry. Apply-only stores must not perform independent writes.
 //! Bounds constrain canonical entry bytes, not aggregate process memory.
 
 use sha2::{Digest, Sha256};
 
 use crate::db::{Database, StoreError, COMMIT_SEQUENCE_KEY};
-use crate::txn::{Cf, TxnError};
+use crate::txn::{Cf, Txn, TxnError};
 
 const MAGIC: &[u8] = b"BWAP";
 const LEDGER_PREFIX: &[u8] = b"replicated-apply/";
@@ -205,6 +205,10 @@ impl Batch {
         }
     }
 
+    pub(crate) fn validate(&self, limits: ApplyLimits) -> Result<(), ApplyError> {
+        self.prepare(limits).map(|_| ())
+    }
+
     pub fn canonical_bytes(&self, limits: ApplyLimits) -> Result<Vec<u8>, ApplyError> {
         let (entries, size) = self.prepare(limits)?;
         let mut result = Vec::with_capacity(size);
@@ -333,6 +337,15 @@ pub fn applied_state(database: &Database) -> Result<Option<AppliedState>, ApplyE
         .transpose()
 }
 
+/// Snapshot ledger read with a tracked dependency for transaction preparation.
+pub fn applied_state_in(transaction: &mut Txn<'_>) -> Result<Option<AppliedState>, ApplyError> {
+    transaction
+        .get_for_update(Cf::Meta, LEDGER_KEY)?
+        .as_deref()
+        .map(ledger)
+        .transpose()
+}
+
 /// Applies trusted materialized bytes and progress in one existing synchronous commit.
 /// A conflict is returned to the caller; no hidden retry or quorum acknowledgement.
 pub fn apply(
@@ -391,6 +404,7 @@ pub fn apply(
     marker.extend_from_slice(&state.digest);
     transaction.put(Cf::Meta, LEDGER_KEY.to_vec(), marker);
     let sequence = transaction.commit()?;
+    database.clear_id_cache_after_apply();
     Ok(ApplyReceipt {
         state,
         already_applied: false,

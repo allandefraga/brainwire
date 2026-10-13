@@ -30,9 +30,12 @@ with synthetic tests against the actual engine. It is not native CDC.
 
 The [candidate report](benchmarks/2026-10-13-beta-acl.md) records deployment and
 recovery evidence by binary/image hash. Multiple pods do not provide replication.
-The experimental deterministic apply ledger is a storage foundation only:
-consensus, network replication, quorum acknowledgement and leader election remain
-unimplemented. Keep them as a separate dependency-heavy workstream.
+The optional [three-voter quorum protocol](quorum-replication.md) now integrates
+OpenRaft, authenticated peer transport, durable votes/logs, linearizable read
+barriers and committed deterministic apply. Its local native-process fault
+qualification is separate from the earlier standalone container receipts.
+Snapshots, log compaction, dynamic membership, erased-voter replacement and
+multi-machine Kubernetes/Swarm qualification remain release gates.
 
 ## Capacity and release rule
 

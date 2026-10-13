@@ -1,0 +1,28 @@
+{"partial_checks": ["committed bootstrap/create register two graphs; indexed nodes and trusted ACL restrict Alice; follower BEGIN refused", "symmetric old-leader partition: majority elects/writes; staged old COMMIT and old read barrier refuse acknowledgement", "new leader killed after acknowledged writes; promotion preserves nodes/index/ACL/cursor and allocates another unique node", "two voters stopped: remaining writer/read barriers refuse; recovered majority has no acknowledged no-quorum mutation", "successful COMMIT acknowledgement intentionally ignored; stable explicit metadata retry reports RequestAlreadyCommitted and durable outcome without duplicate mutation"], "binary_sha256": "300c8da6a37c0dc96fa12834a4b6ed831c6a29f39d1c3f630e7a3d553345480e"}
+Owned replica 1 final log (at most 64 KiB):
+brainwire serve 127.0.0.1:54609 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:54609 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:54609 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+
+Owned replica 2 final log (at most 64 KiB):
+brainwire serve 127.0.0.1:54610 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:54610 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:54610 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+
+Owned replica 3 final log (at most 64 KiB):
+brainwire serve 127.0.0.1:54611 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+
+thread 'tokio-rt-worker' (17934366) panicked at /Users/fraga/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/openraft-0.9.25/src/progress/entry/mod.rs:165:13:
+follower log reversion is not allowed without `--features loosen-follower-log-revert`; matching: T3-N3-19; conflict: 19
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+Traceback (most recent call last):
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 492, in <module>
+    print(json.dumps(self_check() if args.self_check else run(args.binary, args.rows), indent=2))
+                                                          ~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 413, in run
+    report["fresh_follower_catchup"] = caught_up(timeout=60)
+                                       ~~~~~~~~~^^^^^^^^^^^^
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 304, in caught_up
+    raise RuntimeError(f"all owned replicas did not catch up: {snapshots}")
+RuntimeError: all owned replicas did not catch up: [{'cluster_id': 'acceptance-0a40d1ab463944ff9fe4fc4f2c90cdcd', 'node_id': 1, 'state': 'Follower', 'current_term': 4, 'leader': 2, 'last_log_index': 20, 'last_applied': 20, 'committed_index': 20, 'membership': [1, 2, 3], 'log_bytes': 11982, 'running': True}, {'cluster_id': 'acceptance-0a40d1ab463944ff9fe4fc4f2c90cdcd', 'node_id': 2, 'state': 'Leader', 'current_term': 4, 'leader': 2, 'last_log_index': 20, 'last_applied': 20, 'committed_index': 20, 'membership': [1, 2, 3], 'log_bytes': 11982, 'running': True}, {'cluster_id': 'acceptance-0a40d1ab463944ff9fe4fc4f2c90cdcd', 'node_id': 3, 'state': 'Leader', 'current_term': 3, 'leader': 3, 'last_log_index': 19, 'last_applied': 19, 'committed_index': 19, 'membership': [1, 2, 3], 'log_bytes': 11906, 'running': True}]

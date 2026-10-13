@@ -1,0 +1,489 @@
+{
+  "binary_sha256": "ffd228769250700adb182ad6f1064ecb66e93581e0b91ad9fbcaa3d16c241cd5",
+  "driver": "6.3.0",
+  "rows": 200,
+  "synthetic": true,
+  "checks": [
+    "each fresh owned voter explicitly provisioned once; restarts never provision or replace voter persistence",
+    "committed bootstrap/create register two graphs; indexed nodes and trusted ACL restrict Alice; follower BEGIN refused",
+    "symmetric old-leader partition: majority elects/writes; staged old COMMIT and old read barrier refuse acknowledgement",
+    "new leader killed after acknowledged writes; promotion preserves nodes/index/ACL/cursor and allocates another unique node",
+    "two voters stopped: remaining writer/read barriers refuse; recovered majority has no acknowledged no-quorum mutation",
+    "successful COMMIT acknowledgement intentionally ignored; stable explicit metadata retry reports RequestAlreadyCommitted and durable outcome without duplicate mutation",
+    "missing committed graph refuses startup without recreation; intact majority writes; restored graph with retained votes/log catches up",
+    "missing voter Raft directory refuses startup without recreation; restored original persistent votes/log catches up",
+    "missing initialized committed registry refuses startup; restoring original registry preserves voter history and catches up",
+    "missing persisted voter identity refuses startup without provisioning; restoring original identity permits restart",
+    "full process restart retains exactly acknowledged data; quiescent offline audits and all-11-CF logical graph digests agree across all voters"
+  ],
+  "scope": "three independent native processes on loopback; not a machine-loss, TLS or snapshot qualification",
+  "bootstrap": {
+    "Proposed": {
+      "reply": "Initialized",
+      "log_index": 2
+    }
+  },
+  "create_aux": {
+    "Proposed": {
+      "reply": "Initialized",
+      "log_index": 3
+    }
+  },
+  "post_heal_status": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Follower",
+      "current_term": 2,
+      "leader": 3,
+      "last_log_index": 212,
+      "last_applied": 212,
+      "committed_index": 212,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 190769,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 2,
+      "leader": 3,
+      "last_log_index": 212,
+      "last_applied": 212,
+      "committed_index": 212,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 190769,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Leader",
+      "current_term": 2,
+      "leader": 3,
+      "last_log_index": 212,
+      "last_applied": 212,
+      "committed_index": 212,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 190769,
+      "running": true
+    }
+  ],
+  "request_outcome": {
+    "Lookup": {
+      "Applied": {
+        "revision": 208
+      }
+    }
+  },
+  "missing_storage_refusals": {
+    "pages": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: committed graph store missing; rebuild this replica from retained consensus history\n"
+    },
+    ".brainwire-raft": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: persisted voter identity/consensus store missing; serve never provisions a voter\n"
+    },
+    ".brainwire-graphs.json": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: committed graph registry missing; refusing empty recovery\n"
+    },
+    ".brainwire-cluster.json": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: persisted voter identity/consensus store missing; serve never provisions a voter\n"
+    }
+  },
+  "restored_graph_catchup": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 216,
+      "last_applied": 216,
+      "committed_index": 216,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 193048,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 216,
+      "last_applied": 216,
+      "committed_index": 216,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 193048,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 216,
+      "last_applied": 216,
+      "committed_index": 216,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 193048,
+      "running": true
+    }
+  ],
+  "restored_raft_catchup": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 217,
+      "last_applied": 217,
+      "committed_index": 217,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 193890,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 217,
+      "last_applied": 217,
+      "committed_index": 217,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 193890,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 217,
+      "last_applied": 217,
+      "committed_index": 217,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 193890,
+      "running": true
+    }
+  ],
+  "restored_registry_catchup": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 218,
+      "last_applied": 218,
+      "committed_index": 218,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 194822,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 218,
+      "last_applied": 218,
+      "committed_index": 218,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 194822,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 218,
+      "last_applied": 218,
+      "committed_index": 218,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 194822,
+      "running": true
+    }
+  ],
+  "restored_identity_catchup": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    }
+  ],
+  "voter_replacement": "unsupported: fully wiped voters require new identity and joint membership, not same-ID automatic recreation",
+  "before_full_restart": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    }
+  ],
+  "after_full_restart": [
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-e55ebfd149b448d48071aa379f41cd2a",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 219,
+      "last_applied": 219,
+      "committed_index": 219,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 195789,
+      "running": true
+    }
+  ],
+  "offline_audits": {
+    "1": {
+      "graphs": {
+        "aux": {
+          "logical_sha256": "39cb9bc2a48c20f5cd1362360e1e7aef5a3c2148730bd14ffc112c8e322b11e4",
+          "revision": 2,
+          "status": "ok"
+        },
+        "pages": {
+          "logical_sha256": "a21b6f1f704b74b620f9b3b19ea5c95886b2b72f96282d1818fed56ef5b86a1a",
+          "revision": 212,
+          "status": "ok"
+        }
+      },
+      "result": "PASS"
+    },
+    "2": {
+      "graphs": {
+        "aux": {
+          "logical_sha256": "39cb9bc2a48c20f5cd1362360e1e7aef5a3c2148730bd14ffc112c8e322b11e4",
+          "revision": 2,
+          "status": "ok"
+        },
+        "pages": {
+          "logical_sha256": "a21b6f1f704b74b620f9b3b19ea5c95886b2b72f96282d1818fed56ef5b86a1a",
+          "revision": 212,
+          "status": "ok"
+        }
+      },
+      "result": "PASS"
+    },
+    "3": {
+      "graphs": {
+        "aux": {
+          "logical_sha256": "39cb9bc2a48c20f5cd1362360e1e7aef5a3c2148730bd14ffc112c8e322b11e4",
+          "revision": 2,
+          "status": "ok"
+        },
+        "pages": {
+          "logical_sha256": "a21b6f1f704b74b620f9b3b19ea5c95886b2b72f96282d1818fed56ef5b86a1a",
+          "revision": 212,
+          "status": "ok"
+        }
+      },
+      "result": "PASS"
+    }
+  },
+  "logical_graph_digests": {
+    "aux": "39cb9bc2a48c20f5cd1362360e1e7aef5a3c2148730bd14ffc112c8e322b11e4",
+    "pages": "a21b6f1f704b74b620f9b3b19ea5c95886b2b72f96282d1818fed56ef5b86a1a"
+  },
+  "snapshots": "unsupported: no snapshot transfer or compaction acceptance claimed",
+  "result": "PASS",
+  "childProcessesStopped": true,
+  "faultProxiesStopped": true,
+  "ownedResourcesRemoved": true
+}

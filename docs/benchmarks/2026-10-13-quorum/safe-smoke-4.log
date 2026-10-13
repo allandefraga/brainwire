@@ -1,0 +1,26 @@
+{"partial_checks": ["each fresh owned voter explicitly provisioned once; restarts never provision or replace voter persistence", "committed bootstrap/create register two graphs; indexed nodes and trusted ACL restrict Alice; follower BEGIN refused", "symmetric old-leader partition: majority elects/writes; staged old COMMIT and old read barrier refuse acknowledgement", "new leader killed after acknowledged writes; promotion preserves nodes/index/ACL/cursor and allocates another unique node", "two voters stopped: remaining writer/read barriers refuse; recovered majority has no acknowledged no-quorum mutation", "successful COMMIT acknowledgement intentionally ignored; stable explicit metadata retry reports RequestAlreadyCommitted and durable outcome without duplicate mutation", "missing committed graph refuses startup without recreation; intact majority writes; restored graph with retained votes/log catches up", "missing voter Raft directory refuses startup without recreation; restored original persistent votes/log catches up"], "binary_sha256": "0db6b26ab4efb976bc3e6bd5fe2f5b7b006fc34afc2ca30e1eae2196fd9f698b"}
+Owned replica 1 final log (at most 64 KiB):
+brainwire serve 127.0.0.1:55645 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55645 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+
+Owned replica 2 final log (at most 64 KiB):
+brainwire serve 127.0.0.1:55646 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55646 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55646 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55646 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55646 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55646 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+
+Owned replica 3 final log (at most 64 KiB):
+brainwire serve 127.0.0.1:55647 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55647 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+brainwire serve 127.0.0.1:55647 databases=["aux", "pages"] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)
+
+Traceback (most recent call last):
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 516, in <module>
+    print(json.dumps(self_check() if args.self_check else run(args.binary, args.rows), indent=2))
+                                                          ~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/fraga/Documents/brainwire/crates/server/tests/quorum_replication.py", line 452, in run
+    identities = [row["node"].element_id for row in node_rows]
+                  ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'dict' object has no attribute 'element_id'

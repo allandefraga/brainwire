@@ -1,0 +1,12 @@
+{
+  "result": "FAIL",
+  "binary_sha256": "300c8da6a37c0dc96fa12834a4b6ed831c6a29f39d1c3f630e7a3d553345480e",
+  "rows": 4,
+  "failed_stage": "fresh_follower_catchup",
+  "error": "OpenRaft follower log reversion panics without loosen-follower-log-revert; all-member convergence timed out",
+  "log": "smoke-4.log",
+  "log_sha256": "c798018f1210323797bc373906369d743690f15a85a3db814f9cc3383ffb18e1",
+  "not_an_acceptance_pass": true,
+  "scope": "unsafe-test-unsupported",
+  "interpretation": "The test erased persistent Raft log and votes for an existing voter identity, violating the supported Raft persistence contract. It is not a supported replacement acceptance test and is not claimed fixed."
+}

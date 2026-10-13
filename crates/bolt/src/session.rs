@@ -23,6 +23,42 @@ pub struct EngineError {
     pub message: String,
 }
 
+fn durable_request_id(extra: &PackValue) -> Result<Option<&str>, Response> {
+    if matches!(extra, PackValue::Map(fields) if fields.iter().filter(|(key,_)| key == "tx_metadata").count() > 1)
+    {
+        return Err(invalid("duplicate transaction metadata"));
+    }
+    let Some(metadata) = extra.get("tx_metadata") else {
+        return Ok(None);
+    };
+    let PackValue::Map(fields) = metadata else {
+        return Err(invalid("transaction metadata must be a map"));
+    };
+    if fields
+        .iter()
+        .filter(|(key, _)| key == "brainwire_request_id")
+        .count()
+        > 1
+    {
+        return Err(invalid("duplicate durable request identity"));
+    }
+    match metadata.get("brainwire_request_id") {
+        None => Ok(None),
+        Some(PackValue::String(id))
+            if !id.is_empty()
+                && id.len() <= 128
+                && id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"-_:.".contains(&c)) =>
+        {
+            Ok(Some(id))
+        }
+        _ => Err(invalid(
+            "brainwire_request_id must be an ASCII identifier of 1..128 bytes",
+        )),
+    }
+}
+
 pub trait QueryEngine {
     /// Engines must explicitly support protected identities; legacy engines fail closed.
     fn set_access(&mut self, access: AccessContext) -> Result<(), EngineError> {
@@ -43,6 +79,25 @@ pub trait QueryEngine {
             code: "Neo.ClientError.Security.Forbidden".into(),
             message: "engine does not support read-only transactions".into(),
         })
+    }
+    /// Optional durable request identity; unsupported engines reject it explicitly.
+    fn begin_with_request_id(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+    ) -> Result<(), EngineError> {
+        if request_id.is_some() {
+            return Err(EngineError {
+                code: "Neo.ClientError.Request.Invalid".into(),
+                message: "engine does not support durable request identities".into(),
+            });
+        }
+        if read_only {
+            self.begin_read_only(db)
+        } else {
+            self.begin(db)
+        }
     }
     /// Commit and optionally return an engine-owned bookmark.
     /// Return success only after completion; a failure is followed by `abort`.
@@ -257,14 +312,12 @@ impl<E: QueryEngine> Session<E> {
             Some(PackValue::String(mode)) if mode == "r" => true,
             _ => return Err(invalid("mode must be r or w")),
         };
+        let request_id = durable_request_id(extra)?;
         // A failed begin may still own partially initialized engine state.
         self.pending = true;
-        if read_only {
-            self.engine.begin_read_only(self.db.as_deref())
-        } else {
-            self.engine.begin(self.db.as_deref())
-        }
-        .map_err(Self::engine_failure)
+        self.engine
+            .begin_with_request_id(self.db.as_deref(), read_only, request_id)
+            .map_err(Self::engine_failure)
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
@@ -1085,5 +1138,51 @@ mod protected_tests {
         let trace = t.lock().unwrap();
         assert!(trace.events.contains(&"abort"));
         assert!(!trace.events.contains(&"run"));
+    }
+}
+
+#[cfg(test)]
+mod request_identity_tests {
+    use super::*;
+    fn extra(value: PackValue) -> PackValue {
+        PackValue::Map(vec![(
+            "tx_metadata".into(),
+            PackValue::Map(vec![("brainwire_request_id".into(), value)]),
+        )])
+    }
+    #[test]
+    fn durable_identity_validates_nested_metadata_and_never_silently_falls_back() {
+        assert_eq!(
+            durable_request_id(&extra(PackValue::String("batch-42".into()))).unwrap(),
+            Some("batch-42")
+        );
+        for id in ["", "with space", "é", &"x".repeat(129)] {
+            assert!(durable_request_id(&extra(PackValue::String(id.into()))).is_err());
+        }
+        assert!(durable_request_id(&extra(PackValue::Int(42))).is_err());
+        assert!(durable_request_id(&PackValue::Map(vec![(
+            "tx_metadata".into(),
+            PackValue::Null
+        )]))
+        .is_err());
+        let duplicate = PackValue::Map(vec![(
+            "tx_metadata".into(),
+            PackValue::Map(vec![
+                (
+                    "brainwire_request_id".into(),
+                    PackValue::String("one".into()),
+                ),
+                (
+                    "brainwire_request_id".into(),
+                    PackValue::String("two".into()),
+                ),
+            ]),
+        )]);
+        assert!(durable_request_id(&duplicate).is_err());
+        let mut engine = StubEngine;
+        assert!(engine
+            .begin_with_request_id(None, false, Some("batch-42"))
+            .is_err());
+        assert!(engine.begin_with_request_id(None, true, None).is_ok());
     }
 }

@@ -1,0 +1,26 @@
+{
+  "workspace_tests": {
+    "exit_code": 0,
+    "log": "workspace_tests.log",
+    "sha256": "e6887c36ec75af666b5fccc8f468736849bbf116d0a3cd8d5e58f85865458b2c",
+    "passed": 614,
+    "environment": {
+      "RUST_TEST_THREADS": "1"
+    }
+  },
+  "clippy": {
+    "exit_code": 0,
+    "log": "clippy.log",
+    "sha256": "7edc4f54f58180796005f544bd9486952d0f96bba96d30aea80dd163385ba69d"
+  },
+  "fmt": {
+    "exit_code": 0,
+    "log": "fmt.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "diff": {
+    "exit_code": 0,
+    "log": "diff.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

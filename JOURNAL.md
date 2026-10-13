@@ -39,6 +39,42 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-13 — Real fixed three-voter quorum protocol
+
+- **Requested:** implement quorum replication. Started 13:53:38 UTC; final
+  verification at 15:00 UTC. All work stayed local; no pushes or target deployment.
+- **Done:** optional OpenRaft 0.9.25 group across all named graphs, independent
+  synchronously durable votes/logs/commit/apply/deduplication, authenticated bounded
+  peer RPC and non-loopback mTLS. Leader-only transactions obtain a linearizable
+  quorum barrier before the graph snapshot. COMMIT prepares concrete mutations,
+  stages allocator counters and commits after majority agreement; followers never
+  replay Cypher. Per-graph revision CAS and command-bound ledgers fence stale
+  proposals and recover graph/global-applied crash ordering.
+- **Operations:** explicit one-time voter provision, guarded normal startup,
+  committed schema/graph creation, status/request lookup/offline audit. Stable
+  Python transaction metadata resolves duplicate requests; unknown commit outcomes
+  are nonretryable errors until resolved with the retained request identity.
+- **Safety fixes/review:** Astra reviewed plan and final implementation. Missing
+  published graph, registry, voter identity or Raft state refuses empty recovery.
+  An erased-voter same-ID experiment failed and is retained as diagnostic evidence;
+  this unsupported procedure is guarded, not advertised as recovery.
+- **Verified:** 614 workspace tests passed (single test thread), Clippy -D warnings,
+  fmt and diff checks. Frozen debug SHA `ffd228769250700adb182ad6f1064ecb66e93581e0b91ad9fbcaa3d16c241cd5`
+  passed 11 actual fault/restart checks with 200 synthetic nodes and two graphs;
+  all three eleven-CF logical digests match, all owned processes/proxies/data cleaned.
+  First full-suite attempt hit a pre-existing Bolt deadline timing failure during
+  concurrent compilation; unchanged assertions passed in the final isolated run.
+- **Evidence/docs:** `docs/quorum-replication.md`,
+  `docs/benchmarks/2026-10-13-quorum.md` and its bound source/check/fault receipts.
+  Existing standalone orchestrator evidence remains bound to its earlier candidate.
+- **Next step / blockers:** implement coordinated snapshots/log compaction and
+  learner/joint membership for new-identity disk-loss replacement. Then qualify
+  release throughput, power/storage failures and three-machine Kubernetes/Swarm
+  routing, peer TLS and persistent volumes. No current snapshot, purge, sharding,
+  dynamic membership, graph drop/schema migration or erased-member replacement.
+  Native Bolt TLS and dynamic client adapter remain separate gates. TUI unchanged.
+
+
 ### 2026-10-13 — Governed ingestion and recoverable deployment candidate
 
 - **Requested:** node ACL, DuckLake incremental ingestion, local container

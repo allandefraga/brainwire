@@ -70,6 +70,15 @@ pub enum ExecError {
     #[error(transparent)]
     Graph(GraphError),
 }
+impl From<brainwire_store::replicated_apply::ApplyError> for ExecError {
+    fn from(error: brainwire_store::replicated_apply::ApplyError) -> Self {
+        match error {
+            brainwire_store::replicated_apply::ApplyError::Transaction(error) => error.into(),
+            error => StoreError::Corrupt(format!("replication preparation: {error}")).into(),
+        }
+    }
+}
+
 impl From<GraphError> for ExecError {
     fn from(e: GraphError) -> Self {
         match e {
@@ -103,10 +112,19 @@ struct Context<'a, 'db> {
     visibility: Option<&'a ReadVisibility>,
 }
 
+/// Trusted prepared bytes; the caller must obtain quorum and apply before acknowledgement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedReplication {
+    pub expected_revision: u64,
+    pub batch: Vec<u8>,
+}
+
 /// Lifecycle of a shared query transaction. Terminal states cannot be reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryTransactionState {
     Active,
+    /// Overlay exported for quorum; this state is not a durable commit.
+    Prepared,
     Failed,
     Committed,
     RolledBack,
@@ -175,6 +193,7 @@ pub struct QueryTransaction<'db> {
     reservation: Option<budget::Reservation>,
     visibility: Option<ReadVisibility>,
     ran: bool,
+    replicated_mode: bool,
 }
 
 impl<'db> QueryTransaction<'db> {
@@ -214,6 +233,7 @@ impl<'db> QueryTransaction<'db> {
             reservation: None,
             visibility: None,
             ran: false,
+            replicated_mode: false,
         })
     }
 
@@ -228,6 +248,18 @@ impl<'db> QueryTransaction<'db> {
         let mut transaction = Self::begin_with_limits(db, limits)?;
         transaction.reservation = Some(budget::Reservation::new(pool));
         Ok(transaction)
+    }
+
+    /// Select transaction-local IDs before the first RUN. Direct commit is refused;
+    /// the caller must prepare, obtain quorum and apply the materialized entry.
+    pub fn with_replicated_ids(mut self) -> Self {
+        if self.ran || self.state != QueryTransactionState::Active {
+            self.fail();
+            return self;
+        }
+        self.txn = self.txn.take().map(Txn::with_replicated_ids);
+        self.replicated_mode = true;
+        self
     }
 
     /// Attach a trusted immutable read policy before the first RUN.
@@ -356,6 +388,62 @@ impl<'db> QueryTransaction<'db> {
             QueryTransactionState::Committed
         } else {
             QueryTransactionState::Failed
+        };
+        result
+    }
+
+    /// Validate MVCC and export the overlay without committing locally.
+    /// None completes a read-only request. Prepared writes remain nondurable
+    /// until the caller's consensus/apply layer succeeds.
+    pub fn prepare_replication(&mut self) -> Result<Option<PreparedReplication>, ExecError> {
+        self.require_active()?;
+        if !self.replicated_mode {
+            self.fail();
+            return Err(ExecError::Semantic(
+                "replicated IDs must be enabled before RUN".into(),
+            ));
+        }
+        if self.wrote {
+            let estimate = self
+                .txn
+                .as_ref()
+                .expect("active transaction")
+                .estimated_memory_bytes()
+                .checked_mul(3)
+                .ok_or(ExecError::MemoryLimit {
+                    limit: self.limits.memory_bytes,
+                    attempted: usize::MAX,
+                });
+            let guard = estimate.and_then(|estimate| {
+                Budget::new(self.limits, self.reservation.as_ref()).charge(estimate)
+            });
+            if let Err(error) = guard {
+                self.fail();
+                return Err(error);
+            }
+        }
+        let txn = self.txn.take().expect("active transaction");
+        let result = txn
+            .prepare_replication(brainwire_store::replicated_apply::ApplyLimits::default())
+            .and_then(|batch| {
+                batch
+                    .map(|batch| {
+                        let bytes = batch.canonical_bytes(
+                            brainwire_store::replicated_apply::ApplyLimits::default(),
+                        )?;
+                        Ok(PreparedReplication {
+                            expected_revision: batch.index - 1,
+                            batch: bytes,
+                        })
+                    })
+                    .transpose()
+            })
+            .map_err(ExecError::from);
+        self.reservation.take();
+        self.state = match &result {
+            Ok(Some(_)) => QueryTransactionState::Prepared,
+            Ok(None) => QueryTransactionState::Committed,
+            Err(_) => QueryTransactionState::Failed,
         };
         result
     }

@@ -1,0 +1,9 @@
+{
+  "result": "FAIL",
+  "binary_sha256": "0db6b26ab4efb976bc3e6bd5fe2f5b7b006fc34afc2ca30e1eae2196fd9f698b",
+  "rows": 4,
+  "scope": "harness-error",
+  "error": "Result.data converts Node to dict before element_id assertion; corrected harness uses native Record",
+  "log": "safe-smoke-4.log",
+  "log_sha256": "fb7e7dab74cb0e30ae3671588149217c6d74f42317af65ad8dd2141c79afa101"
+}

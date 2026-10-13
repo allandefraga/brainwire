@@ -10,11 +10,17 @@ use brainwire_bolt::session::{EngineError, QueryEngine, QueryResult};
 use brainwire_core::value::Value;
 use brainwire_cypher::{ExecError, Out, QueryAccess, QueryOutput, QueryTransaction};
 
+use crate::cluster::Replica;
 use crate::databases::Databases;
 
 enum Command {
     SetAccess(AccessContext, mpsc::Sender<Result<(), EngineError>>),
-    Begin(Option<String>, bool, mpsc::Sender<Result<(), EngineError>>),
+    Begin(
+        Option<String>,
+        bool,
+        Option<String>,
+        mpsc::Sender<Result<(), EngineError>>,
+    ),
     Run(
         Option<String>,
         String,
@@ -33,25 +39,49 @@ pub struct DbEngine {
 
 impl DbEngine {
     pub fn new(databases: Arc<Databases>, default_database: String) -> Result<Self, String> {
-        Self::with_access(databases, default_database, AccessContext::Unrestricted)
+        Self::with_access(
+            databases,
+            default_database,
+            AccessContext::Unrestricted,
+            None,
+        )
     }
 
     pub fn new_protected(
         databases: Arc<Databases>,
         default_database: String,
     ) -> Result<Self, String> {
-        Self::with_access(databases, default_database, AccessContext::Unauthenticated)
+        Self::with_access(
+            databases,
+            default_database,
+            AccessContext::Unauthenticated,
+            None,
+        )
+    }
+
+    pub(crate) fn new_replicated(
+        databases: Arc<Databases>,
+        default_database: String,
+        replica: Arc<Replica>,
+    ) -> Result<Self, String> {
+        Self::with_access(
+            databases,
+            default_database,
+            AccessContext::Unauthenticated,
+            Some(replica),
+        )
     }
 
     fn with_access(
         databases: Arc<Databases>,
         default_database: String,
         access: AccessContext,
+        replica: Option<Arc<Replica>>,
     ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("brainwire-query".into())
-            .spawn(move || worker(receiver, databases, default_database, access))
+            .spawn(move || worker(receiver, databases, default_database, access, replica))
             .map_err(|e| format!("cannot start query worker: {e}"))?;
         Ok(Self { sender })
     }
@@ -74,11 +104,27 @@ impl QueryEngine for DbEngine {
     }
 
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, None, reply))
     }
 
     fn begin_read_only(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, None, reply))
+    }
+
+    fn begin_with_request_id(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+    ) -> Result<(), EngineError> {
+        self.ask(|reply| {
+            Command::Begin(
+                db.map(str::to_owned),
+                read_only,
+                request_id.map(str::to_owned),
+                reply,
+            )
+        })
     }
 
     fn run(
@@ -136,6 +182,7 @@ fn worker(
     databases: Arc<Databases>,
     default_database: String,
     mut access: AccessContext,
+    replica: Option<Arc<Replica>>,
 ) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -143,7 +190,7 @@ fn worker(
                 access = next;
                 let _ = reply.send(Ok(()));
             }
-            Command::Begin(name, read_only, reply) => {
+            Command::Begin(name, read_only, request_id, reply) => {
                 let name = name.as_deref().unwrap_or(&default_database);
                 let mut query_access = match graph_access(&access, name) {
                     Ok(access) => access,
@@ -155,6 +202,43 @@ fn worker(
                 if read_only {
                     query_access.write = false;
                 }
+                if request_id.is_some() && replica.is_none() {
+                    let _ = reply.send(Err(error(
+                        "Neo.ClientError.Request.Invalid",
+                        "explicit request IDs require replicated serving",
+                    )));
+                    continue;
+                }
+                let seed = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let caller = match &access {
+                    AccessContext::Authenticated(principal) => principal.id.as_str(),
+                    _ => "standalone",
+                };
+                let request_id = replica
+                    .as_ref()
+                    .map(|replica| replica.request_key(name, caller, &seed));
+                let restricted = matches!(&access, AccessContext::Authenticated(principal) if principal.node_visibility.is_some());
+                let _writer_permit = if let Some(replica) = &replica {
+                    match replica.begin(
+                        query_access.write && !restricted,
+                        request_id.as_deref().expect("replicated request"),
+                    ) {
+                        Ok(permit) => permit,
+                        Err(message) => {
+                            let code = if message.contains("already committed") {
+                                "Neo.ClientError.Transaction.RequestAlreadyCommitted"
+                            } else if message.contains("previously rejected") {
+                                "Neo.ClientError.Transaction.RequestPreviouslyRejected"
+                            } else {
+                                "Neo.TransientError.General.DatabaseUnavailable"
+                            };
+                            let _ = reply.send(Err(error(code, message)));
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
                 let Some(database) = databases.get(name) else {
                     let _ = reply.send(Err(error(
                         "Neo.ClientError.Database.DatabaseNotFound",
@@ -173,6 +257,9 @@ fn worker(
                         continue;
                     }
                 };
+                if replica.is_some() {
+                    transaction = transaction.with_replicated_ids();
+                }
                 if let AccessContext::Authenticated(principal) = &access {
                     if let Some(visibility) = &principal.node_visibility {
                         transaction = match transaction.with_read_visibility(visibility.clone()) {
@@ -217,8 +304,36 @@ fn worker(
                             let _ = reply.send(result);
                         }
                         Command::Commit(reply) => {
-                            let result =
-                                transaction.commit().map(|_| None).map_err(execution_error);
+                            let result = if let Some(replica) = &replica {
+                                match transaction.prepare_replication() {
+                                    Ok(Some(prepared)) => replica
+                                        .commit(
+                                            request_id.clone().expect("replicated request"),
+                                            name.to_owned(),
+                                            prepared.expected_revision,
+                                            prepared.batch,
+                                        )
+                                        .map(Some)
+                                        .map_err(|message| {
+                                            let code = if message
+                                                == "replicated transaction revision conflict"
+                                            {
+                                                "Neo.TransientError.Transaction.Conflict"
+                                            } else if message.contains("exceeds")
+                                                || message.contains("validation limits")
+                                            {
+                                                "Neo.ClientError.Statement.ArgumentError"
+                                            } else {
+                                                "Neo.ClientError.Transaction.CommitOutcomeUnknown"
+                                            };
+                                            error(code, message)
+                                        }),
+                                    Ok(None) => Ok(None),
+                                    Err(err) => Err(execution_error(err)),
+                                }
+                            } else {
+                                transaction.commit().map(|_| None).map_err(execution_error)
+                            };
                             let _ = reply.send(result);
                             break;
                         }
@@ -227,7 +342,7 @@ fn worker(
                             let _ = reply.send(Ok(()));
                             break;
                         }
-                        Command::Begin(_, _, reply) => {
+                        Command::Begin(_, _, _, reply) => {
                             let _ = reply.send(Err(error(
                                 "Neo.ClientError.Transaction.TransactionStartFailed",
                                 "transaction already active",

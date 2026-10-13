@@ -694,7 +694,7 @@ pub fn merge_node(
             (id, row)
         }
         None => {
-            let id = txn.database().next_node_id(ty.id)?;
+            let id = txn.next_node_id(ty.id)?;
             txn.put(Cf::Pk, pk, id.0.to_be_bytes().to_vec());
             (id, Row::default())
         }

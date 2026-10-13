@@ -21,6 +21,10 @@ brainwire-cypher = { path = "../cypher" }
 brainwire-tui = { path = "../tui" }
 brainwire-bolt = { path = "../bolt" }
 tokio.workspace = true
+brainwire-replication = { path = "../replication" }
+openraft.workspace = true
+sha2.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -191,6 +191,9 @@ pub struct Txn<'db> {
     depends_prefix: BTreeSet<Key>,
     done: bool,
     estimated_bytes: usize,
+    pub(crate) replicated_ids: bool,
+    pub(crate) used_standalone_ids: bool,
+    replication_valid: bool,
 }
 
 impl Database {
@@ -219,11 +222,22 @@ impl Database {
             depends_prefix: BTreeSet::new(),
             done: false,
             estimated_bytes: 0,
+            replicated_ids: false,
+            used_standalone_ids: false,
+            replication_valid: true,
         }
     }
 }
 
 impl<'db> Txn<'db> {
+    /// Opt into staged ID counters before any mutation or standalone allocation.
+    /// Replicated writes must be prepared, never committed directly.
+    pub fn with_replicated_ids(mut self) -> Self {
+        self.replication_valid &= self.writes.is_empty() && !self.used_standalone_ids;
+        self.replicated_ids = true;
+        self
+    }
+
     pub fn database(&self) -> &'db Database {
         self.db
     }
@@ -449,16 +463,8 @@ impl<'db> Txn<'db> {
         self.scan_prefix(cf, prefix)
     }
 
-    pub fn commit(mut self) -> Result<u64, TxnError> {
-        let db = self.db;
-        let mut st = db.committer.lock();
+    fn has_conflict(&self, st: &CommitState) -> bool {
         let start = self.start_seq;
-        if self
-            .writes
-            .contains_key(&(Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec()))
-        {
-            return Err(StoreError::Corrupt("commit sequence metadata is reserved".into()).into());
-        }
         let touched_anything =
             !self.writes.is_empty() || !self.depends.is_empty() || !self.depends_prefix.is_empty();
         // A transaction old enough to predate `pruned_through` can no longer
@@ -466,7 +472,7 @@ impl<'db> Txn<'db> {
         // recovery might have removed the one entry that mattered — so fail
         // it closed rather than silently skip the check. Cheap and broad,
         // so it runs before the precise per-key scan.
-        let conflict = (touched_anything && start < st.pruned_through)
+        (touched_anything && start < st.pruned_through)
             || self
                 .writes
                 .keys()
@@ -477,7 +483,72 @@ impl<'db> Txn<'db> {
                     .range((*cf, prefix.clone())..)
                     .take_while(|((c, k), _)| c == cf && k.starts_with(prefix))
                     .any(|(_, &s)| s > start)
-            });
+            })
+    }
+
+    /// Move trusted overlay mutations into a canonical entry after MVCC validation.
+    /// No local write or network operation occurs. The leader must serialize the
+    /// interval between preparation and quorum/apply; revision CAS rejects stale entries.
+    pub fn prepare_replication(
+        mut self,
+        limits: crate::replicated_apply::ApplyLimits,
+    ) -> Result<Option<crate::replicated_apply::Batch>, crate::replicated_apply::ApplyError> {
+        use crate::replicated_apply::{ApplyError, Batch, Mutation};
+        if !self.replicated_ids || !self.replication_valid {
+            return Err(ApplyError::Invalid(
+                "replicated IDs must be enabled before writes",
+            ));
+        }
+        if self.writes.is_empty() {
+            return Ok(None);
+        }
+        let current = crate::replicated_apply::applied_state_in(&mut self)?;
+        let index = current.map_or(Ok(1), |state| {
+            state
+                .index
+                .checked_add(1)
+                .ok_or(ApplyError::Invalid("apply revision exhausted"))
+        })?;
+        let mut st = self.db.committer.lock();
+        if self.has_conflict(&st) {
+            return Err(TxnError::Conflict.into());
+        }
+        let writes = std::mem::take(&mut self.writes);
+        let batch = Batch {
+            version: 1,
+            index,
+            mutations: writes
+                .into_iter()
+                .map(|((cf, key), value)| Mutation {
+                    cf: cf.name().into(),
+                    key,
+                    value,
+                })
+                .collect(),
+        };
+        // Validate bounds/reserved metadata without persisting anything.
+        batch.validate(limits)?;
+        st.release(self.start_seq);
+        self.done = true;
+        Ok(Some(batch))
+    }
+
+    pub fn commit(mut self) -> Result<u64, TxnError> {
+        if self.replicated_ids && !self.writes.is_empty() {
+            return Err(
+                StoreError::Corrupt("replicated write requires quorum preparation".into()).into(),
+            );
+        }
+        let db = self.db;
+        let mut st = db.committer.lock();
+        let start = self.start_seq;
+        if self
+            .writes
+            .contains_key(&(Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec()))
+        {
+            return Err(StoreError::Corrupt("commit sequence metadata is reserved".into()).into());
+        }
+        let conflict = self.has_conflict(&st);
         if conflict {
             st.release(start);
             self.done = true;

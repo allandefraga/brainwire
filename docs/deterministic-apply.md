@@ -1,10 +1,10 @@
 # Experimental deterministic per-store apply
 
-`brainwire_store::replicated_apply` is an internal Rust foundation, disconnected
-from the server and CLI. It applies already-materialized column-family/key/value
-mutations, not Cypher commands. It is not a replicated database: there is no
-network protocol, durable consensus log, leader election, quorum acknowledgement,
-normal-commit capture or global multi-graph/registry transaction.
+`brainwire_store::replicated_apply` applies already-materialized column-family/key/value
+mutations, not Cypher commands. The optional [quorum server](quorum-replication.md)
+now prepares transaction overlays, orders them with OpenRaft and applies committed
+batches through this module. Consensus, peer transport and graph registry ordering
+belong to the server/replication crate; this low-level API alone is not a cluster.
 
 A version-1 `Batch` has an ordered log index and unique concrete mutations. A
 mutation's CF is one of the eleven existing families, its key is nonempty, and
@@ -36,11 +36,12 @@ next-index boundary. The local durable commit sequence is independent of the
 log index. Ordinary `Txn` APIs remain trusted and can bypass this module; they
 are not a replica-role authorization gate.
 
-Apply-only stores must not perform independent writes or allocate graph IDs.
-Copying persistent allocator counters does not synchronize in-memory allocator
-caches or make follower promotion safe. Future consensus integration must supply
-role/fencing rules, normal-commit capture, log persistence, membership, snapshot
-installation and compatible codec versions before this becomes replication.
+Apply-only stores must not perform independent writes. Quorum transactions stage
+allocator counters in the exported overlay and invalidate local allocator caches
+after apply. Per-graph compare-and-set revisions reject stale leader proposals;
+request identities distinguish crash replay from a separate identical mutation.
+The quorum implementation retains its entire log; snapshot transfer, compaction,
+dynamic membership and replacement of a permanently erased voter remain pending.
 
 ```sh
 cargo test -p brainwire-store --test replicated_apply --locked --offline

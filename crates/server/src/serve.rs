@@ -12,12 +12,15 @@ use crate::config;
 use crate::databases::Databases;
 use crate::engine::DbEngine;
 
-pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
+pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|e| format!("config: {e}"))?;
     let implicit = config::find_file(&cwd);
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let loaded = config::load(explicit_config.or(implicit.as_deref()), &env)
         .map_err(|e| format!("config: {e}"))?;
+    let cluster_config = cluster_config
+        .map(crate::cluster::ClusterConfig::load)
+        .transpose()?;
     let auth = match &loaded.config.server.auth_file {
         None => {
             eprintln!("warning: development mode, Bolt authentication is disabled; use an isolated network");
@@ -50,7 +53,11 @@ pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
         let listener = TcpListener::bind(&loaded.config.server.listen)
             .await
             .map_err(|e| format!("cannot bind {}: {e}", loaded.config.server.listen))?;
-        let databases = Arc::new(Databases::open_all(&loaded.config)?);
+        let (replica, databases) = if let Some(cluster) = &cluster_config {
+            let peer_listener = TcpListener::bind(&cluster.listen).await.map_err(|_| "cannot bind private peer listener")?;
+            let (replica, databases) = crate::cluster::Replica::start(&loaded.config, cluster, peer_listener).await?;
+            (Some(replica), databases)
+        } else { (None, Arc::new(Databases::open_all(&loaded.config)?)) };
         let default_name = loaded.config.server.default_database.clone();
         println!(
             "brainwire serve {} databases={:?} cache={} memtables={} query={} (shared query reservations + per-RUN guard; not RSS)",
@@ -63,7 +70,9 @@ pub fn run(explicit_config: Option<&Path>) -> Result<(), String> {
         brainwire_bolt::server::serve_with_connection_limits(
             listener,
             move || {
-                let engine = if protected {
+                let engine = if let Some(replica) = &replica {
+                    DbEngine::new_replicated(Arc::clone(&databases), default_name.clone(), Arc::clone(replica))
+                } else if protected {
                     DbEngine::new_protected(Arc::clone(&databases), default_name.clone())
                 } else {
                     DbEngine::new(Arc::clone(&databases), default_name.clone())
