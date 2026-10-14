@@ -149,6 +149,13 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ClusterCommands {
+    /// Probe this local Raft member; readiness requires leader and quorum read barrier.
+    Probe {
+        #[arg(long, default_value = "readiness", value_parser = ["liveness", "readiness"])]
+        kind: String,
+    },
+    /// Sample all three peers; diagnostics do not prove quorum or write/read readiness.
+    Inspect,
     /// Inspect leader, membership and durable progress.
     Status,
     /// Provision one new voter once, before cluster initialization; never reuse lost IDs.
@@ -538,7 +545,14 @@ fn run_cluster(path: &Path, command: ClusterCommands) -> Result<(), String> {
     {
         return cluster::audit(&config, server_config);
     }
+    if let ClusterCommands::Probe { kind } = &command {
+        return cluster::probe(&config, kind);
+    }
+    if matches!(command, ClusterCommands::Inspect) {
+        return cluster::inspect(&config);
+    }
     let response = match command {
+        ClusterCommands::Inspect | ClusterCommands::Probe { .. } => unreachable!(),
         ClusterCommands::Audit { .. } | ClusterCommands::Provision { .. } => unreachable!(),
         ClusterCommands::Status => cluster::control(&config, RpcRequest::Status)?,
         ClusterCommands::Request { id } => {

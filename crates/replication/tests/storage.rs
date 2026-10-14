@@ -373,3 +373,79 @@ async fn registry_initialization_proof_is_durable_only_for_new_successful_regist
         }
     }
 }
+
+#[tokio::test]
+async fn retained_log_capacity_is_atomic_at_boundary_and_can_increase_on_reopen() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let first = entry(0, command("capacity-first"));
+    let second = entry(1, command("capacity-second"));
+    let third = entry(2, command("capacity-third"));
+    let bytes = |entry: &Entry<TypeConfig>| serde_json::to_vec(entry).unwrap().len() as u64;
+    let first_bytes = bytes(&first);
+    let cap = first_bytes + bytes(&second);
+    let store = Storage::open(dir.path(), cap, app.clone()).unwrap();
+    assert_eq!(store.max_log_bytes(), cap);
+    let mut logs = store.log_store();
+    logs.blocking_append([first.clone()]).await.unwrap();
+    logs.save_committed(Some(first.log_id)).await.unwrap();
+    store.state_machine().apply([first.clone()]).await.unwrap();
+
+    // The second entry fits, but the entire append must fail when the third exceeds capacity.
+    assert!(logs
+        .blocking_append([second.clone(), third.clone()])
+        .await
+        .is_err());
+    assert_eq!(
+        logs.try_get_log_entries(..).await.unwrap(),
+        vec![first.clone()]
+    );
+    assert_eq!(store.log_bytes().unwrap(), first_bytes);
+    assert_eq!(store.committed().unwrap(), Some(first.log_id));
+    assert_eq!(store.last_applied().unwrap(), Some(first.log_id));
+    assert_eq!(
+        store.lookup("capacity-first").unwrap(),
+        Some(Reply::Applied { revision: 1 })
+    );
+    assert_eq!(store.lookup("capacity-second").unwrap(), None);
+    assert_eq!(store.lookup("capacity-third").unwrap(), None);
+
+    logs.blocking_append([second.clone()]).await.unwrap();
+    logs.save_committed(Some(second.log_id)).await.unwrap();
+    store.state_machine().apply([second.clone()]).await.unwrap();
+    assert_eq!(store.log_bytes().unwrap(), cap);
+    logs.blocking_append([first.clone(), second.clone()])
+        .await
+        .unwrap();
+    assert_eq!(store.log_bytes().unwrap(), cap);
+    assert_eq!(store.committed().unwrap(), Some(second.log_id));
+    assert_eq!(store.last_applied().unwrap(), Some(second.log_id));
+    assert_eq!(app.calls.load(Ordering::SeqCst), 2);
+    drop(logs);
+    drop(store);
+
+    let store = Storage::open(dir.path(), cap, app.clone()).unwrap();
+    assert_eq!(store.log_bytes().unwrap(), cap);
+    assert_eq!(
+        store.log_store().try_get_log_entries(..).await.unwrap(),
+        vec![first.clone(), second.clone()]
+    );
+    drop(store);
+    assert!(Storage::open(dir.path(), cap - 1, app.clone()).is_err());
+
+    let higher_cap = cap + bytes(&third);
+    let store = Storage::open(dir.path(), higher_cap, app).unwrap();
+    assert_eq!(store.max_log_bytes(), higher_cap);
+    store
+        .log_store()
+        .blocking_append([third.clone()])
+        .await
+        .unwrap();
+    assert_eq!(store.log_bytes().unwrap(), higher_cap);
+    assert_eq!(
+        store.log_store().try_get_log_entries(..).await.unwrap(),
+        vec![first, second.clone(), third]
+    );
+    assert_eq!(store.committed().unwrap(), Some(second.log_id));
+    assert_eq!(store.last_applied().unwrap(), Some(second.log_id));
+}

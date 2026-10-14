@@ -157,6 +157,10 @@ impl Storage {
     pub fn registry_initialized(&self) -> Result<bool, Error> {
         Ok(self.read(REGISTRY_INITIALIZED)?.unwrap_or(false))
     }
+    /// Configured cap for retained encoded log entries, excluding RocksDB overhead.
+    pub fn max_log_bytes(&self) -> u64 {
+        self.0.max_log_bytes
+    }
     pub fn log_bytes(&self) -> Result<u64, Error> {
         Ok(self.read(BYTES)?.unwrap_or(0))
     }

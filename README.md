@@ -46,6 +46,10 @@ Compose/Kubernetes/Swarm recovery to that corrected standalone candidate.
 [Experimental quorum qualification](docs/benchmarks/2026-10-13-quorum.md) separately
 tests three native processes, partitions, leader loss and retained-state restart.
 Dynamic client adapter integration and multi-machine quorum deployment remain pending.
+The [October 14 quorum follow-up](docs/benchmarks/2026-10-14-quorum-capacity.md)
+adds all-member inspection, local Raft probes, log-capacity diagnostics and Python
+explicit transaction identities/atomic node-ACL upserts. Native debug/release fault
+qualification passes; this is not a multi-machine deployment or throughput claim.
 
 The terminal backoffice design is documented in
 [Brainwire Observatory](docs/design/2026-09-26-brainwire-observatory.md), with

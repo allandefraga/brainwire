@@ -116,12 +116,46 @@ this increment has no graph drop or ontology migration operation.
   request --id initial-tickets
 ```
 
+`cluster inspect` samples every configured voter directly in one command:
+
+```sh
+./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" inspect
+```
+
+Its JSON includes individual statuses, `complete`, `all_initialized`,
+`retained_log_cap_agreement` and `configured_log_cap_agreement`. Unavailable or
+invalid peers remain explicit entries; incomplete samples report unknown cap
+agreement as `null`. Incomplete/running-false samples or differing capacities
+exit nonzero after printing the diagnostic report. An uninitialized group can
+produce complete samples with `all_initialized=false`. Collection is sequential
+and each peer has a bounded request deadline. Independent status samples do not
+prove quorum or readiness for the next write; transaction barriers remain authoritative.
+
 Status is local diagnostic telemetry: leader, term, membership, last log,
-committed/applied progress, retained log bytes and running state. It is not a
+committed/applied progress, retained log bytes, configured byte cap, remaining
+log bytes and running state. It is not a
 quorum health proof. Graph creation follows the leader; accessing a new graph
 also requires explicit grants in the Bolt policy on every voter and a server
 restart to reload that policy. Private cluster controls use the peer secret,
 not the Bolt reader token; protect access as administrative authority.
+
+Raft-specific local probes keep followers alive without routing user traffic to them:
+
+```sh
+./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" probe --kind liveness
+./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" probe --kind readiness
+```
+
+Liveness samples only the addressed member's identity and running state; followers
+and uninitialized members can be live. Readiness additionally requires that this
+member is the initialized local leader and completes a quorum read barrier. It
+never follows a leader redirect, so a follower cannot be marked ready via another
+member. Failure prints a redacted diagnostic JSON and exits nonzero.
+Readiness is a momentary Raft-only sample, not a test of graph availability, Bolt
+permissions or future write capacity. Leadership can change immediately afterward.
+Allow up to 5 seconds for liveness and 10 seconds for readiness; configure an
+external probe timeout accordingly. Current standalone manifests are unchanged
+and are not qualified three-voter deployment profiles.
 
 Request lookup follows the leader and uses a quorum barrier before returning a
 cached reply or absence. An unavailable quorum gives an error rather than an
@@ -155,7 +189,7 @@ from examples.python.connection import auth_from_env
 seed = "ticket-create-" + uuid.uuid4().hex  # Persist once; reuse after an uncertain outcome.
 request_key = hashlib.sha256(json.dumps(
     ["brainwire-quorum-demo", "tickets", "writer", seed],
-    separators=(",", ":"),
+    ensure_ascii=False, separators=(",", ":"),
 ).encode()).hexdigest()
 print("Durable request key:", request_key)
 
@@ -228,7 +262,22 @@ needs a separate designed and qualified procedure.
 
 Retained encoded log bytes default to 1 GiB per voter; `max_log_bytes` accepts
 1 MiB–64 GiB. Approaching the cap requires capacity planning: exhaustion fails
-closed and does not discard history. Query allocation budgets are not a promise
+closed and does not discard history. `cluster status` reports `log_bytes`,
+`max_log_bytes` and `log_remaining_bytes` separately for the queried voter.
+These are retained encoded entry bytes, not disk usage, RocksDB allocation or RSS;
+headroom is diagnostic, not a reservation for the next transaction. Compare all
+three members: their local configured caps may differ.
+
+If the cap is exhausted, preserve every original voter volume. Stop ingestion,
+inspect each member, increase `max_log_bytes` within its supported range on each
+voter, and restart using the same complete volumes and identities. Keep a majority
+available where possible; after recovery verify membership, committed/applied
+progress and catchup before resuming ingestion. A Raft storage error can stop a
+member until restart. Increasing the cap permits retaining more history; it does
+not reclaim disk, implement snapshots or replace a lost voter. Never delete Raft
+files to make space. Lowering the cap below retained bytes refuses startup.
+
+Query allocation budgets are not a promise
 about replication/RocksDB process RSS.
 
 Stop **all three servers** before an offline audit, then run for each voter:

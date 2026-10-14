@@ -3,10 +3,28 @@
 Pass an existing Neo4j driver and named database. Missing properties are unchanged;
 None removes a property. Node batches are atomic individually, not across a load.
 """
+import hashlib
 import itertools
 import json
 import math
 import re
+
+
+
+def _request_id(seed):
+    if not isinstance(seed, str) or not re.fullmatch(r"[A-Za-z0-9_:.\-]{1,128}", seed):
+        raise ValueError("request_id must be 1..128 ASCII letters/digits or -_:.")
+    return seed
+
+
+def request_key(cluster_id, graph, principal_id, seed):
+    """Return the quorum lookup key for an authenticated graph/seed namespace."""
+    _request_id(seed)
+    if any(not isinstance(value, str) or not value for value in (cluster_id, graph, principal_id)):
+        raise ValueError("cluster_id, graph and principal_id must be nonempty strings")
+    namespace = json.dumps([cluster_id, graph, principal_id, seed],
+                           ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(namespace).hexdigest()
 
 
 def identifier(value):
@@ -60,6 +78,14 @@ def _entity(value):
     return value
 
 
+def _acl_options(label, entity_id, acl):
+    names = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
+    if not isinstance(acl, dict) or not set(acl).issubset(names):
+        raise ValueError("invalid ACL metadata fields")
+    _value(acl)
+    return {"label": identifier(label), "entityId": _entity(entity_id), **acl}
+
+
 def _set(variable, names, prefix):
     return " SET " + ", ".join(f"{variable}.{name}={prefix}.{name}" for name in names) if names else ""
 
@@ -83,6 +109,21 @@ class GraphClient:
     def _write(self, operation):
         with self.driver.session(database=self.database) as session:
             return session.execute_write(operation)
+
+    def write_transaction(self, operation, *, request_id):
+        """Run once with a retained request seed on a quorum server's current leader.
+
+        Standalone servers reject this metadata. No managed retry or leader routing
+        occurs; AlreadyCommitted/CommitOutcomeUnknown propagate to the caller.
+        Return the callback's value only after an acknowledged explicit commit.
+        Materialize query results inside operation before its transaction closes.
+        """
+        _request_id(request_id)
+        with self.driver.session(database=self.database) as session:
+            with session.begin_transaction(metadata={"brainwire_request_id": request_id}) as tx:
+                result = operation(tx)
+                tx.commit()
+                return result
 
     def upsert_node(self, label, entity_id, properties=None):
         return self.load_nodes(label, [{"entity_id": _entity(entity_id), **_properties({} if properties is None else properties)}])
@@ -171,9 +212,28 @@ class GraphClient:
         This is a trusted service operation, not ordinary property editing.
         Omitted ACL fields reset to empty; missing ACL denies restricted readers.
         """
-        names = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
-        if not isinstance(acl, dict) or not set(acl).issubset(names):
-            raise ValueError("invalid ACL metadata fields")
-        _value(acl)
-        options = {"label":identifier(label), "entityId":_entity(entity_id), **acl}
+        options = _acl_options(label, entity_id, acl)
         return self._write(lambda tx: tx.run("CALL db.setNodeAcl($options) YIELD updated RETURN updated", options=options).single()["updated"])
+
+    def upsert_node_with_acl(self, label, entity_id, properties, acl, *, request_id=None):
+        """Atomically patch a node and replace authoritative private ACL metadata.
+
+        Requires graph-write + instance-admin; supply source-authoritative ACLs.
+        Omitted ACL fields reset to empty. A request seed requires quorum serving.
+        """
+        options = _acl_options(label, entity_id, acl)
+        fields, params = _parameters(_properties(properties))
+        query = f"MERGE (n:{options['label']} {{entity_id:$id}})"
+        if fields:
+            query += " SET " + ", ".join(f"n.{name}=${parameter}" for name, parameter in fields)
+        query += " RETURN count(*) AS processed"
+
+        def apply(tx):
+            if tx.run(query, id=options["entityId"], **params).single()["processed"] != 1:
+                raise ValueError("node upsert requires exactly one node")
+            if tx.run("CALL db.setNodeAcl($options) YIELD updated RETURN updated",
+                      options=options).single()["updated"] is not True:
+                raise ValueError("ACL replacement was not acknowledged")
+            return True
+
+        return self._write(apply) if request_id is None else self.write_transaction(apply, request_id=request_id)

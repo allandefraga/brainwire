@@ -21,6 +21,7 @@ import time
 import uuid
 
 MAX_FRAME = 8 << 20
+MAX_LOG_BYTES = 1 << 30
 SCHEMA = {"version": "1", "nodes": [
     {"label": "Page", "properties": ["title"], "indexed_fields": ["title"]},
     {"label": "ImportCheckpoint", "properties": ["next_offset", "sha256"]}],
@@ -117,7 +118,60 @@ def port():
         return listener.getsockname()[1]
 
 
+def check_capacity(status):
+    assert status["max_log_bytes"] == MAX_LOG_BYTES
+    assert type(status["log_bytes"]) is int and 0 <= status["log_bytes"] <= MAX_LOG_BYTES
+    assert type(status["log_remaining_bytes"]) is int
+    assert status["log_remaining_bytes"] == MAX_LOG_BYTES - status["log_bytes"]
+
+
+def check_inspection(sample, unavailable=None):
+    assert sample["kind"] == "diagnostic_sample"
+    assert sample["scope"] == "independent status samples; not a quorum or write/read readiness proof"
+    assert sample["configured_max_log_bytes"] == MAX_LOG_BYTES
+    complete = unavailable is None
+    assert sample["complete"] is complete and sample["all_initialized"] is complete
+    for key in ("retained_log_cap_agreement", "configured_log_cap_agreement"):
+        assert sample[key] is (True if complete else None)
+    members = sample["members"]
+    assert len(members) == 3 and {item["node_id"] for item in members} == {1, 2, 3}
+    for item in members:
+        if item["node_id"] == unavailable:
+            assert item["diagnostic"] == "unavailable" and item["status"] is None
+        else:
+            assert item["diagnostic"] == "sampled" and item["initialized"] is True
+            assert item["status"]["node_id"] == item["node_id"]
+            check_capacity(item["status"])
+
+
 def self_check():
+    valid = {"max_log_bytes": MAX_LOG_BYTES, "log_bytes": 123, "log_remaining_bytes": MAX_LOG_BYTES - 123}
+    check_capacity(valid)
+    for field, value in (("max_log_bytes", 0), ("log_bytes", -1), ("log_remaining_bytes", MAX_LOG_BYTES), ("log_bytes", True)):
+        invalid = {**valid, field: value}
+        try:
+            check_capacity(invalid)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("invalid capacity sample accepted")
+    inspection = {"kind": "diagnostic_sample", "scope": "independent status samples; not a quorum or write/read readiness proof",
+        "configured_max_log_bytes": MAX_LOG_BYTES, "complete": True, "all_initialized": True,
+        "retained_log_cap_agreement": True, "configured_log_cap_agreement": True,
+        "members": [{"node_id": member, "diagnostic": "sampled", "initialized": True,
+                     "status": {**valid, "node_id": member}} for member in (1, 2, 3)]}
+    check_inspection(inspection)
+    incomplete = json.loads(json.dumps(inspection))
+    incomplete.update(complete=False, all_initialized=False, retained_log_cap_agreement=None, configured_log_cap_agreement=None)
+    incomplete["members"][1] = {"node_id": 2, "diagnostic": "unavailable", "status": None}
+    check_inspection(incomplete, unavailable=2)
+    for field, value in (("complete", True), ("retained_log_cap_agreement", True)):
+        try:
+            check_inspection({**incomplete, field: value}, unavailable=2)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("incomplete inspection claim accepted")
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen()
@@ -155,12 +209,14 @@ def self_check():
         proxy.close()
         listener.close()
     return {"self_check": "PASS", "runtime_exercised": False,
-            "checks": ["bounded peer proxy forwards one frame", "isolation blocks sender and recipient", "oversized header refused before body allocation"]}
+            "checks": ["bounded peer proxy forwards one frame", "isolation blocks sender and recipient", "oversized header refused before body allocation", "capacity sample rejects mismatched limit/remaining and invalid counters", "incomplete inspect cannot claim completeness or capacity agreement"]}
 
 
 def run(binary, rows):
     from neo4j import GraphDatabase, READ_ACCESS, __version__ as driver_version
     from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from examples.python.client import GraphClient, request_key as build_request_key
     if not 4 <= rows <= 500 or rows % 2:
         raise ValueError("rows must be even and between 4 and 500")
     binary = binary.resolve(strict=True)
@@ -170,7 +226,7 @@ def run(binary, rows):
     processes = {}
     logs = {}
     proxies = []
-    tokens = {name: secrets.token_hex(32) for name in ("writer", "alice")}
+    tokens = {name: secrets.token_hex(32) for name in ("writer", "alice", "plain-writer")}
     environment = {key: value for key, value in os.environ.items() if not key.startswith("BRAINWIRE_")}
     cluster_id = "acceptance-" + uuid.uuid4().hex
 
@@ -183,6 +239,8 @@ def run(binary, rows):
         policy.write_text(json.dumps({"principals": [
             {"id": "writer", "token_sha256": hashlib.sha256(tokens["writer"].encode()).hexdigest(),
              "graphs": {"pages": "write", "aux": "write"}, "instance_admin": True},
+            {"id": "plain-writer", "token_sha256": hashlib.sha256(tokens["plain-writer"].encode()).hexdigest(),
+             "graphs": {"pages": "write", "aux": "write"}, "instance_admin": False},
             {"id": "alice", "token_sha256": hashlib.sha256(tokens["alice"].encode()).hexdigest(),
              "graphs": {"pages": "read", "aux": "read"}, "instance_admin": False,
              "node_visibility": {"principals": ["alice"]}}]}))
@@ -228,6 +286,15 @@ def run(binary, rows):
 
         def status(member):
             return json.loads(command(member, "status", timeout=8).stdout)["Status"]
+
+        def probe(member, kind, success):
+            result = command(member, "probe", "--kind", kind, check=False)
+            sample = json.loads(result.stdout)
+            assert sample["kind"] == "raft_probe" and sample["node_id"] == member
+            assert sample["probe_kind"] == kind and sample["success"] is success
+            assert sample["scope"] == "Raft only; does not verify graphs, Bolt authentication, or future writes"
+            assert (result.returncode == 0) is success
+            return sample
 
         def start(member):
             log = (root / str(member) / "server.log").open("ab")
@@ -326,6 +393,11 @@ def run(binary, rows):
             assert query(current, "MATCH (p:Page) RETURN count(*) AS n", graph="aux", principal="alice") == [{"n": 1}]
             follower = next(member for member in (1, 2, 3) if member != current)
             refused(follower, "RETURN 1", principal="alice")
+            report["local_probes"] = {"leader_readiness": probe(current, "readiness", True),
+                "follower_liveness": probe(follower, "liveness", True),
+                "follower_readiness": probe(follower, "readiness", False)}
+            assert report["local_probes"]["follower_readiness"]["reason"] == "not_local_leader"
+            report["checks"].append("local leader readiness passes quorum read barrier; follower liveness passes while follower readiness fails; probes explicitly cover Raft only")
             report["checks"].append("committed bootstrap/create register two graphs; indexed nodes and trusted ACL restrict Alice; follower BEGIN refused")
             pending_driver = driver(current)
             pending_resources = [pending_driver]
@@ -359,6 +431,25 @@ def run(binary, rows):
             report["checks"].append("symmetric old-leader partition: majority elects/writes; staged old COMMIT and old read barrier refuse acknowledgement")
             faults.set(set())
             report["post_heal_status"] = caught_up()
+            for sample in report["post_heal_status"]:
+                check_capacity(sample)
+            report["inspection_healthy"] = json.loads(command(current, "inspect").stdout)
+            check_inspection(report["inspection_healthy"])
+            assert report["inspection_healthy"]["cluster_id"] == cluster_id
+            report["checks"].append("healed three-voter status reports 1 GiB retained-log cap and exact remaining bytes; independent inspect samples agree without implying quorum readiness")
+            inspection_victim = next(member for member in (1, 2, 3) if member != current)
+            stop(inspection_victim)
+            try:
+                inspection = command(current, "inspect", check=False)
+                assert inspection.returncode != 0, "incomplete inspection exited successfully"
+                report["inspection_incomplete"] = json.loads(inspection.stdout)
+                report["inspection_incomplete_exit_code"] = inspection.returncode
+                check_inspection(report["inspection_incomplete"], unavailable=inspection_victim)
+                assert report["inspection_incomplete"]["cluster_id"] == cluster_id
+            finally:
+                start(inspection_victim)
+            caught_up()
+            report["checks"].append("one stopped voter is unavailable in incomplete inspect samples, agreements are unknown and CLI exits nonzero; original voter restarts")
             assert query(current, "MATCH (p:Page {entity_id:'old-uncommitted'}) RETURN p.entity_id AS id") == []
             assert query(current, "MATCH (p:Page {title:'title-0'}) RETURN p.entity_id AS id") == [{"id": "page-0"}]
             stop(current)
@@ -377,6 +468,7 @@ def run(binary, rows):
                 stop(member)
             refused(current, "CREATE (p:Page {entity_id:'no-quorum'})")
             refused(current, "MATCH (p:Page) RETURN count(*) AS n", principal="alice")
+            report["local_probes"]["no_quorum_readiness"] = probe(current, "readiness", False)
             for member in stopped:
                 start(member)
             current = leader()
@@ -384,26 +476,31 @@ def run(binary, rows):
             assert query(current, "MATCH (p:Page {entity_id:'no-quorum'}) RETURN p.entity_id AS id") == []
             report["checks"].append("two voters stopped: remaining writer/read barriers refuse; recovered majority has no acknowledged no-quorum mutation")
             seed = "fixed-lost-ack"
+            operation_calls = []
+
+            def write_once(tx):
+                operation_calls.append(1)
+                tx.run("CREATE (p:Page {entity_id:'idempotent',title:'idempotent'})").consume()
+                return "acknowledged"
+
             with driver(current) as client:
-                with client.session(database="pages") as session:
-                    tx = session.begin_transaction(metadata={"brainwire_request_id": seed})
-                    tx.run("CREATE (p:Page {entity_id:'idempotent',title:'idempotent'})").consume()
-                    tx.commit()  # Deliberately discard this successful acknowledgement.
+                GraphClient(client, "pages").write_transaction(write_once, request_id=seed)
+                # Intentionally ignore the successful ACK; this is not packet-loss injection.
             before_retry = query(current, "MATCH (p:Page) RETURN count(*) AS n")
             with driver(current) as client:
-                with client.session(database="pages") as session:
-                    try:
-                        session.begin_transaction(metadata={"brainwire_request_id": seed})
-                    except Neo4jError as error:
-                        assert error.code == "Neo.ClientError.Transaction.RequestAlreadyCommitted", error.code
-                    else:
-                        raise AssertionError("same explicit request ID was accepted again")
+                try:
+                    GraphClient(client, "pages").write_transaction(write_once, request_id=seed)
+                except Neo4jError as error:
+                    assert error.code == "Neo.ClientError.Transaction.RequestAlreadyCommitted", error.code
+                else:
+                    raise AssertionError("same explicit request ID was accepted again")
+            assert operation_calls == [1], "public explicit-write API retried the operation callback"
             assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == before_retry
-            request_key = hashlib.sha256(json.dumps([cluster_id, "pages", "writer", seed], separators=(",", ":")).encode()).hexdigest()
+            request_key = build_request_key(cluster_id, "pages", "writer", seed)
             outcome = json.loads(command(current, "request", "--id", request_key).stdout)
             assert "Applied" in outcome["Lookup"]
             report["request_outcome"] = outcome
-            report["checks"].append("successful COMMIT acknowledgement intentionally ignored; stable explicit metadata retry reports RequestAlreadyCommitted and durable outcome without duplicate mutation")
+            report["checks"].append("public GraphClient explicit COMMIT acknowledgement intentionally ignored; stable seed retry propagates RequestAlreadyCommitted without rerunning callback; request_key resolves durable outcome without duplicate mutation")
             caught_up()
             victim = next(member for member in (1, 2, 3) if member != current)
             data = root / str(victim) / "data"
@@ -456,6 +553,22 @@ def run(binary, rows):
                 with client.session(database="pages") as session:
                     identities = [record["node"].element_id for record in session.run("MATCH (p:Page) RETURN p AS node")]
             assert len(identities) == rows + 3 and len(set(identities)) == rows + 3
+            with driver(current) as client:
+                assert GraphClient(client, "pages").upsert_node_with_acl("Page", "atomic-visible",
+                    {"title": "atomic"}, {"allow": ["alice"]}, request_id="atomic-acl-success") is True
+            assert query(current, "MATCH (p:Page {entity_id:'atomic-visible'}) RETURN count(*) AS n", principal="alice") == [{"n": 1}]
+            with driver(current, "plain-writer") as client:
+                try:
+                    GraphClient(client, "pages").upsert_node_with_acl("Page", "atomic-denied",
+                        {"title": "denied"}, {"allow": ["alice"]}, request_id="atomic-acl-denied")
+                except Neo4jError as error:
+                    assert error.code == "Neo.ClientError.Security.Forbidden", error.code
+                else:
+                    raise AssertionError("non-admin writer stamped trusted ACL")
+            assert query(current, "MATCH (p:Page {entity_id:'atomic-denied'}) RETURN count(*) AS n") == [{"n": 0}]
+            assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == [{"n": rows + 4}]
+            report["checks"].append("public atomic node+ACL helper exposes privileged acknowledged write to Alice; non-admin ACL rejection rolls back earlier MERGE with exact Forbidden error")
+            report["post_atomic_status"] = caught_up()
             for member in list(processes):
                 stop(member)
             audits = {}

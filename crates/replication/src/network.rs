@@ -311,6 +311,8 @@ pub struct ClusterStatus {
     pub committed_index: Option<u64>,
     pub membership: Vec<u64>,
     pub log_bytes: u64,
+    pub max_log_bytes: u64,
+    pub log_remaining_bytes: u64,
     pub running: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -661,23 +663,28 @@ async fn dispatch(
                 Ok::<_, ()>((
                     store.log_bytes().map_err(|_| ())?,
                     store.committed().map_err(|_| ())?,
+                    store.max_log_bytes(),
                 ))
             })
             .await
             {
-                Ok(Ok((log_bytes, committed))) => RpcResponse::Status(ClusterStatus {
-                    cluster_id: settings.cluster_id.clone(),
-                    node_id: settings.node_id,
-                    state: format!("{:?}", metrics.state),
-                    current_term: metrics.current_term,
-                    leader: metrics.current_leader,
-                    last_log_index: metrics.last_log_index,
-                    last_applied: metrics.last_applied.map(|id| id.index),
-                    committed_index: committed.map(|id| id.index),
-                    membership: metrics.membership_config.voter_ids().collect(),
-                    log_bytes,
-                    running: metrics.running_state.is_ok(),
-                }),
+                Ok(Ok((log_bytes, committed, max_log_bytes))) => {
+                    RpcResponse::Status(ClusterStatus {
+                        cluster_id: settings.cluster_id.clone(),
+                        node_id: settings.node_id,
+                        state: format!("{:?}", metrics.state),
+                        current_term: metrics.current_term,
+                        leader: metrics.current_leader,
+                        last_log_index: metrics.last_log_index,
+                        last_applied: metrics.last_applied.map(|id| id.index),
+                        committed_index: committed.map(|id| id.index),
+                        membership: metrics.membership_config.voter_ids().collect(),
+                        log_bytes,
+                        max_log_bytes,
+                        log_remaining_bytes: max_log_bytes.saturating_sub(log_bytes),
+                        running: metrics.running_state.is_ok(),
+                    })
+                }
                 _ => rejected("storage_unavailable", None),
             }
         }

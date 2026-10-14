@@ -289,7 +289,7 @@ async fn real_three_peer_quorum_proposal_lookup_and_status() {
         RpcResponse::Lookup(Some(Reply::Applied { revision: 1 }))
     ));
     assert!(
-        matches!(request(&fixture.settings[0], leader, RpcRequest::Status).await.unwrap(), RpcResponse::Status(s) if s.membership == vec![1,2,3] && s.committed_index.is_some() && s.running)
+        matches!(request(&fixture.settings[0], leader, RpcRequest::Status).await.unwrap(), RpcResponse::Status(s) if s.membership == vec![1,2,3] && s.committed_index.is_some() && s.running && s.max_log_bytes == 32 << 20 && s.log_bytes > 0 && s.log_remaining_bytes == s.max_log_bytes - s.log_bytes)
     );
     let follower = (1..=3).find(|id| *id != leader).unwrap();
     let began = tokio::time::Instant::now();

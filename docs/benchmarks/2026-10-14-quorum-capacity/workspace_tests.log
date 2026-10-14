@@ -1,0 +1,949 @@
+   Compiling brainwire-server v0.1.0 (/Users/fraga/Documents/brainwire/crates/server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.32s
+     Running unittests src/lib.rs (target/debug/deps/brainwire_bolt-9cb951c6298aa6b1)
+
+running 93 tests
+test auth::tests::authenticates_exact_ascii_token_and_returns_only_access_identity ... ok
+test auth::tests::hello_and_logon_debug_never_expose_auth_values ... ok
+test auth::tests::policy_bounds_count_size_and_names ... ok
+test auth::tests::rejects_missing_wrong_duplicate_and_unsupported_auth_fields ... ok
+test auth::tests::rejects_policy_ambiguity_unknown_fields_and_invalid_grants ... ok
+test auth::tests::static_node_visibility_is_trusted_validated_and_cannot_be_null ... ok
+test chunk::tests::big_message_is_split_at_65535 ... ok
+test chunk::tests::bounded_reader_accepts_fragmented_exact_boundary_with_noops ... ok
+test chunk::tests::bounded_reader_rejects_announced_payload_before_accepting_chunk_body ... ok
+test chunk::tests::compaction_preserves_a_fragmented_pending_chunk_and_message_payload ... ok
+test chunk::tests::many_noops_and_coalesced_messages_consume_without_shifting_the_buffer ... ok
+test chunk::tests::reader_waits_for_the_terminator_and_skips_noop_chunks ... ok
+test chunk::tests::small_message_is_one_chunk_and_a_terminator ... ok
+test handshake::tests::bolt_4_only_is_refused ... ok
+test handshake::tests::driver_5_28_gets_5_4 ... ok
+test handshake::tests::exact_5_2_is_accepted_and_5_5_is_not ... ok
+test message::tests::parses_run_with_its_three_fields ... ok
+test message::tests::parses_the_simple_messages ... ok
+test message::tests::rejects_bad_input ... ok
+test message::tests::responses_become_structs ... ok
+test packstream::tests::a_non_string_map_key_is_rejected ... ok
+test packstream::tests::decoded_nested_storage_and_payloads_share_one_budget ... ok
+test packstream::tests::decoded_scalar_list_budget_has_an_exact_boundary ... ok
+test packstream::tests::deeply_nested_adversarial_input_returns_too_deep ... ok
+test packstream::tests::depth_past_max_is_too_deep ... ok
+test packstream::tests::invalid_utf8_in_a_tiny_string_is_rejected ... ok
+test packstream::tests::known_encodings ... ok
+test packstream::tests::map_get ... ok
+test packstream::tests::map_get_returns_the_last_matching_key_not_the_first ... ok
+test packstream::tests::max_depth_nesting_decodes ... ok
+test packstream::tests::round_trips_every_kind_and_size ... ok
+test packstream::tests::too_deep_message_is_built_from_max_depth_and_reads_the_same_as_before ... ok
+test packstream::tests::truncated_and_unknown ... ok
+test packstream::tests::truncated_container_announcements_are_rejected_before_budget_or_allocation ... ok
+test server::tests::a_connection_level_error_is_not_resource_exhaustion ... ok
+test server::tests::a_malformed_message_gets_a_failure_then_the_connection_closes ... ok
+test server::tests::a_message_that_never_terminates_is_capped_instead_of_buffered_forever ... ok
+test server::tests::all_response_frames_share_one_absolute_write_budget ... ok
+test server::tests::authenticated_idle_noops_and_partial_requests_expire_and_abort_pending_transaction ... ok
+test server::tests::authentication_deadline_bounds_success_and_failure_writes ... ok
+test server::tests::authentication_timeout_releases_the_owned_connection_permit ... ok
+test server::tests::blocking_query_is_excluded_from_authenticated_request_io_budget ... ok
+test server::tests::coalesced_messages_each_have_their_own_payload_limit ... ok
+test server::tests::complete_authenticated_requests_renew_the_io_budget ... ok
+test server::tests::decoded_overbudget_begin_is_fatal_before_engine_and_releases_permit ... ok
+test server::tests::decoded_overbudget_cleanup_precedes_a_blocked_failure_write ... ok
+test server::tests::emfile_and_enfile_are_resource_exhaustion ... ok
+test server::tests::enobufs_is_resource_exhaustion_with_the_macos_errno ... ok
+test server::tests::expired_authentication_after_blocking_logon_never_executes_buffered_begin ... ok
+test server::tests::fragmented_second_message_keeps_its_accumulated_payload_size ... ok
+test server::tests::handshake_deadline_includes_a_blocked_version_reply ... ok
+test server::tests::login_clears_the_deadline_and_logoff_starts_a_fresh_one ... ok
+test server::tests::malformed_and_oversize_cleanup_precedes_a_blocked_failure_write ... ok
+test server::tests::out_of_memory_is_resource_exhaustion_on_every_platform ... ok
+test server::tests::oversized_chunk_header_is_rejected_without_waiting_for_body ... ok
+test server::tests::protected_listener_applies_policy_to_each_connection ... ok
+test server::tests::reset_right_after_the_handshake_gets_one_failure_then_the_connection_closes ... ok
+test server::tests::silent_and_slow_drip_handshakes_time_out_and_release_the_permit ... ok
+test server::tests::small_encoded_cap_is_independent_of_decoded_storage_cap ... ok
+test server::tests::socket_eof_aborts_a_pending_transaction ... ok
+test server::tests::socket_io_error_aborts_before_the_session_is_dropped ... ok
+test server::tests::trailing_payload_bytes_fail_before_calling_the_engine ... ok
+test server::tests::unauthenticated_idle_hello_noops_and_partial_logon_do_not_renew_deadline ... ok
+test server::tests::valid_handshake_with_a_deadline_keeps_established_sessions_open ... ok
+test session::protected_tests::explicit_run_impersonation_aborts_bound_transaction ... ok
+test session::protected_tests::failed_auth_is_generic_fatal_and_cannot_be_reset ... ok
+test session::protected_tests::hello_credentials_do_not_authenticate_and_unsupported_engines_fail_closed ... ok
+test session::protected_tests::impersonation_is_rejected_before_begin_or_run ... ok
+test session::protected_tests::logoff_cleanup_failure_still_revokes_and_closes ... ok
+test session::protected_tests::logoff_discards_stream_and_transaction_before_revoking_identity ... ok
+test session::protected_tests::logoff_ready_and_tx_ready_revoke_without_committing ... ok
+test session::protected_tests::logoff_works_in_failed_state_and_allow_all_requires_fresh_login ... ok
+test session::protected_tests::protected_logon_passes_principal_and_reset_preserves_identity ... ok
+test session::protected_tests::repeated_logon_closes_and_revokes_previous_identity ... ok
+test session::request_identity_tests::durable_identity_validates_nested_metadata_and_never_silently_falls_back ... ok
+test session::tests::a_second_hello_from_ready_is_refused_and_the_session_becomes_defunct ... ok
+test session::tests::auto_commit_run_and_pull ... ok
+test session::tests::default_access_hook_rejects_any_protected_context ... ok
+test session::tests::discard_drops_remaining_rows_and_returns_to_ready ... ok
+test session::tests::failure_then_ignored_until_reset ... ok
+test session::tests::goodbye_answers_nothing ... ok
+test session::tests::out_of_place_request_fails_invalid_and_enters_failed ... ok
+test session::tests::pull_in_batches_reports_has_more ... ok
+test session::tests::reset_after_hello_but_before_logon_is_refused_and_the_session_becomes_defunct ... ok
+test session::tests::reset_right_after_the_handshake_is_refused_and_the_session_becomes_defunct ... ok
+test session::tests::rollback_returns_to_ready_without_a_bookmark ... ok
+test session::tests::route_is_refused_with_a_failure ... ok
+test session::tests::run_after_hello_but_before_logon_is_refused_and_the_session_becomes_defunct_not_failed ... ok
+test session::tests::run_failure_inside_a_transaction_goes_to_failed ... ok
+test session::tests::stub_transaction_does_not_fabricate_a_bookmark ... ok
+test session::tests::telemetry_is_acknowledged_in_ready_and_tx_ready_without_changing_state ... ok
+test session::tests::transaction_mode_is_validated_and_legacy_read_support_fails_closed ... ok
+test session::tests::tx_pull_in_batches_reports_has_more_and_stays_in_the_transaction ... ok
+
+test result: ok. 93 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s
+
+     Running unittests src/bin/brainwire-bolt-dev.rs (target/debug/deps/brainwire_bolt_dev-8f5dafdee68d9568)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-8133022c1f9e69ea)
+
+running 11 tests
+test cleanup_error_is_defunct_and_drop_retries ... ok
+test cleanup_for_rollback_reset_goodbye_protocol_failure_and_drop ... ok
+test database_is_bound_and_invalid_metadata_aborts ... ok
+test database_metadata_is_validated_on_every_run ... ok
+test errors_abort_and_ignore_until_reset ... ok
+test explicit_commit_failure_is_failure_and_aborts ... ok
+test explicit_multiple_queries_commit_once ... ok
+test fatal_hello_aborts_and_idle_drop_does_not_abort ... ok
+test final_discard_commits_but_zero_discard_keeps_rows ... ok
+test implicit_partial_pull_discard_then_commit_with_engine_bookmark ... ok
+test invalid_counts_fail_before_consumption ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transactions.rs (target/debug/deps/transactions-4d83c239ecc60eb7)
+
+running 5 tests
+test concurrent_sessions_surface_commit_conflict_without_success ... ok
+test implicit_empty_result_waits_for_discard_before_persisting ... ok
+test implicit_write_commits_only_after_final_pull_and_reset_discards ... ok
+test rollback_reset_drop_and_late_query_failure_leave_no_graph_writes ... ok
+test session_commit_preserves_overlay_visibility_and_reopen ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running unittests src/lib.rs (target/debug/deps/brainwire_core-b7cf911114d1d986)
+
+running 69 tests
+test acl::tests::document_grants_are_exclusive_even_with_allow_all_open_or_row_grants ... ok
+test acl::tests::entry_and_open_cross_product_matches_independent_boolean_rule ... ok
+test acl::tests::private_metadata_and_policy_validation_are_bounded_and_strict ... ok
+test acl::tests::truth_table_preserves_entry_open_deny_and_missing_provenance ... ok
+test codec::tests::allocation_preflight_covers_decoded_recursive_value_backing ... ok
+test codec::tests::allocation_preflight_covers_null_lists_nested_singletons_maps_and_long_strings ... ok
+test codec::tests::allocation_preflight_matches_decoder_errors_without_allocating_announced_storage ... ok
+test codec::tests::depth_65_returns_too_deep ... ok
+test codec::tests::empty_row_round_trips ... ok
+test codec::tests::extreme_nesting_100k_levels_does_not_crash ... ok
+test codec::tests::invalid_utf8_in_string_returns_bad_utf8 ... ok
+test codec::tests::max_depth_64_nested_lists_round_trip ... ok
+test codec::tests::rows_round_trip ... ok
+test codec::tests::truncated_row_is_an_error ... ok
+test codec::tests::unknown_tag_is_an_error ... ok
+test codec::tests::varint_11_continuation_bytes_returns_overflow ... ok
+test ids::tests::a_label_scan_is_one_contiguous_range ... ok
+test ids::tests::bounds_are_enforced ... ok
+test ids::tests::edge_id_merged_constant ... ok
+test ids::tests::edge_id_new_partition_out_of_range ... ok
+test ids::tests::edge_id_new_sequence_out_of_range ... ok
+test ids::tests::edge_id_new_success ... ok
+test ids::tests::element_ids_round_trip ... ok
+test ids::tests::fields_round_trip ... ok
+test ids::tests::parse_element_id_invalid_formats ... ok
+test ids::tests::type_id_constants ... ok
+test ids::tests::type_range_invalid_partition ... ok
+test ids::tests::type_range_invalid_type_id ... ok
+test keys::tests::bytes_are_prefix_free ... ok
+test keys::tests::bytes_order_and_round_trip ... ok
+test keys::tests::bytes_round_trip_with_zero_bytes ... ok
+test keys::tests::i64_order ... ok
+test keys::tests::i64_round_trip ... ok
+test keys::tests::truncated_input_is_an_error ... ok
+test keys::tests::u16_round_trip ... ok
+test keys::tests::u32_round_trip ... ok
+test keys::tests::u64_order ... ok
+test keys::tests::u64_round_trip ... ok
+test schema::tests::bad_entity_join_is_an_error ... ok
+test schema::tests::builds_the_catalog ... ok
+test schema::tests::catalog_round_trips_as_json ... ok
+test schema::tests::edge_from_a_shared_label_resolves_to_the_merged_type ... ok
+test schema::tests::exhausting_column_ids_is_an_error ... ok
+test schema::tests::exhausting_edge_type_ids_is_an_error ... ok
+test schema::tests::ids_are_stable_across_applications ... ok
+test schema::tests::malformed_json_is_an_error_not_a_panic ... ok
+test schema::tests::missing_previous_catalog_starts_fresh_and_node_type_lookup_misses_are_none ... ok
+test schema::tests::reapplying_shared_label_keeps_ids_stable_and_appends ... ok
+test schema::tests::shared_label_display_color_is_the_first_one_set ... ok
+test schema::tests::sharing_a_label_merges_into_one_type ... ok
+test schema::tests::too_many_node_types_is_an_error ... ok
+test schema::tests::unknown_edge_label_is_an_error ... ok
+test smoke::builds ... ok
+test sparse::tests::breadth_first_finds_shortest_directed_depths_and_stops_at_limit ... ok
+test sparse::tests::breadth_first_matches_independent_all_pairs_shortest_hops ... ok
+test sparse::tests::builds_csr_and_sums_duplicate_edges ... ok
+test sparse::tests::component_checks_interrupt_before_allocation_and_during_high_degree_work ... ok
+test sparse::tests::components_are_canonical_and_include_isolates_self_loops_and_directed_cycles ... ok
+test sparse::tests::components_handle_100k_chain_and_ring_without_recursive_dfs ... ok
+test sparse::tests::components_match_independent_dense_reachability ... ok
+test sparse::tests::duplicate_overflow_is_an_error_and_large_row_sums_preserve_mass ... ok
+test sparse::tests::impossible_shape_is_an_error_without_panicking ... ok
+test sparse::tests::invalid_matvec_inputs_and_overflow_are_errors ... ok
+test sparse::tests::pagerank_converges_on_a_small_graph ... ok
+test sparse::tests::pagerank_matches_independent_dense_reference ... ok
+test sparse::tests::pagerank_validates_options_and_reports_convergence ... ok
+test sparse::tests::rejects_bad_indices_and_vector_shape ... ok
+test sparse::tests::shortest_path_returns_minimum_hops_and_handles_cycles_bounds_and_isolation ... ok
+test sparse::tests::zero_weights_and_cancellation_do_not_store_zero_coordinates ... ok
+
+test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running unittests src/lib.rs (target/debug/deps/brainwire_cypher-c3a07d43667bbb69)
+
+running 47 tests
+test exec::budget::tests::racing_reservations_never_exceed_capacity_or_leak ... ok
+test lexer::tests::float_literal_overflow_is_rejected ... ok
+test lexer::tests::permits_negative_minimum_magnitude_for_parser_to_resolve ... ok
+test parser::tests::and_chain_inside_parentheses_shares_the_expression_depth_budget ... ok
+test parser::tests::and_chain_up_to_1023_extra_terms_is_ok_and_1024_is_an_error ... ok
+test parser::tests::and_subtree_cannot_hide_under_or_chain ... ok
+test parser::tests::backtick_quoted_identifier_is_never_a_keyword ... ok
+test parser::tests::call_parses_names_parameters_aliases_filters_and_utf8 ... ok
+test parser::tests::call_requires_explicit_yield ... ok
+test parser::tests::create_with_multiple_comma_separated_patterns ... ok
+test parser::tests::create_with_properties ... ok
+test parser::tests::delete_without_detach_is_unsupported ... ok
+test parser::tests::detach_delete_and_literals ... ok
+test parser::tests::detach_delete_multiple_variables ... ok
+test parser::tests::detach_without_delete_is_an_error ... ok
+test parser::tests::empty_and_labelless_node_patterns_parse_structurally ... ok
+test parser::tests::errors_have_offsets_and_unsupported_is_named ... ok
+test parser::tests::float_literal_boundaries ... ok
+test parser::tests::function_other_than_count_is_unsupported ... ok
+test parser::tests::garbage_top_level_keyword_is_an_error ... ok
+test parser::tests::incoming_relationship_and_count ... ok
+test parser::tests::independent_siblings_do_not_accumulate_depth ... ok
+test parser::tests::integer_literal_out_of_range_is_an_error ... ok
+test parser::tests::invalid_escape_sequence_is_an_error ... ok
+test parser::tests::match_with_multiple_comma_separated_patterns ... ok
+test parser::tests::merge_then_set_with_parameters ... ok
+test parser::tests::mixed_operators_and_wrappers_share_the_actual_subtree_depth ... ok
+test parser::tests::multiple_hops_is_unsupported ... ok
+test parser::tests::multiple_labels_is_unsupported ... ok
+test parser::tests::nesting_shares_one_counter_across_parens_lists_and_maps ... ok
+test parser::tests::nesting_up_to_64_levels_is_ok_and_65_is_an_error ... ok
+test parser::tests::never_panics_on_any_prefix_of_every_test_query ... ok
+test parser::tests::one_hop_match_with_where_and_return_names ... ok
+test parser::tests::optional_match_is_unsupported ... ok
+test parser::tests::or_chain_up_to_1023_extra_terms_is_ok_and_1024_is_an_error ... ok
+test parser::tests::order_by_after_limit_is_also_unsupported ... ok
+test parser::tests::order_by_is_unsupported ... ok
+test parser::tests::semicolon_followed_by_more_tokens_is_an_error ... ok
+test parser::tests::signed_integer_literal_boundaries ... ok
+test parser::tests::skip_is_unsupported ... ok
+test parser::tests::trailing_semicolon_is_allowed ... ok
+test parser::tests::unexpected_character_is_an_error ... ok
+test parser::tests::unterminated_backtick_identifier_is_an_error ... ok
+test parser::tests::unterminated_string_is_an_error ... ok
+test parser::tests::unwind_rows_merge ... ok
+test parser::tests::unwind_without_as_is_an_error ... ok
+test parser::tests::very_long_and_or_chains_are_refused_quickly_without_crashing ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests/analytics.rs (target/debug/deps/analytics-270f1ce6a2b37606)
+
+running 14 tests
+test analytics_see_staged_writes_and_remain_private_then_rebuild_after_reopen ... ok
+test component_projection_observes_staged_overlay_snapshot_rollback_and_reopen ... ok
+test component_projection_preserves_pool_exhaustion_and_releases_failed_reservations ... ok
+test component_validation_and_caps_cannot_be_hidden_by_empty_graph_or_limit_zero ... ok
+test components_enforce_query_memory_and_cooperative_deadlines_without_leaking_pool ... ok
+test empty_graph_and_parameter_options_have_stable_fields ... ok
+test failure_poisons_transaction_and_limits_cannot_be_hidden_by_limit_zero ... ok
+test filters_and_selected_fields_cannot_hide_bad_arguments_or_bad_return ... ok
+test project_degree_and_weighted_pagerank_use_cypher ... ok
+test reachable_uses_csr_with_depth_relationship_limits_and_transaction_snapshot ... ok
+test shortest_path_returns_ordered_nodes_in_the_transaction_overlay ... ok
+test snapshot_isolation_deletions_and_rollback_apply_to_analytics ... ok
+test weak_and_strong_components_include_isolates_and_ignore_stored_weight_properties ... ok
+test weighted_edges_reject_invalid_data_and_zero_weight_is_dangling ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/authorization.rs (target/debug/deps/authorization-7e7fdb2958b90458)
+
+running 6 tests
+test denial_discards_prior_runs_and_releases_shared_reservation ... ok
+test memory_and_unknown_procedures_fail_closed_before_earlier_writes ... ok
+test reader_can_return_match_unwind_and_graph_scoped_procedures ... ok
+test reader_denials_precede_execution_and_allocator_reservations ... ok
+test source_length_guard_still_precedes_authorization ... ok
+test writer_can_commit_and_instance_admin_can_read_memory ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/coalesce.rs (target/debug/deps/coalesce-cbfe22eafe4bbcb8)
+
+running 4 tests
+test first_nonnull_is_lazy_and_accepts_values_and_parameters ... ok
+test later_row_error_rolls_back_writes_and_memory_guards_remain_active ... ok
+test names_and_aggregate_shapes_are_validated_even_in_skipped_arguments ... ok
+test per_row_defaults_work_in_unwind_predicates_and_exact_counts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/commit_state.rs (target/debug/deps/commit_state-938794b61d01c0d5)
+
+running 6 tests
+test explicit_snapshot_stays_stable_across_commits_and_internal_allocation ... ok
+test independent_stores_report_their_own_decimal_sequences ... ok
+test obeys_shared_memory_and_deadline_limits ... ok
+test one_row_supports_shared_projection_aliases_and_filters ... ok
+test pending_writes_rollback_reopen_and_next_commit_report_snapshot_state ... ok
+test rejects_arguments_options_unknown_fields_and_duplicate_aliases ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/executor.rs (target/debug/deps/executor-1d32a4daf29eb8de)
+
+running 16 tests
+test bulk_unwind_and_reopen ... ok
+test create_merge_set_node_and_null ... ok
+test flexible_properties_count_nodes_and_parameter_limit ... ok
+test grouping_empty_aggregation_null_and_numeric_precision ... ok
+test hops_and_detach_delete ... ok
+test integer_min_and_nonfinite_parameter_comparison ... ok
+test literal_query_without_catalog ... ok
+test mixed_comparisons_and_empty_boolean_operand_validation ... ok
+test numeric_groups_and_three_valued_logic ... ok
+test overflowing_float_literals_fail_without_writes ... ok
+test real_store_conflict_converts_to_public_executor_error ... ok
+test repeated_bindings_cartesian_product_and_runtime_rollback ... ok
+test rollback_late_runtime_errors_and_conflict_mapping ... ok
+test self_loops_bound_endpoints_and_duplicate_delete_rows ... ok
+test signed_minimum_literal_executes_and_persists_exactly ... ok
+test static_errors_survive_empty_input ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/index.rs (target/debug/deps/index-b2f99ceebb66a38d)
+
+running 13 tests
+test applying_new_index_backfills_and_old_unmarked_catalog_still_scans ... ok
+test boolean_and_numeric_indexes_keep_type_and_precise_equality ... ok
+test index_catalog_is_queryable_without_scanning_graph_data ... ok
+test indexed_and_scan_paths_agree_across_mixed_type_overwrites ... ok
+test indexed_strings_follow_create_set_null_delete_and_reopen ... ok
+test invariant_audit_detects_missing_and_stale_active_index_entries ... ok
+test malformed_index_key_fails_closed_instead_of_returning_a_wrong_node ... ok
+test removing_and_readding_a_declaration_discards_stale_keys ... ok
+test rollback_and_conflicting_writers_never_publish_uncommitted_index_keys ... ok
+test where_equality_uses_index_without_reading_unrelated_nodes ... ok
+test where_index_reads_own_overlay_and_retains_older_snapshots ... ok
+test where_seek_matches_scan_for_conjunctions_or_null_and_numeric_fallback ... ok
+test where_seeks_keep_hop_filters_cartesian_patterns_and_existing_bindings ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/knowledge_rank.rs (target/debug/deps/knowledge_rank-a4baf17c9e5f91a7)
+
+running 5 tests
+test options_candidate_limits_and_ties_are_deterministic ... ok
+test ranks_explains_filters_and_survives_reopen_with_index_or_scan ... ok
+test term_index_bounds_work_before_unrelated_nodes_are_read ... ok
+test top_k_replaces_earlier_candidates_and_obeys_memory_and_deadline_guards ... ok
+test updates_are_snapshot_local_and_invalid_signals_abort_prior_writes ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/limits.rs (target/debug/deps/limits-4e3aab6e4851a494)
+
+running 5 tests
+test hop_grouping_and_shortest_path_limits_discard_an_indexed_overwrite ... ok
+test label_index_hop_analytics_and_staged_writes_obey_the_guard ... ok
+test oversized_parameters_and_fanout_fail_without_writes_and_poison_prior_runs ... ok
+test source_and_unused_parameters_share_one_run_guard ... ok
+test zero_budget_is_invalid_and_failed_query_does_not_prevent_a_new_transaction ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/memory_pool.rs (target/debug/deps/memory_pool-630bc54ef4f9e3ec)
+
+running 3 tests
+test concurrent_transactions_share_capacity_and_release_on_all_terminal_paths ... ok
+test execution_deadline_stops_low_memory_fanout_and_releases_the_pool ... ok
+test pool_reservation_stays_bounded_across_runs_and_reports_live_usage ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/node_acl.rs (target/debug/deps/node_acl-3afc4184c342e25d)
+
+running 10 tests
+test acl_filters_scans_primary_keys_indexes_bound_variables_counts_and_both_edge_directions ... ok
+test acl_stamp_of_null_heavy_node_fits_metadata_budget_without_decoding_its_payload ... ok
+test authoritative_document_grants_override_allow_all_when_actual_document_id_is_present ... ok
+test every_csr_analytics_procedure_and_knowledge_rank_uses_only_visible_nodes_and_edges ... ok
+test large_hidden_rows_are_precharged_before_decode_and_release_query_pool_on_rejection ... ok
+test malformed_stored_node_acl_stamp_fails_and_rolls_back_all_prior_metadata_changes ... ok
+test null_heavy_hidden_and_visible_lists_use_decoded_estimates_before_allocation ... ok
+test policy_is_trusted_immutable_and_rejects_all_mutations_before_execution ... ok
+test private_acl_properties_are_stripped_from_scalar_and_whole_node_outputs_even_legacy ... ok
+test stamp_requires_both_privileges_validates_whole_metadata_and_is_transactional ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/numeric_index.rs (target/debug/deps/numeric_index-99f4ffe262b6f6ee)
+
+running 3 tests
+test numeric_index_matches_scan_at_precision_boundaries_and_survives_overwrite ... ok
+test oversized_v1_migration_keeps_catalog_marker_and_existing_entries_unchanged ... ok
+test v1_ready_marker_cannot_enable_numeric_index_before_atomic_rebuild ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.22s
+
+     Running tests/replication_prepare.rs (target/debug/deps/replication_prepare-e3bc786b5c69bcf3)
+
+running 4 tests
+test competing_prepared_entries_reject_divergence_without_mutation ... ok
+test preparation_buffer_guard_rejects_before_export_and_releases_shared_reservation ... ok
+test readonly_drops_and_local_commit_or_stale_prepare_fail_closed ... ok
+test replicated_multi_run_prepares_all_bytes_without_local_mutation_then_applies_once ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/scalar_size.rs (target/debug/deps/scalar_size-ffdaa5116c1edc7f)
+
+running 4 tests
+test property_predicates_unwind_and_count_arguments_use_size ... ok
+test rejects_invalid_types_names_arity_and_nested_aggregates ... ok
+test size_in_set_persists_and_an_invalid_argument_rolls_back_create ... ok
+test sizes_strings_lists_null_nested_values_and_parameters ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/schema.rs (target/debug/deps/schema-449e6f1be4ebcce5)
+
+running 7 tests
+test caps_count_repeated_endpoints_and_relationship_properties ... ok
+test catalog_and_index_readiness_use_the_transaction_snapshot ... ok
+test empty_catalog_returns_one_row ... ok
+test enforces_allocation_and_execution_deadline ... ok
+test rejects_arguments_and_invalid_yields_and_rolls_back_staged_writes ... ok
+test rejects_oversized_schema_and_dangling_endpoints ... ok
+test returns_effective_columns_and_every_signature_in_catalog_order ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/streaming.rs (target/debug/deps/streaming-167844bf0ef0f50a)
+
+running 4 tests
+test bounded_reads_and_counts_do_not_materialize_all_input_rows ... ok
+test read_pipeline_matches_eager_fallback_for_correlated_and_empty_inputs ... ok
+test scalar_property_reads_match_whole_nodes_before_and_after_ontology_promotion ... ok
+test streaming_hops_overlay_empty_counts_and_validation_keep_semantics ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/string_case.rs (target/debug/deps/string_case-82c4a0b4f2f3bf3b)
+
+running 6 tests
+test arity_types_names_and_zero_rows_are_validated ... ok
+test conversion_allocation_is_guarded ... ok
+test conversion_uses_shared_pool_and_deadline ... ok
+test indexed_set_overwrite_and_reopen ... ok
+test later_row_type_error_rolls_back_all_writes ... ok
+test unicode_null_and_nested_functions ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/transactions.rs (target/debug/deps/transactions-093b258ea3870e06)
+
+running 8 tests
+test bindings_and_parameters_are_query_local ... ok
+test catalog_migration_conflicts_with_writes ... ok
+test conflicting_writer_fails_permanently ... ok
+test every_query_error_poisons_all_prior_work ... ok
+test owned_database_worker_safely_contains_borrowed_transaction ... ok
+test rollback_and_drop_discard_every_run ... ok
+test shared_overlay_is_private_then_persists_on_commit_and_reopen ... ok
+test snapshot_hides_external_updates_and_read_only_completion_succeeds ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/typed_adjacency.rs (target/debug/deps/typed_adjacency-d3b3bb8537c20bcd)
+
+running 3 tests
+test directional_reads_and_eager_writes_select_the_same_neighbors ... ok
+test pending_merges_and_detach_deletes_rollback_and_survive_reopen_on_commit ... ok
+test projection_limit_stops_before_a_later_invalid_neighbor ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src/lib.rs (target/debug/deps/brainwire_replication-1ebaf6223096b017)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/network.rs (target/debug/deps/network-9415cd18aae73497)
+
+running 4 tests
+test authentication_membership_bounds_and_total_deadline ... ok
+test mutual_tls_and_claimed_sender_hostname_required ... ok
+test nonloopback_requires_tls_and_debug_hides_secret ... ok
+test real_three_peer_quorum_proposal_lookup_and_status ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.50s
+
+     Running tests/storage.rs (target/debug/deps/storage-a79ccae8948053f4)
+
+running 9 tests
+test cap_holes_and_unsupported_snapshots_fail_without_mutation ... ok
+test command_validation_and_digest_include_graph_variant_and_request_identity ... ok
+test corrupt_durable_accounting_is_not_silently_reset_on_reopen ... ok
+test crash_window_replay_uses_application_ledger_and_fatal_runtime_stops ... ok
+test durable_vote_log_committed_membership_dedupe_and_conflicting_retry ... ok
+test official_supported_storage_conformance_cases ... ok
+test registry_initialization_proof_is_durable_only_for_new_successful_registry_commands ... ok
+test replication_reader_bounds_serialized_batches_and_handles_max_exclusive ... ok
+test retained_log_capacity_is_atomic_at_boundary_and_can_increase_on_reopen ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+     Running unittests src/main.rs (target/debug/deps/brainwire-457877b83a4df85d)
+
+running 75 tests
+test admin::tests::ontology_preserves_every_signature_and_rejects_dangling_types ... ok
+test client_auth::tests::credentials_are_strict_bounded_and_errors_do_not_echo_secrets ... ok
+test cluster::application::tests::graph_apply_replays_only_same_global_command_and_registry_ignores_orphans ... ok
+test cluster::application::tests::invalid_schema_or_batch_is_a_deterministic_rejection ... ok
+test cluster::application::tests::missing_acknowledged_store_is_refused_and_unpublished_creation_replays ... ok
+test config::tests::a_bad_value_names_its_key ... ok
+test config::tests::an_unknown_key_in_a_known_section_is_refused ... ok
+test config::tests::an_unknown_top_level_section_is_refused ... ok
+test config::tests::auth_file_defaults_unset_and_reports_path_provenance ... ok
+test config::tests::auth_file_rejects_explicit_blank_paths_in_file_and_environment ... ok
+test config::tests::cache_below_the_floor_is_invalid ... ok
+test config::tests::config_error_messages_are_human_readable ... ok
+test config::tests::decoded_message_limit_has_independent_default_file_and_env_provenance ... ok
+test config::tests::default_database_cannot_escape_the_data_directory ... ok
+test config::tests::defaults_follow_the_spec ... ok
+test config::tests::describe_reports_value_and_source_text ... ok
+test config::tests::describe_returns_one_row_per_key_in_order ... ok
+test config::tests::env_overrides_every_key ... ok
+test config::tests::file_then_env_override_and_sources_are_recorded ... ok
+test config::tests::find_file_locates_brainwire_toml_in_cwd ... ok
+test config::tests::io_budget_is_positive_independent_and_reports_provenance ... ok
+test config::tests::listen_must_parse_as_a_socket_address ... ok
+test config::tests::malformed_toml_is_a_parse_error ... ok
+test config::tests::memtables_must_fit_inside_the_cache ... ok
+test config::tests::query_allocation_guard_must_be_positive ... ok
+test config::tests::query_timeout_has_file_env_provenance_and_rejects_invalid_bounds ... ok
+test config::tests::the_default_file_loads_back_to_the_defaults ... ok
+test config::tests::wrong_type_for_a_known_key_is_a_parse_error_not_a_panic ... ok
+test cypher::tests::nonfinite_output_is_never_null ... ok
+test databases::tests::creates_default_and_reopens_existing_named_databases ... ok
+test databases::tests::refuses_symlinked_database_directory ... ok
+test databases::tests::refuses_to_start_if_a_named_database_is_corrupt ... ok
+test databases::tests::rejects_path_names_and_ignores_non_database_directories ... ok
+test engine::tests::concurrent_writers_report_retryable_commit_conflict ... ok
+test engine::tests::configured_query_guard_rejects_large_runs_and_discards_prior_writes ... ok
+test engine::tests::graph_reader_cannot_mutate_and_writer_cannot_read_instance_telemetry ... ok
+test engine::tests::named_database_workers_share_and_release_the_query_pool ... ok
+test engine::tests::node_output_uses_bolt_node_tag_and_element_id ... ok
+test engine::tests::parameter_conversion_failure_discards_prior_writes_and_reservations ... ok
+test engine::tests::parameters_keep_nested_types_and_last_duplicate_key ... ok
+test engine::tests::privilege_change_and_graph_switch_discard_pending_writes ... ok
+test engine::tests::production_session_reset_and_drop_discard_pending_writes ... ok
+test engine::tests::protected_engine_checks_default_and_explicit_graph_before_lookup ... ok
+test engine::tests::protected_session_logoff_aborts_explicit_write_and_unconsumed_rows ... ok
+test engine::tests::protected_session_logoff_aborts_implicit_write_and_unconsumed_rows ... ok
+test engine::tests::protected_session_repeated_or_invalid_logon_aborts_streaming_writes ... ok
+test engine::tests::protected_session_reset_cannot_restore_logged_out_access ... ok
+test engine::tests::protocol_error_codes_preserve_retry_and_user_error_categories ... ok
+test engine::tests::read_only_transaction_disallows_writes_and_acl_stamp_for_admin ... ok
+test engine::tests::trusted_node_visibility_survives_runs_and_resets_on_identity_change ... ok
+test engine::tests::worker_preserves_transaction_visibility_commit_and_rollback ... ok
+test probe::tests::repeated_empty_chunks_cannot_hold_a_probe_open_forever ... ok
+test probe::tests::response_decode_accepts_exact_storage_boundary_and_rejects_trailing_bytes ... ok
+test probe::tests::response_decode_bounds_scalar_amplification_before_owned_allocation ... ok
+test remote::tests::handshake_slow_drip_cannot_extend_absolute_deadline ... ok
+test remote::tests::schema_accepts_one_complete_row_and_rejects_bad_or_partial_results ... ok
+test remote::tests::schema_preserves_catalog_names_and_indexes_on_extra_properties ... ok
+test remote::tests::schema_rejects_shapes_duplicates_endpoints_and_limits ... ok
+test remote_graph::tests::record_shape_and_identifier_size_are_strict ... ok
+test remote_graph::tests::rejects_identifiers_ids_and_deadlines_before_network ... ok
+test remote_graph::tests::rows_preserve_repeated_ids_and_reject_excess_wrong_fields_and_partial_summary ... ok
+test remote_indexes::tests::accepts_empty_and_200_rows_rejects_excess_partial_wrong_fields_and_wire ... ok
+test remote_indexes::tests::invalid_graph_and_timeout_fail_before_connect ... ok
+test remote_indexes::tests::strict_row_shape_and_states_preserve_catalog_strings ... ok
+test remote_memory::tests::bounded_wire_requires_exact_fields_one_record_and_complete_summary ... ok
+test remote_memory::tests::handshake_slow_drip_cannot_extend_absolute_deadline ... ok
+test remote_memory::tests::rejects_invalid_options_before_connecting ... ok
+test remote_memory::tests::strict_counters_preserve_unknown_and_reject_malformed_values ... ok
+test size::tests::deserialize_rejects_bad_input_without_panicking ... ok
+test size::tests::deserializes_from_toml_string_or_integer ... ok
+test size::tests::displays_the_largest_exact_binary_unit ... ok
+test size::tests::empty_and_blank_strings_do_not_parse ... ok
+test size::tests::overflow_is_an_error_not_a_panic ... ok
+test size::tests::parses_binary_and_decimal_units ... ok
+test size::tests::zero_bytes_displays_as_bytes ... ok
+
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.18s
+
+     Running tests/admin.rs (target/debug/deps/admin-f2e6a02d771f18f7)
+
+running 8 tests
+test applying_an_ontology_without_a_previous_label_preserves_existing_graph_data ... ok
+test checkpoint_cli_refuses_overwrite_and_reopens_independent_graph ... ok
+test create_list_and_apply_ontology_survive_process_reopen ... ok
+test file_inventory_classifies_actual_engine_files_and_bounds_output ... ok
+test invalid_name_never_escapes_configured_data_directory ... ok
+test invalid_ontology_does_not_create_database ... ok
+test ontology_view_reads_real_catalog_signatures_properties_and_empty_graphs ... ok
+test overview_reports_multiple_independent_graphs ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.93s
+
+     Running tests/cluster_inspect.rs (target/debug/deps/cluster_inspect-6e079539ff2c6260)
+
+running 4 tests
+test all_three_members_and_uninitialized_are_diagnostics_only ... ok
+test mismatched_caps_and_wrong_identity_are_reported_without_raw_errors ... ok
+test stopped_raft_state_is_not_a_complete_sample ... ok
+test unavailable_member_does_not_turn_two_samples_into_cap_or_quorum_proof ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests/cluster_probe.rs (target/debug/deps/cluster_probe-297f32637dd13191)
+
+running 4 tests
+test cli_rejects_unknown_probe_kind ... ok
+test follower_and_uninitialized_are_live_but_not_ready ... ok
+test readiness_defaults_and_discards_both_absent_and_existing_lookup_payloads ... ok
+test stopped_wrong_identity_and_redirect_do_not_pass_readiness ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+     Running tests/commit_state.rs (target/debug/deps/commit_state-471f8054c417669a)
+
+running 2 tests
+test checkpoint_receipt_matches_reopened_checkpoint_and_explicit_config ... ontology applied to research
+ok
+test commit_state_is_read_only_durable_and_scoped_to_each_graph ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+
+     Running tests/connected_graph.rs (target/debug/deps/connected_graph-ab9fef62bf36189b)
+
+running 1 test
+test protected_graph_preview_bounds_relationship_rows_and_preserves_missing_and_isolated_sources ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+
+     Running tests/connected_indexes.rs (target/debug/deps/connected_indexes-000b2ad6ed185af2)
+
+running 1 test
+test protected_indexes_allow_reader_deny_unauthorized_graph_and_keeps_client_storage_closed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/connected_memory.rs (target/debug/deps/connected_memory-2072e8ae6e6b29ea)
+
+running 1 test
+test protected_memory_allows_admin_denies_reader_and_keeps_client_storage_closed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running tests/connected_ontology.rs (target/debug/deps/connected_ontology-73ff8f98cd04deff)
+
+running 2 tests
+test connected_flags_cannot_fall_back_to_offline_or_demo ... ok
+test connected_schema_selects_named_graphs_while_server_owns_storage ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+     Running tests/cypher.rs (target/debug/deps/cypher-b7f2c9518b1ee011)
+
+running 9 tests
+test analytics_through_cli_returns_real_nodes_scores_and_projection_counts ... ok
+test config_and_shell_routes_survive ... ok
+test configured_allocation_guard_fails_before_committing_bulk_writes ... ok
+test exclusive_lock_and_nonfinite_stored_output_are_actionable ... ok
+test initialize_create_parameter_reopen_and_atomic_failure ... ok
+test invalid_inputs_do_not_create_database ... ok
+test invalid_parameter_files_fail_before_opening_store ... ok
+test parameter_file_conflicts_with_explicit_parameters ... ok
+test parameter_file_imports_nested_rows_and_reopens ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+
+     Running tests/probe.rs (target/debug/deps/probe-c03c1895f305289a)
+
+running 2 tests
+test probe_rejects_zero_timeout_before_connecting ... ok
+test ready_probe_requires_a_serving_database_and_fails_after_shutdown ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running unittests src/lib.rs (target/debug/deps/brainwire_store-8d4069e511caf32e)
+
+running 83 tests
+test alloc::tests::a_poisoned_allocator_recovers_and_never_reuses_or_repeats_an_id ... ok
+test alloc::tests::a_reopen_never_reuses_ids ... ok
+test alloc::tests::concurrent_allocation_from_an_arc_database_is_unique ... ok
+test alloc::tests::concurrent_allocation_is_unique ... ok
+test alloc::tests::edge_ids_start_at_one ... ok
+test alloc::tests::ids_grow_and_never_repeat_across_blocks ... ok
+test alloc::tests::next_edge_id_errors_instead_of_panicking_at_the_sequence_boundary ... ok
+test alloc::tests::next_node_id_errors_instead_of_panicking_at_the_sequence_boundary ... ok
+test alloc::tests::next_node_id_rejects_an_out_of_range_type ... ok
+test alloc::tests::reserve_propagates_a_store_error_instead_of_panicking ... ok
+test db::tests::a_path_that_cannot_be_opened_is_a_store_error_not_a_panic ... ok
+test db::tests::catalog_error_carries_its_message ... ok
+test db::tests::checkpoint_reopens_committed_schema_indexes_and_counter_without_pending_writes ... ok
+test db::tests::codec_error_converts_into_store_error ... ok
+test db::tests::corrupt_error_carries_its_message ... ok
+test db::tests::creates_every_column_family ... ok
+test db::tests::data_survives_reopen ... ok
+test db::tests::key_error_converts_into_store_error ... ok
+test db::tests::missing_column_family_is_an_error ... ok
+test db::tests::resources_stores_the_config_it_was_given ... ok
+test db::tests::storage_metrics_report_every_column_family_without_claiming_exact_counts ... ok
+test db::tests::two_databases_share_one_resources ... ok
+test graph::tests::a_wrong_signature_is_refused ... ok
+test graph::tests::acl_properties_are_refused_for_now ... ok
+test graph::tests::apply_ontology_txn_error_surfaces_as_graph_error ... ok
+test graph::tests::check_invariants_catches_a_missing_edge_mirror ... ok
+test graph::tests::check_invariants_catches_a_node_above_its_id_counter ... ok
+test graph::tests::check_invariants_catches_a_pk_pointing_to_a_missing_node ... ok
+test graph::tests::check_invariants_catches_an_edge_with_a_missing_endpoint ... ok
+test graph::tests::detach_delete_of_a_nonexistent_node_is_not_found ... ok
+test graph::tests::detach_delete_of_an_unrelated_node_does_not_conflict_with_a_concurrent_merge_edge ... ok
+test graph::tests::detach_delete_of_the_destination_also_removes_the_mirrored_out_edge ... ok
+test graph::tests::detach_delete_removes_node_key_and_both_mirrors ... ok
+test graph::tests::finds_by_entity_id_with_and_without_label ... ok
+test graph::tests::get_node_on_corrupt_bytes_is_a_store_error_not_a_panic ... ok
+test graph::tests::index_backfill_conflicts_if_a_writer_commits_after_its_snapshot ... ok
+test graph::tests::merge_edge_conflicts_when_a_concurrent_detach_delete_of_the_destination_commits_first ... ok
+test graph::tests::merge_edge_conflicts_when_a_concurrent_detach_delete_of_the_source_commits_first ... ok
+test graph::tests::merge_edge_first_then_a_concurrent_detach_delete_of_the_destination_conflicts ... ok
+test graph::tests::merge_edge_first_then_a_concurrent_detach_delete_of_the_source_conflicts ... ok
+test graph::tests::merge_edge_never_duplicates_and_mirrors ... ok
+test graph::tests::merge_edge_to_a_nonexistent_node_is_not_found ... ok
+test graph::tests::merge_edge_with_unknown_edge_type_is_an_error ... ok
+test graph::tests::merge_node_is_idempotent_and_null_removes ... ok
+test graph::tests::merge_node_reports_not_found_when_pk_points_to_a_missing_node ... ok
+test graph::tests::merge_node_with_unknown_label_is_an_error ... ok
+test graph::tests::nodes_of_type_includes_last_sequence_and_isolates_maximum_type ... ok
+test graph::tests::nodes_of_type_reads_own_writes_and_deletes_in_id_order ... ok
+test graph::tests::nodes_of_type_reports_malformed_node_keys ... ok
+test graph::tests::non_null_set_after_promotion_removes_the_old_extra_value_directly ... ok
+test graph::tests::projection_filters_types_and_aggregates_parallel_coordinates ... ok
+test graph::tests::projection_rejects_corrupt_keys_and_missing_endpoints ... ok
+test graph::tests::promoting_a_property_to_a_column_clears_the_stale_extra_value ... ok
+test graph::tests::sparse_projection_maps_persisted_edges_to_csr_rows ... ok
+test graph::tests::stats_counts_nodes_and_outgoing_edges ... ok
+test graph::tests::the_catalog_persists ... ok
+test graph::tests::two_merge_edges_into_the_same_hub_from_different_sources_both_commit ... ok
+test graph::tests::typed_adjacency_preserves_snapshot_overlay_direction_and_edge_ids ... ok
+test graph::tests::typed_adjacency_validates_family_and_stops_on_callback_error ... ok
+test replicated_apply::tests::actual_failed_commit_does_not_persist_data_or_ledger ... ok
+test smoke::builds ... ok
+test txn::tests::a_dropped_transaction_leaves_no_trace ... ok
+test txn::tests::a_failed_write_is_a_store_error_not_a_panic ... ok
+test txn::tests::a_poisoned_committer_recovers_and_forces_older_transactions_to_retry ... ok
+test txn::tests::a_read_only_get_for_update_dependency_also_conflicts ... ok
+test txn::tests::a_transaction_older_than_the_pruned_history_conflicts_on_any_touch ... ok
+test txn::tests::commit_sequence_increases_on_writes_and_a_read_only_commit_is_a_no_op ... ok
+test txn::tests::database_returns_the_originating_database ... ok
+test txn::tests::disjoint_writes_both_commit ... ok
+test txn::tests::first_committer_wins_on_a_dependency ... ok
+test txn::tests::get_for_update_conflicts_even_when_the_writes_are_disjoint ... ok
+test txn::tests::memory_estimate_tracks_replacement_tombstones_and_unique_dependencies ... ok
+test txn::tests::plain_get_creates_no_dependency_and_the_commit_succeeds ... ok
+test txn::tests::poison_recovers_only_once_so_later_disjoint_transactions_still_both_commit ... ok
+test txn::tests::range_visitor_matches_eager_scan_with_overlay_and_stops_on_error ... ok
+test txn::tests::reads_come_from_the_snapshot ... ok
+test txn::tests::reads_its_own_writes ... ok
+test txn::tests::scan_merges_the_overlay_and_applies_deletes ... ok
+test txn::tests::scan_prefix_for_update_conflicts_on_a_write_under_the_prefix_that_lands_after_start ... ok
+test txn::tests::scan_prefix_for_update_does_not_conflict_on_a_write_outside_the_prefix_or_cf ... ok
+test txn::tests::scan_range_merges_snapshot_and_overlay_with_exclusive_upper_bound ... ok
+test txn::tests::scan_range_uses_the_transaction_snapshot ... ok
+test txn::tests::visitor_merges_updates_deletes_insertions_and_respects_snapshot_and_prefix ... ok
+
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+     Running unittests src/bin/crash_writer.rs (target/debug/deps/crash_writer-3675d35c962715eb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/commit_sequence.rs (target/debug/deps/commit_sequence-90334026c91d6140)
+
+running 11 tests
+test acknowledged_sequences_and_indexed_graph_writes_survive_sigkill ... ok
+test allocator_reservation_is_committed_even_when_outer_transaction_rolls_back ... ok
+test checkpoint_receipts_match_numbered_data_under_writer_contention ... ok
+test checkpoint_retains_its_captured_sequence ... ok
+test disjoint_concurrent_writers_commit_but_explicit_marker_dependencies_conflict ... ok
+test legacy_checkpoint_receipt_is_untracked_and_does_not_create_a_marker ... ok
+test malformed_or_unknown_version_marker_fails_open ... ok
+test missing_marker_is_untracked_until_a_write_and_reopen_continues_sequence ... ok
+test ontology_commits_are_tracked_and_sequences_are_per_store ... ok
+test overflow_and_reserved_writes_fail_atomically ... ok
+test snapshot_is_captured_at_begin_and_does_not_follow_pending_or_later_commits ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.47s
+
+     Running tests/crash.rs (target/debug/deps/crash-9331d5424d51d2d8)
+
+running 1 test
+test survives_five_kill_and_reopen_cycles ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests/node_acl.rs (target/debug/deps/node_acl-d0f5af09441c81a7)
+
+running 9 tests
+test acl_overlay_snapshot_conflict_delete_and_reopen_are_atomic ... ok
+test acl_stamping_validates_borrowed_large_rows_and_pending_overlay_without_owned_decoding ... ok
+test actual_document_property_activates_exclusive_grants_and_invalid_stamps_do_not_mutate ... ok
+test filtered_projection_excludes_hidden_topology_before_weight_and_keeps_physical_limits ... ok
+test null_heavy_node_and_acl_private_error_are_guarded_without_secret_leak ... ok
+test stamping_and_detaching_conflict_in_both_commit_orders_and_orphan_metadata_fails_audit ... ok
+test trusted_acl_replacement_tracks_large_or_corrupt_previous_metadata_without_decoding_it ... ok
+test visibility_filter_keeps_dangling_corruption_detection_and_control_errors ... ok
+test visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_callback_error ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/projection_control.rs (target/debug/deps/projection_control-febd91c2e0a5f805)
+
+running 4 tests
+test failed_reservation_prevents_projection_and_preserves_store ... ok
+test interruption_observes_filtered_edge_scan_and_does_not_mutate ... ok
+test weighted_decode_reservation_precedes_selected_edge_reservation ... ok
+test wrapper_parity_and_controls_surround_csr_construction ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/property_patches.rs (target/debug/deps/property_patches-2778637e94616a9a)
+
+running 1 test
+test edge_partial_patch_preserves_omitted_fields_removes_null_and_reopens_with_one_mirror ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/replicated_apply.rs (target/debug/deps/replicated_apply-1cec336747ada8eb)
+
+running 4 tests
+test canonical_roundtrip_sorting_digest_and_empty_delete_distinction ... ok
+test invalid_entries_and_bounds_fail_without_data_or_progress ... ok
+test strict_indices_and_latest_duplicate_are_durable_without_extra_commit ... ok
+test three_independent_stores_match_graph_identity_indexes_acl_cursor_and_restore_ledger ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/replication_prepare.rs (target/debug/deps/replication_prepare-9e523a44188e38c6)
+
+running 4 tests
+test apply_invalidates_preexisting_standalone_allocator_cache ... ok
+test malformed_or_exhausted_staged_id_counters_fail_before_mutation ... ok
+test prepare_rejects_late_mode_reserved_metadata_bounds_and_local_commit ... ok
+test staged_node_and_edge_counters_do_not_commit_until_apply_and_survive_promotion_reopen ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running unittests src/lib.rs (target/debug/deps/brainwire_tui-3b39b0b32526bf92)
+
+running 38 tests
+test composition_tests::all_files_have_contextual_explanations_and_selection_stays_reachable ... ok
+test composition_tests::disk_and_memory_keep_core_composition_at_every_size ... ok
+test composition_tests::inspector_scroll_is_independent_and_cannot_erase_explanation ... ok
+test composition_tests::wrapped_examples_and_overflow_hint_are_visible_in_compact_query ... ok
+test connected::tests::refresh_is_atomic_preserves_selection_and_recovers_from_stale_errors ... ok
+test connected_graph::tests::bounded_bilingual_real_relationships_preserve_direction_and_selection ... ok
+test connected_graph::tests::failed_refresh_keeps_age_rows_selection_then_recovery_preserves_identity ... ok
+test connected_graph::tests::missing_and_isolated_entity_do_not_invent_nodes_or_degree ... ok
+test connected_indexes::tests::bilingual_narrow_and_stale_keep_explanations_and_escape_untrusted_text ... ok
+test connected_indexes::tests::refresh_preserves_selected_identity_and_stale_age_then_recovers ... ok
+test connected_memory::tests::bilingual_narrow_render_keeps_all_counters_and_scope ... ok
+test connected_memory::tests::human_byte_counters_keep_exact_values_in_compact_bilingual_render ... ok
+test connected_memory::tests::refresh_retains_stale_data_and_age_then_recovers ... ok
+test connected_memory::tests::snapshot_options_are_validated_before_fetch_and_theme_uses_green_cyan ... ok
+test connected_workspace::tests::all_panes_render_at_beta_sizes_in_both_languages_without_clipping_core_data ... ok
+test connected_workspace::tests::forbidden_memory_keeps_workspace_open_and_other_panes_available ... ok
+test connected_workspace::tests::fourth_pane_is_lazy_keeps_selection_and_permission_failure_is_navigable ... ok
+test connected_workspace::tests::navigation_fetches_lazily_once_and_preserves_each_selection ... ok
+test connected_workspace::tests::refresh_failure_retains_real_sample_age_and_recovers ... ok
+test connected_workspace::tests::snapshot_initial_failure_returns_error_for_automation ... ok
+test connected_workspace::tests::wrong_snapshot_is_error_and_initial_failure_can_be_retried ... ok
+test ontology::tests::compact_toggle_and_localization_preserve_canonical_names ... ok
+test ontology::tests::empty_isolated_tiny_and_untrusted_names_are_safe ... ok
+test ontology::tests::schema_signatures_remain_distinct_and_scrollable ... ok
+test ontology::tests::wide_schema_has_directed_boxes_and_inspector ... ok
+test overview::tests::disk_panel_uses_real_file_metadata_and_explains_selected_files ... ok
+test overview::tests::ontology_navigation_selects_types_resets_on_graph_change_and_closes_inspector ... ok
+test overview::tests::pipeline_overflow_scrolls_to_explanation_and_memory_never_claims_live_usage ... ok
+test overview::tests::query_panel_shows_persisted_store_sequence_and_localized_untracked_state ... ok
+test overview::tests::real_overview_renders_multiple_graphs_and_selected_details ... ok
+test tests::all_views_render_at_required_sizes ... ok
+test tests::graph_highlight_follows_selection ... ok
+test tests::guided_queries_use_fixture_and_reject_edits ... ok
+test tests::no_color_and_languages_render ... ok
+test tests::query_results_and_unsupported_status_remain_reachable_at_80x24 ... ok
+test tests::selection_updates_inspector ... ok
+test tests::transitions_and_editor_shortcuts ... ok
+test tests::unicode_and_bounded_paste ... ok
+
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+   Doc-tests brainwire_bolt
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests brainwire_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests brainwire_cypher
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests brainwire_replication
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests brainwire_store
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests brainwire_tui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -95,8 +95,63 @@ graph.set_node_acl("Ticket", "t-42", {
 })
 ```
 
-Omitted metadata fields reset to empty. This is a separate privileged transaction
-per node; it is not atomic with a prior `load_nodes` call. Restricted readers
-cannot see unstamped ordinary nodes. The existing snapshot/diff importer does
-not automatically stamp these ACLs. Production integration still needs the
-authoritative ACL source and atomic ingestion policy; see [node ACL](node-acl.md).
+Omitted metadata fields reset to empty. `set_node_acl` remains a separate privileged
+transaction per node; it is not atomic with a prior `load_nodes` call.
+To create/update one node and replace its source-authoritative ACL atomically:
+
+```python
+graph.upsert_node_with_acl("Ticket", "t-42", {"status":"open"}, {
+    "allow":["user:zendesk-main:alice"], "deny":[],
+    "connectorIds":["zendesk-main"], "sources":["tickets"],
+}, request_id="ticket-t42-source-revision-8")
+```
+
+The provided request seed uses the explicit quorum transaction path. Omit it for
+standalone managed transactions. Node mutation and ACL replacement commit together;
+ACL authorization/validation failure rolls both back. This API requires an
+unrestricted trusted principal with graph-write and instance-administration grants.
+It does not infer permissions from ordinary properties or make an untrusted caller
+an administrator. The snapshot/diff importer still does not automatically supply
+or stamp authoritative ACLs: real client mapping and importer integration remain
+open. See [node ACL](node-acl.md).
+
+## Explicit quorum transaction identity
+
+For a replicated server, `write_transaction` sends one explicit transaction with
+an application-retained request seed. This API does not use managed retries,
+discover a leader or swallow uncertain outcomes. Connect to the current leader;
+standalone servers reject the identity metadata. Existing `load_nodes`/CRUD helpers
+keep their existing managed-transaction behavior and do not gain a durable source
+cursor or retained request identity automatically.
+
+```python
+from examples.python.client import GraphClient, request_key
+
+seed = "ticket-t42-source-revision-7"  # Persist before sending; reuse on retry.
+key = request_key("brainwire-quorum-demo", "tickets", "writer", seed)
+
+def apply_ticket(tx):
+    tx.run("MERGE (t:Ticket {entity_id:$id}) SET t.status=$status",
+           id="t-42", status="closed").consume()
+    return "t-42"
+
+# Reuse a driver connected to the current quorum leader.
+graph = GraphClient(driver, "tickets")
+acknowledged_id = graph.write_transaction(apply_ticket, request_id=seed)
+```
+
+Consume query results inside the callback; return ordinary materialized values.
+The return value is delivered only after COMMIT acknowledgement. Callback errors
+rollback via the driver's transaction context. `CommitOutcomeUnknown` or
+`RequestAlreadyCommitted` propagate without a second execution or invented result.
+Inspect `key` using `cluster request --id KEY` with protected cluster credentials.
+A committed reply resolves the durable write outcome, not its lost query results.
+Retain the same seed, payload and authenticated principal across retries; never
+assign a fresh seed merely because the first response was lost. An absent lookup
+is not proof that an in-flight proposal will never commit. See
+[quorum operations](quorum-replication.md) for the full outcome protocol.
+
+Seeds accept 1–128 ASCII letters/digits or `-`, `_`, `:`, `.`. `request_key` uses
+compact UTF-8 JSON matching the Rust namespace, including Unicode principal IDs.
+Custom callbacks still obey ontology, authorization, query and replicated-batch
+limits; this method does not split an oversized transaction automatically.

@@ -343,6 +343,126 @@ pub(crate) fn control(config: &ClusterConfig, request: RpcRequest) -> Result<Rpc
         })
 }
 
+pub(crate) fn probe(config: &ClusterConfig, kind: &str) -> Result<(), String> {
+    let outcome = (|| {
+        let settings = config.transport().map_err(|_| "transport_unavailable")?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "runtime_unavailable")?;
+        runtime.block_on(async {
+            let status = match network::request(&settings, config.node_id, RpcRequest::Status).await
+            {
+                Ok(RpcResponse::Status(status)) => status,
+                _ => return Err("status_unavailable"),
+            };
+            if status.cluster_id != config.cluster_id || status.node_id != config.node_id {
+                return Err("invalid_status");
+            }
+            if !status.running {
+                return Err("not_running");
+            }
+            if kind == "liveness" {
+                return Ok(());
+            }
+            if status.membership != settings.peers().keys().copied().collect::<Vec<_>>() {
+                return Err("uninitialized_or_membership_mismatch");
+            }
+            if status.state != "Leader" || status.leader != Some(config.node_id) {
+                return Err("not_local_leader");
+            }
+            match network::request(
+                &settings,
+                config.node_id,
+                RpcRequest::Lookup {
+                    request_id: "brainwire-readiness-v1".into(),
+                },
+            )
+            .await
+            {
+                Ok(RpcResponse::Lookup(_)) => Ok(()),
+                _ => Err("quorum_unavailable"),
+            }
+        })
+    })();
+    println!(
+        "{}",
+        serde_json::json!({"kind":"raft_probe","node_id":config.node_id,
+        "probe_kind":kind,"success":outcome.is_ok(),"reason":outcome.err().unwrap_or(if kind == "liveness" { "running" } else { "quorum_read_barrier_passed" }),
+        "scope":"Raft only; does not verify graphs, Bolt authentication, or future writes"})
+    );
+    if outcome.is_err() {
+        return Err("local Raft probe failed".into());
+    }
+    Ok(())
+}
+
+/// Independent samples do not establish a quorum or a write/read readiness barrier.
+pub(crate) fn inspect(config: &ClusterConfig) -> Result<(), String> {
+    let settings = config.transport()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "cannot start inspection runtime")?;
+    let expected = settings.peers().keys().copied().collect::<Vec<_>>();
+    let samples = runtime.block_on(async {
+        let mut samples = Vec::new();
+        for &node_id in &expected {
+            let response = network::request(&settings, node_id, RpcRequest::Status).await;
+            let sample = match response {
+                Ok(RpcResponse::Status(status)) => {
+                    let initialized = status.membership == expected;
+                    let uninitialized = status.membership.is_empty()
+                        && status.last_applied.is_none()
+                        && status.committed_index.is_none();
+                    let valid = status.cluster_id == config.cluster_id
+                        && status.node_id == node_id
+                        && (initialized || uninitialized)
+                        && status.leader.is_none_or(|id| expected.contains(&id))
+                        && matches!(status.state.as_str(), "Learner" | "Follower" | "Candidate" | "Leader" | "Shutdown")
+                        && ((1 << 20)..=(64_u64 << 30)).contains(&status.max_log_bytes)
+                        && status.log_bytes <= status.max_log_bytes
+                        && status.log_remaining_bytes == status.max_log_bytes - status.log_bytes;
+                    if valid {
+                        serde_json::json!({"node_id":node_id,"initialized":initialized,
+                            "diagnostic":if status.running { "sampled" } else { "not_running" },"status":status})
+                    } else {
+                        serde_json::json!({"node_id":node_id,"diagnostic":"invalid_status","status":null})
+                    }
+                }
+                _ => serde_json::json!({"node_id":node_id,"diagnostic":"unavailable","status":null}),
+            };
+            samples.push(sample);
+        }
+        samples
+    });
+    let complete = samples
+        .iter()
+        .all(|sample| sample["diagnostic"] == "sampled");
+    let all_initialized = complete && samples.iter().all(|sample| sample["initialized"] == true);
+    let caps = samples
+        .iter()
+        .filter_map(|sample| sample["status"]["max_log_bytes"].as_u64())
+        .collect::<Vec<_>>();
+    let cap_agreement = complete.then(|| caps.iter().all(|cap| *cap == caps[0]));
+    let configured_cap_agreement =
+        complete.then(|| caps.iter().all(|cap| *cap == config.max_log_bytes));
+    let report = serde_json::json!({"kind":"diagnostic_sample",
+        "scope":"independent status samples; not a quorum or write/read readiness proof",
+        "cluster_id":config.cluster_id,"configured_max_log_bytes":config.max_log_bytes,
+        "complete":complete,"all_initialized":all_initialized,
+        "retained_log_cap_agreement":cap_agreement,
+        "configured_log_cap_agreement":configured_cap_agreement,"members":samples});
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).map_err(|_| "cannot encode cluster inspection")?
+    );
+    if !complete || cap_agreement != Some(true) || configured_cap_agreement != Some(true) {
+        return Err("cluster inspection incomplete or retained log capacities differ".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn propose_control(
     config: &ClusterConfig,
     command: Command,

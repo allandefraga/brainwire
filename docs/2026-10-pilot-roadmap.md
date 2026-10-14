@@ -23,7 +23,9 @@ authorization. This is a work queue, not a configured automatic daily run.
 
 Private node ACL now filters MATCH, traversals, ranking and sparse algorithms;
 protected static policies and privileged stamping are available. The dynamic
-client adapter and atomic authoritative ACL ingestion remain open. Python has
+client adapter and authoritative ACL source integration remain open. Python
+now offers atomic per-node upsert + ACL replacement; the snapshot importer does
+not automatically use it. Python has
 single/batch upserts and partial property addition/removal on nodes and edges.
 A separate pinned DuckLake snapshot-diff importer resumes updates and deletes,
 with synthetic tests against the actual engine. It is not native CDC.
@@ -101,7 +103,8 @@ restoration, failure and workload acceptance pass and deployment is authorized.
   source cursor commits atomically with each data batch (October 7). DuckLake
   pinned snapshot differences cover update/delete/replay for owned sources. Native
   CDC and general source reconciliation remain pending. Deterministic per-store
-  apply is experimental and not wired into consensus or serving.
+  apply is now wired into the optional fixed three-voter quorum server; snapshots
+  and multi-machine qualification remain pending.
 - Real offline graph/pipeline/memory/disk/ontology panels and connected ontology,
   memory, index and typed graph-neighbor inspection. Connected memory is shared query reservation
   accounting, not RSS or RocksDB cache. Other connected panels, query execution and live job progress remain
@@ -304,7 +307,7 @@ inside this narrower release label. No guaranteed production SLA is established.
 | Product | Fully connected Observatory, query/jobs/history/maintenance tabs, hosted docs and MCP | Shared authenticated APIs, real bounded status and examples; publication separately authorized |
 
 These are not dropped. Their dates require a new capacity decision based on the
-October pilot evidence. The next large engine task remains deterministic apply;
+October pilot evidence. The next large engine tasks are coordinated snapshots and log compaction;
 this revision deliberately puts the client pilot blockers ahead of claiming
 an untested distributed system in a 6-hour remaining development budget.
 

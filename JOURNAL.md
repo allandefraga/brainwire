@@ -39,6 +39,44 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-14 — Quorum operation and atomic Python ACL writes
+
+- **Requested:** use remaining weekly allowance from 7% toward 1%, checking actual
+  account usage and preserving a completion margin. Started 08:22 UTC; verified
+  at 08:41 UTC. Work stayed local, with no publication, push or target deployment.
+- **Done:** each private status reports retained encoded log bytes, configured cap
+  and remaining bytes. Atomic boundary tests prove rejected multi-entry append
+  leaves entries/accounting/commit/apply unchanged, full-cap duplicate replay,
+  lower-cap refusal and increased-cap reopen without data deletion.
+- **Operation:** `cluster inspect` samples all three members, validates identity
+  and capacity, emits explicit unavailable/invalid statuses and exits nonzero on
+  incomplete sampling or cap mismatch. It is not a quorum proof. Local `cluster
+  probe --kind liveness|readiness` keeps running followers live while readiness
+  requires the local leader and a real quorum read barrier without forwarding.
+  These are Raft samples, not graph/authentication/future-write guarantees.
+- **Python:** `write_transaction` uses explicit retained metadata and does not
+  automatically retry unknown outcomes; `request_key` matches the Rust UTF-8
+  namespace. `upsert_node_with_acl` commits node changes and authoritative private
+  ACL together, optionally using the stable seed. Permission refusal rolls the
+  MERGE back. Existing managed CRUD and source importer behavior stays unchanged.
+- **Verified:** 623 Rust workspace tests, 31 Python tests, Clippy -D warnings,
+  fmt/diff checks. Astra reviewed the bounded plan and final source without
+  blockers. Native debug qualification (200 input nodes) and release (500) passed
+  all 15 fault/operation checks; three members' eleven-CF logical graph digests
+  match and all owned child processes, proxies and temporary directories cleaned.
+  Evidence verifier binds actual source/binary/check logs and rejects six false
+  readiness/cleanup/capacity receipts. Optimized binary SHA
+  `04a18d258f7f4811dd573a9dbc8ff84c6be14e03f62c6200f9cf7336cc5ad7e1`.
+- **Docs/evidence:** `docs/benchmarks/2026-10-14-quorum-capacity.md` and receipt
+  directory; Python and quorum guides updated. Previous candidate receipts remain
+  bound to their previous source/binary, never relabeled as current evidence.
+- **Next / limits:** coordinated snapshots/log compaction, joint membership/new-ID
+  disk-loss replacement and real machine/container qualification remain pending.
+  Real cluster log exhaustion was not tested; storage-boundary exhaustion was.
+  Real client/DuckLake authoritative ACL mapping and importer integration remain
+  open. No TUI changes or throughput claims; native Bolt TLS remains separate.
+
+
 ### 2026-10-13 — Real fixed three-voter quorum protocol
 
 - **Requested:** implement quorum replication. Started 13:53:38 UTC; final
