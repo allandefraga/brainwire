@@ -1,5 +1,5 @@
    Compiling brainwire-server v0.1.0 (/Users/fraga/Documents/brainwire/crates/server)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.32s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.15s
      Running unittests src/lib.rs (target/debug/deps/brainwire_bolt-9cb951c6298aa6b1)
 
 running 93 tests
@@ -97,7 +97,7 @@ test session::tests::telemetry_is_acknowledged_in_ready_and_tx_ready_without_cha
 test session::tests::transaction_mode_is_validated_and_legacy_read_support_fails_closed ... ok
 test session::tests::tx_pull_in_batches_reports_has_more_and_stays_in_the_transaction ... ok
 
-test result: ok. 93 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s
+test result: ok. 93 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s
 
      Running unittests src/bin/brainwire-bolt-dev.rs (target/debug/deps/brainwire_bolt_dev-8f5dafdee68d9568)
 
@@ -131,7 +131,7 @@ test implicit_write_commits_only_after_final_pull_and_reset_discards ... ok
 test rollback_reset_drop_and_late_query_failure_leave_no_graph_writes ... ok
 test session_commit_preserves_overlay_visibility_and_reopen ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
      Running unittests src/lib.rs (target/debug/deps/brainwire_core-b7cf911114d1d986)
 
@@ -206,7 +206,7 @@ test sparse::tests::rejects_bad_indices_and_vector_shape ... ok
 test sparse::tests::shortest_path_returns_minimum_hops_and_handles_cycles_bounds_and_isolation ... ok
 test sparse::tests::zero_weights_and_cancellation_do_not_store_zero_coordinates ... ok
 
-test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
 
      Running unittests src/lib.rs (target/debug/deps/brainwire_cypher-c3a07d43667bbb69)
 
@@ -259,7 +259,7 @@ test parser::tests::unwind_rows_merge ... ok
 test parser::tests::unwind_without_as_is_an_error ... ok
 test parser::tests::very_long_and_or_chains_are_refused_quickly_without_crashing ... ok
 
-test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
 
      Running tests/analytics.rs (target/debug/deps/analytics-270f1ce6a2b37606)
 
@@ -279,7 +279,7 @@ test snapshot_isolation_deletions_and_rollback_apply_to_analytics ... ok
 test weak_and_strong_components_include_isolates_and_ignore_stored_weight_properties ... ok
 test weighted_edges_reject_invalid_data_and_zero_weight_is_dangling ... ok
 
-test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
 
      Running tests/authorization.rs (target/debug/deps/authorization-7e7fdb2958b90458)
 
@@ -291,7 +291,7 @@ test reader_denials_precede_execution_and_allocator_reservations ... ok
 test source_length_guard_still_precedes_authorization ... ok
 test writer_can_commit_and_instance_admin_can_read_memory ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
 
      Running tests/coalesce.rs (target/debug/deps/coalesce-cbfe22eafe4bbcb8)
 
@@ -301,7 +301,7 @@ test later_row_error_rolls_back_writes_and_memory_guards_remain_active ... ok
 test names_and_aggregate_shapes_are_validated_even_in_skipped_arguments ... ok
 test per_row_defaults_work_in_unwind_predicates_and_exact_counts ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
 
      Running tests/commit_state.rs (target/debug/deps/commit_state-938794b61d01c0d5)
 
@@ -313,7 +313,7 @@ test one_row_supports_shared_projection_aliases_and_filters ... ok
 test pending_writes_rollback_reopen_and_next_commit_report_snapshot_state ... ok
 test rejects_arguments_options_unknown_fields_and_duplicate_aliases ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
 
      Running tests/executor.rs (target/debug/deps/executor-1d32a4daf29eb8de)
 
@@ -335,7 +335,7 @@ test self_loops_bound_endpoints_and_duplicate_delete_rows ... ok
 test signed_minimum_literal_executes_and_persists_exactly ... ok
 test static_errors_survive_empty_input ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
 
      Running tests/index.rs (target/debug/deps/index-b2f99ceebb66a38d)
 
@@ -354,7 +354,7 @@ test where_index_reads_own_overlay_and_retains_older_snapshots ... ok
 test where_seek_matches_scan_for_conjunctions_or_null_and_numeric_fallback ... ok
 test where_seeks_keep_hop_filters_cartesian_patterns_and_existing_bindings ... ok
 
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
 
      Running tests/knowledge_rank.rs (target/debug/deps/knowledge_rank-a4baf17c9e5f91a7)
 
@@ -365,7 +365,7 @@ test term_index_bounds_work_before_unrelated_nodes_are_read ... ok
 test top_k_replaces_earlier_candidates_and_obeys_memory_and_deadline_guards ... ok
 test updates_are_snapshot_local_and_invalid_signals_abort_prior_writes ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
 
      Running tests/limits.rs (target/debug/deps/limits-4e3aab6e4851a494)
 
@@ -376,7 +376,7 @@ test oversized_parameters_and_fanout_fail_without_writes_and_poison_prior_runs .
 test source_and_unused_parameters_share_one_run_guard ... ok
 test zero_budget_is_invalid_and_failed_query_does_not_prevent_a_new_transaction ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
      Running tests/memory_pool.rs (target/debug/deps/memory_pool-630bc54ef4f9e3ec)
 
@@ -385,7 +385,7 @@ test concurrent_transactions_share_capacity_and_release_on_all_terminal_paths ..
 test execution_deadline_stops_low_memory_fanout_and_releases_the_pool ... ok
 test pool_reservation_stays_bounded_across_runs_and_reports_live_usage ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
 
      Running tests/node_acl.rs (target/debug/deps/node_acl-3afc4184c342e25d)
 
@@ -401,7 +401,7 @@ test policy_is_trusted_immutable_and_rejects_all_mutations_before_execution ... 
 test private_acl_properties_are_stripped_from_scalar_and_whole_node_outputs_even_legacy ... ok
 test stamp_requires_both_privileges_validates_whole_metadata_and_is_transactional ... ok
 
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
 
      Running tests/numeric_index.rs (target/debug/deps/numeric_index-99f4ffe262b6f6ee)
 
@@ -410,7 +410,7 @@ test numeric_index_matches_scan_at_precision_boundaries_and_survives_overwrite .
 test oversized_v1_migration_keeps_catalog_marker_and_existing_entries_unchanged ... ok
 test v1_ready_marker_cannot_enable_numeric_index_before_atomic_rebuild ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.22s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.19s
 
      Running tests/replication_prepare.rs (target/debug/deps/replication_prepare-e3bc786b5c69bcf3)
 
@@ -443,7 +443,7 @@ test rejects_arguments_and_invalid_yields_and_rolls_back_staged_writes ... ok
 test rejects_oversized_schema_and_dangling_endpoints ... ok
 test returns_effective_columns_and_every_signature_in_catalog_order ... ok
 
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
 
      Running tests/streaming.rs (target/debug/deps/streaming-167844bf0ef0f50a)
 
@@ -453,7 +453,7 @@ test read_pipeline_matches_eager_fallback_for_correlated_and_empty_inputs ... ok
 test scalar_property_reads_match_whole_nodes_before_and_after_ontology_promotion ... ok
 test streaming_hops_overlay_empty_counts_and_validation_keep_semantics ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
 
      Running tests/string_case.rs (target/debug/deps/string_case-82c4a0b4f2f3bf3b)
 
@@ -465,7 +465,7 @@ test indexed_set_overwrite_and_reopen ... ok
 test later_row_type_error_rolls_back_all_writes ... ok
 test unicode_null_and_nested_functions ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
      Running tests/transactions.rs (target/debug/deps/transactions-093b258ea3870e06)
 
@@ -479,7 +479,7 @@ test rollback_and_drop_discard_every_run ... ok
 test shared_overlay_is_private_then_persists_on_commit_and_reopen ... ok
 test snapshot_hides_external_updates_and_read_only_completion_succeeds ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
 
      Running tests/typed_adjacency.rs (target/debug/deps/typed_adjacency-d3b3bb8537c20bcd)
 
@@ -504,7 +504,7 @@ test mutual_tls_and_claimed_sender_hostname_required ... ok
 test nonloopback_requires_tls_and_debug_hides_secret ... ok
 test real_three_peer_quorum_proposal_lookup_and_status ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.50s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.67s
 
      Running tests/storage.rs (target/debug/deps/storage-a79ccae8948053f4)
 
@@ -519,7 +519,7 @@ test registry_initialization_proof_is_durable_only_for_new_successful_registry_c
 test replication_reader_bounds_serialized_batches_and_handles_max_exclusive ... ok
 test retained_log_capacity_is_atomic_at_boundary_and_can_increase_on_reopen ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
 
      Running unittests src/main.rs (target/debug/deps/brainwire-457877b83a4df85d)
 
@@ -600,7 +600,7 @@ test size::tests::overflow_is_an_error_not_a_panic ... ok
 test size::tests::parses_binary_and_decimal_units ... ok
 test size::tests::zero_bytes_displays_as_bytes ... ok
 
-test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.18s
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.56s
 
      Running tests/admin.rs (target/debug/deps/admin-f2e6a02d771f18f7)
 
@@ -614,7 +614,7 @@ test invalid_ontology_does_not_create_database ... ok
 test ontology_view_reads_real_catalog_signatures_properties_and_empty_graphs ... ok
 test overview_reports_multiple_independent_graphs ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.93s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.80s
 
      Running tests/cluster_inspect.rs (target/debug/deps/cluster_inspect-6e079539ff2c6260)
 
@@ -624,17 +624,18 @@ test mismatched_caps_and_wrong_identity_are_reported_without_raw_errors ... ok
 test stopped_raft_state_is_not_a_complete_sample ... ok
 test unavailable_member_does_not_turn_two_samples_into_cap_or_quorum_proof ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
 
      Running tests/cluster_probe.rs (target/debug/deps/cluster_probe-297f32637dd13191)
 
-running 4 tests
+running 5 tests
 test cli_rejects_unknown_probe_kind ... ok
 test follower_and_uninitialized_are_live_but_not_ready ... ok
+test probes_do_not_confuse_running_or_read_quorum_with_future_write_capacity ... ok
 test readiness_defaults_and_discards_both_absent_and_existing_lookup_payloads ... ok
 test stopped_wrong_identity_and_redirect_do_not_pass_readiness ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
 
      Running tests/commit_state.rs (target/debug/deps/commit_state-471f8054c417669a)
 
@@ -643,28 +644,28 @@ test checkpoint_receipt_matches_reopened_checkpoint_and_explicit_config ... onto
 ok
 test commit_state_is_read_only_durable_and_scoped_to_each_graph ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.94s
 
      Running tests/connected_graph.rs (target/debug/deps/connected_graph-ab9fef62bf36189b)
 
 running 1 test
 test protected_graph_preview_bounds_relationship_rows_and_preserves_missing_and_isolated_sources ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
 
      Running tests/connected_indexes.rs (target/debug/deps/connected_indexes-000b2ad6ed185af2)
 
 running 1 test
 test protected_indexes_allow_reader_deny_unauthorized_graph_and_keeps_client_storage_closed ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
 
      Running tests/connected_memory.rs (target/debug/deps/connected_memory-2072e8ae6e6b29ea)
 
 running 1 test
 test protected_memory_allows_admin_denies_reader_and_keeps_client_storage_closed ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
 
      Running tests/connected_ontology.rs (target/debug/deps/connected_ontology-73ff8f98cd04deff)
 
@@ -672,7 +673,7 @@ running 2 tests
 test connected_flags_cannot_fall_back_to_offline_or_demo ... ok
 test connected_schema_selects_named_graphs_while_server_owns_storage ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
 
      Running tests/cypher.rs (target/debug/deps/cypher-b7f2c9518b1ee011)
 
@@ -687,7 +688,7 @@ test invalid_parameter_files_fail_before_opening_store ... ok
 test parameter_file_conflicts_with_explicit_parameters ... ok
 test parameter_file_imports_nested_rows_and_reopens ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.81s
 
      Running tests/probe.rs (target/debug/deps/probe-c03c1895f305289a)
 
@@ -695,7 +696,7 @@ running 2 tests
 test probe_rejects_zero_timeout_before_connecting ... ok
 test ready_probe_requires_a_serving_database_and_fails_after_shutdown ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
 
      Running unittests src/lib.rs (target/debug/deps/brainwire_store-8d4069e511caf32e)
 
@@ -784,7 +785,7 @@ test txn::tests::scan_range_merges_snapshot_and_overlay_with_exclusive_upper_bou
 test txn::tests::scan_range_uses_the_transaction_snapshot ... ok
 test txn::tests::visitor_merges_updates_deletes_insertions_and_respects_snapshot_and_prefix ... ok
 
-test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.48s
 
      Running unittests src/bin/crash_writer.rs (target/debug/deps/crash_writer-3675d35c962715eb)
 
@@ -807,14 +808,14 @@ test ontology_commits_are_tracked_and_sequences_are_per_store ... ok
 test overflow_and_reserved_writes_fail_atomically ... ok
 test snapshot_is_captured_at_begin_and_does_not_follow_pending_or_later_commits ... ok
 
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.47s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.92s
 
      Running tests/crash.rs (target/debug/deps/crash-9331d5424d51d2d8)
 
 running 1 test
 test survives_five_kill_and_reopen_cycles ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
 
      Running tests/node_acl.rs (target/debug/deps/node_acl-d0f5af09441c81a7)
 
@@ -829,7 +830,7 @@ test trusted_acl_replacement_tracks_large_or_corrupt_previous_metadata_without_d
 test visibility_filter_keeps_dangling_corruption_detection_and_control_errors ... ok
 test visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_callback_error ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
 
      Running tests/projection_control.rs (target/debug/deps/projection_control-febd91c2e0a5f805)
 
@@ -839,14 +840,14 @@ test interruption_observes_filtered_edge_scan_and_does_not_mutate ... ok
 test weighted_decode_reservation_precedes_selected_edge_reservation ... ok
 test wrapper_parity_and_controls_surround_csr_construction ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
      Running tests/property_patches.rs (target/debug/deps/property_patches-2778637e94616a9a)
 
 running 1 test
 test edge_partial_patch_preserves_omitted_fields_removes_null_and_reopens_with_one_mirror ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
 
      Running tests/replicated_apply.rs (target/debug/deps/replicated_apply-1cec336747ada8eb)
 
@@ -856,7 +857,7 @@ test invalid_entries_and_bounds_fail_without_data_or_progress ... ok
 test strict_indices_and_latest_duplicate_are_durable_without_extra_commit ... ok
 test three_independent_stores_match_graph_identity_indexes_acl_cursor_and_restore_ledger ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
 
      Running tests/replication_prepare.rs (target/debug/deps/replication_prepare-9e523a44188e38c6)
 
@@ -866,7 +867,7 @@ test malformed_or_exhausted_staged_id_counters_fail_before_mutation ... ok
 test prepare_rejects_late_mode_reserved_metadata_bounds_and_local_commit ... ok
 test staged_node_and_edge_counters_do_not_commit_until_apply_and_survive_promotion_reopen ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
 
      Running unittests src/lib.rs (target/debug/deps/brainwire_tui-3b39b0b32526bf92)
 
@@ -910,7 +911,7 @@ test tests::selection_updates_inspector ... ok
 test tests::transitions_and_editor_shortcuts ... ok
 test tests::unicode_and_bounded_paste ... ok
 
-test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
 
    Doc-tests brainwire_bolt
 

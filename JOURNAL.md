@@ -59,7 +59,7 @@ No line of code before the end of phase 2.
   namespace. `upsert_node_with_acl` commits node changes and authoritative private
   ACL together, optionally using the stable seed. Permission refusal rolls the
   MERGE back. Existing managed CRUD and source importer behavior stays unchanged.
-- **Verified:** 623 Rust workspace tests, 31 Python tests, Clippy -D warnings,
+- **Verified:** 624 Rust workspace tests, 31 Python tests, Clippy -D warnings,
   fmt/diff checks. Astra reviewed the bounded plan and final source without
   blockers. Native debug qualification (200 input nodes) and release (500) passed
   all 15 fault/operation checks; three members' eleven-CF logical graph digests
@@ -70,6 +70,11 @@ No line of code before the end of phase 2.
 - **Docs/evidence:** `docs/benchmarks/2026-10-14-quorum-capacity.md` and receipt
   directory; Python and quorum guides updated. Previous candidate receipts remain
   bound to their previous source/binary, never relabeled as current evidence.
+- **Preparation:** saved Astra-reviewed snapshot/compaction plan at
+  `docs/design/raft-snapshots-and-compaction.md`; snapshot creation must refuse a
+  fatal apply gap rather than capture graphs ahead of global APPLIED. Added a
+  regression proving Raft probes do not promise future write headroom. Serving
+  sources/binaries remain unchanged by that final test-only addition.
 - **Next / limits:** coordinated snapshots/log compaction, joint membership/new-ID
   disk-loss replacement and real machine/container qualification remain pending.
   Real cluster log exhaustion was not tested; storage-boundary exhaustion was.

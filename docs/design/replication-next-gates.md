@@ -11,6 +11,9 @@ reads obtain a quorum barrier before opening the graph snapshot. Per-graph apply
 ledgers recover the crash gap before advancing the instance applied marker.
 Graph creation initializes physical stores before publishing the registry.
 
+The [reviewed snapshot preparation](raft-snapshots-and-compaction.md) records
+the consistent-cut, installation and purge requirements for the next session.
+
 ## Remaining release gates
 
 1. Implement and review snapshots covering registry, schemas, graph data, IDs,

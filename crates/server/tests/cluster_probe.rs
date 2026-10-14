@@ -167,3 +167,21 @@ fn cli_rejects_unknown_probe_kind() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
 }
+
+#[test]
+fn probes_do_not_confuse_running_or_read_quorum_with_future_write_capacity() {
+    let mut full = status();
+    full["log_bytes"] = full["max_log_bytes"].clone();
+    full["log_remaining_bytes"] = 0.into();
+    assert!(probe(Some("liveness"), full.clone(), None).status.success());
+    let output = probe(
+        Some("readiness"),
+        full,
+        Some(serde_json::json!({"Lookup":null})),
+    );
+    assert!(output.status.success());
+    assert!(parsed(&output)["scope"]
+        .as_str()
+        .unwrap()
+        .contains("future writes"));
+}

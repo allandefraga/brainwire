@@ -105,7 +105,7 @@
     "crates/server/src/size.rs": "5cbf44bd045c44961f36368ca32072a4b3a1949f8531350b55a37bae11966e48",
     "crates/server/tests/admin.rs": "200b296c7178b841483d079babb9353c5fdd9e461b7b9e7fa210d2edcdb16997",
     "crates/server/tests/cluster_inspect.rs": "ff46317290e46545b8250588ade46aec1e9056503deca59f580971ef730b1b47",
-    "crates/server/tests/cluster_probe.rs": "5516a4df5129cc3b4428f156f6bc9840b05b8f01194a9a86d98adbe15ed4a70b",
+    "crates/server/tests/cluster_probe.rs": "eb8c25b7957d149fbf8a19f665f4a30091885492c69268fd1766952c8c5adf1f",
     "crates/server/tests/commit_state.rs": "091f0066371fb0c113db47c4ac1bb43ac5a8224534ebc2639ebc06f78d4cb1ed",
     "crates/server/tests/connected_graph.rs": "c49c7354ecf6a9d222d80a87117d3d0a23fe50c94481be0d3c920c28b768c328",
     "crates/server/tests/connected_indexes.rs": "793c6e84cd28355e4891bb01dcc8603c9c7fabe679e2c2a302f16071e76ae3fe",
@@ -147,8 +147,8 @@
     "workspace_tests": {
       "exit_code": 0,
       "log": "workspace_tests.log",
-      "sha256": "73211a3d219b9d5b98c3fe2f777bb1aa2ba1eb07da8bb81a113710360abdb889",
-      "passed": 623,
+      "sha256": "880875914da7f5c145d27671f5ee03a47afc84d2831d62b66a95b72e7da6c237",
+      "passed": 624,
       "environment": {
         "RUST_TEST_THREADS": "1"
       }
@@ -162,7 +162,7 @@
     "clippy": {
       "exit_code": 0,
       "log": "clippy.log",
-      "sha256": "4873f0c5378a98ea59cb64f011ed1d1982c294b9c1e099833f9f72cfbc25cb4f"
+      "sha256": "8f7cdbaf51456dc431678fac04ec6d721596f6fb510f7587c2475cf375b45951"
     },
     "fmt": {
       "exit_code": 0,

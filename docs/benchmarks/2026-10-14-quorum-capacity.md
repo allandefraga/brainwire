@@ -6,7 +6,7 @@ identities and atomic node/ACL upserts. No target deployment or publication occu
 
 ## Verified scope
 
-The final workspace run passed **623 Rust tests** and **31 Python tests**. Clippy
+The final workspace run passed **624 Rust tests** and **31 Python tests**. Clippy
 with warnings denied, formatting and diff checks passed. Astra reviewed the changes
 and found no source-level blockers. The capacity boundary test proves atomic
 rejection, exact replay at capacity, lower-cap startup refusal and increased-cap
