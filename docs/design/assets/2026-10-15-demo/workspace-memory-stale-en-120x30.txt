@@ -1,0 +1,30 @@
+┌NAVIGATION────────┐┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ READ ONLY        ││ BRAINWIRE / MEMORY / tickets @ 127.0.0.1:50939                                                   │
+│                  │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│   1 Ontology     │┌STALE • refresh failed────────────────────────────────────────────────────────────────────────────┐
+│                  ││ SERVER SNAPSHOT • age 1s • CALL db.memory()                                                      │
+│ > 2 Memory       ││ cannot connect to 127.0.0.1:50939: Connection refused (os error 61)                              │
+│                  ││                                                                                                  │
+│   3 Indexes      │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│                  │┌QUERY POOL / READ ONLY────────────────────────────────────────────────────────────────────────────┐
+│   4 Graph        ││ Query pool shared by all graphs on this server.                                                  │
+│                  ││                                                                                                  │
+│ Tab / Shift+Tab  ││ LIMIT  64.00 MiB (67108864 B)                                                                    │
+│ switch panes     ││ Configured shared query reservation limit.                                                       │
+│                  ││ RESERVED  318 B                                                                                  │
+│                  ││ Currently accounted reservations, including this sampling query.                                 │
+│                  ││ PEAK  1.33 MiB (1389952 B)                                                                       │
+│                  ││ Peak accounted reservations over this server's lifetime.                                         │
+│                  ││ REJECTIONS  0                                                                                    │
+│                  ││ Rejected reservations over this server's lifetime.                                               │
+│                  ││ Reservation accounting; not OS RSS, total RAM or cache.                                          │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│                  │┌QUERY POOL / READ ONLY────────────────────────────────────────────────────────────────────────────┐
+│                  ││ 1 Ontology  2 Memory  3 Indexes  4 Graph • Tab • r refresh • q quit                              │
+└──────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────┘

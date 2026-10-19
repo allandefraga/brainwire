@@ -16,7 +16,7 @@ not found, it says "not found". Recommendations for Brainwire are marked as
 
 **Driver versions.** PyPI lists 6.3.1 as the most recent version (uploaded on
 2026-09-15, requires Python 3.10+). The 5.x line is still maintained: 5.28.6 came out
-on the same day. The platform pins `neo4j>=5.0,<6` in `client-core/pyproject.toml`
+on the same day. The platform pins `neo4j>=5.0,<6` in `external-core/pyproject.toml`
 (measured at 5.28.6), so the real target is 5.28.x. The comment on the pin says that
 6.x removed `Node.id` and `Relationship.id`. In the 6.3.1 code, `Entity.id`
 still exists, deprecated, and the docstring warns that it may come back empty depending
@@ -301,7 +301,7 @@ PackStream v2: not found in the official docs.
   type and database. Neo4j reuses the IDs of deleted elements.
 - The 5.28.6 driver stores the result's nodes and relationships keyed by `element_id`.
   If it is absent (Bolt 4.x), it uses `str(id)`. The legacy `id` is also stored.
-- The platform adapter (`client-core/.../repository/neo4j.py`) exposes
+- The platform adapter (`external-core/.../repository/neo4j.py`) exposes
   `element_id` as `.id` of `_Node` and `_Relationship`, and memory-api deduplicates
   by that value. So `element_id` needs to be stable at least within a
   result.
@@ -1088,7 +1088,7 @@ Amazon Neptune:
 
 In this repository:
 
-- `client-core/pyproject.toml` (extra `neo4j`: `neo4j>=5.0,<6`)
-- `client-core/src/client_core/repository/neo4j.py` (use of `element_id`,
+- `external-core/pyproject.toml` (extra `neo4j`: `neo4j>=5.0,<6`)
+- `external-core/src/external_core/repository/neo4j.py` (use of `element_id`,
   `execute_query` and the error code)
-- `client-brainwire/PLAN.md` (bookmark = Raft log index)
+- `external-brainwire/PLAN.md` (bookmark = Raft log index)

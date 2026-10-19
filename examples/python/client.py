@@ -8,6 +8,7 @@ import itertools
 import json
 import math
 import re
+from collections.abc import Mapping
 
 
 
@@ -110,6 +111,23 @@ class GraphClient:
         with self.driver.session(database=self.database) as session:
             return session.execute_write(operation)
 
+    def run_cypher(self, query, parameters=None):
+        """Run one parameterized Cypher statement and return all records as dicts.
+
+        The result is fully consumed before the method returns, so callers do
+        not accidentally use a cursor after its session closes. A single
+        statement is atomic on the server. This does not retry uncertain writes;
+        use ``write_transaction`` with a request ID for retained quorum retries.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a nonempty string")
+        if parameters is None:
+            parameters = {}
+        if not isinstance(parameters, Mapping):
+            raise ValueError("parameters must be a mapping")
+        with self.driver.session(database=self.database) as session:
+            return session.run(query, dict(parameters)).data()
+
     def write_transaction(self, operation, *, request_id):
         """Run once with a retained request seed on a quorum server's current leader.
 
@@ -162,6 +180,97 @@ class GraphClient:
             size += len(encoded)
         if batch:
             total += self._write(lambda tx: apply(tx, batch))
+        return total
+
+    def delete_nodes(self, label, entity_ids):
+        """Detach-delete node IDs in bounded, individually atomic batches.
+
+        Incident edges are removed with each node. Duplicate IDs within a batch
+        are collapsed; a missing or already-deleted ID contributes zero. A
+        failed later batch does not roll back earlier batches. This is a direct
+        deletion helper, not a source cursor or a whole-snapshot reconciliation.
+        """
+        label = identifier(label)
+        if isinstance(entity_ids, (str, bytes, bytearray, Mapping)):
+            raise ValueError("entity_ids must be an iterable of IDs, not a single value or mapping")
+        try:
+            entity_ids = iter(entity_ids)
+        except TypeError as error:
+            raise ValueError("entity_ids must be an iterable of IDs") from error
+        total, batch, size = 0, [], 0
+
+        def apply(tx, ids):
+            # Duplicate IDs in one UNWIND would otherwise inflate count(*) even
+            # though the node is physically removed only once.
+            ids = list(dict.fromkeys(ids))
+            query = (f"UNWIND $ids AS id MATCH (n:{label} {{entity_id:id}}) "
+                     "DETACH DELETE n RETURN count(*) AS deleted")
+            return tx.run(query, ids=ids).single()["deleted"]
+
+        for entity_id in entity_ids:
+            entity_id = _entity(entity_id)
+            encoded = json.dumps(entity_id, ensure_ascii=False,
+                                 separators=(",", ":")).encode("utf-8")
+            if len(encoded) > self.batch_bytes:
+                raise ValueError("one entity ID exceeds the batch byte limit")
+            if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
+                total += self._write(lambda tx, ids=batch: apply(tx, ids))
+                batch, size = [], 0
+            batch.append(entity_id)
+            size += len(encoded)
+            if len(batch) == self.batch_size or size == self.batch_bytes:
+                total += self._write(lambda tx, ids=batch: apply(tx, ids))
+                batch, size = [], 0
+        if batch:
+            total += self._write(lambda tx: apply(tx, batch))
+        return total
+
+    def load_edges(self, source_label, relationship, target_label, rows):
+        """Merge endpoint/type-identified edges from bounded flat dictionaries.
+
+        Each row contains ``source_id`` and ``target_id`` plus edge properties.
+        Each batch is atomic; every endpoint must exist or that batch rolls back.
+        Omitted edge properties are preserved and supplied nulls remove properties.
+        """
+        source_label = identifier(source_label)
+        target_label = identifier(target_label)
+        relationship = identifier(relationship)
+        total, batch, size = 0, [], 0
+
+        def apply(tx, items):
+            written = 0
+            # Keep one UNWIND/MERGE shape per query while preserving row order.
+            for names, group in itertools.groupby(items, lambda row: tuple(sorted(row["properties"]))):
+                records = [{"source_id": row["source_id"], "target_id": row["target_id"],
+                            **row["properties"]} for row in group]
+                fields = ", ".join(f"{name}:row.{name}" for name in names)
+                edge = f"MERGE (a)-[:{relationship}" + (f" {{{fields}}}" if fields else "") + "]->(b)"
+                query = (f"UNWIND $rows AS row MATCH (a:{source_label} {{entity_id:row.source_id}}), "
+                         f"(b:{target_label} {{entity_id:row.target_id}}) {edge} RETURN count(*) AS processed")
+                count = tx.run(query, rows=records).single()["processed"]
+                if count != len(records):
+                    raise ValueError("both endpoints of every edge row must already exist")
+                written += count
+            return written
+
+        for row in rows:
+            if not isinstance(row, dict) or not {"source_id", "target_id"}.issubset(row):
+                raise ValueError("each edge row must contain source_id and target_id")
+            props = _properties({key: value for key, value in row.items()
+                                 if key not in ("source_id", "target_id")})
+            normalized = {"source_id": _entity(row["source_id"]),
+                          "target_id": _entity(row["target_id"]), "properties": props}
+            encoded = json.dumps(normalized, ensure_ascii=False, allow_nan=False,
+                                 separators=(",", ":")).encode()
+            if len(encoded) > self.batch_bytes:
+                raise ValueError("one edge exceeds the batch byte limit")
+            if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
+                total += self._write(lambda tx, items=batch: apply(tx, items))
+                batch, size = [], 0
+            batch.append(json.loads(encoded))
+            size += len(encoded)
+        if batch:
+            total += self._write(lambda tx, items=batch: apply(tx, items))
         return total
 
     def update_node(self, label, entity_id, properties=None, *, remove=()):

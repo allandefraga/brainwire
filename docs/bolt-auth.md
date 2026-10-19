@@ -19,7 +19,7 @@ export BRAINWIRE_SERVER_AUTH_FILE=/tmp/brainwire-auth/policy.json
 export BRAINWIRE_MEMORY_CACHE=64MiB
 export BRAINWIRE_MEMORY_MEMTABLES=16MiB
 export BRAINWIRE_MEMORY_QUERY=64MiB
-./target/release/brainwire db create tickets --ontology examples/client/ontology.json
+./target/release/brainwire db create tickets --ontology examples/source_ingestion/ontology.json
 ./target/release/brainwire serve
 ```
 
@@ -45,8 +45,8 @@ format. Tokens stay out of argv and output:
 
 ```sh
 export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/writer.json
-python3 -m examples.client.generate_fixture /tmp/brainwire-protected-tickets.jsonl --tickets 10000
-uv run --no-project --with neo4j==6.3.0 python -m examples.client.ingest_snapshot \
+python3 -m examples.source_ingestion.generate_fixture /tmp/brainwire-protected-tickets.jsonl --tickets 10000
+uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ingest_snapshot \
   /tmp/brainwire-protected-tickets.jsonl --database tickets --uri bolt://127.0.0.1:17687 \
   --source-id synthetic-snapshot-001
 
@@ -62,7 +62,7 @@ Programmatic Python connection from the repository root:
 ```python
 from neo4j import GraphDatabase
 from examples.python.connection import auth_from_env
-from examples.client.ingest_snapshot import identity
+from examples.source_ingestion.ingest_snapshot import identity
 
 with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(), liveness_check_timeout=30) as driver:
     with driver.session(database="tickets") as session:
@@ -101,7 +101,7 @@ arbitrary increments and external side effects are not automatically safe.
 | Surface | Credentials and graph selection | Current operation |
 | --- | --- | --- |
 | Python driver | `auth_from_env()`, explicit session database | Supported Cypher reads/writes/procedures and transactions |
-| Public import scripts | Same environment/file, `--database` | Bounded Customer or client snapshot import/resume |
+| Public import scripts | Same environment/file, `--database` | Bounded Customer or external application snapshot import/resume |
 | Native connected TUI | Same environment/file, `--graph` | Real ontology/index inspection; Memory also requires instance administration |
 | Native probe `live` | Same environment/file | Negotiation and login only |
 | Native probe `ready` | Same environment/file, configured default graph grant | Login plus a read query |

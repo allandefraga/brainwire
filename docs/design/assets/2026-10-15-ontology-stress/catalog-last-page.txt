@@ -1,0 +1,48 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / ONTOLOGY / ontology20_stress • offline schema • indexes ready                                                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌TYPES • ↑↓──────────┐┌ALL CONNECTIONS • PgUp/PgDn─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│> Person            ││363  Product -[:DERIVED_FROM]-> Person  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│  Organization      ││364  Product -[:DERIVED_FROM]-> Payment  [weight, confidence, valid_from, valid_to, source_id]                                          │
+│  Account           ││365  Product -[:DERIVED_FROM]-> Event  [weight, confidence, valid_from, valid_to, source_id]                                            │
+│  ContactPoint      ││366  Opportunity -[:DERIVED_FROM]-> Person  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  Contract          ││367  Opportunity -[:DERIVED_FROM]-> Payment  [weight, confidence, valid_from, valid_to, source_id]                                      │
+│  Product           ││368  Opportunity -[:DERIVED_FROM]-> Event  [weight, confidence, valid_from, valid_to, source_id]                                        │
+│  Opportunity       ││369  Invoice -[:DERIVED_FROM]-> ContactPoint  [weight, confidence, valid_from, valid_to, source_id]                                     │
+│  Invoice           ││370  Invoice -[:DERIVED_FROM]-> Attachment  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  Payment           ││371  Invoice -[:DERIVED_FROM]-> Role  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│  Ticket            ││372  Payment -[:DERIVED_FROM]-> ContactPoint  [weight, confidence, valid_from, valid_to, source_id]                                     │
+│  Message           ││373  Payment -[:DERIVED_FROM]-> Attachment  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  Attachment        ││374  Payment -[:DERIVED_FROM]-> Role  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│  Document          ││375  Ticket -[:DERIVED_FROM]-> Opportunity  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  KnowledgeArticle  ││376  Ticket -[:DERIVED_FROM]-> Tag  [weight, confidence, valid_from, valid_to, source_id]                                               │
+│  Tag               ││377  Message -[:DERIVED_FROM]-> Opportunity  [weight, confidence, valid_from, valid_to, source_id]                                      │
+│  Campaign          ││378  Message -[:DERIVED_FROM]-> Tag  [weight, confidence, valid_from, valid_to, source_id]                                              │
+│  Event             ││379  Attachment -[:DERIVED_FROM]-> Organization  [weight, confidence, valid_from, valid_to, source_id]                                  │
+│  Location          ││380  Attachment -[:DERIVED_FROM]-> Ticket  [weight, confidence, valid_from, valid_to, source_id]                                        │
+│  Department        ││381  Attachment -[:DERIVED_FROM]-> Location  [weight, confidence, valid_from, valid_to, source_id]                                      │
+│  Role              ││382  Document -[:DERIVED_FROM]-> Organization  [weight, confidence, valid_from, valid_to, source_id]                                    │
+│                    ││383  Document -[:DERIVED_FROM]-> Ticket  [weight, confidence, valid_from, valid_to, source_id]                                          │
+│                    ││384  Document -[:DERIVED_FROM]-> Location  [weight, confidence, valid_from, valid_to, source_id]                                        │
+│                    ││385  KnowledgeArticle -[:DERIVED_FROM]-> Contract  [weight, confidence, valid_from, valid_to, source_id]                                │
+│                    ││386  KnowledgeArticle -[:DERIVED_FROM]-> Document  [weight, confidence, valid_from, valid_to, source_id]                                │
+│                    ││387  Tag -[:DERIVED_FROM]-> Contract  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│                    ││388  Tag -[:DERIVED_FROM]-> Document  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│                    ││389  Campaign -[:DERIVED_FROM]-> Invoice  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│                    ││390  Campaign -[:DERIVED_FROM]-> Campaign  [weight, confidence, valid_from, valid_to, source_id]                                        │
+│                    ││391  Event -[:DERIVED_FROM]-> Invoice  [weight, confidence, valid_from, valid_to, source_id]                                            │
+│                    ││392  Event -[:DERIVED_FROM]-> Campaign  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││393  Location -[:DERIVED_FROM]-> Account  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│                    ││394  Location -[:DERIVED_FROM]-> Message  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│                    ││395  Location -[:DERIVED_FROM]-> Department  [weight, confidence, valid_from, valid_to, source_id]                                      │
+│                    ││396  Department -[:DERIVED_FROM]-> Account  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│                    ││397  Department -[:DERIVED_FROM]-> Message  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│                    ││398  Department -[:DERIVED_FROM]-> Department  [weight, confidence, valid_from, valid_to, source_id]                                    │
+│                    ││399  Role -[:DERIVED_FROM]-> Product  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│                    ││400  Role -[:DERIVED_FROM]-> KnowledgeArticle  [weight, confidence, valid_from, valid_to, source_id]                                    │
+│                    ││                                                                                                                                        │
+│                    ││                                                                                                                                        │
+└────────────────────┘└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ←→ graph • ↑↓ type • a all connections • Enter inspect • PgUp/Dn scroll • Tab • q quit                                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

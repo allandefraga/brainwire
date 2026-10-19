@@ -1,4 +1,4 @@
-# Run the local client MVP
+# Run the local Brainwire MVP
 
 This starts a protected **single-node shadow graph** with synthetic data. Python
 uses Bolt/Cypher; the connected TUI inspects ontology, indexes and shared query
@@ -24,7 +24,7 @@ export BRAINWIRE_SERVER_IO_TIMEOUT_MS=300000
 export BRAINWIRE_MEMORY_CACHE=64MiB
 export BRAINWIRE_MEMORY_MEMTABLES=16MiB
 export BRAINWIRE_MEMORY_QUERY=64MiB
-./target/release/brainwire db create tickets --ontology examples/client/ontology.json
+./target/release/brainwire db create tickets --ontology examples/source_ingestion/ontology.json
 echo "$BRAINWIRE_MVP_DIR"
 ./target/release/brainwire serve
 ```
@@ -47,8 +47,8 @@ one printed above:
 ```sh
 export BRAINWIRE_MVP_DIR=/tmp/brainwire-mvp.YOUR_SUFFIX
 export BRAINWIRE_BOLT_AUTH_FILE="$BRAINWIRE_MVP_DIR/auth/writer.json"
-python3 -m examples.client.generate_fixture "$BRAINWIRE_MVP_DIR/snapshot.jsonl" --tickets 10000
-uv run --no-project --with neo4j==6.3.0 python -m examples.client.ingest_snapshot \
+python3 -m examples.source_ingestion.generate_fixture "$BRAINWIRE_MVP_DIR/snapshot.jsonl" --tickets 10000
+uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ingest_snapshot \
   "$BRAINWIRE_MVP_DIR/snapshot.jsonl" --database tickets \
   --uri bolt://127.0.0.1:17687 --source-id synthetic-snapshot-001
 ```
@@ -56,7 +56,7 @@ uv run --no-project --with neo4j==6.3.0 python -m examples.client.ingest_snapsho
 The fixture has 10,000 tickets, 20,000 comments and 20,000 HAS_COMMENT edges.
 Rerunning the same immutable file/source ID resumes its durable cursor; completed
 replay makes no writes. New revisions need new source IDs and chronological,
-serial import. See [client source export](client-shadow.md) to prepare actual
+serial import. See [the source-export example](source-ingestion.md) to prepare actual
 DuckDB or version-pinned local SQLite DuckLake snapshots. Source deletion and
 ticket history are not synchronized by this importer.
 
@@ -137,8 +137,9 @@ CA/hostname checks; the native TUI does not yet support that TLS endpoint.
 ## Stop, audit and recover
 
 Stop the server in terminal A before offline commands, keeping its exported
-environment. Ordinary stop is not a native application-drain guarantee; pending
-transactions are discarded on crash/reopen and committed WAL data is retained.
+environment. Ctrl-C or SIGTERM drains: idle sessions close, open
+transactions get `server.shutdown_grace_ms` (8 s by default) to finish, and
+anything still pending after that is discarded. Committed WAL data is retained.
 
 ```sh
 ./target/release/brainwire db check tickets --json
@@ -156,7 +157,7 @@ restart verifies resume against the same source digest/mapping.
 For a disposable automated rehearsal, including forced termination and exact
 audits, run the [MVP acceptance harness](benchmarks/2026-10-12-mvp.md). The
 [October beta roadmap](2026-10-pilot-roadmap.md) separates implemented capabilities
-from the source, workload and deployment gates still required for client.
+from the source, workload and deployment gates still required for a production pilot.
 
 Build a local Linux image for the current checkout with
 `docker build -t brainwire:local .` and follow the
@@ -174,5 +175,5 @@ Cypher and RocksDB transaction path.
 
 Generated reader credentials without `node_visibility` are legacy graph-wide
 service identities. For governed users configure [private node ACL](node-acl.md);
-an empty visibility policy denies ordinary nodes. The dynamic client adapter
+an empty visibility policy denies ordinary nodes. Dynamic source-specific adapters
 and authoritative ACL ingestion are still pending.

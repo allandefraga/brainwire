@@ -33,7 +33,7 @@
     "tickets": 100000,
     "comments": 200000,
     "bytes": 291493330,
-    "mapping_contract_id": "client-zendesk-snapshot-v1",
+    "mapping_contract_id": "external-zendesk-snapshot-v1",
     "sha256": "2ee182d9f6e6c470703854b2125bc21a39dfcf2458483d8687c945c91090a81b",
     "source_type": "ducklake-sqlite",
     "snapshot_version": 2,

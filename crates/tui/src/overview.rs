@@ -141,6 +141,8 @@ struct OverviewSelection {
     scroll: u16,
     file: usize,
     explain: bool,
+    all_connections: bool,
+    help: bool,
 }
 
 fn first_data_file(graph: Option<&GraphSummary>) -> usize {
@@ -389,17 +391,23 @@ fn render_overview(
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(8),
             Constraint::Length(3),
         ])
         .split(frame.area());
-    let header = Line::from(vec![
+    let mut header = vec![
         Span::styled(
             " BRAINWIRE ",
             text_style(GREEN, no_color).add_modifier(Modifier::BOLD),
         ),
-        Span::raw(if graphs.first().is_some_and(|g| g.estimated) {
+        Span::styled(
+            format!("/ {} ", view.display(lang)),
+            text_style(CYAN, no_color),
+        ),
+        Span::raw(if view == OverviewView::Ontology {
+            lang.choose(" • esquema offline", " • offline schema")
+        } else if graphs.first().is_some_and(|g| g.estimated) {
             lang.choose(
                 "/ grafos locais • estimativas RocksDB • somente leitura",
                 "/ local graphs • RocksDB estimates • read only",
@@ -410,9 +418,52 @@ fn render_overview(
                 "/ local graphs • real data • read only",
             )
         }),
-    ]);
+    ];
+    if view == OverviewView::Ontology {
+        if let Some(graph) = graphs.get(state.graph) {
+            let indexes = if graph.index_declarations == 0 {
+                lang.choose("sem índices declarados", "no declared indexes")
+            } else if graph.indexes_ready {
+                lang.choose("índices prontos", "indexes ready")
+            } else {
+                lang.choose("índices pendentes", "indexes pending")
+            };
+            header.push(Span::raw(format!(
+                " • {} • {indexes}",
+                terminal_text(&graph.name)
+            )));
+        }
+    }
+    let header = Line::from(header);
+    let pages = [
+        (OverviewView::Graph, lang.choose("GRAFOS", "GRAPHS")),
+        (OverviewView::Query, lang.choose("PIPELINE", "PIPELINE")),
+        (OverviewView::Memory, lang.choose("MEMÓRIA", "MEMORY")),
+        (OverviewView::Disk, lang.choose("ARQUIVOS", "FILES")),
+        (OverviewView::Ontology, lang.choose("ONTOLOGIA", "ONTOLOGY")),
+    ];
+    let nav = Line::from(
+        pages
+            .iter()
+            .flat_map(|(page, label)| {
+                let selected = *page == view;
+                [
+                    Span::styled(
+                        format!(" {} ", label),
+                        if selected {
+                            text_style(GREEN, no_color)
+                                .add_modifier(Modifier::REVERSED | Modifier::BOLD)
+                        } else {
+                            text_style(PALE, no_color)
+                        },
+                    ),
+                    Span::raw(" "),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    );
     frame.render_widget(
-        Paragraph::new(header).block(panel("", GREEN, no_color)),
+        Paragraph::new(vec![header, nav]).block(panel("", GREEN, no_color)),
         sections[0],
     );
 
@@ -421,23 +472,6 @@ fn render_overview(
             state.node_type = state
                 .node_type
                 .min(graph.ontology.nodes.len().saturating_sub(1));
-            let heading = format!(
-                " BRAINWIRE / {} / {} • {} • {}",
-                view.display(lang),
-                terminal_text(&graph.name),
-                lang.choose("esquema offline", "offline schema"),
-                if graph.index_declarations == 0 {
-                    lang.choose("sem índices declarados", "no declared indexes")
-                } else if graph.indexes_ready {
-                    lang.choose("índices prontos", "indexes ready")
-                } else {
-                    lang.choose("índices pendentes", "indexes pending")
-                }
-            );
-            frame.render_widget(
-                Paragraph::new(heading).block(panel("", GREEN, no_color)),
-                sections[0],
-            );
             crate::ontology::render(
                 frame,
                 sections[1],
@@ -445,6 +479,7 @@ fn render_overview(
                 state.node_type,
                 &mut state.scroll,
                 state.explain,
+                state.all_connections,
                 lang,
                 no_color,
             );
@@ -456,13 +491,23 @@ fn render_overview(
             );
         }
         frame.render_widget(
-            Paragraph::new(lang.choose(
-                " ←→ grafo • ↑↓ tipo • Enter detalhes • PgUp/Dn rola • Tab painel • q sai",
-                " ←→ graph • ↑↓ type • Enter inspect • PgUp/Dn scroll • Tab panel • q quit",
-            ))
+            Paragraph::new(if state.all_connections {
+                lang.choose(
+                    " ←→ grafo • ↑↓ tipo • a tipos • ? ajuda • PgUp/Dn rola catálogo • Tab páginas • q sai",
+                    " ←→ graph • ↑↓ type • a selected type • ? help • PgUp/Dn browse catalog • Tab pages • q quit",
+                )
+            } else {
+                lang.choose(
+                    " ←→ grafo • ↑↓ tipo • a catálogo total • F1 detalhes • ? ajuda • PgUp/Dn rola • Tab páginas • q sai",
+                    " ←→ graph • ↑↓ type • a full catalog • F1 inspect • ? help • PgUp/Dn scroll • Tab pages • q quit",
+                )
+            })
             .block(panel("", GREEN, no_color)),
             sections[2],
         );
+        if state.help {
+            render_page_help(frame, frame.area(), view, lang, no_color);
+        }
         return;
     }
 
@@ -470,12 +515,15 @@ fn render_overview(
         render_disk(frame, graphs, state, sections[1], lang, no_color);
         frame.render_widget(
             Paragraph::new(lang.choose(
-                " ←→ grafo • ↑↓ arquivo • F1 explica • Tab painel • q sai",
-                " ←→ graph • ↑↓ file • F1 explain • Tab panel • q quit",
+                " ←→ grafo • ↑↓ arquivo • F1 explica • ? ajuda • Tab páginas • q sai",
+                " ←→ graph • ↑↓ file • F1 explain • ? help • Tab pages • q quit",
             ))
             .block(panel("", GREEN, no_color)),
             sections[2],
         );
+        if state.help {
+            render_page_help(frame, frame.area(), view, lang, no_color);
+        }
         return;
     }
     let selected = state.graph;
@@ -615,17 +663,85 @@ fn render_overview(
     frame.render_widget(
         Paragraph::new(if frame.area().width < 100 {
             lang.choose(
-                " ↑↓ grafo • Tab painel • q sai • offline",
-                " ↑↓ graph • Tab panel • q quit • offline",
+                " ↑↓ grafo • Tab páginas • ? ajuda • q sai • offline",
+                " ↑↓ graph • Tab pages • ? help • q quit • offline",
             )
         } else {
             lang.choose(
-                " ↑↓ grafo • Tab painel • q sai • snapshot: --snapshot  •  offline: pare o servidor primeiro",
-                " ↑↓ graph • Tab panel • q quit • snapshot: --snapshot  •  offline: stop the server first",
+                " ↑↓ grafo • Tab páginas • ? ajuda • q sai • snapshot: --snapshot  •  offline: pare o servidor primeiro",
+                " ↑↓ graph • Tab pages • ? help • q quit • snapshot: --snapshot • offline: stop server first",
             )
         })
         .block(panel("", GREEN, no_color)),
         sections[2],
+    );
+    if state.help {
+        render_page_help(frame, frame.area(), view, lang, no_color);
+    }
+}
+
+fn render_page_help(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    view: OverviewView,
+    lang: Language,
+    no_color: bool,
+) {
+    use ratatui::widgets::Clear;
+    let width = area.width.saturating_sub(4).clamp(1, 88);
+    let height = area.height.saturating_sub(2).clamp(1, 24);
+    let popup = ratatui::layout::Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    let (title, content) = match view {
+        OverviewView::Graph => (
+            lang.choose("Grafos: o que estou vendo?", "Graphs: what am I seeing?"),
+            lang.choose(
+                "Cada linha e um banco nomeado independente. Nos/arestas podem ser exatos ou estimados; confira o indicador no topo.\n\n↑↓ seleciona grafo. Tab muda de pagina. Use a pagina Ontologia para navegar tipos e relacoes permitidas.\n\nEste inspetor e offline e somente leitura. Pare o servidor antes de abrir o armazenamento local.",
+                "Each row is an independent named graph. Node/edge counts may be exact or estimated; check the status in the header.\n\n↑↓ selects a graph. Tab changes page. Use Ontology to browse types and allowed relationships.\n\nThis inspector is offline and read-only. Stop the server before opening local storage.",
+            ),
+        ),
+        OverviewView::Query => (
+            lang.choose("Pipeline: como a escrita funciona", "Pipeline: how writes work"),
+            lang.choose(
+                "Este painel explica o caminho Python → Bolt → Cypher e a persistencia. Ele nao executa consultas.\n\nMERGE encontra ou cria pela identidade estavel; SET atualiza propriedades e null remove uma propriedade. O commit sincroniza o WAL; SST e criado depois por flush.\n\nUse o cliente Python ou brainwire cypher para executar. Tab percorre as paginas; ? fecha esta ajuda.",
+                "This panel explains Python → Bolt → Cypher and persistence. It does not execute queries.\n\nMERGE finds or creates by stable identity; SET updates properties and null removes one. Commit syncs the WAL; SST files are produced later by flush.\n\nUse the Python client or brainwire cypher to execute. Tab changes pages; ? closes this help.",
+            ),
+        ),
+        OverviewView::Memory => (
+            lang.choose("Memoria: entenda os numeros", "Memory: understand the numbers"),
+            lang.choose(
+                "Configurado e o orcamento; contabilizado/alocado e o contador observado pelo RocksDB. O inspetor offline nao mede RSS nem o uso total do sistema.\n\nmemory.memtables faz parte de memory.cache — nao some os dois. memory.query limita trabalho temporario; o prazo e cooperativo.\n\nTab muda de pagina. O painel explica a configuracao local; nao altera limites.",
+                "Configured is a budget; accounted/allocated is what RocksDB reports. The offline inspector does not measure RSS or total system usage.\n\nmemory.memtables is inside memory.cache—do not add them. memory.query limits temporary work; its deadline is cooperative.\n\nTab changes page. This panel explains local settings; it does not change limits.",
+            ),
+        ),
+        OverviewView::Disk => (
+            lang.choose("Arquivos: navegar com seguranca", "Files: browse safely"),
+            lang.choose(
+                "Metadados dos arquivos do engine, nao o conteudo dos registros. SST guarda dados ordenados; WAL permite recuperar commits recentes; MANIFEST acompanha os arquivos SST ativos.\n\n↑↓ seleciona arquivo. ←→ troca o grafo. ? fecha esta ajuda. Nao edite nem apague arquivos do RocksDB.\n\nEsta pagina e offline: pare o servidor antes de inspecionar o diretorio.",
+                "Engine file metadata, not record contents. SST stores sorted data; WAL recovers recent commits; MANIFEST tracks active SST files.\n\n↑↓ selects a file. ←→ changes graph. ? closes this help. Do not edit or delete RocksDB files.\n\nThis page is offline: stop the server before inspecting the directory.",
+            ),
+        ),
+        OverviewView::Ontology => (
+            lang.choose("Ontologia: tipos e relacoes permitidas", "Ontology: types and allowed relationships"),
+            lang.choose(
+                "Os tipos e relacoes mostrados sao regras declaradas no schema. Uma relacao permitida nao significa que ja existam arestas gravadas.\n\n↑↓ escolhe tipo; Enter/F1 abre detalhes; a alterna entre relacoes deste tipo e o catalogo completo; PgUp/PgDn rola. ←→ troca o grafo.\n\nCatalogo completo mostra origem, tipo da relacao e destino, preservando a direcao. Tab muda de pagina.",
+                "Types and relationships shown are declarations in the schema. An allowed relationship does not mean stored edges already exist.\n\n↑↓ selects a type; Enter/F1 opens details; a toggles between this type's relationships and the complete catalog; PgUp/PgDn scrolls. ←→ changes graph.\n\nThe full catalog shows source, relationship type and target, preserving direction. Tab changes page.",
+            ),
+        ),
+    };
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{content}\n\n{}",
+            lang.choose("? ou Esc fecha a ajuda.", "? or Esc closes help.")
+        ))
+        .wrap(Wrap { trim: false })
+        .block(panel(title, GREEN, no_color)),
+        popup,
     );
 }
 
@@ -695,8 +811,19 @@ fn handle_key(
     view: &mut OverviewView,
     graphs: &[GraphSummary],
 ) -> bool {
+    if state.help && !matches!(key, KeyCode::Char('?') | KeyCode::Esc) {
+        return false;
+    }
     let mut graph_changed = false;
     match key {
+        KeyCode::Char('?') => {
+            state.help = !state.help;
+            state.scroll = 0;
+        }
+        KeyCode::Esc if state.help => {
+            state.help = false;
+            state.scroll = 0;
+        }
         KeyCode::Tab => {
             *view = OverviewView::from_index(view.index() + 1);
             state.scroll = 0;
@@ -709,16 +836,23 @@ fn handle_key(
         }
         KeyCode::PageDown => state.scroll = state.scroll.saturating_add(5),
         KeyCode::PageUp => state.scroll = state.scroll.saturating_sub(5),
+        KeyCode::Char('a') if *view == OverviewView::Ontology => {
+            state.all_connections = !state.all_connections;
+            state.scroll = 0;
+        }
         KeyCode::Esc if *view == OverviewView::Ontology && state.explain => {
             state.explain = false;
             state.scroll = 0;
         }
         KeyCode::Char('q') | KeyCode::Esc => return true,
-        KeyCode::F(1) if matches!(view, OverviewView::Disk | OverviewView::Ontology) => {
+        KeyCode::F(1)
+            if matches!(view, OverviewView::Disk | OverviewView::Ontology)
+                && !(*view == OverviewView::Ontology && state.all_connections) =>
+        {
             state.explain = !state.explain;
             state.scroll = 0;
         }
-        KeyCode::Enter if *view == OverviewView::Ontology => {
+        KeyCode::Enter if *view == OverviewView::Ontology && !state.all_connections => {
             state.explain = !state.explain;
             state.scroll = 0;
         }
@@ -840,6 +974,21 @@ mod tests {
             handle_key(KeyCode::Down, &mut state, &mut view, &graphs);
         }
         assert_eq!(state.node_type, 1);
+        handle_key(KeyCode::Char('a'), &mut state, &mut view, &graphs);
+        assert!(state.all_connections);
+        handle_key(KeyCode::Char('?'), &mut state, &mut view, &graphs);
+        assert!(state.help);
+        // Help is reachable even when the catalog has no selected edge inspector.
+        handle_key(KeyCode::Down, &mut state, &mut view, &graphs);
+        assert_eq!(state.node_type, 1);
+        handle_key(KeyCode::Esc, &mut state, &mut view, &graphs);
+        assert!(!state.help);
+        handle_key(KeyCode::PageDown, &mut state, &mut view, &graphs);
+        handle_key(KeyCode::Enter, &mut state, &mut view, &graphs);
+        assert!(!state.explain);
+        handle_key(KeyCode::Char('a'), &mut state, &mut view, &graphs);
+        assert!(!state.all_connections);
+        assert_eq!(state.scroll, 0);
         handle_key(KeyCode::Enter, &mut state, &mut view, &graphs);
         assert!(state.explain);
         assert!(!handle_key(KeyCode::Esc, &mut state, &mut view, &graphs));
@@ -859,6 +1008,51 @@ mod tests {
             &mut view,
             &graphs
         ));
+    }
+
+    #[test]
+    fn contextual_help_explains_each_offline_page_and_schema_vs_data() {
+        let cases = [
+            (OverviewView::Graph, "independent", "independente"),
+            (OverviewView::Query, "does not", "nao executa"),
+            (OverviewView::Memory, "does not measure RSS", "nao mede RSS"),
+            (OverviewView::Disk, "Do not edit", "Nao edite"),
+            (OverviewView::Ontology, "allowed relationship", "permitida"),
+        ];
+        for lang in [Language::En, Language::PtBr] {
+            for (width, height) in [(80, 24), (160, 48)] {
+                for (view, expected_en, expected_pt) in cases {
+                    let graphs = vec![GraphSummary::default()];
+                    let mut state = OverviewSelection {
+                        help: true,
+                        all_connections: true,
+                        ..OverviewSelection::default()
+                    };
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal
+                        .draw(|f| render_overview(f, &graphs, &mut state, view, lang, true))
+                        .unwrap();
+                    let text = terminal
+                        .backend()
+                        .buffer()
+                        .content()
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>();
+                    let expected = if lang == Language::En {
+                        expected_en
+                    } else {
+                        expected_pt
+                    };
+                    assert!(text.contains(expected), "{view:?}: {text}");
+                    assert!(text.contains(if lang == Language::En {
+                        "? or Esc closes help"
+                    } else {
+                        "? ou Esc fecha a ajuda"
+                    }));
+                }
+            }
+        }
     }
 
     #[test]

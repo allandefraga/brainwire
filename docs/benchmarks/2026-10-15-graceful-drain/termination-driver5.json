@@ -1,0 +1,62 @@
+{
+  "binary_sha256": "8662a2326e9983390c83e8ba1cf9519b3af66f2e6025695257f9e71b8eda45f5",
+  "driver": "5.28.6",
+  "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "signal": "SIGTERM",
+  "synthetic": true,
+  "baseline_rows": 1000,
+  "uncertain_rows": 200,
+  "shutdown_grace_ms": 3000,
+  "termination": [
+    {
+      "case": "explicit transaction committed during drain",
+      "exit_code": 0,
+      "exit_seconds": 0.028902
+    },
+    {
+      "case": "explicit transaction abandoned at the grace deadline",
+      "exit_code": 1,
+      "exit_seconds": 3.02969
+    },
+    {
+      "case": "RUN submitted without acknowledgement",
+      "exit_code": 1,
+      "exit_seconds": 3.024111
+    },
+    {
+      "case": "PULL first RECORD observed then reader stopped",
+      "exit_code": 1,
+      "exit_seconds": 3.041002
+    },
+    {
+      "case": "idle pooled driver connection only",
+      "exit_code": 0,
+      "exit_seconds": 0.001536
+    }
+  ],
+  "checks": [
+    "SIGTERM refuses new connections; an open transaction runs and commits within the grace; its CREATE and indexed overwrite survive restart; exit 0",
+    "acknowledged 1000 indexed writes survive; a transaction left open past the grace exits 1 and its CREATE and indexed overwrite disappear",
+    "unacknowledged RUN produces zero or all 200 nodes with matching scalar indexes",
+    "a stalled reader holds the drain only until the grace deadline; restart preserves committed graph",
+    "idle authenticated sessions close at once and the drained process exits 0"
+  ],
+  "initial_ready_seconds": 0.02382,
+  "drain_admission_refused_seconds": 0.02349,
+  "drain_commit_recovery_ready_seconds": 0.032719,
+  "pending_recovery_ready_seconds": 0.061743,
+  "uncertain_recovery_ready_seconds": 0.054881,
+  "unacknowledged_outcome": "no mutations committed",
+  "slow_reader_first_record_bytes": 4103,
+  "slow_reader_requested_socket_receive_buffer": 1024,
+  "slow_reader_socket_receive_buffer": 322407,
+  "slow_reader_recovery_ready_seconds": 0.018989,
+  "audit": {
+    "database": "default",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "result": "PASS",
+  "scope": "native single-node SIGTERM drain and recovery; no interruption of running engine calls, no exact commit-phase kill hook",
+  "ownedResourcesRemoved": true
+}

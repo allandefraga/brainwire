@@ -16,7 +16,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[3]
 DIND = "docker:29.7.2-dind"
-DATABASE = "client_memory"
+DATABASE = "default"
 INNER_PORT = 17687
 
 

@@ -20,7 +20,7 @@
     "columns": 160,
     "rows": 48
   },
-  "binary_sha256": "883ebf260981de247d79eca80b127dbd4da5e63fe8ffda0965ad59d96d843210",
+  "binary_sha256": "fb0e480f6ccfb5e4331805873479ca1eeafb82320acc724b4b47c82453307331",
   "binary": "target/debug/brainwire",
   "views": [
     "offline-graph-en-160x48",
@@ -32,7 +32,7 @@
   ],
   "configured_cache": "64MiB",
   "configured_memtables": "16MiB",
-  "elapsed_seconds": 11.327,
+  "elapsed_seconds": 10.8,
   "temporary_store_removed_on_exit": true,
   "capture_source": "PTY escape stream rendered with pyte and Pillow",
   "counter_explanation": "Per-store commits include ID allocator and ontology writes; not a node count or global replication position."

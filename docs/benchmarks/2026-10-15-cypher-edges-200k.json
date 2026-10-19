@@ -1,0 +1,45 @@
+{
+  "build": "release",
+  "cacheMiB": 128,
+  "edges": 200000,
+  "hubOutDegree": 200000,
+  "importMs": 1042.674333,
+  "measurements": {
+    "hubCount": {
+      "maxMs": 406.122833,
+      "p50Ms": 399.20491699999997,
+      "peakReservationBytes": 2554,
+      "query": "MATCH (h:Item)-[:LINK]->(n:Item) WHERE h.key='hub' RETURN count(n.key)",
+      "samplesMs": [
+        402.001083,
+        396.484125,
+        393.066917,
+        399.20491699999997,
+        404.363708,
+        406.122833,
+        397.654542
+      ]
+    },
+    "hubLimitOne": {
+      "maxMs": 0.016249999999999997,
+      "p50Ms": 0.0095,
+      "peakReservationBytes": 2719,
+      "query": "MATCH (h:Item)-[:LINK]->(n:Item) WHERE h.key='hub' RETURN n.key LIMIT 1",
+      "samplesMs": [
+        0.016249999999999997,
+        0.011125,
+        0.010125,
+        0.0095,
+        0.009292,
+        0.009125,
+        0.009166
+      ]
+    }
+  },
+  "memtableMiB": 16,
+  "nodes": 200001,
+  "queryBudgetBytes": 134217728,
+  "samplesPerQuery": 7,
+  "scope": "warm embedded Cypher reads; includes transaction begin, index lookup, relationship traversal and commit; query reservation is not RSS",
+  "warmupsPerQuery": 1
+}

@@ -1,0 +1,15 @@
+{
+  "result": "FAIL",
+  "binary_sha256": "a3df32597305e8586d9a43d654dc8ecee6d08e54058b4ae8fce9152d356ca72e",
+  "command": "quorum_write_benchmark.py --rows 2000 --batch-size 100 --repeats 10",
+  "scope": "synthetic single-client three-native-process loopback diagnostic; candidate WAL and sync settings unchanged",
+  "phase": "sequential single-row Cypher CREATE; exact repeat and row offset were not recorded",
+  "error_code": "Neo.ClientError.Transaction.CommitOutcomeUnknown",
+  "error": "commit outcome unknown for request bc88df6890b7e1e3300b669feb97f1d1d335795277455a6bed0d1ddc88280f8f; inspect durable outcome",
+  "classification": "confirmed 10-second timeout around raft.client_write; this means the caller stopped waiting and does not establish whether the write committed",
+  "request_id": "bc88df6890b7e1e3300b669feb97f1d1d335795277455a6bed0d1ddc88280f8f",
+  "cluster_status_at_failure": null,
+  "post_restart_validation": null,
+  "offline_audits": null,
+  "diagnostic_limit": "the harness finally block ran, but its TemporaryDirectory removed server logs and voter state; no status sample or request lookup was captured, so cause and commit outcome remain unknown"
+}

@@ -47,7 +47,7 @@ and [October 12 receipts](benchmarks/2026-10-12-auth.md).
 - Validate the intended encrypted transport configuration and its failure behavior.
 - Execute protected Swarm and Kubernetes profiles in separately authorized test
   clusters, including secret rotation, placement, retained storage and probes.
-- Review actual client principal/graph policy and workload with the operator;
+- Review actual external application principal/graph policy and workload with the operator;
   synthetic fixtures do not approve access to production data.
 - Extend sustained mixed-load/recovery measurements to the proposed supported
   resource profile and data shape. A short local run is not certification.

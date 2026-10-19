@@ -148,6 +148,7 @@ pub(crate) fn render_at(
         state.selected,
         &mut state.scroll,
         state.inspect,
+        false,
         lang,
         no_color,
     );

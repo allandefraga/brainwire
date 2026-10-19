@@ -9,3 +9,4 @@ __pycache__/
 
 # Local Python client environment.
 /.venv/
+/.venv-*/

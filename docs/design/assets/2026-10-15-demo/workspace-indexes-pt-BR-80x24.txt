@@ -1,0 +1,24 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / ÍNDICES / tickets @ 127.0.0.1:50939                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ SNAPSHOT DO SERVIDOR • idade 0s • CALL db.indexes()                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌ÍNDICES CONFIGURADOS / SOMENTE LEITURA────────────────────────────────────────┐
+│TIPO                        PROPRIEDADE                    ESTADO             │
+│> Ticket                    status                         PRONTO             │
+│  Ticket                    priority                       PRONTO             │
+│  TicketComment             ticket_entity_id               PRONTO             │
+│  TicketComment             is_public                      PRONTO             │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌O QUE SIGNIFICA?──────────────────────────────────────────────────────────────┐
+│ 1-4 / 4                                                                      │
+│ PRONTO: índice de igualdade para valores escalares suportados.               │
+│ DECLARADO: configuração somente; consultas usam varredura.                   │
+│ Não comprova suporte a valores complexos ou outros tipos de índice.          │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌↑↓ índice • PgUp/Dn rola──────────────────────────────────────────────────────┐
+│ 1 Ontologia  2 Memória  3 Índices  4 Grafo • Tab • r atualiza • q sai        │
+└──────────────────────────────────────────────────────────────────────────────┘

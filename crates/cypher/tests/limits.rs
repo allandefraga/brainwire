@@ -111,6 +111,41 @@ fn label_index_hop_analytics_and_staged_writes_obey_the_guard() {
 }
 
 #[test]
+fn conflicting_repeated_node_binding_skips_large_unrestricted_candidate() {
+    let (_dir, db) = setup();
+    execute(
+        &db,
+        "CREATE (p:Page {entity_id:'root', text:'small'})",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    execute(
+        &db,
+        "CREATE (p:Page {entity_id:'large', text:$text})",
+        &BTreeMap::from([("text".into(), Value::Str("x".repeat(100_000)))]),
+    )
+    .unwrap();
+    execute(
+        &db,
+        "MATCH (a:Page {entity_id:'root'}), (b:Page {entity_id:'large'}) MERGE (a)-[:LINK]->(b)",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let output = execute_with_limits(
+        &db,
+        "MATCH (n:Page {entity_id:'root'})-[:LINK]->(n:Page) RETURN count(*)",
+        &BTreeMap::new(),
+        limits(16 * 1024),
+    )
+    .unwrap();
+    assert_eq!(
+        output.rows,
+        vec![vec![brainwire_cypher::Out::Value(Value::Int(0))]]
+    );
+}
+
+#[test]
 fn zero_budget_is_invalid_and_failed_query_does_not_prevent_a_new_transaction() {
     let (_dir, db) = setup();
     assert!(QueryTransaction::begin_with_limits(&db, limits(0)).is_err());

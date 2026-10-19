@@ -328,6 +328,63 @@ async fn real_three_peer_quorum_proposal_lookup_and_status() {
     }
     fixture.shutdown().await;
 }
+// Functional check of the pooled path with real Raft; 300 writes do not reach
+// the port exhaustion that the quorum write benchmark reproduced.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pooled_peer_connections_serve_quorum_reads_and_writes() {
+    let fixture = Fixture::new(false).await;
+    request(
+        &fixture.settings[0],
+        1,
+        RpcRequest::Initialize {
+            members: fixture.peers.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    let started = tokio::time::Instant::now();
+    let leader = loop {
+        if let Some(id) = fixture.rafts[0].metrics().borrow().current_leader {
+            break id;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+    let raft = &fixture.rafts[leader as usize - 1];
+    for i in 0..300 {
+        raft.ensure_linearizable()
+            .await
+            .unwrap_or_else(|e| panic!("quorum read {i}: {e}"));
+        let command = Command::Write {
+            request_id: format!("sustained-{i}"),
+            graph: "g".into(),
+            expected_revision: 0,
+            batch: vec![1],
+        };
+        raft.client_write(command)
+            .await
+            .unwrap_or_else(|e| panic!("write {i}: {e}"));
+    }
+    fixture.shutdown().await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_peer_connection_serves_successive_requests() {
+    let fixture = Fixture::new(false).await;
+    let mut stream = TcpStream::connect(&fixture.peers[&2].addr).await.unwrap();
+    let body = serde_json::json!({"protocol":1,"cluster_id":"fixture","sender":1,"recipient":2,"token":"0123456789abcdef0123456789abcdef","payload":"Status"}).to_string();
+    for _ in 0..3 {
+        stream.write_u32(body.len() as u32).await.unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        let size = tokio::time::timeout(Duration::from_secs(5), stream.read_u32())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut reply = vec![0; size as usize];
+        stream.read_exact(&mut reply).await.unwrap();
+        assert!(String::from_utf8(reply).unwrap().contains("Status"));
+    }
+    fixture.shutdown().await;
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn authentication_membership_bounds_and_total_deadline() {
     let fixture = Fixture::new(false).await;

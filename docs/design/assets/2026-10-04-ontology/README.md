@@ -53,7 +53,7 @@ and is available for exclusive offline access.
 [Raw timings and commands](startup-timings.json): local macOS ARM64, debug build,
 one unmeasured warm-up followed by five separate process runs per command.
 Each process opens the local registry (analytics-demo, staging-100k and
-client_memory), renders a 160x40 text snapshot and exits. Medians:
+default), renders a 160x40 text snapshot and exits. Medians:
 
 | Initial panel | Median elapsed |
 | --- | ---: |

@@ -260,6 +260,25 @@ impl<'db> Txn<'db> {
         Ok(self.snapshot.get_cf(self.db.cf(cf.name())?, key)?)
     }
 
+    /// Visit one value without copying it before the caller can account for
+    /// decoding. Pending writes (including deletes) take precedence over the
+    /// transaction's pinned RocksDB snapshot.
+    pub fn with_get<E: From<StoreError>, R>(
+        &self,
+        cf: Cf,
+        key: &[u8],
+        visit: impl FnOnce(Option<&[u8]>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        if let Some(value) = self.writes.get(&(cf, key.to_vec())) {
+            return visit(value.as_deref());
+        }
+        let value = self
+            .snapshot
+            .get_pinned_cf(self.db.cf(cf.name())?, key)
+            .map_err(StoreError::from)?;
+        visit(value.as_deref())
+    }
+
     pub fn get_for_update(&mut self, cf: Cf, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
         if self.depends.insert((cf, key.to_vec())) {
             self.estimated_bytes = self.estimated_bytes.saturating_add(128 + key.len());
@@ -447,12 +466,8 @@ impl<'db> Txn<'db> {
     /// one conflict — even a key this snapshot never saw, because it did not
     /// exist yet (a phantom). Callers that scan a range to decide what to
     /// delete or fold over, and need that decision to still hold at commit
-    /// time, should use this instead of a plain `scan_prefix` (`detach_delete`
-    /// relies on this for both the `out` and `in` prefixes of the node being
-    /// deleted, so a concurrent `merge_edge` that adds an edge to that node
-    /// conflicts instead of leaving a dangling edge — the other half of the
-    /// rule `merge_edge`'s own `get_for_update` on the node key only covers
-    /// one direction of).
+    /// time, should use this or `visit_prefix_for_update` instead of a plain
+    /// `scan_prefix`.
     #[allow(clippy::type_complexity)]
     pub fn scan_prefix_for_update(
         &mut self,
@@ -693,6 +708,63 @@ mod tests {
         writer.commit().unwrap();
         assert_eq!(reader.get(Cf::Node, b"a").unwrap(), None);
         assert_eq!(db.begin().get(Cf::Node, b"a").unwrap(), Some(b"1".to_vec()));
+    }
+
+    #[test]
+    fn borrowed_point_read_merges_snapshot_overlay_and_tombstones() {
+        let (_d, _r, db) = open();
+        let mut seed = db.begin();
+        seed.put(Cf::Node, b"stored".to_vec(), b"snapshot".to_vec());
+        seed.commit().unwrap();
+
+        let mut reader = db.begin();
+        let mut writer = db.begin();
+        writer.put(Cf::Node, b"stored".to_vec(), b"later".to_vec());
+        writer.put(Cf::Node, b"new".to_vec(), b"overlay".to_vec());
+        writer.commit().unwrap();
+
+        let stored =
+            reader
+                .with_get::<StoreError, _>(Cf::Node, b"stored", |value| {
+                    Ok(value.map(ToOwned::to_owned))
+                })
+                .unwrap();
+        assert_eq!(stored, Some(b"snapshot".to_vec()));
+        reader.put(Cf::Node, b"stored".to_vec(), b"replacement".to_vec());
+        reader.delete(Cf::Node, b"new".to_vec());
+        assert_eq!(
+            reader
+                .with_get::<StoreError, _>(Cf::Node, b"stored", |value| {
+                    Ok(value.map(ToOwned::to_owned))
+                })
+                .unwrap(),
+            Some(b"replacement".to_vec())
+        );
+        assert_eq!(
+            reader
+                .with_get::<StoreError, _>(Cf::Node, b"new", |value| {
+                    Ok(value.map(ToOwned::to_owned))
+                })
+                .unwrap(),
+            None
+        );
+        reader.delete(Cf::Node, b"stored".to_vec());
+        assert_eq!(
+            reader
+                .with_get::<StoreError, _>(Cf::Node, b"stored", |value| {
+                    Ok(value.map(ToOwned::to_owned))
+                })
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            reader
+                .with_get::<StoreError, _>(Cf::Node, b"missing", |value| {
+                    Ok(value.map(ToOwned::to_owned))
+                })
+                .unwrap(),
+            None
+        );
     }
 
     #[test]

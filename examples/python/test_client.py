@@ -7,7 +7,15 @@ class Result:
         self.count = count
 
     def single(self):
-        return {"processed": self.count}
+        return {"processed": self.count, "deleted": self.count}
+
+
+class QueryResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def data(self):
+        return self.rows
 
 
 class Driver:
@@ -37,8 +45,34 @@ class Driver:
         self.committed.append(captured)
         return result
 
+    def run(self, query, parameters):
+        self.query = (query, parameters)
+        return QueryResult([{"id": "c-1", "name": "Ada"}])
+
 
 class ClientTests(unittest.TestCase):
+    def test_run_cypher_uses_named_database_parameters_and_returns_materialized_records(self):
+        driver = Driver()
+        client = GraphClient(driver, "research")
+        rows = client.run_cypher(
+            "MATCH (c:Customer {entity_id:$id}) RETURN c.entity_id AS id, c.name AS name",
+            {"id": "c-1"},
+        )
+        self.assertEqual(driver.database, "research")
+        self.assertEqual(driver.query, (
+            "MATCH (c:Customer {entity_id:$id}) RETURN c.entity_id AS id, c.name AS name",
+            {"id": "c-1"},
+        ))
+        self.assertEqual(rows, [{"id": "c-1", "name": "Ada"}])
+
+    def test_run_cypher_rejects_empty_queries_and_non_mapping_parameters_before_connecting(self):
+        driver = Driver()
+        client = GraphClient(driver, "research")
+        for query, parameters in [("  ", {}), ("RETURN 1", [])]:
+            with self.subTest(query=query, parameters=parameters), self.assertRaises(ValueError):
+                client.run_cypher(query, parameters)
+        self.assertFalse(hasattr(driver, "database"))
+
     def test_mixed_shapes_preserve_duplicate_order_and_bounded_batches(self):
         driver = Driver()
         graph = GraphClient(driver, "tickets", batch_size=3)
@@ -51,6 +85,84 @@ class ClientTests(unittest.TestCase):
         records = [row for batch in driver.committed for _, params in batch for row in params["rows"]]
         self.assertEqual([row["status"] for row in records], ["first","second","last",None])
         self.assertEqual(driver.database,"tickets")
+
+    def test_delete_nodes_deduplicates_ids_and_detaches_in_atomic_batches(self):
+        driver = Driver([1, 2, 0])
+        graph = GraphClient(driver, "tickets", batch_size=2)
+        self.assertEqual(graph.delete_nodes("Ticket", ["a", "a", "b", "c", "missing"]), 3)
+        calls = [call for batch in driver.committed for call in batch]
+        self.assertEqual([params["ids"] for _, params in calls],
+                         [["a"], ["b", "c"], ["missing"]])
+        self.assertTrue(all("DETACH DELETE n" in query for query, _ in calls))
+        self.assertTrue(all("RETURN count(*) AS deleted" in query for query, _ in calls))
+
+    def test_delete_nodes_replay_with_missing_ids_counts_only_the_first_removal(self):
+        driver = Driver([1, 0])
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        self.assertEqual(graph.delete_nodes("Ticket", ["same", "same"]), 1)
+        self.assertEqual([params["ids"] for batch in driver.committed
+                          for _, params in batch], [["same"], ["same"]])
+
+    def test_delete_nodes_empty_iterable_is_a_noop_without_opening_a_session(self):
+        driver = Driver()
+        self.assertEqual(GraphClient(driver, "tickets").delete_nodes("Ticket", iter(())), 0)
+        self.assertFalse(hasattr(driver, "database"))
+
+    def test_delete_nodes_rejects_oversized_id_without_committing_that_batch(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=2, batch_bytes=8)
+        with self.assertRaisesRegex(ValueError, "entity ID exceeds"):
+            graph.delete_nodes("Ticket", ["ok", "x" * 20])
+        self.assertEqual(driver.committed, [])
+
+    def test_delete_nodes_respects_utf8_byte_bound(self):
+        driver = Driver([1, 1, 1])
+        graph = GraphClient(driver, "tickets", batch_size=10, batch_bytes=4)
+        self.assertEqual(graph.delete_nodes("Ticket", ["a", "é", "b"]), 3)
+        calls = [call for batch in driver.committed for call in batch]
+        self.assertEqual([params["ids"] for _, params in calls], [["a"], ["é"], ["b"]])
+
+    def test_delete_nodes_rejects_single_values_and_mappings_before_connecting(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets")
+        for ids in ["ticket-1", b"ticket-1", {"entity_id": "ticket-1"}, None]:
+            with self.subTest(ids=ids), self.assertRaises(ValueError):
+                graph.delete_nodes("Ticket", ids)
+        self.assertFalse(hasattr(driver, "database"))
+
+    def test_delete_nodes_keeps_only_earlier_full_batches_on_invalid_later_input(self):
+        driver = Driver([1])
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        with self.assertRaisesRegex(ValueError, "entity_id"):
+            graph.delete_nodes("Ticket", ["committed", ""])
+        self.assertEqual(len(driver.committed), 1)
+        self.assertEqual(driver.committed[0][0][1]["ids"], ["committed"])
+
+    def test_edge_batches_are_bounded_and_preserve_relationship_properties(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=2)
+        rows = [
+            {"source_id": "a", "target_id": "b", "weight": 0.2},
+            {"source_id": "a", "target_id": "c", "weight": 0.8, "kind": "related"},
+            {"source_id": "b", "target_id": "c", "weight": None},
+        ]
+        self.assertEqual(graph.load_edges("Page", "LINK", "Page", rows), 3)
+        self.assertEqual([len(batch) for batch in driver.committed], [2, 1])
+        calls = [call for batch in driver.committed for call in batch]
+        self.assertTrue(all("UNWIND $rows AS row" in query for query, _ in calls))
+        self.assertTrue(all("MERGE (a)-[:LINK" in query for query, _ in calls))
+        self.assertTrue(any("weight:row.weight" in query and "kind:row.kind" in query for query, _ in calls))
+        self.assertEqual([row for _, params in calls for row in params["rows"]], rows)
+
+    def test_edge_batch_enforces_byte_bound_before_committing_that_row(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=10, batch_bytes=100)
+        with self.assertRaisesRegex(ValueError, "batch byte limit"):
+            graph.load_edges("Page", "LINK", "Page", [
+                {"source_id": "a", "target_id": "b"},
+                {"source_id": "b", "target_id": "c", "note": "x" * 200},
+            ])
+        self.assertEqual(driver.committed, [])
 
     def test_patch_separates_unchanged_set_and_remove_and_missing_node(self):
         driver = Driver([1,0])

@@ -33,6 +33,7 @@ pub struct ServerSection {
     pub max_decoded_message: ByteSize,
     pub io_timeout_ms: u64,
     pub query_timeout_ms: u64,
+    pub shutdown_grace_ms: u64,
     pub auth_file: Option<PathBuf>,
 }
 
@@ -41,11 +42,13 @@ impl Default for ServerSection {
         ServerSection {
             listen: "127.0.0.1:7687".to_string(),
             data_dir: PathBuf::from("./data"),
-            default_database: "client_memory".to_string(),
+            default_database: "default".to_string(),
             max_message: ByteSize(256 << 20),
             max_decoded_message: ByteSize(64 << 20),
             io_timeout_ms: 300_000,
             query_timeout_ms: 30_000,
+            // Below Docker's default 10 s stop timeout, so the drain ends first.
+            shutdown_grace_ms: 8_000,
             auth_file: None,
         }
     }
@@ -103,7 +106,7 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 11] = [
+pub(crate) const KEYS: [&str; 12] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -111,6 +114,7 @@ pub(crate) const KEYS: [&str; 11] = [
     "server.max_decoded_message",
     "server.io_timeout_ms",
     "server.query_timeout_ms",
+    "server.shutdown_grace_ms",
     "server.auth_file",
     "memory.cache",
     "memory.memtables",
@@ -162,6 +166,8 @@ struct FileServerSection {
     io_timeout_ms: Option<u64>,
     #[serde(default)]
     query_timeout_ms: Option<u64>,
+    #[serde(default)]
+    shutdown_grace_ms: Option<u64>,
     #[serde(default)]
     auth_file: Option<PathBuf>,
 }
@@ -242,6 +248,10 @@ fn apply_file(
         config.server.io_timeout_ms = v;
         sources.insert("server.io_timeout_ms", Source::File(path.to_path_buf()));
     }
+    if let Some(v) = file.server.shutdown_grace_ms {
+        config.server.shutdown_grace_ms = v;
+        sources.insert("server.shutdown_grace_ms", Source::File(path.to_path_buf()));
+    }
     if let Some(path_value) = file.server.auth_file {
         config.server.auth_file = Some(auth_file_path(path_value)?);
         sources.insert("server.auth_file", Source::File(path.to_path_buf()));
@@ -301,6 +311,16 @@ fn apply_env(
                     message: error.to_string(),
                 })?;
         sources.insert("server.io_timeout_ms", Source::Env(io_var));
+    }
+    let grace_var = env_var_name("server.shutdown_grace_ms");
+    if let Some(v) = env.get(&grace_var) {
+        config.server.shutdown_grace_ms =
+            v.parse()
+                .map_err(|error: std::num::ParseIntError| ConfigError::BadValue {
+                    key: "server.shutdown_grace_ms".into(),
+                    message: error.to_string(),
+                })?;
+        sources.insert("server.shutdown_grace_ms", Source::Env(grace_var));
     }
     let decoded_var = env_var_name("server.max_decoded_message");
     if let Some(v) = env.get(&decoded_var) {
@@ -380,6 +400,11 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
             "server.query_timeout_ms must be between 1 and 3600000".into(),
         ));
     }
+    if config.server.shutdown_grace_ms > 3_600_000 {
+        return Err(ConfigError::Invalid(
+            "server.shutdown_grace_ms must be between 0 and 3600000".into(),
+        ));
+    }
     if config.memory.query.0 == 0 {
         return Err(ConfigError::Invalid("memory.query must be positive".into()));
     }
@@ -440,6 +465,10 @@ pub fn default_file() -> String {
          # Cooperative per-RUN deadline; storage calls and commit can overrun.\n\
          query_timeout_ms = {query_timeout_ms}\n\
          \n\
+         # SIGTERM/SIGINT drain: idle sessions close at once; open transactions\n\
+         # and result streams get this long before the process exits.\n\
+         shutdown_grace_ms = {shutdown_grace_ms}\n\
+         \n\
          # Optional protected Bolt policy; omit for local development mode.\n\
          # auth_file = \"/run/secrets/brainwire-policy.json\"\n\
          \n\
@@ -457,6 +486,7 @@ pub fn default_file() -> String {
         max_decoded_message = d.server.max_decoded_message,
         io_timeout_ms = d.server.io_timeout_ms,
         query_timeout_ms = d.server.query_timeout_ms,
+        shutdown_grace_ms = d.server.shutdown_grace_ms,
         cache = d.memory.cache,
         memtables = d.memory.memtables,
         query = d.memory.query,
@@ -493,6 +523,7 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.max_decoded_message" => config.server.max_decoded_message.to_string(),
         "server.io_timeout_ms" => config.server.io_timeout_ms.to_string(),
         "server.query_timeout_ms" => config.server.query_timeout_ms.to_string(),
+        "server.shutdown_grace_ms" => config.server.shutdown_grace_ms.to_string(),
         "server.auth_file" => config
             .server
             .auth_file
@@ -650,7 +681,7 @@ mod tests {
         assert_eq!(loaded.config.memory.cache.0, 10 << 30);
         assert_eq!(loaded.config.memory.memtables.0, 1 << 30);
         assert_eq!(loaded.config.memory.query.0, 2 << 30);
-        assert_eq!(loaded.config.server.default_database, "client_memory");
+        assert_eq!(loaded.config.server.default_database, "default");
         assert!(matches!(loaded.sources["memory.cache"], Source::Default));
     }
 
@@ -701,6 +732,27 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn shutdown_grace_has_file_env_provenance_and_rejects_invalid_bounds() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("brainwire.toml");
+        std::fs::write(&path, "[server]\nshutdown_grace_ms=0\n").unwrap();
+        let loaded = load(Some(&path), &BTreeMap::new()).unwrap();
+        assert_eq!(loaded.config.server.shutdown_grace_ms, 0);
+        let env = BTreeMap::from([("BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS".into(), "25000".into())]);
+        let loaded = load(Some(&path), &env).unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.shutdown_grace_ms"
+                && value == "25000"
+                && source.starts_with("env ")));
+        for bad in ["3600001", "oops", "-1"] {
+            let env = BTreeMap::from([("BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS".into(), bad.into())]);
+            assert!(load(None, &env).is_err(), "{bad}");
+        }
+        assert_eq!(Config::default().server.shutdown_grace_ms, 8_000);
     }
 
     #[test]
@@ -840,6 +892,7 @@ mod tests {
                 ("BRAINWIRE_SERVER_MAX_DECODED_MESSAGE", "32MiB"),
                 ("BRAINWIRE_SERVER_IO_TIMEOUT_MS", "12000"),
                 ("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS", "1250"),
+                ("BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS", "20000"),
                 ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
@@ -857,6 +910,7 @@ mod tests {
         assert_eq!(loaded.config.server.max_decoded_message.0, 32 << 20);
         assert_eq!(loaded.config.server.io_timeout_ms, 12000);
         assert_eq!(loaded.config.server.query_timeout_ms, 1250);
+        assert_eq!(loaded.config.server.shutdown_grace_ms, 20000);
         assert_eq!(
             loaded.config.server.auth_file.as_deref(),
             Some(Path::new("/run/secrets/policy.json"))

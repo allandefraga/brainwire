@@ -37,7 +37,7 @@ workspace).
 ## File structure
 
 ```
-client-brainwire/crates/bolt/        package brainwire-bolt
+external-brainwire/crates/bolt/        package brainwire-bolt
   Cargo.toml
   src/lib.rs                           module list
   src/chunk.rs                         chunk framing (2-byte sizes, 00 00 end)
@@ -54,7 +54,7 @@ client-brainwire/crates/bolt/        package brainwire-bolt
 
 **Files:**
 - Create: `crates/bolt/Cargo.toml`, `crates/bolt/src/lib.rs`, `crates/bolt/src/chunk.rs`
-- Modify: `client-brainwire/Cargo.toml` (add `"crates/bolt"` to `members` and
+- Modify: `external-brainwire/Cargo.toml` (add `"crates/bolt"` to `members` and
   `tokio = { version = "1", features = ["full"] }` to `[workspace.dependencies]`)
 
 **Interfaces:**
@@ -195,7 +195,7 @@ Expected: the three `chunk::tests` pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add client-brainwire/Cargo.toml client-brainwire/crates/bolt
+git add external-brainwire/Cargo.toml external-brainwire/crates/bolt
 git commit -m "feat(brainwire): add the bolt crate with chunk framing"
 ```
 
@@ -513,7 +513,7 @@ Expected: the four `packstream::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/bolt
+git add external-brainwire/crates/bolt
 git commit -m "feat(brainwire): add PackStream v1 encoding"
 ```
 
@@ -619,7 +619,7 @@ Expected: the three `handshake::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/bolt
+git add external-brainwire/crates/bolt
 git commit -m "feat(brainwire): negotiate Bolt 5.1 to 5.4"
 ```
 
@@ -825,7 +825,7 @@ Expected: the four `message::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/bolt
+git add external-brainwire/crates/bolt
 git commit -m "feat(brainwire): parse Bolt requests and encode responses"
 ```
 
@@ -1208,7 +1208,7 @@ Expected: the five `session::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/bolt
+git add external-brainwire/crates/bolt
 git commit -m "feat(brainwire): add the Bolt session state machine with a stub engine"
 ```
 
@@ -1371,7 +1371,7 @@ Expected: all green.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/bolt
+git add external-brainwire/crates/bolt
 git commit -m "feat(brainwire): serve Bolt over TCP and pass the Python driver check"
 ```
 
@@ -1381,5 +1381,5 @@ With the storage plan and this one done, Gate 1 closes: crash consistency, the
 ontology as schema, and the Python driver connected. Plan 3 (Cypher, native
 ACL, indexes, introspection, contract suite) replaces the stub engine with the
 real one over the store. Authentication (`basic` against `system`, `bearer`
-with the client-identity JWT) arrives with the security work of plan 3; until
+with the external-identity JWT) arrives with the security work of plan 3; until
 then only the development binary exists, and it must never be exposed.

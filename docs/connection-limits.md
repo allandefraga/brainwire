@@ -55,7 +55,7 @@ with GraphDatabase.driver(
     connection_timeout=5,
     max_transaction_retry_time=0,
 ) as driver:
-    with driver.session(database='client_memory') as session:
+    with driver.session(database='default') as session:
         print(session.run('RETURN 1 AS ok').single()['ok'])
 ```
 

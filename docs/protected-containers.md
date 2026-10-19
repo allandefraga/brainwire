@@ -26,7 +26,7 @@ docker compose -f deploy/compose.yaml -f deploy/compose.auth.yaml up -d --no-bui
 ```
 
 The inherited host port stays on loopback and the named data volume is retained.
-The existing default graph is `client_memory`; generate health grants for that
+The existing default graph is `default`; generate health grants for that
 name, or deliberately change both the server default and grants together.
 
 Compose file-backed secrets use file mounts. Do not assume uid/gid/mode attributes

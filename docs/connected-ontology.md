@@ -29,11 +29,22 @@ while native TLS is pending; retain a trusted/encrypted transport boundary.
 ## Snapshot and refresh
 
 Up/Down selects a type, Enter/F1 toggles the compact inspector, PgUp/PgDn scrolls,
-and `q` exits. In wide terminals connections and details appear side by side.
+`?` opens the contextual page guide, and `q` exits. In wide terminals connections
+and details appear side by side. The guide explains schema signatures versus
+stored relationship records and calls out that the connected pane is scoped to
+one selected type.
 The header identifies the graph and server; the status shows catalog version,
 sample age and scalar-index readiness. Connections are allowed type signatures,
 not individual stored edges. Changing the target graph requires reopening with
 another `--graph` value; server-side graph discovery is not part of this slice.
+
+The offline `--overview --view ontology` inspector also has a complete
+signature-catalog mode: press `a` to list every declared source/type/target
+signature in the selected graph and use PgUp/PgDn to traverse the catalog.
+This mode shows all declarations through a scrollable list; it does not attempt
+to draw a dense schema as an unreadable 400-edge hairball, and it does not imply
+that any instance records exist. The connected read-only workspace remains
+focused on one selected type at a time.
 
 Press `r` to fetch a new complete snapshot using a fresh connection. The previous
 selection is retained by label if it still exists. Refresh is synchronous: key

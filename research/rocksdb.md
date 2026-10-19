@@ -1245,9 +1245,9 @@ Other public technical sources:
 
 In this repository:
 
-- `client-brainwire/README.md` (volume, disk target, ingestion ceiling)
-- `client-brainwire/PLAN.md`
-- `client-brainwire/docs/superpowers/specs/2026-09-24-brainwire-design.md`
+- `external-brainwire/README.md` (volume, disk target, ingestion ceiling)
+- `external-brainwire/PLAN.md`
+- `external-brainwire/docs/superpowers/specs/2026-09-24-brainwire-design.md`
   (section 1: families, keys, memory, transactions, loading and purge)
 
 ---

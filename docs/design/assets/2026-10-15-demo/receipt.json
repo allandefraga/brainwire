@@ -1,0 +1,49 @@
+{
+  "dataset": "synthetic single high-degree ticket",
+  "nodes_requested": 1000,
+  "binary_sha256": "b95854ead7ec3cc8b707ec50c49aed22c87d4eb3933e86c1899f733141a6399c",
+  "ontology_sha256": "ee19d596b483e2a9861281b3433d2e2b18be0529f73a7616881e53fa64845a29",
+  "capture_method": "controlling PTY -> pyte cells -> Pillow/Menlo",
+  "dimensions": [
+    [
+      120,
+      30
+    ],
+    [
+      80,
+      24
+    ]
+  ],
+  "languages": [
+    "en",
+    "pt-BR"
+  ],
+  "default_workspace_without_view_flag": true,
+  "graph_sample_max_rows": 20,
+  "driver_version": "6.3.0",
+  "actual_nodes": 1000,
+  "actual_edges": 999,
+  "import_seconds": 0.02892775001237169,
+  "captures": [
+    "workspace-ontology-en-120x30",
+    "workspace-memory-en-120x30",
+    "workspace-memory-stale-en-120x30",
+    "workspace-memory-recovered-en-120x30",
+    "workspace-indexes-en-120x30",
+    "workspace-graph-en-120x30",
+    "workspace-graph-scrolled-en-120x30",
+    "workspace-ontology-pt-BR-80x24",
+    "workspace-memory-pt-BR-80x24",
+    "workspace-indexes-pt-BR-80x24",
+    "workspace-graph-pt-BR-80x24",
+    "workspace-reader-memory-forbidden-en-120x30",
+    "workspace-reader-indexes-after-forbidden-en-120x30"
+  ],
+  "offline_stats": {
+    "database": "tickets",
+    "edges": 999,
+    "nodes": 1000
+  },
+  "all_child_processes_stopped": true,
+  "temporary_credentials_and_storage_removed_on_context_exit": true
+}

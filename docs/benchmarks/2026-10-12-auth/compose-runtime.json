@@ -8,7 +8,7 @@
     "89c570a5db48f90a970e911b7f2b1e4cf1a1122a0d9dd0aa27dd4188a7169d93"
   ],
   "kernel": "Linux 7.0.12-linuxkit",
-  "database": "client_memory",
+  "database": "default",
   "driverVersion": "6.3.0",
   "volume": "brainwire-auth-b599d6e22237_brainwire-data",
   "store": "RocksDB",
@@ -32,7 +32,7 @@
     "offline graph/index audit succeeds"
   ],
   "audit": {
-    "database": "client_memory",
+    "database": "default",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },

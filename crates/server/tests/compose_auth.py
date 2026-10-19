@@ -17,7 +17,7 @@ import tempfile
 import time
 import uuid
 
-DATABASE = "client_memory"
+DATABASE = "default"
 ROWS = 1000
 
 
@@ -50,6 +50,9 @@ def run(image):
     from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
 
     root = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(root))
+    from examples.python.client import GraphClient
+
     project = f"brainwire-auth-{uuid.uuid4().hex[:12]}"
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -160,6 +163,23 @@ def run(image):
             query(writer, "UNWIND $rows AS row MERGE (c:Customer {entity_id:row.id}) SET c.email = row.email", {"rows": rows})
             assert query(reader, "MATCH (c:Customer) RETURN count(*) AS n") == [{"n": ROWS}]
             checks.append("writer commits 1000 indexed MERGE/SET records")
+            with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=writer) as driver:
+                graph = GraphClient(driver, DATABASE, batch_size=2)
+                assert graph.load_nodes("Customer", [{"entity_id": "auth-cleanup"}]) == 1
+            try:
+                with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=reader) as driver:
+                    GraphClient(driver, DATABASE).delete_nodes("Customer", ["auth-cleanup"])
+            except Neo4jError as error:
+                assert error.code == "Neo.ClientError.Security.Forbidden", error.code
+            else:
+                raise AssertionError("graph reader unexpectedly deleted a node")
+            assert query(reader, "MATCH (c:Customer) RETURN count(*) AS n") == [{"n": ROWS + 1}]
+            with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=writer) as driver:
+                graph = GraphClient(driver, DATABASE)
+                assert graph.delete_nodes("Customer", ["auth-cleanup"]) == 1
+                assert graph.delete_nodes("Customer", ["auth-cleanup"]) == 0
+            assert query(reader, "MATCH (c:Customer) RETURN count(*) AS n") == [{"n": ROWS}]
+            checks.append("Python batched delete enforces graph writer role and is replay-safe for missing IDs")
             pending_driver = GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=writer,
                                                   connection_timeout=3, connection_acquisition_timeout=5,
                                                   max_transaction_retry_time=0)

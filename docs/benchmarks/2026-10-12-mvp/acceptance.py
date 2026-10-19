@@ -20,10 +20,10 @@ from neo4j.exceptions import ClientError
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from examples.client.export_snapshot import export_snapshot
+from examples.source_ingestion.export_snapshot import export_snapshot
 from examples.python.create_service_tokens import create
-from examples.client.generate_fixture import generate
-from examples.client.ingest_snapshot import identity, ingest_snapshot
+from examples.source_ingestion.generate_fixture import generate
+from examples.source_ingestion.ingest_snapshot import identity, ingest_snapshot
 
 
 def run(binary, tickets, captures, ducklake=False):
@@ -37,7 +37,7 @@ def run(binary, tickets, captures, ducklake=False):
         fixture, snapshot = path / "fixture.jsonl", path / "snapshot.jsonl"
         report["fixture"] = generate(fixture, tickets, 2, 1024)
         if ducklake:
-            from examples.client.export_ducklake_snapshot import export_ducklake_snapshot, sql_literal
+            from examples.source_ingestion.export_ducklake_snapshot import export_ducklake_snapshot, sql_literal
             catalog, data = path / "metadata.sqlite", path / "lake-data"
             data.mkdir()
             with duckdb.connect(config={"autoinstall_known_extensions": "false",
@@ -135,7 +135,7 @@ def run(binary, tickets, captures, ducklake=False):
                 return sequence, indexes
 
         try:
-            cli("db", "create", "shadow", "--ontology", str(ROOT / "examples/client/ontology.json"))
+            cli("db", "create", "shadow", "--ontology", str(ROOT / "examples/source_ingestion/ontology.json"))
             start()
             with GraphDatabase.driver("bolt://" + address, auth=("writer", tokens["writer"])) as driver:
                 began = time.perf_counter()

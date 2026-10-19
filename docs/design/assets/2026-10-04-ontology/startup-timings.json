@@ -2,7 +2,7 @@
   "date": "2026-10-04",
   "build": "debug",
   "system": "macOS-26.6.2-arm64-arm-64bit",
-  "fixture": "existing local synthetic staging-100k; registry also opens analytics-demo and client_memory",
+  "fixture": "existing local synthetic staging-100k; registry also opens analytics-demo and default",
   "runs": {
     "ontology_snapshot": {
       "argv": [

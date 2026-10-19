@@ -136,14 +136,23 @@ pub(crate) fn render_at(
             )),
         areas[1],
     );
-    let scope = format!(
-        " {}: {}\n -[:{}]-> {} • {}",
-        display(&state.snapshot.node_label),
-        display(&state.snapshot.entity_id),
-        display(&state.snapshot.edge_type),
-        display(&state.snapshot.target_label),
-        lang.choose("somente leitura", "read only")
-    );
+    let unconfigured = state.snapshot.entity_id.is_empty();
+    let scope = if unconfigured {
+        lang.choose(
+            " Configure o rótulo, ID, aresta e rótulo de destino na linha de comando.",
+            " Set the source label, entity ID, edge type and target label in the command line.",
+        )
+        .into()
+    } else {
+        format!(
+            " {}: {}\n -[:{}]-> {} • {}",
+            display(&state.snapshot.node_label),
+            display(&state.snapshot.entity_id),
+            display(&state.snapshot.edge_type),
+            display(&state.snapshot.target_label),
+            lang.choose("somente leitura", "read only")
+        )
+    };
     frame.render_widget(
         Paragraph::new(scope)
             .wrap(Wrap { trim: false })
@@ -246,10 +255,17 @@ pub(crate) fn render_at(
         );
     } else {
         frame.render_widget(
-            Paragraph::new(lang.choose(
-                " Entidade não encontrada.\n Nenhum nó foi criado.",
-                " Entity not found.\n No node was created.",
-            ))
+            Paragraph::new(if unconfigured {
+                lang.choose(
+                    " Amostra não configurada.\n Nenhum dado foi consultado.",
+                    " Sample not configured.\n No graph data was queried.",
+                )
+            } else {
+                lang.choose(
+                    " Entidade não encontrada.\n Nenhum nó foi criado.",
+                    " Entity not found.\n No node was created.",
+                )
+            })
             .wrap(Wrap { trim: false })
             .block(panel(lang.choose("PRÉVIA", "PREVIEW"), GREEN, no_color)),
             body[0],
@@ -499,5 +515,23 @@ mod tests {
         assert!(state.sampled > old);
         state.refresh(Ok(sample(0)));
         assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn an_unconfigured_graph_sample_is_not_reported_as_a_missing_entity() {
+        for lang in [Language::En, Language::PtBr] {
+            let mut state = State::new(GraphSnapshot::default());
+            state.refresh(Err(
+                "Graph preview needs --node-label, --entity-id, --edge-type and --target-label"
+                    .into(),
+            ));
+            let rendered = text(&mut state, lang, 80, 24);
+            assert!(
+                rendered.contains(lang.choose("Amostra não configurada", "Sample not configured"))
+            );
+            assert!(rendered
+                .contains(lang.choose("Nenhum dado foi consultado", "No graph data was queried")));
+            assert!(rendered.contains("--entity-id"));
+        }
     }
 }

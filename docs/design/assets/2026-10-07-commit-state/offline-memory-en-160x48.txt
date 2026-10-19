@@ -4,7 +4,7 @@
 ┌Named graphs───────────────────────────────────────────────────────────────┐┌─MEMORY──────────────────────────────────────────────────────────────────────────┐
 │ GRAPH                     NODES    EDGES                                  ││OFFLINE PROCESS • ALL GRAPHS                                                     │
 │▶ customers-100k             100000          0                             ││                                                                                 │
-│  client_memory                 0          0                             ││memory.cache: 64.00 MiB                                                          │
+│  default                         0          0                             ││memory.cache: 64.00 MiB                                                          │
 │                                                                           ││Accounted: 8.97 MiB                                                              │
 │                                                                           ││memory.memtables: 16.00 MiB                                                      │
 │                                                                           ││Allocated: 0.05 MiB                                                              │

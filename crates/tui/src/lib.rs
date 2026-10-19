@@ -397,7 +397,7 @@ impl App {
         }
     }
     pub fn paste(&mut self, s: &str) {
-        if self.editing {
+        if self.editing && !self.help {
             self.insert(s);
         }
     }
@@ -426,6 +426,7 @@ impl App {
             self.set_view(View::from_index(
                 (self.view.index() as isize + delta).rem_euclid(4) as usize,
             ));
+            self.focus = Focus::Navigation;
             return;
         }
         let (index, len) = match self.view {
@@ -652,6 +653,87 @@ mod tests {
         app.handle(key(KeyCode::Char('q')));
         assert!(app.quit);
     }
+    #[test]
+    fn help_is_modal_and_preserves_editor_contents() {
+        let mut app = App::new(Language::En, View::Query);
+        app.handle(key(KeyCode::Enter));
+        let before = app.query.clone();
+        app.handle(key(KeyCode::F(1)));
+        for code in [
+            KeyCode::Char('q'),
+            KeyCode::Char('4'),
+            KeyCode::F(5),
+            KeyCode::Tab,
+        ] {
+            app.handle(key(code));
+        }
+        app.paste("unexpected mutation");
+        assert!(app.help && app.editing);
+        assert!(!app.quit);
+        assert_eq!(app.view, View::Query);
+        assert_eq!(app.query, before);
+        assert!(app.result.is_empty());
+        app.handle(key(KeyCode::Esc));
+        assert!(!app.help);
+        assert!(app.editing);
+    }
+
+    #[test]
+    fn page_help_and_navigation_are_readable_at_compact_sizes() {
+        for (w, h) in [(80, 24), (120, 30), (160, 48)] {
+            for lang in [Language::En, Language::PtBr] {
+                for view in [View::Graph, View::Query, View::Memory, View::Disk] {
+                    for no_color in [false, true] {
+                        let mut app = App::new(lang, view);
+                        app.handle(key(KeyCode::F(1)));
+                        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+                        terminal.draw(|f| render(f, &app, no_color)).unwrap();
+                        let buffer = terminal.backend().buffer();
+                        let visible = buffer
+                            .content()
+                            .iter()
+                            .map(|c| c.symbol())
+                            .collect::<String>();
+                        for text in [
+                            lang.choose("PARA QUE SERVE", "PURPOSE"),
+                            lang.choose("O QUE SIGNIFICA", "WHAT IT MEANS"),
+                            lang.choose("O QUE POSSO FAZER", "AVAILABLE ACTIONS"),
+                            "DEMO: ",
+                            "F1/Esc",
+                        ] {
+                            assert!(visible.contains(text), "{w}x{h} {view:?}: missing {text}");
+                        }
+                        let page = match view {
+                            View::Graph => lang.choose("[1 Grafo]", "[1 Graph]"),
+                            View::Query => lang.choose("[2 Consulta]", "[2 Query]"),
+                            View::Memory => lang.choose("[3 Memória]", "[3 Memory]"),
+                            View::Disk => lang.choose("[4 Disco]", "[4 Disk]"),
+                        };
+                        assert!(visible.contains(page));
+                        if no_color {
+                            assert!(buffer
+                                .content()
+                                .iter()
+                                .all(|c| c.fg == Color::Reset && c.bg == Color::Reset));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn navigation_arrows_keep_focus_until_page_is_opened() {
+        let mut app = App::new(Language::En, View::Graph);
+        for view in [View::Query, View::Memory, View::Disk, View::Graph] {
+            app.handle(key(KeyCode::Down));
+            assert_eq!(app.view, view);
+            assert_eq!(app.focus, Focus::Navigation);
+        }
+        app.handle(key(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Main);
+    }
+
     #[test]
     fn unicode_and_bounded_paste() {
         let mut app = App::new(Language::PtBr, View::Query);

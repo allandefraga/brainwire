@@ -235,6 +235,7 @@ dependencies = [
  "brainwire-store",
  "brainwire-tui",
  "clap",
+ "libc",
  "openraft",
  "serde",
  "serde_json",

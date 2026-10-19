@@ -3,9 +3,9 @@ use crate::overview::{panel, terminal_text};
 use crate::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::{Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -53,6 +53,7 @@ struct Workspace {
     graph: Option<connected_graph::State>,
     attempted: [bool; 4],
     initial_errors: [Option<String>; 4],
+    help: bool,
 }
 impl Workspace {
     fn new() -> Self {
@@ -64,6 +65,7 @@ impl Workspace {
             graph: None,
             attempted: [false; 4],
             initial_errors: std::array::from_fn(|_| None),
+            help: false,
         }
     }
     fn refresh(
@@ -144,8 +146,15 @@ impl Workspace {
         if key.kind != event::KeyEventKind::Press {
             return false;
         }
+        if self.help {
+            if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
+                self.help = false;
+            }
+            return false;
+        }
         match key.code {
             KeyCode::Char('q') => return true,
+            KeyCode::Char('?') => self.help = true,
             KeyCode::Tab => self.select(
                 ConnectedView::from_index(
                     self.active.index()
@@ -264,7 +273,7 @@ fn render(
                     view.name(lang)
                 ),
                 if selected && !no_color {
-                    Style::default().fg(GREEN)
+                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 },
@@ -357,12 +366,13 @@ fn render(
         content.height.min(3),
     );
     let navigation = format!(
-        " 1 {}  2 {}  3 {}  4 {} • Tab • r {} • q {}",
+        " 1 {}  2 {}  3 {}  4 {} • Tab • r {} • ? {} • q {}",
         ConnectedView::Ontology.name(lang),
         ConnectedView::Memory.name(lang),
         ConnectedView::Indexes.name(lang),
         ConnectedView::Graph.name(lang),
         lang.choose("atualiza", "refresh"),
+        lang.choose("ajuda", "help"),
         lang.choose("sai", "quit")
     );
     let controls = if !has_sample {
@@ -390,6 +400,56 @@ fn render(
         Paragraph::new(navigation).block(panel(controls, GREEN, no_color)),
         footer,
     );
+    if workspace.help {
+        let (title, body) = match workspace.active {
+            ConnectedView::Ontology => (
+                lang.choose("Ontologia conectada", "Connected ontology"),
+                lang.choose(
+                    "Snapshot real do schema do grafo selecionado. Conexoes sao assinaturas permitidas; nao provam que existam arestas gravadas.\n\n↑↓ escolhe tipo; Enter/F1 abre o inspetor; PgUp/PgDn percorre propriedades e relacoes. Tab ou 1–4 muda de painel; r atualiza.\n\nO catalogo global esta disponivel no inspetor offline. Esta tela conectada mostra o tipo selecionado.",
+                    "A real schema snapshot from the selected graph. Connections are allowed signatures; they do not prove stored edge records exist.\n\n↑↓ selects a type; Enter/F1 opens its inspector; PgUp/PgDn scrolls properties and relationships. Tab or 1–4 changes pane; r refreshes.\n\nThe global catalog is available in the offline inspector. This connected view shows the selected type.",
+                ),
+            ),
+            ConnectedView::Memory => (
+                lang.choose("Memoria conectada", "Connected memory"),
+                lang.choose(
+                    "Contadores atuais do pool compartilhado de consultas no servidor. Reservas podem durar ate o fim da transacao; nao sao RSS nem uso total do processo.\n\nTab ou 1–4 muda de painel; r busca uma amostra nova. Esta tela e somente leitura.\n\nA TUI conectada consulta o servidor sem abrir os arquivos RocksDB localmente.",
+                    "Current counters from the server's shared query pool. Reservations can last until transaction end; these are not RSS or total process usage.\n\nTab or 1–4 changes pane; r fetches a new sample. This pane is read-only.\n\nThe connected TUI queries the server without opening local RocksDB files.",
+                ),
+            ),
+            ConnectedView::Indexes => (
+                lang.choose("Indices conectados", "Connected indexes"),
+                lang.choose(
+                    "Declarado significa que o schema pede o indice. Pronto significa que a construcao terminou. Enquanto pendente, a consulta pode usar scan.\n\n↑↓ ou PgUp/PgDn seleciona indice; Tab ou 1–4 muda de painel; r atualiza. Esta tela e somente leitura.",
+                    "Declared means the schema requests the index. Ready means construction finished. While pending, a query may use a scan.\n\n↑↓ or PgUp/PgDn selects an index; Tab or 1–4 changes pane; r refreshes. This pane is read-only.",
+                ),
+            ),
+            ConnectedView::Graph => (
+                lang.choose("Grafo conectado", "Connected graph"),
+                lang.choose(
+                    "Explora uma amostra limitada de relacoes reais a partir do nodo selecionado. O limite da amostra nao e o grau total do nodo.\n\n↑↓ seleciona resultado; campos de configuracao identificam nodo e relacao. Tab ou 1–4 muda de painel; r atualiza. Nenhuma escrita e feita.",
+                    "Explores a bounded sample of real relationships from the selected node. The sample limit is not the node's total degree.\n\n↑↓ selects a result; configuration fields identify the node and relationship. Tab or 1–4 changes pane; r refreshes. No writes are performed.",
+                ),
+            ),
+        };
+        let width = content.width.saturating_sub(4).clamp(1, 88);
+        let height = content.height.saturating_sub(2).clamp(1, 24);
+        let popup = Rect::new(
+            content.x + content.width.saturating_sub(width) / 2,
+            content.y + content.height.saturating_sub(height) / 2,
+            width,
+            height,
+        );
+        frame.render_widget(Clear, popup);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{body}\n\n{}",
+                lang.choose("? ou Esc fecha a ajuda.", "? or Esc closes help.")
+            ))
+            .wrap(Wrap { trim: false })
+            .block(panel(title, GREEN, no_color)),
+            popup,
+        );
+    }
 }
 
 /// One terminal loop with lazy, synchronous read-only pane refreshes.
@@ -556,6 +616,47 @@ mod tests {
         );
         workspace.handle(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), &mut fetch);
         assert_eq!(workspace.active, ConnectedView::Memory);
+    }
+
+    #[test]
+    fn contextual_help_is_available_on_every_connected_pane_and_does_not_move_selection() {
+        for lang in [Language::En, Language::PtBr] {
+            for (width, height) in [(80, 24), (120, 30), (160, 48)] {
+                for (view, meaning_en, meaning_pt) in [
+                    (ConnectedView::Ontology, "allowed", "permitidas"),
+                    (ConnectedView::Memory, "not RSS", "nao sao RSS"),
+                    (
+                        ConnectedView::Indexes,
+                        "Declared means",
+                        "Declarado significa",
+                    ),
+                    (ConnectedView::Graph, "bounded sample", "amostra limitada"),
+                ] {
+                    let mut workspace = Workspace::new();
+                    let mut fetcher = fetch;
+                    workspace.refresh(&mut fetcher);
+                    workspace.select(view, &mut fetcher);
+                    workspace.handle(key(KeyCode::Char('?')), &mut fetcher);
+                    assert!(workspace.help);
+                    let actual = if lang == Language::En {
+                        meaning_en
+                    } else {
+                        meaning_pt
+                    };
+                    let output = text(&mut workspace, lang, width, height, true);
+                    assert!(output.contains(actual), "{view:?}: {output}");
+                    assert!(output.contains(if lang == Language::En {
+                        "? or Esc closes help"
+                    } else {
+                        "? ou Esc fecha a ajuda"
+                    }));
+                    workspace.handle(key(KeyCode::Down), &mut fetcher);
+                    assert!(workspace.help);
+                    workspace.handle(key(KeyCode::Esc), &mut fetcher);
+                    assert!(!workspace.help);
+                }
+            }
+        }
     }
     #[test]
     fn forbidden_memory_keeps_workspace_open_and_other_panes_available() {

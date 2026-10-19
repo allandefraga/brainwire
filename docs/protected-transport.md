@@ -27,7 +27,7 @@ configuration are mounted read-only. There are no credentials in YAML.
 Build the selected local image first using the [container guide](container.md).
 Prepare a server auth policy and health client JSON using the
 [auth profile](bolt-auth.md), with grants for the Compose default graph
-`client_memory`. The native quickstart's temporary data directory is separate
+`default`. The native quickstart's temporary data directory is separate
 from Compose storage; initialize the actual selected Compose volume before serving. File-backed Compose
 secrets retain host permissions; arrange ownership/read access for Brainwire
 UID 10001 without making real credentials world-readable.
@@ -43,7 +43,7 @@ export BRAINWIRE_TLS_PORT=7688
 
 docker compose -p "$BRAINWIRE_PILOT_PROJECT" -f deploy/compose.yaml -f deploy/compose.auth.yaml -f deploy/compose.tls.yaml config
 # Fresh project/volume only; the bundled Customer ontology is a synthetic example.
-docker compose -p "$BRAINWIRE_PILOT_PROJECT" -f deploy/compose.yaml -f deploy/compose.auth.yaml -f deploy/compose.tls.yaml run --rm --no-deps brainwire db create client_memory --ontology /opt/brainwire/example-schema.json
+docker compose -p "$BRAINWIRE_PILOT_PROJECT" -f deploy/compose.yaml -f deploy/compose.auth.yaml -f deploy/compose.tls.yaml run --rm --no-deps brainwire db create default --ontology /opt/brainwire/example-schema.json
 docker compose -p "$BRAINWIRE_PILOT_PROJECT" -f deploy/compose.yaml -f deploy/compose.auth.yaml -f deploy/compose.tls.yaml up -d --no-build
 ```
 
@@ -91,7 +91,7 @@ with GraphDatabase.driver(
     liveness_check_timeout=30,
     max_transaction_retry_time=0,
 ) as driver:
-    with driver.session(database='client_memory') as session:
+    with driver.session(database='default') as session:
         print(session.run('RETURN 1 AS ok').single()['ok'])
 ```
 

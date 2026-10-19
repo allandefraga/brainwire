@@ -16,7 +16,7 @@ server's `QueryEngine` trait.
 **Tech Stack:** Rust (stable), the workspace crates (`brainwire-core`,
 `brainwire-store`, `brainwire-bolt`), `clap` 4 (derive), `toml` 0.8, `serde`;
 Python 3 with the `neo4j` driver (5.28.6 in the session scratchpad venv, and
-6.3.0 in `client-core/.venv`) for the end-to-end check.
+6.3.0 in `external-core/.venv`) for the end-to-end check.
 
 **Spec:** [2026-09-24-brainwire-design.md](../specs/2026-09-24-brainwire-design.md),
 sections 1.5 (memory), 2.1 (schema from the ontology), 3.1 and 3.3 (query and
@@ -84,7 +84,7 @@ already require them in this MVP.
   variable `BRAINWIRE_<SECTION>_<KEY>` (for containers).
 - Memory defaults follow spec 1.5 for a 16 GB node: block cache 10 GiB with the
   memtables charged inside it (1 GiB), 2 GiB for query execution.
-- The default database is `client_memory` (spec 3.3); each database is one
+- The default database is `default` (spec 3.3); each database is one
   directory under `data_dir`.
 - Errors use Neo4j codes (spec 3.3): `Neo.ClientError.Statement.SyntaxError`
   for syntax and unsupported constructs, `Neo.TransientError.Transaction.Outdated`
@@ -142,7 +142,7 @@ crates/store/src/graph.rs                 + nodes_of_type (Task 3)
     `Deserialize` from a TOML string or integer.
   - `pub struct Config { pub server: ServerSection, pub memory: MemorySection }`
   - `pub struct ServerSection { pub listen: String, pub data_dir: PathBuf, pub default_database: String, pub max_message: ByteSize }`
-    with defaults `127.0.0.1:7687`, `./data`, `client_memory`, `256MiB`.
+    with defaults `127.0.0.1:7687`, `./data`, `default`, `256MiB`.
   - `pub struct MemorySection { pub cache: ByteSize, pub memtables: ByteSize, pub query: ByteSize }`
     with defaults `10GiB`, `1GiB`, `2GiB`.
   - `pub enum Source { Default, File(PathBuf), Env(String) }`
@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(loaded.config.memory.cache.0, 10 << 30);
         assert_eq!(loaded.config.memory.memtables.0, 1 << 30);
         assert_eq!(loaded.config.memory.query.0, 2 << 30);
-        assert_eq!(loaded.config.server.default_database, "client_memory");
+        assert_eq!(loaded.config.server.default_database, "default");
         assert!(matches!(loaded.sources["memory.cache"], Source::Default));
     }
 
@@ -645,11 +645,11 @@ These checks belong alongside the adapter and driver tests below.
 - [ ] **Step 1: Failing tests:** engine conversion tests (a params map with
   every PackValue kind; a node output becomes the 0x4E struct with the right
   element id; each `ExecError` gets its code); `Databases::open_all` on an empty
-  tempdir creates `client_memory`, and a second `open_all` finds it again.
+  tempdir creates `default`, and a second `open_all` finds it again.
 - [ ] **Step 2: Run to see them fail**, **Step 3: implement.**
 - [ ] **Step 4: The driver check.** `tests/mvp_demo.py <uri> write|read`:
   `write` applies nothing itself (the server is started on a data directory
-  prepared with `brainwire db create client_memory --ontology crates/core/tests/fixtures/graph_mapping.json`),
+  prepared with `brainwire db create default --ontology crates/core/tests/fixtures/graph_mapping.json`),
   creates two Customers and one Company with the driver (`execute_query` and a
   managed `execute_write`), links them with `WORKS_AT`, loads 10,000 Customers
   with one `UNWIND $rows` query and prints the time it took; `read` checks the
@@ -658,8 +658,8 @@ These checks belong alongside the adapter and driver tests below.
   `mvp demo: ok`. Run: create the data directory, start `brainwire serve` with
   a config on port 37687, run `write`, stop the server, start it again, run
   `read`. Do it with the 5.28.6 driver
-  (`/private/tmp/claude-501/-Users-fraga-Documents-client-platform/41f59c99-d001-444a-9711-f2c8aecf8c78/scratchpad/neo4j5/bin/python`)
-  and with 6.3.0 (`/Users/fraga/Documents/client-platform/client-core/.venv/bin/python`).
+  (`/private/tmp/claude-501/-Users-fraga-Documents-external-platform/41f59c99-d001-444a-9711-f2c8aecf8c78/scratchpad/neo4j5/bin/python`)
+  and with 6.3.0 (`/Users/fraga/Documents/external-platform/external-core/.venv/bin/python`).
   No server may be left running.
 - [ ] **Step 5: Workspace tests, clippy, fmt; commit**
   `feat(brainwire): serve the store over Bolt with the brainwire binary`

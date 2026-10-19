@@ -7,7 +7,7 @@ pub(crate) use application::validate_graphs;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use brainwire_replication::network::{
     self, NetworkFactory, RpcRequest, RpcResponse, TlsFiles, TransportSettings,
@@ -35,6 +35,24 @@ pub(crate) struct ClusterConfig {
 
 fn log_capacity() -> u64 {
     1 << 30
+}
+
+fn running_diagnostic(status: &network::ClusterStatus) -> &'static str {
+    match (status.running, status.running_issue.as_deref()) {
+        (true, None) => "running",
+        (false, Some("storage_error")) => "fatal_storage_error",
+        (false, Some("panic")) => "raft_panicked",
+        (false, Some("stopped")) => "raft_stopped",
+        _ => "not_running",
+    }
+}
+
+fn valid_running_state(status: &network::ClusterStatus) -> bool {
+    (!status.running || status.running_issue.is_none())
+        && status
+            .running_issue
+            .as_deref()
+            .is_none_or(|issue| matches!(issue, "storage_error" | "panic" | "stopped"))
 }
 
 #[derive(Clone, Deserialize)]
@@ -359,8 +377,16 @@ pub(crate) fn probe(config: &ClusterConfig, kind: &str) -> Result<(), String> {
             if status.cluster_id != config.cluster_id || status.node_id != config.node_id {
                 return Err("invalid_status");
             }
+            if !valid_running_state(&status) {
+                return Err("invalid_status");
+            }
             if !status.running {
-                return Err("not_running");
+                return Err(match running_diagnostic(&status) {
+                    "fatal_storage_error" => "fatal_storage_error",
+                    "raft_panicked" => "raft_panicked",
+                    "raft_stopped" => "raft_stopped",
+                    _ => "not_running",
+                });
             }
             if kind == "liveness" {
                 return Ok(());
@@ -405,10 +431,24 @@ pub(crate) fn inspect(config: &ClusterConfig) -> Result<(), String> {
         .build()
         .map_err(|_| "cannot start inspection runtime")?;
     let expected = settings.peers().keys().copied().collect::<Vec<_>>();
-    let samples = runtime.block_on(async {
+    let mut samples = runtime.block_on(async {
+        // Transport validation guarantees exactly three voters; poll all before waiting.
+        let settings_ref = &settings;
+        let request = |node_id| async move {
+            let started = Instant::now();
+            let response = network::request(settings_ref, node_id, RpcRequest::Status).await;
+            (started.elapsed().as_secs_f64() * 1_000.0, response)
+        };
+        let responses = tokio::join!(
+            request(expected[0]),
+            request(expected[1]),
+            request(expected[2]),
+        );
         let mut samples = Vec::new();
-        for &node_id in &expected {
-            let response = network::request(&settings, node_id, RpcRequest::Status).await;
+        for (&node_id, (response_time_ms, response)) in expected
+            .iter()
+            .zip([responses.0, responses.1, responses.2])
+        {
             let sample = match response {
                 Ok(RpcResponse::Status(status)) => {
                     let initialized = status.membership == expected;
@@ -420,17 +460,21 @@ pub(crate) fn inspect(config: &ClusterConfig) -> Result<(), String> {
                         && (initialized || uninitialized)
                         && status.leader.is_none_or(|id| expected.contains(&id))
                         && matches!(status.state.as_str(), "Learner" | "Follower" | "Candidate" | "Leader" | "Shutdown")
+                        && valid_running_state(&status)
                         && ((1 << 20)..=(64_u64 << 30)).contains(&status.max_log_bytes)
                         && status.log_bytes <= status.max_log_bytes
                         && status.log_remaining_bytes == status.max_log_bytes - status.log_bytes;
                     if valid {
-                        serde_json::json!({"node_id":node_id,"initialized":initialized,
-                            "diagnostic":if status.running { "sampled" } else { "not_running" },"status":status})
+                        serde_json::json!({"node_id":node_id,"response_time_ms":response_time_ms,
+                            "initialized":initialized,
+                            "diagnostic":if status.running { "sampled" } else { running_diagnostic(&status) },"status":status})
                     } else {
-                        serde_json::json!({"node_id":node_id,"diagnostic":"invalid_status","status":null})
+                        serde_json::json!({"node_id":node_id,"response_time_ms":response_time_ms,
+                            "diagnostic":"invalid_status","status":null})
                     }
                 }
-                _ => serde_json::json!({"node_id":node_id,"diagnostic":"unavailable","status":null}),
+                _ => serde_json::json!({"node_id":node_id,"response_time_ms":response_time_ms,
+                    "diagnostic":"unavailable","status":null}),
             };
             samples.push(sample);
         }
@@ -440,6 +484,40 @@ pub(crate) fn inspect(config: &ClusterConfig) -> Result<(), String> {
         .iter()
         .all(|sample| sample["diagnostic"] == "sampled");
     let all_initialized = complete && samples.iter().all(|sample| sample["initialized"] == true);
+    let replication_progress = if all_initialized {
+        let committed = samples
+            .iter()
+            .map(|sample| sample["status"]["committed_index"].as_u64())
+            .collect::<Option<Vec<_>>>();
+        let applied = samples
+            .iter()
+            .map(|sample| sample["status"]["last_applied"].as_u64())
+            .collect::<Option<Vec<_>>>();
+        match (committed, applied) {
+            (Some(committed), Some(applied)) => {
+                let committed_min = *committed.iter().min().expect("three configured voters");
+                let committed_max = *committed.iter().max().expect("three configured voters");
+                let applied_min = *applied.iter().min().expect("three configured voters");
+                let applied_max = *applied.iter().max().expect("three configured voters");
+                for (sample, (committed, applied)) in
+                    samples.iter_mut().zip(committed.into_iter().zip(applied))
+                {
+                    sample["committed_index_lag"] =
+                        serde_json::json!(committed_max.saturating_sub(committed));
+                    sample["applied_index_lag"] =
+                        serde_json::json!(applied_max.saturating_sub(applied));
+                }
+                Some(serde_json::json!({
+                    "basis":"concurrent independent samples; not an atomic snapshot or readiness proof",
+                    "committed_index":{"min":committed_min,"max":committed_max,"spread":committed_max - committed_min},
+                    "applied_index":{"min":applied_min,"max":applied_max,"spread":applied_max - applied_min}
+                }))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     let caps = samples
         .iter()
         .filter_map(|sample| sample["status"]["max_log_bytes"].as_u64())
@@ -451,6 +529,7 @@ pub(crate) fn inspect(config: &ClusterConfig) -> Result<(), String> {
         "scope":"independent status samples; not a quorum or write/read readiness proof",
         "cluster_id":config.cluster_id,"configured_max_log_bytes":config.max_log_bytes,
         "complete":complete,"all_initialized":all_initialized,
+        "replication_progress":replication_progress,
         "retained_log_cap_agreement":cap_agreement,
         "configured_log_cap_agreement":configured_cap_agreement,"members":samples});
     println!(

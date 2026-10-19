@@ -25,6 +25,7 @@ brainwire-replication = { path = "../replication" }
 openraft.workspace = true
 sha2.workspace = true
 uuid.workspace = true
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

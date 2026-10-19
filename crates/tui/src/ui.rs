@@ -6,7 +6,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         canvas::{Canvas, Line as CanvasLine},
-        Block, Borders, Gauge, Paragraph, Wrap,
+        Block, Borders, Clear, Gauge, Paragraph, Wrap,
     },
     Frame,
 };
@@ -201,9 +201,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
         View::Memory => memory(frame, app, main, no_color),
         View::Disk => disk(frame, app, main, no_color),
     }
-    let explanation = if app.help {
-        app.lang.choose("F1/Esc fecha ajuda. Tab muda foco. 1-4 abre vistas. Setas selecionam. Enter edita Query. F5 executa exemplo. q sai fora do editor.","F1/Esc closes help. Tab changes focus. 1-4 opens views. Arrows select. Enter edits Query. F5 runs example. q quits outside editor.").to_string()
-    } else if app.view == View::Graph {
+    let explanation = if app.view == View::Graph {
         format!(
             "{}\nid: {:02}   label: {}   name: {}\n{}",
             app.selected_description(),
@@ -248,27 +246,123 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
         )),
         inspector,
     );
-    let footer = if app.lang == Language::PtBr {
-        if area.width < 100 {
-            " F1 ajuda Tab foco 1-4 vistas ↑↓ seleciona Enter edita F5 roda Esc/q sai"
-        } else {
-            " F1 ajuda  Tab foco  1-4 vistas  ↑↓ seleciona  Enter inspeciona/edita  F5 executa  Esc volta  q sai  •  DEMO"
-        }
-    } else if area.width < 100 {
-        " F1 help Tab focus 1-4 views ↑↓ select Enter edit F5 run Esc/q back"
+    let page_names = if app.lang == Language::PtBr {
+        ["Grafo", "Consulta", "Memória", "Disco"]
     } else {
-        " F1 help  Tab focus  1-4 views  ↑↓ select  Enter inspect/edit  F5 run  Esc back  q quit  •  DEMO"
+        ["Graph", "Query", "Memory", "Disk"]
     };
-    let footer = if area.width < 100 && app.view != View::Query {
-        footer
-            .replace("Enter edita", "Enter vê")
-            .replace("Enter edit", "Enter inspect")
+    let pages = Line::from(
+        page_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let active = index == app.view.index();
+                Span::styled(
+                    if active {
+                        format!(" [{} {}] ", index + 1, name)
+                    } else {
+                        format!("  {} {}  ", index + 1, name)
+                    },
+                    if active {
+                        selected_style(no_color)
+                    } else {
+                        style(CYAN, no_color)
+                    },
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let actions = if app.help {
+        app.lang.choose(
+            " F1/Esc fecha ajuda • outras teclas pausadas",
+            " F1/Esc close help • other keys paused",
+        )
+    } else if app.editing {
+        app.lang.choose(
+            " F1 ajuda • digite/cole • PgUp/Dn rola • F5 roda • Enter/Esc termina",
+            " F1 help • type/paste • PgUp/Dn scroll • F5 run • Enter/Esc finish",
+        )
+    } else if app.view == View::Query {
+        app.lang.choose(
+            " F1 ajuda • Tab foco • ←→ exemplos • Enter edita • F5 roda • q sai",
+            " F1 help • Tab focus • ←→ examples • Enter edit • F5 run • q quit",
+        )
     } else {
-        footer.to_string()
+        app.lang.choose(
+            " F1 ajuda • Tab foco • 1-4 páginas • ↑↓ seleciona • Enter abre • q sai",
+            " F1 help • Tab focus • 1-4 pages • ↑↓ select • Enter open • q quit",
+        )
     };
     frame.render_widget(
-        Paragraph::new(footer).style(style(PALE, no_color)),
+        Paragraph::new(vec![pages, Line::from(actions)]).style(style(PALE, no_color)),
         sections[2],
+    );
+    if app.help {
+        help_overlay(frame, app, sections[1], no_color);
+    }
+}
+
+fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
+    let area = Rect::new(
+        body.x + 1,
+        body.y,
+        body.width.saturating_sub(2),
+        body.height,
+    );
+    let (purpose, meaning, actions) = match app.view {
+        View::Graph => (
+            app.lang.choose("Explore os nós e suas conexões no exemplo.", "Explore nodes and their connections in the example."),
+            app.lang.choose("Nós são entidades. Linhas são relações; * marca as selecionadas.\nC=Customer, O=Company, P=Project; ◆ marca o nó selecionado.", "Nodes are entities. Lines are relationships; * marks selected links.\nC=Customer, O=Company, P=Project; ◆ marks the selected node."),
+            app.lang.choose("Tab: foco no grafo. ↑↓: seleciona nó. Enter: explica o selecionado.", "Tab: focus graph. ↑↓: select node. Enter: explain selection."),
+        ),
+        View::Query => (
+            app.lang.choose("Experimente dois exemplos guiados de Cypher.", "Try two guided Cypher examples."),
+            app.lang.choose("MATCH encontra entidades/relações; RETURN escolhe as colunas.\nLIMIT limita linhas. Resultados vêm dos dados sintéticos da demo.\nSomente os dois exemplos exatos são suportados nesta demo.", "MATCH finds entities/relationships; RETURN chooses columns.\nLIMIT caps rows. Results come from the synthetic demo fixture.\nOnly the two exact examples are supported in this demo."),
+            app.lang.choose("←→: exemplos. Enter: edita. F5: executa. ↑↓: rola resultados.\nNo editor: digite/cole; PgUp/PgDn rola; Enter/Esc termina edição.", "←→: examples. Enter: edit. F5: run. ↑↓: scroll results.\nIn editor: type/paste; PgUp/PgDn scroll; Enter/Esc finish editing."),
+        ),
+        View::Memory => (
+            app.lang.choose("Entenda orçamentos e uso de memória.", "Understand memory budgets and usage."),
+            app.lang.choose("Configurado é orçamento, não RAM reservada; usado é ilustrativo.\nCache guarda leituras e inclui memtables (buffers de escrita).\nRSS é memória física do processo; não some RSS e cache.", "Configured is a budget, not reserved RAM; used is illustrative.\nCache stores reads and includes memtables (write buffers).\nRSS is process resident memory; do not add RSS and cache."),
+            app.lang.choose("Tab: foco nos indicadores. ↑↓: escolhe indicador.\nEnter: abre explicação; ↑↓ no inspetor rola o texto.", "Tab: focus metrics. ↑↓: select metric.\nEnter: open explanation; ↑↓ in inspector scrolls text."),
+        ),
+        View::Disk => (
+            app.lang.choose("Veja para que serve cada arquivo do armazenamento.", "Learn what each storage file does."),
+            app.lang.choose("WAL registra escritas; SST guarda dados ordenados em disco.\nMANIFEST registra as tabelas; CURRENT aponta ao manifesto ativo.\nMemtable → L0 → L1 → L2 mostra o fluxo ilustrativo da escrita.", "WAL records writes; SST stores sorted data on disk.\nMANIFEST tracks tables; CURRENT points to the active manifest.\nMemtable → L0 → L1 → L2 illustrates the storage write flow."),
+            app.lang.choose("Tab: foco nos arquivos. ↑↓: seleciona arquivo.\nEnter: explica arquivo; ↑↓ no inspetor rola o texto.", "Tab: focus files. ↑↓: select file.\nEnter: explain file; ↑↓ in inspector scrolls text."),
+        ),
+    };
+    let mut lines = Vec::new();
+    for (label, text) in [
+        (app.lang.choose("PARA QUE SERVE", "PURPOSE"), purpose),
+        (app.lang.choose("O QUE SIGNIFICA", "WHAT IT MEANS"), meaning),
+        (
+            app.lang.choose("O QUE POSSO FAZER", "AVAILABLE ACTIONS"),
+            actions,
+        ),
+    ] {
+        lines.push(Line::from(Span::styled(
+            label,
+            style(GREEN, no_color).add_modifier(Modifier::BOLD),
+        )));
+        lines.extend(text.lines().map(Line::from));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(app.lang.choose(
+        "DEMO: dados sintéticos; não altera arquivos nem configuração.",
+        "DEMO: synthetic data; does not change files or configuration.",
+    )));
+    let title = format!(
+        " {} / {} • F1/Esc {} ",
+        app.lang.choose("Ajuda", "Help"),
+        app.view.display(app.lang),
+        app.lang.choose("fecha", "close")
+    );
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(block(&title, GREEN, no_color)),
+        area,
     );
 }
 

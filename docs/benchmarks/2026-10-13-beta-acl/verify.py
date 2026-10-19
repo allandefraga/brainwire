@@ -85,4 +85,4 @@ if __name__ == '__main__':
     validate(candidate,receipts)
     print(json.dumps(dict(result='PASS',scope='local synthetic single-owner candidate only',
         nativeSha256=candidate['nativeSha256'],imageId=candidate['imageId'],
-        pending=['live client source','dynamic adapter/atomic ACL ingestion','consensus and machine-loss replication']),indent=2))
+        pending=['live external application source','dynamic adapter/atomic ACL ingestion','consensus and machine-loss replication']),indent=2))

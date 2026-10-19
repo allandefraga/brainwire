@@ -2,7 +2,7 @@
 
 Brainwire can store several independent named graphs under one configured
 `server.data_dir`. Each name maps to a separate RocksDB directory and ontology
-catalog. `client_memory` is only the default name; it is not a limit of one
+catalog. `default` is only the default name; it is not a limit of one
 graph. The Bolt server opens existing names and clients choose a database in
 their session. Cache and memtable budgets are shared by the process, so the
 number of graphs and their active working sets still matter.
@@ -16,7 +16,7 @@ checkout. They are exact graph counts from a full scan, not forecasts:
 | --- | ---: | ---: | --- | --- | --- |
 | `analytics-demo` | 3 | 2 | v1 | `Page` | `LINK` |
 | `staging-100k` | 100,000 | 1,000,000 | v1 | `Page` | `LINK` |
-| `client_memory` | 0 | 0 | none | none | none |
+| `default` | 0 | 0 | none | none | none |
 
 The `staging-100k` directory occupied about 9.5 MiB on this host when
 measured with `du -sh`; this synthetic fixture is highly compressible and
@@ -47,7 +47,9 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
 `shell --overview` is a **real, read-only, offline** TUI. Up/Down chooses a
 graph and the inspector shows its exact node/edge counts, ontology version,
 node labels and edge types. Tab changes to the write pipeline, Memory,
-Disk and Ontology panels; Shift-Tab moves backward. PgUp/PgDn scroll long explanations. `--view query|memory|disk|ontology`
+Disk and Ontology panels; Shift-Tab moves backward. The page strip highlights
+the active panel, and `?` opens an explanation of its terms and available
+controls. PgUp/PgDn scroll long explanations. `--view query|memory|disk|ontology`
 chooses the initial panel; `q` or Esc exits. See the
 [Python ingestion guide](python-ingestion.md) for memory semantics and the
 new offline `db check` consistency audit. `--graph` sets the initial

@@ -47,7 +47,8 @@ pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Res
         .enable_all()
         .build()
         .map_err(|e| format!("cannot start server runtime: {e}"))?;
-    runtime.block_on(async move {
+    let grace = std::time::Duration::from_millis(loaded.config.server.shutdown_grace_ms);
+    let result = runtime.block_on(async move {
         // Bind before opening the stores, so a port conflict does not leave a
         // partly initialized server that appears to be accepting queries.
         let listener = TcpListener::bind(&loaded.config.server.listen)
@@ -58,6 +59,10 @@ pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Res
             let (replica, databases) = crate::cluster::Replica::start(&loaded.config, cluster, peer_listener).await?;
             (Some(replica), databases)
         } else { (None, Arc::new(Databases::open_all(&loaded.config)?)) };
+        // Registered after the stores open, so a signal during recovery still
+        // stops at once (crash-safe), and before the first accept.
+        let stop = termination().map_err(|e| format!("cannot install signal handlers: {e}"))?;
+        let stores = Arc::clone(&databases);
         let default_name = loaded.config.server.default_database.clone();
         println!(
             "brainwire serve {} databases={:?} cache={} memtables={} query={} (shared query reservations + per-RUN guard; not RSS)",
@@ -67,7 +72,7 @@ pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Res
             loaded.config.memory.memtables,
             loaded.config.memory.query,
         );
-        brainwire_bolt::server::serve_with_connection_limits(
+        let open = brainwire_bolt::server::serve_until(
             listener,
             move || {
                 let engine = if let Some(replica) = &replica {
@@ -85,8 +90,58 @@ pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Res
                 io_timeout: std::time::Duration::from_millis(loaded.config.server.io_timeout_ms),
             },
             auth,
+            stop,
+            grace,
         )
         .await
-        .map_err(|e| format!("Bolt server stopped: {e}"))
+        .map_err(|e| format!("Bolt server stopped: {e}"))?;
+        Ok::<_, String>((open, stores))
+    });
+    // Abandoned sessions roll back when their tasks drop; a running engine
+    // call is not awaited past this bound.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    let (open, stores) = result?;
+    close_stores(stores);
+    if open == 0 {
+        eprintln!("brainwire: drained; all sessions closed");
+        Ok(())
+    } else {
+        Err(format!(
+            "shutdown grace of {} ms elapsed with {open} session(s) open; their unacknowledged work was abandoned",
+            grace.as_millis()
+        ))
+    }
+}
+
+/// Engine worker threads release their store handles after their sessions
+/// end. Close RocksDB on this thread before `exit()` runs C++ static
+/// destructors: a store closing concurrently with them aborts the process.
+fn close_stores(stores: Arc<Databases>) {
+    // ponytail: fixed bound; a running engine call honours query_timeout_ms cooperatively.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while Arc::strong_count(&stores) > 1 {
+        if std::time::Instant::now() >= deadline {
+            eprintln!("brainwire: a running engine call still holds the stores; exiting without closing them (acknowledged commits are already synced)");
+            // SAFETY: `_exit` skips destructors, as the previous abrupt
+            // termination did; no Rust or RocksDB state is touched afterwards.
+            unsafe { libc::_exit(1) }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    drop(stores);
+}
+
+/// The first SIGTERM or SIGINT starts the drain. A further signal keeps the
+/// handler installed, so forced stop is SIGKILL (the orchestrator's default).
+fn termination() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    Ok(async move {
+        tokio::select! {
+            _ = terminate.recv() => {}
+            _ = interrupt.recv() => {}
+        }
+        eprintln!("brainwire: shutdown requested; draining sessions");
     })
 }

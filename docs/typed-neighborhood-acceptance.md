@@ -60,7 +60,7 @@ uv run --no-project --with neo4j==6.3.0 python crates/server/tests/typed_neighbo
 The allowed node range is 22..100,000 so every fixture has more than the 20-row
 sample. Receipts identify the binary/ontology hashes, driver/OS, memory and
 message limits, dataset size, import time, actual counts, snapshot, timings,
-audit and cleanup. No real client source or existing deployment is accessed.
+audit and cleanup. No real external application source or existing deployment is accessed.
 
 This is a small-property, warm, sequential, localhost observation. Other work
 on the host can affect timings. It is not a whole-graph, multi-hop, cold-cache,

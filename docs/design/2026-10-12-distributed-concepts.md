@@ -11,7 +11,7 @@ implementation or replace the existing specification. Concrete failure examples
 are in [the scenario workbook](2026-10-12-distributed-scenarios.md); capacity
 and deployment boundaries are in [the capacity companion](2026-10-12-distributed-capacity.md).
 
-## What distribution should give client
+## What distribution should give external application
 
 A Python ingestion process should write to a logical Brainwire instance rather
 than depend permanently on one machine. If a supported replica fails, the
@@ -359,7 +359,7 @@ produce numbers seen in E1's discarded future. The restored baseline's existing
 IDs and allocator state must still be preserved.
 
 An external physical reference therefore needs lineage, graph incarnation and
-internal ID. A tenant/source/type-qualified business key can help client
+internal ID. A tenant/source/type-qualified business key can help external application
 reconcile an entity after restore. Neither a bare numeric ID nor the same
 business key authorizes automatically replaying an E1 operation into E2.
 
@@ -658,7 +658,7 @@ itself use replicated voters. Nine members could mean three replicated shards
 with three voters each; it does not mean nine independent writers for the same
 unpartitioned graph.
 
-For client, tenant or organization could be a candidate partition key if the
+For external application, tenant or organization could be a candidate partition key if the
 actual workload supports that locality. Ticket, comments, customer and document
 chunks of one tenant could stay near one another. A global user, shared document
 or cross-tenant edge complicates that boundary. A large tenant can become a hot

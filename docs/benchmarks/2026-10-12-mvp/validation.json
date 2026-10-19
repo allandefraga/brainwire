@@ -10,7 +10,7 @@
   "clippy": "workspace all targets -D warnings PASS",
   "format": "cargo fmt --all -- --check PASS",
   "python_examples_tests": 17,
-  "client_tests": 23,
+  "external_tests": 23,
   "dependencies": {
     "duckdb": "1.5.5",
     "neo4j": [

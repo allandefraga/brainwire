@@ -4,13 +4,13 @@
   "scope": "local synthetic protected service-token acceptance; no shared deployment or production certification",
   "rust_workspace_tests": 475,
   "python_example_tests": 16,
-  "python_client_tests": 3,
+  "python_external_tests": 3,
   "checks": {
     "cargo_test_workspace_locked_offline": "PASS",
     "cargo_clippy_workspace_all_targets_warnings_denied": "PASS",
     "cargo_fmt_check": "PASS",
     "python_unittest_examples": "PASS",
-    "python_unittest_client": "PASS",
+    "python_unittest_external": "PASS",
     "python_compile_harnesses": "PASS",
     "auth_profiles_local_render": "PASS",
     "driver5": "PASS",
@@ -101,9 +101,9 @@
     "examples/python/create_service_tokens.py": "52481b879e04d54b181d75b45ed771c4ec33428e60815bc31f226261ed5161e7",
     "examples/python/ingest_customers.py": "bade7f33c85763f7aec21c3a607ce47255a919461ccbc80e365aaca6d4d842e9",
     "examples/python/resumable_customers.py": "4d9b48da475bbb0fd8db6b940d6ac1bd784be5b88f3f062064d7a6820ba77554",
-    "examples/client/ingest_snapshot.py": "1db99dd86d02e03a9c82b737e482dc0932fd571d5805fbca12ae07942366a92e",
+    "examples/source_ingestion/ingest_snapshot.py": "1db99dd86d02e03a9c82b737e482dc0932fd571d5805fbca12ae07942366a92e",
     "crates/core/tests/fixtures/graph_mapping.json": "2c2d0517e0d5eb63001fb4cc9f4575e0a4634f9a6feb74e02eaf1c29d099231b",
-    "examples/client/ontology.json": "ee19d596b483e2a9861281b3433d2e2b18be0529f73a7616881e53fa64845a29",
+    "examples/source_ingestion/ontology.json": "ee19d596b483e2a9861281b3433d2e2b18be0529f73a7616881e53fa64845a29",
     "examples/knowledge/schema.json": "ab39ae937579a57d04aadeeb8c0fca39529f8547bd3ff99c8ff520cde960e68b",
     "examples/python/resumable_customers_ontology.json": "db64ca2f634b40ee59437a9f66dbddd23778d34f373df6a05cbfd3885952ce2a",
     "deploy/kubernetes/kustomization.yaml": "0ecf692510580ff242779f9a40bea83b6994bb47388f0dd1147706a02c17b56f"
@@ -114,7 +114,7 @@
     "cargo clippy --workspace --all-targets --locked --offline -- -D warnings",
     "cargo fmt --all -- --check",
     "python3 -m unittest discover -s examples/python -p test_*.py",
-    "python3 -m unittest discover -s examples/client -p test_*.py",
+    "python3 -m unittest discover -s examples/source_ingestion -p test_*.py",
     "python3 deploy/check_auth_profiles.py",
     "uv run --offline --no-project --with neo4j==5.28.6 python docs/benchmarks/2026-10-12-auth/acceptance.py",
     "uv run --offline --no-project --with neo4j==6.3.0 python docs/benchmarks/2026-10-12-auth/acceptance.py",
@@ -128,14 +128,14 @@
     "brainwire-20261012-clippy-final.log": "9d892c5778d0c975f64a671e66ea5a753502353da3addd1dfdf3825225e406a2",
     "brainwire-20261012-fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "brainwire-20261012-python-final.log": "cb911b310ccb3daadcab815b43af6edf4c098f9348c2c9dd39e6de244666d0ae",
-    "brainwire-20261012-client-final.log": "33060fd73862c5e1af97335504d5b45211fce6d229657f556d8deceeadc52ce4"
+    "brainwire-20261012-external-final.log": "33060fd73862c5e1af97335504d5b45211fce6d229657f556d8deceeadc52ce4"
   },
   "not_run": [
     "protected Swarm cluster",
     "protected Kubernetes cluster",
     "native TLS/encrypted-transport acceptance",
     "replicated failover",
-    "real client data"
+    "real external application data"
   ],
   "linux_image_binary_sha256": "867ad8491c3c1ed63539fb8b92f9623dfeee6b22b246b93ba9208d2d7acf0e56",
   "toolchain": {

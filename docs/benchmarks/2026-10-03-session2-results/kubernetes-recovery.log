@@ -24,7 +24,7 @@ verified pod-recreation, same retained PVC
     }
   ],
   "audit": {
-    "database": "client_memory",
+    "database": "default",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },

@@ -81,7 +81,7 @@ def validate(name, receipt):
         require(receipt.get("silent_sockets") == 64 and receipt.get("unauthenticated_sockets") == 64 and receipt.get("request_payload_cap_bytes") == 32, "transport peer/cap profile mismatch")
     if name == "static-checks.json":
         require(receipt.get("rust_tests_passed") == 541 and receipt.get("rust_tests_failed") == 0 and receipt.get("rust_tests_ignored") == 0, "Rust test counts mismatch")
-        require(receipt.get("python_examples_passed") == 17 and receipt.get("client_python_passed") == 23, "Python test counts mismatch")
+        require(receipt.get("python_examples_passed") == 17 and receipt.get("external_python_passed") == 23, "Python test counts mismatch")
         require(receipt.get("clippy_passed") is True and receipt.get("fmt_passed") is True, "Clippy/format verification missing")
         logs = receipt.get("logs")
         require(isinstance(logs, dict) and len(logs) >= 5, "static verification log digests missing")

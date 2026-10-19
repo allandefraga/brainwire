@@ -39,13 +39,14 @@ between terminal emulators.
 | Key | Action |
 |---|---|
 | `1`, `2`, `3`, `4` | Switch to Graph, Query, Memory or Disk outside editing |
-| `Tab` | Change focus |
-| Arrow keys | Move selection; scroll query results or the focused inspector with Up/Down |
+| `Tab` | Move focus between page navigation, content and the explanation panel |
+| Arrow keys | Change page while page navigation is focused; otherwise move selection or scroll the focused panel |
 | `PgUp`, `PgDn` | Move the editor viewport while editing, or scroll the focused inspector |
 | `Enter` | Inspect a selection or enter editing, according to focus |
-| `F1` | Toggle contextual explanation |
+| `F1` | Open page-specific help explaining its purpose, fields and controls |
 | `F5` | Run the supported guided query example |
-| `Esc` | Leave editing or help before exiting |
+| `Esc` | Close help or leave editing before exiting |
+| `?` | In the local overview and connected workspace, open page-specific help |
 | `q` | Quit when not editing |
 
 Both guided examples wrap at 80 columns. Longer edited text shows an overflow
@@ -57,6 +58,17 @@ markers that remain useful when color is disabled.
 The footer shows the current controls. Typed shortcut characters remain text
 while editing. A changed query outside the guided examples is refused
 explicitly instead of receiving a fabricated successful result.
+
+The help overlay explains each page without replacing the selected graph,
+file, memory item or query. The page strip and footer stay visible when color is
+disabled. In the local read-only overview, `?` describes the selected page and
+`Tab`/`Shift+Tab` moves through Graphs, Pipeline, Memory, Files and Ontology.
+The Ontology guide distinguishes schema declarations (allowed type
+relationships) from edge records stored in the graph. In the connected
+workspace, `?` explains the live, read-only Ontology, Memory, Indexes and Graph
+panes; `r` refreshes the selected pane. The global connection catalog is an
+offline overview feature; the connected pane remains focused on one selected
+type.
 
 Memory figures and file rows are illustrative. The memory view explains the
 difference between a container limit, an internal component budget and actual

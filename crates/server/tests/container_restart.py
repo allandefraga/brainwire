@@ -69,7 +69,7 @@ def run(image, rows, cycles):
             "run", "--rm", "--mount", f"type=volume,src={volume},dst=/data",
             "--env", "BRAINWIRE_MEMORY_CACHE=256MiB",
             "--env", "BRAINWIRE_MEMORY_MEMTABLES=32MiB",
-            image, "db", "create", "client_memory", "--ontology",
+            image, "db", "create", "default", "--ontology",
             "/opt/brainwire/example-schema.json",
         )
         for cycle in range(cycles + 2):
@@ -79,10 +79,10 @@ def run(image, rows, cycles):
                     driver.verify_connectivity()
                     if cycle == 0:
                         write(driver, rows)
-                        with driver.session(database="client_memory") as session:
+                        with driver.session(database="default") as session:
                             session.run("MATCH (c:Customer {entity_id:'driver-1'}) SET c.email='cycle-0@example.test'").consume()
                     else:
-                        with driver.session(database="client_memory") as session:
+                        with driver.session(database="default") as session:
                             count = session.run(
                                 "MATCH (c:Customer) RETURN count(*) AS n"
                             ).single()["n"]
@@ -108,7 +108,7 @@ def run(image, rows, cycles):
                 if cycle <= cycles:
                     # SIGKILL while an indexed overwrite is still uncommitted.
                     with GraphDatabase.driver(uri, auth=None) as driver:
-                        with driver.session(database="client_memory") as session:
+                        with driver.session(database="default") as session:
                             tx = session.begin_transaction()
                             try:
                                 tx.run("MATCH (c:Customer {entity_id:'driver-1'}) SET c.email='uncommitted-crash'").consume()
@@ -125,7 +125,7 @@ def run(image, rows, cycles):
                 stop_container(container)
         audit = docker("run", "--rm", "--mount", f"type=volume,src={volume},dst=/data",
                        "--env", "BRAINWIRE_MEMORY_CACHE=256MiB", "--env", "BRAINWIRE_MEMORY_MEMTABLES=32MiB",
-                       image, "db", "check", "client_memory", "--json")
+                       image, "db", "check", "default", "--json")
         print(audit.stdout.strip())
         print("container restart and indexed-overwrite recovery: ok")
     finally:

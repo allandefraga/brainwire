@@ -1,4 +1,8 @@
-# Brainwire: launch plan
+# Brainwire: historical launch plan
+
+> This is an archived planning draft, not the current product contract. Brainwire
+> is independent: host-specific schema, identity, ACL mapping and ingestion logic
+> belong in optional client integrations and are not runtime/build dependencies.
 
 > **Approach approved on 2026-09-24: Rust + RocksDB (option C).** Launch on
 > **2026-10-31**. Rhythm: 45 minutes of work per day. Nothing here becomes code
@@ -7,7 +11,7 @@
 Goal: on 2026-10-31 (D38), Brainwire runs in a container and as a three-node
 cluster, plugs into the platform through the `GraphRepository` port, holds 5
 billion elements with 16 GB of RAM per node, speaks openCypher measured by the
-TCK, and has a simple RBAC, client's ACL built in, an animated CLI, graph
+TCK, and has a simple RBAC, external application's ACL built in, an animated CLI, graph
 algorithms and AI questions.
 
 ## 1. What ships at launch
@@ -22,7 +26,7 @@ the weekly gate.
 | ACID and WAL | one writer per database, snapshot reads | |
 | Cluster and HA | 3 nodes with Raft: the leader writes, followers replicate, automatic failover, routing through Bolt (`neo4j://`) and bookmarks for causal reads | replicas in another region |
 | RBAC | simple: users, three fixed roles (`reader`, `editor`, `admin`) and access per database; fine-grained visibility stays with the row ACL | privileges per label, type and property (GRANT/DENY); LDAP/SSO |
-| Row-level security | client's ACL (`AclPredicate`), native to the engine (section 5) | |
+| Row-level security | external application's ACL (`AclPredicate`), native to the engine (section 5) | |
 | Cypher | openCypher measured by the TCK: at least 95% of the scenarios, with the list of what is missing published | 100% of the TCK |
 | Online backup | incremental, with a tested restore; in the cluster, taken from a follower | object storage, PITR |
 | Constraints | unique key per type; MERGE never duplicates | property existence and type |
@@ -173,10 +177,10 @@ follows the log.
 
 ## 5. ACL, RBAC and cluster
 
-### ACL: the client model, evaluated inside the engine
+### ACL: the external application model, evaluated inside the engine
 
 Brainwire implements the `AclPredicate` rule
-(`client-core/src/client_core/auth/visibility.py`, ADR-016 and ADR-017)
+(`external-core/src/external_core/auth/visibility.py`, ADR-016 and ADR-017)
 without changing anything in it:
 
 - each element carries `acl_allow`, `acl_deny` and `acl_connector_ids`, stamped
@@ -206,7 +210,7 @@ Both of today's paths keep working. `neo4j.py` keeps sending the predicate and
 the reserved parameters (`$acl_principals`, `$acl_connectors`,
 `$acl_open_connectors`); the engine recognizes them in a service session and
 applies the native rule, and refuses those parameters from a user session.
-Direct connections (CLI, BI) log in with the client-identity JWT, and Brainwire
+Direct connections (CLI, BI) log in with the external-identity JWT, and Brainwire
 compiles the predicate from the claims, like `compile_read_filter`.
 
 Verification: a differential test against the Python `is_visible`, which is the
@@ -221,7 +225,7 @@ writes, `admin` does everything, including managing databases and users. Each
 role applies to the databases the user has access to. Commands, in Neo4j syntax:
 `CREATE USER`, `DROP USER`, `GRANT ROLE`, `REVOKE ROLE`, `SHOW USERS`, `SHOW
 ROLES`, plus `ALTER USER <name> SET DATABASES [...]` for the list of databases
-a user can access (all by default). The roles in the client JWT map to these three through configuration.
+a user can access (all by default). The roles in the external application JWT map to these three through configuration.
 There are no privileges per label, type or property: the row ACL decides what each
 person sees, and RBAC decides only what they can do (read, write, administer),
 like the platform's role and capability policy.
@@ -247,7 +251,7 @@ Proposed SDK API, in the style of the port:
 ```python
 import brainwire as bw
 
-db = bw.connect("grpc://localhost:7688", database="client_memory")
+db = bw.connect("grpc://localhost:7688", database="default")
 db.apply_ontology("graph_mapping.yaml")
 
 with db.bulk():  # WAL off during the load and a flush at the end, like the port's bulk_load
@@ -268,7 +272,7 @@ DuckDB relation: anything that exposes Arrow goes over without a copy. The
 batch's `acl_*` columns become ACL sets at write time. The memory-worker already
 reads the clean layer through DuckDB, so the new path takes `.arrow()` straight
 to `merge`, without generating Cypher row by row. A
-`client_core/repository/brainwire.py` adapter implements the port on top of the
+`external_core/repository/brainwire.py` adapter implements the port on top of the
 SDK; until it exists, the current `neo4j.py` talks to Brainwire over Bolt.
 
 ## 7. Algorithms and AI
@@ -281,7 +285,7 @@ projection bounded by the budget: PageRank, WCC and Louvain.
 They are all Cypher procedures (`CALL bw.path.dijkstra(...)`) and respect the
 caller's ACL and RBAC. The MCP and the memory-api reach them through
 `run_cypher`, with no new API, once the platform's governed read grammar accepts
-`CALL bw.*` (it refuses `CALL` today; a small change in client-core).
+`CALL bw.*` (it refuses `CALL` today; a small change in external-core).
 
 `bw.ask(node, question)` runs an LLM loop with these procedures as tools and
 returns the answer together with the evidence (nodes, paths, scores). For "quais
@@ -291,7 +295,7 @@ customers), runs `bw.similar` and explains the ranking through the paths. When
 implementing, load the `claude-api` skill before writing the loop.
 
 Compliance: `ask` calls the LLM gateway configured in the customer's
-environment, and Brainwire's telemetry carries only `client_*` counts. Tests,
+environment, and Brainwire's telemetry carries only `external_*` counts. Tests,
 benchmarks and demos use the graph-bench synthetic generator.
 
 ## 8. CLI
@@ -406,10 +410,10 @@ the date moves, and that decision is Allan's.
 2. ~~"See comments" in the CLI.~~ Decided on 2026-09-25: people's annotations
    on nodes and types (spec, section 4.4).
 3. Which VMs run the 5B proof and the cluster test.
-4. Where the Python SDK lives: in this folder or in `client-sdk/`.
+4. Where the Python SDK lives: in this folder or in `external-sdk/`.
 5. Brainwire's license for distribution in BYOC.
 6. Who the launch is for: internal, customers or public. If public, where the
-   website lives (its own page or `client-website-v2`).
+   website lives (its own page or `external-website-v2`).
 7. Versioning and release flow: parked by Allan on 2026-09-24, to define later.
 
 ---

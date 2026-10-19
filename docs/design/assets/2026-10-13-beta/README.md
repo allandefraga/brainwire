@@ -10,7 +10,7 @@ Each PNG has a matching text file preserving the captured cells.
 The isolated synthetic graph contains **100,000 nodes and 99,999 edges**:
 one `Ticket` with `entity_id = ticket-high-degree` and 99,999 `TicketComment`
 nodes connected through outgoing `HAS_COMMENT` relationships. Its ontology
-comes directly from `examples/client/ontology.json`. Fresh records and edges
+comes directly from `examples/source_ingestion/ontology.json`. Fresh records and edges
 are created in batches of 250 through the Python Neo4j 6.3.0 driver, with a
 1 MiB Bolt payload cap, 16 MiB decoded-message cap and 64 MiB query pool.
 The driver verifies the exact node and edge counts; offline `db stats` confirms

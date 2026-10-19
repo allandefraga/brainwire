@@ -22,7 +22,7 @@ from neo4j.exceptions import Neo4jError
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from examples.python.resumable_customers import ingest
-from examples.client.ingest_snapshot import identity
+from examples.source_ingestion.ingest_snapshot import identity
 
 
 def run(binary):
@@ -87,7 +87,7 @@ def run(binary):
         try:
             cli('db','create','allowed','--ontology',str(ROOT/'examples/python/resumable_customers_ontology.json'))
             cli('db','create','private')
-            cli('db','create','tickets','--ontology',str(ROOT/'examples/client/ontology.json'))
+            cli('db','create','tickets','--ontology',str(ROOT/'examples/source_ingestion/ontology.json'))
             cli('db','create','knowledge','--ontology',str(ROOT/'examples/knowledge/schema.json'))
             # Extend writer and reader grants for the separate snapshot and ranking graphs.
             mapping=json.loads(policy.read_text())
@@ -148,7 +148,7 @@ def run(binary):
                 # Exercise the authenticated public snapshot module CLI and shared credential loader.
                 snapshot=temporary/'tickets.jsonl'
                 snapshot.write_text(json.dumps(dict(record_type='ticket',tenant_id='synthetic',connector_id='z',external_id='1',subject=None,status='open',priority=None,tags=[]))+'\n'+json.dumps(dict(record_type='comment',tenant_id='synthetic',connector_id='z',external_id='c',ticket_id='1',body='synthetic',is_public=True))+'\n')
-                result=subprocess.run([sys.executable,'-m','examples.client.ingest_snapshot',str(snapshot),'--uri','bolt://'+address,'--database','tickets','--source-id','tickets-source'],cwd=ROOT,env=dict(env,BRAINWIRE_BOLT_AUTH_FILE=client_files['writer']),capture_output=True,text=True,timeout=30)
+                result=subprocess.run([sys.executable,'-m','examples.source_ingestion.ingest_snapshot',str(snapshot),'--uri','bolt://'+address,'--database','tickets','--source-id','tickets-source'],cwd=ROOT,env=dict(env,BRAINWIRE_BOLT_AUTH_FILE=client_files['writer']),capture_output=True,text=True,timeout=30)
                 assert result.returncode==0,result.stderr
             with GraphDatabase.driver('bolt://'+address,auth=('reader',tokens['reader'])) as reader:
                 with reader.session(database='allowed') as session:

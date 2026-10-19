@@ -1,6 +1,6 @@
 {
   "binary_sha256": "1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150",
-  "scope": "four local synthetic scenarios; not real client or replication",
+  "scope": "four local synthetic scenarios; not real external application or replication",
   "phases": {
     "ducklake-100000": {
       "exit_code": 0,

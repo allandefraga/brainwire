@@ -4,7 +4,7 @@
 ┌Named graphs───────────────────────────────────────────────────────────────┐┌─Selected graph──────────────────────────────────────────────────────────────────┐
 │ GRAPH                     NODES    EDGES                                  ││customers-100k                                                                   │
 │▶ customers-100k             100000          0                             ││                                                                                 │
-│  client_memory                 0          0                             ││Nodes: 100000                                                                    │
+│  default                         0          0                             ││Nodes: 100000                                                                    │
 │                                                                           ││Edges: 0                                                                         │
 │                                                                           ││Ontology: v1                                                                     │
 │                                                                           ││Node types: 3                                                                    │

@@ -1,0 +1,784 @@
+{
+  "binary_sha256": "efe0b8452746f6a9ccf8ba2cf4e5a912add586cb71aeddde0a527dabee67ec05",
+  "driver": "6.3.0",
+  "rows": 500,
+  "synthetic": true,
+  "checks": [
+    "each fresh owned voter explicitly provisioned once; restarts never provision or replace voter persistence",
+    "local leader readiness passes quorum read barrier; follower liveness passes while follower readiness fails; probes explicitly cover Raft only",
+    "committed bootstrap/create register two graphs; indexed nodes and trusted ACL restrict Alice; follower BEGIN refused",
+    "symmetric old-leader partition: majority elects/writes; staged old COMMIT and old read barrier refuse acknowledgement",
+    "healed three-voter status reports 1 GiB retained-log cap and exact remaining bytes; independent inspect samples agree without implying quorum readiness",
+    "one stopped voter is unavailable in incomplete inspect samples, agreements are unknown and CLI exits nonzero; original voter restarts",
+    "new leader killed after acknowledged writes; promotion preserves nodes/index/ACL/cursor and allocates another unique node",
+    "two voters stopped: remaining writer/read barriers refuse; recovered majority has no acknowledged no-quorum mutation",
+    "public GraphClient explicit COMMIT acknowledgement intentionally ignored; stable seed retry propagates RequestAlreadyCommitted without rerunning callback; request_key resolves durable outcome without duplicate mutation",
+    "missing committed graph refuses startup without recreation; intact majority writes; restored graph with retained votes/log catches up",
+    "missing voter Raft directory refuses startup without recreation; restored original persistent votes/log catches up",
+    "missing initialized committed registry refuses startup; restoring original registry preserves voter history and catches up",
+    "missing persisted voter identity refuses startup without provisioning; restoring original identity permits restart",
+    "public atomic node+ACL helper exposes privileged acknowledged write to Alice; non-admin ACL rejection rolls back earlier MERGE with exact Forbidden error",
+    "full process restart retains exactly acknowledged data; quiescent offline audits and all-11-CF logical graph digests agree across all voters"
+  ],
+  "scope": "three independent native processes on loopback; not a machine-loss, TLS or snapshot qualification",
+  "bootstrap": {
+    "Proposed": {
+      "reply": "Initialized",
+      "log_index": 2
+    }
+  },
+  "create_aux": {
+    "Proposed": {
+      "reply": "Initialized",
+      "log_index": 3
+    }
+  },
+  "local_probes": {
+    "leader_readiness": {
+      "kind": "raft_probe",
+      "node_id": 1,
+      "probe_kind": "readiness",
+      "reason": "quorum_read_barrier_passed",
+      "scope": "Raft only; does not verify graphs, Bolt authentication, or future writes",
+      "success": true
+    },
+    "follower_liveness": {
+      "kind": "raft_probe",
+      "node_id": 2,
+      "probe_kind": "liveness",
+      "reason": "running",
+      "scope": "Raft only; does not verify graphs, Bolt authentication, or future writes",
+      "success": true
+    },
+    "follower_readiness": {
+      "kind": "raft_probe",
+      "node_id": 2,
+      "probe_kind": "readiness",
+      "reason": "not_local_leader",
+      "scope": "Raft only; does not verify graphs, Bolt authentication, or future writes",
+      "success": false
+    },
+    "no_quorum_readiness": {
+      "kind": "raft_probe",
+      "node_id": 1,
+      "probe_kind": "readiness",
+      "reason": "quorum_unavailable",
+      "scope": "Raft only; does not verify graphs, Bolt authentication, or future writes",
+      "success": false
+    }
+  },
+  "post_heal_status": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Follower",
+      "current_term": 2,
+      "leader": 3,
+      "last_log_index": 512,
+      "last_applied": 512,
+      "committed_index": 512,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 469220,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073272604,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 2,
+      "leader": 3,
+      "last_log_index": 512,
+      "last_applied": 512,
+      "committed_index": 512,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 469220,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073272604,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Leader",
+      "current_term": 2,
+      "leader": 3,
+      "last_log_index": 512,
+      "last_applied": 512,
+      "committed_index": 512,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 469220,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073272604,
+      "running": true
+    }
+  ],
+  "inspection_healthy": {
+    "all_initialized": true,
+    "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+    "complete": true,
+    "configured_log_cap_agreement": true,
+    "configured_max_log_bytes": 1073741824,
+    "kind": "diagnostic_sample",
+    "members": [
+      {
+        "diagnostic": "sampled",
+        "initialized": true,
+        "node_id": 1,
+        "response_time_ms": 1.1850829999999999,
+        "status": {
+          "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+          "committed_index": 512,
+          "current_term": 2,
+          "last_applied": 512,
+          "last_log_index": 512,
+          "leader": 3,
+          "log_bytes": 469220,
+          "log_remaining_bytes": 1073272604,
+          "max_log_bytes": 1073741824,
+          "membership": [
+            1,
+            2,
+            3
+          ],
+          "node_id": 1,
+          "running": true,
+          "state": "Follower"
+        }
+      },
+      {
+        "diagnostic": "sampled",
+        "initialized": true,
+        "node_id": 2,
+        "response_time_ms": 1.138917,
+        "status": {
+          "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+          "committed_index": 512,
+          "current_term": 2,
+          "last_applied": 512,
+          "last_log_index": 512,
+          "leader": 3,
+          "log_bytes": 469220,
+          "log_remaining_bytes": 1073272604,
+          "max_log_bytes": 1073741824,
+          "membership": [
+            1,
+            2,
+            3
+          ],
+          "node_id": 2,
+          "running": true,
+          "state": "Follower"
+        }
+      },
+      {
+        "diagnostic": "sampled",
+        "initialized": true,
+        "node_id": 3,
+        "response_time_ms": 1.0750410000000001,
+        "status": {
+          "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+          "committed_index": 512,
+          "current_term": 2,
+          "last_applied": 512,
+          "last_log_index": 512,
+          "leader": 3,
+          "log_bytes": 469220,
+          "log_remaining_bytes": 1073272604,
+          "max_log_bytes": 1073741824,
+          "membership": [
+            1,
+            2,
+            3
+          ],
+          "node_id": 3,
+          "running": true,
+          "state": "Leader"
+        }
+      }
+    ],
+    "retained_log_cap_agreement": true,
+    "scope": "independent status samples; not a quorum or write/read readiness proof"
+  },
+  "inspection_incomplete": {
+    "all_initialized": false,
+    "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+    "complete": false,
+    "configured_log_cap_agreement": null,
+    "configured_max_log_bytes": 1073741824,
+    "kind": "diagnostic_sample",
+    "members": [
+      {
+        "diagnostic": "unavailable",
+        "node_id": 1,
+        "response_time_ms": 1.173959,
+        "status": null
+      },
+      {
+        "diagnostic": "sampled",
+        "initialized": true,
+        "node_id": 2,
+        "response_time_ms": 1.247125,
+        "status": {
+          "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+          "committed_index": 512,
+          "current_term": 2,
+          "last_applied": 512,
+          "last_log_index": 512,
+          "leader": 3,
+          "log_bytes": 469220,
+          "log_remaining_bytes": 1073272604,
+          "max_log_bytes": 1073741824,
+          "membership": [
+            1,
+            2,
+            3
+          ],
+          "node_id": 2,
+          "running": true,
+          "state": "Follower"
+        }
+      },
+      {
+        "diagnostic": "sampled",
+        "initialized": true,
+        "node_id": 3,
+        "response_time_ms": 1.146125,
+        "status": {
+          "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+          "committed_index": 512,
+          "current_term": 2,
+          "last_applied": 512,
+          "last_log_index": 512,
+          "leader": 3,
+          "log_bytes": 469220,
+          "log_remaining_bytes": 1073272604,
+          "max_log_bytes": 1073741824,
+          "membership": [
+            1,
+            2,
+            3
+          ],
+          "node_id": 3,
+          "running": true,
+          "state": "Leader"
+        }
+      }
+    ],
+    "retained_log_cap_agreement": null,
+    "scope": "independent status samples; not a quorum or write/read readiness proof"
+  },
+  "inspection_incomplete_exit_code": 1,
+  "request_outcome": {
+    "Lookup": {
+      "Applied": {
+        "revision": 508
+      }
+    }
+  },
+  "missing_storage_refusals": {
+    "pages": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: committed graph store missing; rebuild this replica from retained consensus history\n"
+    },
+    ".brainwire-raft": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: persisted voter identity/consensus store missing; serve never provisions a voter\n"
+    },
+    ".brainwire-graphs.json": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: committed graph registry missing; refusing empty recovery\n"
+    },
+    ".brainwire-cluster.json": {
+      "member": 2,
+      "exit_code": 1,
+      "diagnostic": "error: persisted voter identity/consensus store missing; serve never provisions a voter\n"
+    }
+  },
+  "restored_graph_catchup": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 516,
+      "last_applied": 516,
+      "committed_index": 516,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 471499,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073270325,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 516,
+      "last_applied": 516,
+      "committed_index": 516,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 471499,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073270325,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 516,
+      "last_applied": 516,
+      "committed_index": 516,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 471499,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073270325,
+      "running": true
+    }
+  ],
+  "restored_raft_catchup": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 517,
+      "last_applied": 517,
+      "committed_index": 517,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 472341,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073269483,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 517,
+      "last_applied": 517,
+      "committed_index": 517,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 472341,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073269483,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 517,
+      "last_applied": 517,
+      "committed_index": 517,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 472341,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073269483,
+      "running": true
+    }
+  ],
+  "restored_registry_catchup": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 518,
+      "last_applied": 518,
+      "committed_index": 518,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 473273,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073268551,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 518,
+      "last_applied": 518,
+      "committed_index": 518,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 473273,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073268551,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 518,
+      "last_applied": 518,
+      "committed_index": 518,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 473273,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073268551,
+      "running": true
+    }
+  ],
+  "restored_identity_catchup": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    }
+  ],
+  "voter_replacement": "unsupported: fully wiped voters require new identity and joint membership, not same-ID automatic recreation",
+  "before_full_restart": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    }
+  ],
+  "after_full_restart": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 519,
+      "last_applied": 519,
+      "committed_index": 519,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 474238,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073267586,
+      "running": true
+    }
+  ],
+  "post_atomic_status": [
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 520,
+      "last_applied": 520,
+      "committed_index": 520,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 475293,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073266531,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 520,
+      "last_applied": 520,
+      "committed_index": 520,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 475293,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073266531,
+      "running": true
+    },
+    {
+      "cluster_id": "acceptance-25fb3a8995eb4ea9a60f0bc62d21bccb",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 3,
+      "leader": 1,
+      "last_log_index": 520,
+      "last_applied": 520,
+      "committed_index": 520,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 475293,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1073266531,
+      "running": true
+    }
+  ],
+  "offline_audits": {
+    "1": {
+      "graphs": {
+        "aux": {
+          "logical_sha256": "e9397c20a0757e82da29a070c5faaa8ccf4ad40020979169f65d4f27743890e0",
+          "revision": 2,
+          "status": "ok"
+        },
+        "pages": {
+          "logical_sha256": "eedfadb18724d6480761b8ce719c3df968e786025617d87f7771042f539366db",
+          "revision": 513,
+          "status": "ok"
+        }
+      },
+      "result": "PASS"
+    },
+    "2": {
+      "graphs": {
+        "aux": {
+          "logical_sha256": "e9397c20a0757e82da29a070c5faaa8ccf4ad40020979169f65d4f27743890e0",
+          "revision": 2,
+          "status": "ok"
+        },
+        "pages": {
+          "logical_sha256": "eedfadb18724d6480761b8ce719c3df968e786025617d87f7771042f539366db",
+          "revision": 513,
+          "status": "ok"
+        }
+      },
+      "result": "PASS"
+    },
+    "3": {
+      "graphs": {
+        "aux": {
+          "logical_sha256": "e9397c20a0757e82da29a070c5faaa8ccf4ad40020979169f65d4f27743890e0",
+          "revision": 2,
+          "status": "ok"
+        },
+        "pages": {
+          "logical_sha256": "eedfadb18724d6480761b8ce719c3df968e786025617d87f7771042f539366db",
+          "revision": 513,
+          "status": "ok"
+        }
+      },
+      "result": "PASS"
+    }
+  },
+  "logical_graph_digests": {
+    "aux": "e9397c20a0757e82da29a070c5faaa8ccf4ad40020979169f65d4f27743890e0",
+    "pages": "eedfadb18724d6480761b8ce719c3df968e786025617d87f7771042f539366db"
+  },
+  "snapshots": "unsupported: no snapshot transfer or compaction acceptance claimed",
+  "result": "PASS",
+  "childProcessesStopped": true,
+  "faultProxiesStopped": true,
+  "ownedResourcesRemoved": true
+}

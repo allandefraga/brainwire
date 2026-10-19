@@ -1,4 +1,4 @@
-//! Private, bounded node ACL metadata and client's read visibility rule.
+//! Private, bounded node ACL metadata and read-visibility policy evaluation.
 use serde::{Deserialize, Serialize};
 
 pub const MAX_ACL_BYTES: usize = 64 * 1024;

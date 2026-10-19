@@ -1,10 +1,7 @@
 # Brainwire
 
 Brainwire is a standalone graph database repository. Its canonical local path
-is `/Users/fraga/Documents/brainwire`, beside `/Users/fraga/Documents/client-platform`.
-The old platform feature branch is a historical recovery point, not the active
-checkout. Do not edit the old copy or treat the platform's agent routing rules
-as instructions for this repository.
+is `/Users/fraga/Documents/brainwire`; it has no required sibling checkout.
 
 ## Working agreement
 
@@ -36,9 +33,7 @@ The approved design is `docs/superpowers/specs/2026-09-24-brainwire-design.md`.
 The current implementation plan is
 `docs/superpowers/plans/2026-09-26-brainwire-mvp.md`; the storage foundation
 plan also records crash-recovery requirements. Older paths beginning with
-`client-brainwire/` refer to this repository root now: drop that prefix.
-References to `client-core/` or other platform services refer to the sibling
-platform checkout and describe integration targets, not build dependencies.
+`brainwire/` refer to this repository root now.
 
 Use test-first development for engine behavior, followed by task review.
 Run the relevant package tests, and consolidate with:

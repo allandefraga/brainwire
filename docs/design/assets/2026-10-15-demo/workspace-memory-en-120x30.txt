@@ -1,0 +1,30 @@
+┌NAVIGATION────────┐┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ READ ONLY        ││ BRAINWIRE / MEMORY / tickets @ 127.0.0.1:50939                                                   │
+│                  │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│   1 Ontology     │┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                  ││ SERVER SNAPSHOT • age 0s • CALL db.memory()                                                      │
+│ > 2 Memory       │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│                  │┌QUERY POOL / READ ONLY────────────────────────────────────────────────────────────────────────────┐
+│   3 Indexes      ││ Query pool shared by all graphs on this server.                                                  │
+│                  ││                                                                                                  │
+│   4 Graph        ││ LIMIT  64.00 MiB (67108864 B)                                                                    │
+│                  ││ Configured shared query reservation limit.                                                       │
+│ Tab / Shift+Tab  ││ RESERVED  318 B                                                                                  │
+│ switch panes     ││ Currently accounted reservations, including this sampling query.                                 │
+│                  ││ PEAK  1.33 MiB (1389952 B)                                                                       │
+│                  ││ Peak accounted reservations over this server's lifetime.                                         │
+│                  ││ REJECTIONS  0                                                                                    │
+│                  ││ Rejected reservations over this server's lifetime.                                               │
+│                  ││ Reservation accounting; not OS RSS, total RAM or cache.                                          │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  ││                                                                                                  │
+│                  │└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│                  │┌QUERY POOL / READ ONLY────────────────────────────────────────────────────────────────────────────┐
+│                  ││ 1 Ontology  2 Memory  3 Indexes  4 Graph • Tab • r refresh • q quit                              │
+└──────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -166,7 +166,7 @@ storage, plus separate discovery and client-traffic purposes:
 
 ```mermaid
 flowchart TB
-    PY[Python in client] --> CS[Client entry: routing eligibility required]
+    PY[Python in external application] --> CS[Client entry: routing eligibility required]
     HD[Headless peer discovery: no platform balancing] -.-> PA
     HD -.-> PB
     HD -.-> PC

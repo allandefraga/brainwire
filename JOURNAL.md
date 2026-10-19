@@ -39,6 +39,604 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-17 — bounded Python node cleanup
+
+- **Requested:** spend roughly 20 minutes adding robustness and usability for
+  the upcoming application integration.
+- **Done:** added `GraphClient.delete_nodes(label, entity_ids)`. It accepts an
+  iterable (rejecting a single string, bytes value, mapping or non-iterable),
+  validates labels and IDs, bounds each transaction by item count and compact
+  UTF-8 ID bytes, deduplicates IDs within a batch, and uses `DETACH DELETE` so
+  incident edges are removed with nodes. Full batches commit promptly; each is
+  atomic, and a later invalid row does not undo already committed batches.
+  Documented its non-goals: it is not a source cursor or snapshot reconciler,
+  and independent edge deletion is still not exposed by this helper. Updated the
+  README capability list and Python client guide. Added unit and live Bolt tests,
+  including duplicate/missing IDs, Unicode byte bounds, partial input failure,
+  incident-edge cleanup, and protected reader/writer authorization.
+- **Verified:** all workspace Cargo tests passed; workspace Clippy with warnings
+  denied and `cargo fmt --all -- --check` passed. All 42 Python example tests
+  passed. Real Python/Bolt acceptance passed at 10,000 and 100,000 source nodes;
+  each run also created and deleted 1,000 synthetic nodes and 1,000 incident
+  edges, survived SIGKILL/reopen and passed the offline audit. On the final
+  100,000-node local debug run, insertion took 21.1 s, replay 23.5 s, and the
+  1,000-node cleanup 0.13 s. These are single-machine synthetic measurements,
+  not production SLOs. The first 100,000-node attempt exposed that a whole-graph
+  relationship `count(*)` exceeded the 30 s cooperative query deadline; the
+  acceptance now uses bounded point/adjacency seeks and relies on the offline
+  audit for full invariants. Protected Docker Compose auth acceptance passed
+  on a locally built image: reader deletion was forbidden, writer deletion and
+  replay of a missing ID succeeded, and the audit was clean. Image and owned
+  Compose resources were removed.
+- **Decided:** leave all source changes local and uncommitted; retain `.venv` for
+  the next Python integration session.
+- **Next step:** apply a real independently authorized source/ACL mapping and
+  source cursor in shadow mode; define an API for independent edge deletion.
+- **Blockers:** none for this feature. Dynamic ACL/source adapter qualification,
+  and multi-machine replication qualification, remain separate release gates.
+
+
+### 2026-10-17 — builder-focused README
+
+- **Requested:** make the README trendier and more appealing to AI builders.
+- **Done:** refreshed the headline, positioning and section labels while keeping
+  the Docker/Python quickstart, concrete 0.1 capabilities, security boundaries
+  and limitations intact. The copy describes Brainwire as graph infrastructure
+  for context-rich apps and explicitly says it is not yet an agent runtime or
+  turnkey RAG pipeline.
+- **Decided:** keep docs in English; preserve candid beta status and standalone
+  product identity.
+- **Next step:** review the README and continue with the 0.1 integration gate.
+- **Blockers:** none.
+
+
+### 2026-10-17 — local 0.1 candidate and Docker/Python quickstart
+
+- **Requested:** prepare Brainwire 0.1 for GitHub later and make Docker startup
+  plus Python/Bolt ingestion straightforward for a client integration session.
+- **Done:** rewrote the root README as a v0.1 entry point: local-candidate
+  status, Docker demo, parameterized Python writes for nodes/edges, feature
+  boundaries, security warning and links to operational guides. Removed
+  application-specific branding from the README. Replaced `.venv-brainwire`
+  with the ignored `.venv` path and added Docker ignore patterns to prevent a
+  local Python environment entering Git or image context. Corrected the Rust
+  toolchain description: development selects stable; Docker pins 1.98.1. Added
+  `deploy/compose.shared-network.yaml` and documented how a separate consumer
+  Compose project joins an explicit external network. The first executed README
+  query exposed unsupported Cypher `ORDER BY`; sorted returned rows in Python.
+- **Verified on the current working tree:** `cargo test --workspace --locked
+  --offline` passed 646 tests across 54 suites; workspace Clippy with warnings
+  denied and `cargo fmt --all -- --check` passed; Python client unit tests passed
+  (18). Docker Compose built the image from this tree, initialized an isolated
+  synthetic graph and reported healthy. Neo4j driver 6.3.0 sent bounded UNWIND
+  writes for Customer/Segment nodes and IN_SEGMENT edges over Bolt; query
+  returned Ada and Grace. After container restart, the readiness probe passed
+  and both relationships remained. A separate ephemeral Python 3.12 container
+  also resolved `brainwire:7687` over the shared-network overlay, wrote nodes
+  and an edge, and read the edge back. Protected Compose profile rendering and
+  the Docker auth acceptance passed (anonymous/wrong-token denial, graph-scoped
+  reader/writer, 1,000 writes, pending-transaction SIGKILL rollback, retained
+  volume and offline audit). Isolated containers/networks/volumes were removed.
+- **Limits:** this is a local 0.1 candidate check, not a frozen release or live
+  client integration. The checkout contains extensive uncommitted changes;
+  no exact release tree has been selected or tagged. The workspace still says
+  `publish = false`, `license = UNLICENSED`, no Git remote is configured, and
+  no separately installable Python package exists. The demo profile has auth
+  disabled. Real adapter/authoritative ACL integration, production workload,
+  multi-machine quorum qualification and node/edge temporal revisions remain
+  open; temporal history is not included in the 0.1 claim.
+- **Next:** review and freeze an exact candidate tree with Allan; tomorrow,
+  validate the client adapter and ACL contract using authorized representative
+  data, starting in shadow mode. Resolve the repository/image license before a
+  distributable release. Publish only after explicit authorization.
+- **Blockers:** safe GitHub push/release requires an explicit remote and exact
+  staged/committed file set; none was configured or published in this session.
+
+### 2026-10-16 — SIGTERM drain qualified in a Linux container
+
+- **Done:** the Docker registry was reachable again, so the container check left
+  open on 2026-10-15 ran. Extended `crates/server/tests/compose_restart.py`: an
+  explicit transaction stays open while `docker compose stop` runs; the fixture
+  waits for the server's "shutdown requested" log, asserts the stop is still
+  waiting, commits, then requires container exit 0 and the "drained" log, and
+  finds the row after restart. The final idle-only stop must also exit 0.
+- **Verified:** image `636f63b1…` built from the current working tree (binary
+  `372bdeb0…`, Debian glibc 2.36, aarch64) passed 3/3 runs with offline audit
+  `ok`; receipt `docs/benchmarks/2026-10-15-graceful-drain/compose-linux.json`.
+  Each run removed its project and volume; the test image was removed after.
+- **Limits:** Docker Desktop on one Mac; no amd64, Kubernetes or Swarm target,
+  no load during the drain beyond one open transaction.
+- **Next step:** unchanged from the 2026-10-15 quorum entry (opt-in timing to
+  locate the sub-2 s pauses; leader-following Python client) — both need
+  Allan's go-ahead.
+
+### 2026-10-15 — quorum write failure: per-RPC peer connections exhausted ports
+
+- **Context:** same three-hour session, second increment after the drain was
+  closed. Picked the open `CommitOutcomeUnknown` from the earlier distribution
+  entry, because an uncertain write that cannot be reconciled is the exact risk
+  the shadow beta must avoid.
+- **Diagnostics (subagent, test-only):** `quorum_write_benchmark.py` now records,
+  before cleanup, the failing repeat/mode/offset, request ID, elapsed time,
+  every voter's status, a quorum-authoritative `cluster request --id` lookup and
+  redacted log tails, via `--failure-receipt`. It never retries the write.
+- **Root cause (measured):** the 2000×100×10 run reproduced
+  `CommitOutcomeUnknown` (3.2 s; lookup `absent`; leader moved from voter 1 to 2
+  in term 4). Host TIME_WAIT sockets rose from 11 to 58,046 in ~26 s: the peer
+  client in `crates/replication/src/network.rs` opened a TCP connection for
+  every AppendEntries/Vote, and the harness's Python fault proxy also opened one
+  upstream connection per frame. Ports ran out, `connect()` failed, openraft's
+  `ensure_linearizable` heartbeat round got no quorum and leadership churned.
+  Earlier "leader/quorum unavailable" failures (and probably the quorum ACL
+  acceptance failure at `Replica::begin` noted in an earlier entry) match this
+  mechanism. After the fix the 500-row `quorum_replication.py` acceptance, which
+  includes the ACL reader, passed twice (17 checks each).
+- **Fix:** pooled peer connections (≤8 idle per peer, reused within 10 s,
+  returned only after a complete authenticated reply); the peer server answers
+  successive frames per connection (first frame 5 s, then 30 s idle, sender
+  pinned, mTLS per frame). A failed reused connection clears that peer's pool
+  and retries once on a new connection; only AppendEntries/Vote use the pool.
+  That also keeps one-request peers (older binary, proxy) working, which an
+  intermediate build without the retry broke on the first write. The test
+  proxy now forwards successive frames per connection.
+- **Verified:** new unit tests (reuse = 1 accepted connection for 3 RPCs;
+  one-request peer still answers all) and integration tests (successive frames
+  on one server connection; 300 linearizable reads + writes); replication crate
+  3 + 6 + 9 pass; clippy `-D warnings`, fmt and `git diff --check` clean.
+  An independent review found no correctness defect (reply pairing, retry,
+  pinned sender, proxy fault semantics checked) and led to: idle-connection
+  frames get the 5 s body deadline (only the wait for the next frame is 30 s),
+  a client timeout purges that peer's pool, pooled streams are replaced after
+  60 s (server certificate rechecked at handshake). Final binary `9a09b8c1…`:
+  2000×100×10 PASS (1,517 single rows/s, p50 0.607 ms, p95 0.941 ms; 40,000
+  rows verified after SIGKILL restart), host TIME_WAIT 9 before and 63 peak
+  (was 58,046); `quorum_replication.py` 500 rows PASS (17 checks, SIGTERM exit
+  0 per voter); termination fixture PASS with drivers 6.3.0 and 5.28.6.
+  Intermediate binary `6f9c102f…` passed the benchmark twice and quorum at 200
+  and 500 rows.
+- **Limits:** loopback, one client, one host; the native vs proxy share of the old
+  churn was not separated; no multi-machine, endurance or mixed-version
+  rolling-upgrade run (only the unit test for one-request peers). Anyone holding
+  the shared peer token can still occupy the 64 peer connection slots; that
+  token already lets them act as a voter, so this is not a new exposure, but a
+  per-sender cap is open. The new real-Raft integration test exercises the pool
+  and does not reproduce port exhaustion.
+- **Soak:** the write harness now verifies an exact count plus every row in
+  2,000-ID blocks (a single unbounded read of 800k rows hit the 64 MiB query
+  guard, by design) and accepts up to 300 repeats. 200 × (2,000 single + 2,000
+  batched rows) on `9a09b8c1…`: PASS in 352 s, 1,299 single rows/s (p50
+  0.589 ms, p95 1.015 ms, one 1.82 s outlier not diagnosed), all 800,000 rows
+  verified after SIGKILL restart, term 1 throughout, 450 MB retained log,
+  TIME_WAIT ≤87, voter RSS 35–135 MB.
+- **Open finding:** a repeat of the same soak failed after 105 s: leadership
+  moved 1 → 3 (term 2) at repeat 71 and the harness's client, pinned to the old
+  leader, got `leader/quorum unavailable`. So a follower missed heartbeats for
+  ≥500 ms, consistent with the 0.6–1.8 s pauses of the passing soak. RocksDB
+  write stalls were zero and flushes ~6 ms on all voters; the host was busy
+  (mediaanalysisd, Docker VM with 33 containers, BTLEServer) but contention is
+  not proven. No tracing exists to locate the pause. A standalone 60 s
+  `fsync` probe on the same host (1 KiB appends) saw 79 calls >100 ms and a
+  530 ms maximum (p99.9 0.06 ms), so sync pauses are a plausible cause; the
+  voters were not instrumented to confirm it.
+- **Next step:** add opt-in timing/tracing of leader heartbeat, follower
+  append/apply and fsync, rerun the soak on a quiet host, and make the harness
+  follow a leader change (re-resolve the leader, reconcile by request ID)
+  instead of failing; then a mixed-version rolling restart for the one-request
+  fallback.
+
+### 2026-10-15 — bounded SIGTERM drain (Oct 15 queue slot)
+
+- **Requested:** three-hour session; pick one beta-blocking increment. Started
+  20:12 UTC. Chose the dated October 15 slot, "resolve shutdown and cancellation
+  support boundary", because every orchestrator rollout sends SIGTERM and the
+  server died mid-session, turning each planned stop into unknown commit
+  outcomes for clients. No Allan decision was needed.
+- **Done:** `brainwire serve` now drains on SIGTERM/SIGINT. The listener closes;
+  sessions idle at a message boundary (pre-auth, READY, FAILED) close; a request
+  read from an idle session during the drain is refused with
+  `Neo.TransientError.General.DatabaseUnavailable` and not executed; explicit
+  transactions and result streams keep running until idle or until
+  `server.shutdown_grace_ms` (new key, default 8,000 ms, 0–3,600,000, file/env).
+  Exit 0 = complete drain, exit 1 = sessions abandoned (their pending work rolls
+  back). Code: `serve_until` in `crates/bolt/src/server.rs`, signal/exit handling
+  in `crates/server/src/serve.rs`, config in `config.rs`, `libc` dependency.
+- **Defect found and fixed:** the first build aborted (SIGABRT) in 2 of 6 runs of
+  one fixture batch. Crash reports showed an engine worker thread in
+  `rocksdb_close` while `main` ran `exit()` C++ static destructors. Abrupt
+  SIGTERM never ran destructors, so the race was new. `serve` now waits up to
+  5 s for the engine threads to release the stores and closes RocksDB on the main
+  thread; otherwise `_exit(1)` (the old abrupt behaviour). Not reproducible on
+  demand (40 ad hoc cycles without the fix also passed), so the evidence is the
+  stack plus the structural fix.
+- **Verified:** 3 new Bolt drain tests (idle close + admission refused, commit
+  during drain then pipelined BEGIN refused, grace deadline count); config test.
+  `termination_recovery.py` rewritten for drain semantics (commit during drain
+  survives restart with indexes; abandoned transaction rolls back; unacknowledged
+  RUN atomic; stalled reader bounded by grace; idle pool exits 0): 8/8 PASS on
+  binary `301346eb…` with drivers 6.3.0 and 5.28.6. Quorum fixture (200 rows) now
+  ends with SIGTERM per voter: exit 0 each, digests match, 17 checks PASS.
+  `connection_limits`, `multigraph_acceptance` (2,000 rows/graph),
+  `typed_neighborhood_acceptance`, `query_memory`, `beta_acl_api` PASS.
+  `cargo test --workspace --locked --offline` 642 passed / 0 failed; clippy with
+  `-D warnings` and `cargo fmt --check` clean; `git diff --check` clean.
+  Evidence: `docs/benchmarks/2026-10-15-graceful-drain.md` and receipts.
+- **Not verified:** Linux container. Docker's daemon timed out resolving base
+  image metadata (`rust:1.98.1-bookworm`, `debian:bookworm-slim`), so no image
+  was built; signal delivery via the image and the destructor ordering on
+  Linux/glibc are unverified with this build. No Kubernetes/Swarm target.
+- **Limits:** running engine calls are not interrupted; a second signal does not
+  shorten the drain (use SIGKILL); quorum stop does not transfer leadership; no
+  COMMIT-phase kill hook; loopback single-host timings only.
+- **Docs:** termination recovery rewritten; serve, quickstart, orchestrators,
+  multigraph, quorum, operator checklist, README and roadmap (Oct 15 progress,
+  resource gate row) updated. The Oct 13 termination receipt stays historical.
+- **Next step:** build the image and rerun the drain on Linux Compose
+  (`docker compose stop` → exit 0, data retained, audit ok) once the registry is
+  reachable; then the October 18 slot (source revision ordering and import
+  recovery) or the quorum ACK-timeout diagnosis from the earlier entry.
+- **Blockers:** Docker registry access for the container check. No commit, push,
+  publication or deployment was made.
+
+### 2026-10-15 — initial agent platform scope
+
+- **Done:** drafted [the initial agent platform proposal](docs/agent-platform-mvp.md)
+  and linked it in the full-product backlog. It scopes a bounded Python runner,
+  cited graph context and explicit memory operations; provider orchestration is
+  outside the database engine.
+- **Decided:** durable memory is gated on atomic history for both nodes and
+  edges, with distinct recorded/valid times, idempotent writes and historical
+  edge access before promising as-of traversal. Identity-bound ACL is also a
+  prerequisite for shared-user use. This is a proposal, not an implemented
+  agent runtime or temporal storage feature.
+- **Verified:** documentation diff and whitespace checks; no code or runtime
+  behavior changed. All work remains local.
+- **Next step:** review the proposal, then sequence node/edge history and
+  identity-bound ACL foundations before implementing the small read-only Python
+  runner and explicit versioned memory API.
+- **Blockers:** none for the design draft; implementation remains gated by the
+  existing approved-spec workflow and the temporal/ACL acceptance contracts.
+
+### 2026-10-15 — 30-minute distribution and performance session
+
+- **Requested:** spend 30 minutes on distributed systems, performance, Cypher,
+  RocksDB and WAL; keep changes local.
+- **Measured:** added an isolated three-voter write diagnostic comparing
+  sequential Cypher `CREATE` with `UNWIND` batches. In the canonical 400-row × 5
+  alternating run, single writes reached 827 rows/s and batches of 25 reached
+  15,081 rows/s; a repeat measured 826 and 14,784 rows/s. All 4,000 rows
+  survived same-volume SIGKILL/restart and offline voter digests matched.
+  Separate batch-100 and batch-400 runs measured 31,819 and 41,875 rows/s, but
+  had only 20 and 5 ACK samples. The batch-1,000 run reached 35,409 rows/s with
+  25 ms p50 and only three samples.
+- **Measured:** a larger three-voter run measured 6,000 single rows at 937
+  rows/s and 60 batches of 100 at 34,106 rows/s (batch ACK p50/p95
+  2.999/3.113 ms). All 12,000 rows survived same-volume restart and matching
+  offline digests; the run lasted eight seconds. A 10-round follow-up measured
+  10,000 single ACKs at 841 rows/s (p50/p95 1.050/1.708 ms) and 100 batches of
+  100 at 32,090 rows/s (p50/p95 3.073/3.748 ms); all 20,000 rows survived
+  restart with matching digests. Batching delivered about 38× aggregate row
+  throughput in this one-host shape; the 34 ms maximum single-write latency
+  confirms host/queueing outliers. This 14.5-second run is not endurance or
+  multi-machine qualification. A higher `--rows 2000 --batch-size 100
+  --repeats 10` run did not complete: one single-row CREATE received
+  `CommitOutcomeUnknown` at the 10-second `raft.client_write` wait. Request ID
+  and limits are preserved in the failure receipt, but voter status, exact
+  offset and durable outcome were not captured before scratch state was cleaned
+  up. This is an unresolved latency/commit outcome, not evidence of lost data;
+  do not raise the timeout or disable WAL sync before diagnosing it. A preceding
+  run varied from 173–310 single rows/s and 1,934–12,983 batch rows/s. WAL and
+  sync settings were not changed.
+  The harness rejects optimized Python, retains process ownership through
+  confirmed exit and tests cleanup failure paths.
+- **Measured:** extended `detach_delete`'s isolated benchmark with optional
+  `--full-delete`, timing the production helper plus the synchronous transaction
+  commit. On warm synthetic RocksDB fixtures, one 10k-in/10k-out run removed
+  20k relationships / 40k adjacency records in 17.297 ms; one 100k-in/100k-out
+  run removed 200k relationships / 400k records in 203.229 ms. Post-timing
+  checks verified the hub was absent, the exact peer count remained, both
+  adjacency families were empty and graph invariants passed. These are single
+  local observations, not repeated percentiles or Cypher/quorum results. The
+  separate warm streaming-scan comparison remains about 3× faster than its
+  materializing baseline at 20k and 200k hub degree.
+- **Measured:** a release ACL-filtered read example over 100k nodes returned
+  7,143 indexed matches for Alice in 33.650 ms p50, 50k visible label rows in
+  149.760 ms, and 50k visible property values in 221.571 ms. These are warm
+  embedded reads, not server or cluster timings.
+- **Measured:** a separate indexed one-hop fixture over a 100k-edge hub returned
+  one neighbor with `LIMIT 1` in 0.012 ms p50 (max 0.033 ms), while counting
+  all 100k outgoing links took 234.941 ms p50 (max 238.149 ms). Query
+  reservation stayed below 2.7 KiB; its high-water mark includes warmup and
+  measured runs and is not process RSS. A 200k-edge repeat returned `LIMIT 1`
+  in 0.010 ms p50 and counted all links in 399.205 ms p50 (about 1.7× time for
+  2× degree); exact results and invariants passed. The limited result is asserted
+  to be an actual peer.
+- **Durability review:** graph transaction writes (`txn.rs`) and Raft metadata
+  batches (`replication/storage.rs`) still use RocksDB `WriteOptions` with
+  `sync=true`; WAL remains enabled. Store crash/reopen checks and the full
+  workspace tests passed. Full Clippy with warnings denied, formatting and
+  `git diff --check` passed. No production write/durability behavior was
+  changed in this session.
+- **Artifacts:** `docs/benchmarks/2026-10-15-quorum-write/`,
+  `docs/benchmarks/2026-10-15-detach-delete/`,
+  `docs/benchmarks/2026-10-15-acl-reads.md`, and
+  `docs/benchmarks/2026-10-15-streaming-reads.md`,
+  `docs/benchmarks/2026-10-15-cypher-edges.md` and its 100k/200k receipts;
+  quorum run receipts; README links added.
+- **Next:** first update the quorum harness to preserve per-voter status and
+  look up the request ID before cleanup when an ACK times out; reproduce the
+  20k-single workload at a bounded size before scaling. Then repeat distributed
+  loads under controlled idle-host conditions and capture RSS/compaction for
+  high-degree deletion. Multi-machine replication, crash-at-ACK and power-loss
+  qualification remain open. No remote actions, commits or pushes.
+- **Blockers:** none for local loopback work. Current receipts do not establish
+  multi-machine capacity, production workload performance or power-loss safety.
+
+### 2026-10-15 — high-degree deletion and easier local deployment
+
+- **Requested:** improve distribution, Cypher, WAL and RocksDB performance, and
+  make Docker/Kubernetes operation straightforward.
+- **Done:** `detach_delete` now streams dependency-tracked adjacency scans through
+  `visit_prefix_for_update`, decoding edge keys without building the previous
+  temporary key/value `BTreeMap`. A regression covers 2,048 incident edges,
+  incoming/outgoing mirrors, a self-loop, and inserts/tombstones in the pending
+  transaction overlay; the committed graph passes `check_invariants`. This
+  removes temporary copies but still retains an O(degree) `EdgeRef` vector; no
+  before/after performance figure is claimed yet. WAL sync remains enabled for
+  durable acknowledged commits and quorum metadata.
+- **Deployment:** the Docker guide now waits for readiness and documents project
+  isolation, alternate ports, logs and retained-volume cleanup. The Kubernetes
+  guide adds an isolated local `kind` walkthrough with a private kubeconfig,
+  local image loading, namespace, rollout/probe, port-forward and PVC-backed Pod
+  restart. The demo image built in 26 seconds on the cached second build; Bolt
+  batch writes and reads passed after a container restart, and offline RocksDB
+  integrity check returned `consistency=ok`. The isolated smoke project, volume
+  and image were removed afterward.
+- **Validation:** full `cargo test --workspace --locked --offline`, full Clippy
+  with warnings denied, `cargo fmt --all -- --check`, Compose config validation,
+  and Kustomize render passed.
+- **Next:** measure high-degree `DETACH DELETE` scan/commit latency and peak
+  memory against the materializing baseline at representative degrees. Run the
+  documented kind acceptance when `kind` and an available Docker/Kubernetes
+  environment are present; local manifest rendering is not a live cluster test.
+- **Blockers:** this host has no installed `kind` and no current kubectl context,
+  so no Kubernetes cluster was started. The optimization has correctness tests
+  but not yet a before/after benchmark.
+
+### 2026-10-15 — page guidance and clearer TUI navigation
+
+- **Requested:** make the UI more polished, explain each page and its terms,
+  and make interactions easier to discover.
+- **Done:** added a persistent active-page strip to the synthetic demo and the
+  local read-only overview; page-specific help overlays now describe purpose,
+  field meaning, controls and mode limits. `?` opens help in local/connected
+  overview workspaces; F1 opens page help in the demo and still inspects the
+  selected ontology/file item where that was its existing action. Help is
+  modal and preserves selection/query state. Offline help clarifies that
+  ontology signatures are schema permissions, not stored edges; connected help
+  notes its selected-type scope. Query-only F5 is now shown only where it works,
+  and repeated arrow navigation keeps focus on the page strip.
+- **Validation:** TUI contextual-help render tests cover all 13 views/panes,
+  English and pt-BR, at 80×24 and 160×48 (connected panes also at 120×30), with
+  `NO_COLOR`. The 45 TUI tests, full workspace tests, Clippy with warnings
+  denied and rustfmt check pass. The admin ontology integration test also
+  passes with its offline-schema/index status header.
+- **Next:** if desired, continue visual polish from the Observatory composition
+  by adding bounded shortcuts to the 20-type ontology catalog; its full list is
+  currently scrollable and explained, rather than a dense all-at-once hairball.
+- **Blockers:** none.
+
+### 2026-10-15 — dense ontology and complete TUI connection catalog
+
+- **Requested:** stress the graph and TUI with a complex 20-type ontology and
+  make every possible connection visible.
+- **Done:** added `examples/complex-ontology-20/ontology.json`: 20 node types,
+  400 directed type-pair signatures (including self-loops and reverse
+  directions), eight relationship names, temporal/weight/source properties,
+  and declared indexes. The offline Ontology TUI now toggles (`a`) between the
+  selected-type view and a scrollable catalog of all declared signatures.
+  `PgUp`/`PgDn` traverse all 400 without implying they are all stored edges.
+  Created local ignored demo graph `data/ontology20_stress` with 20 nodes and
+  400 actual synthetic edge records; `db stats` reports those counts and
+  `db check` reports `ok`. Screen captures (first/last pages, 160×48) are in
+  `docs/design/assets/2026-10-15-ontology-stress/`.
+- **Validation:** TUI tests exhaustively visited all 400 rendered IDs at
+  80×24, 120×30 and 160×48. `cargo test --workspace --locked --offline`,
+  `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`,
+  and `cargo fmt --all -- --check` passed. The local graph reports 20 nodes,
+  400 edges, and an `ok` integrity check.
+- **Next:** if a simultaneously drawn global node-link map is desired, build it
+  as a separate bounded/zoomable view; the new catalog intentionally keeps the
+  complete schema legible through scrolling. The connected read-only TUI still
+  shows the selected type only.
+- **Blockers:** none.
+
+### 2026-10-15 — standalone product, Python Cypher demo and Docker onboarding
+
+- **Requested:** keep Brainwire fully independent of the adjacent company, make
+  the Cypher/Python path easy to demonstrate, provide plug-and-play Docker
+  startup, and prepare a reviewable local change for a future private-repository
+  PR. Nothing was pushed or published.
+- **Done:** removed company-name references from the working tree, renamed
+  integration-specific example/docs paths to generic source-ingestion names,
+  and changed the default graph name to `default`. Preserved the existing local
+  RocksDB data by renaming its directory to `data/default`; no records were
+  rewritten. Historical benchmark numbers and sanitized artifacts remain
+  historical evidence: old source/log/image hashes may no longer match the
+  renamed or sanitized working-tree files.
+- **Cypher/Python:** added `GraphClient.run_cypher(query, parameters=None)` with
+  validation and materialized dictionary results; the standalone demo exercises
+  point and indexed lookup, typed traversal, relationship count, parameterized
+  update/readback, edge/node batch replay, property removal and ready indexes.
+  The 100,000-node / 99,999-edge run passed and then reopened the same RocksDB
+  data after a server restart. The demo uses disposable synthetic data and
+  cleans up credentials and temporary storage. Its six connected TUI captures
+  and receipt are under `docs/design/assets/2026-10-15-demo/`; it is a local
+  single-node demonstration, not a quorum/HA acceptance.
+- **Docker:** added `deploy/compose.demo.yaml` for build, one-time ontology
+  initialization, a persistent named volume, readiness checks and bounded
+  resources. Verified current-source image build, Python batch writes and
+  parameterized query, clean restart with records retained, offline integrity
+  audit, and a second Compose `up` while healthy. The demo volume was removed
+  after the isolated acceptance. `docs/container.md` now includes explicit
+  `pull` / `up --no-build` instructions for a future private image.
+- **Verified:** `cargo test --workspace --locked --offline`, formatting,
+  Clippy with warnings denied, Python client tests, 100K end-to-end demo, Docker
+  Compose integration and working-tree text/path scan all pass. Markdown
+  relative-link check reports zero broken links. Screenshots containing the
+  former default graph name were regenerated from the current TUI; OCR checked
+  all 109 repository images with no remaining company-name matches.
+- **Blockers / next:** quorum ACL acceptance still fails at the Raft
+  `Replica::begin` linearizable read barrier immediately after a 500-row Cypher
+  create; the ACL mutation itself has not yet run, so distributed acceptance is
+  not qualified. There is no Git remote configured and the authenticated GitHub
+  account currently lists no target repository. Ask Allan for the exact private
+  repository URL, then inspect its branch/protection conventions before making
+  a local PR branch or publishing anything.
+
+### 2026-10-15 — generic Python edge batches
+
+- **Requested:** prepare Brainwire for the beta, especially smooth Python batch
+  writes and a usable TUI. Allan will provide the reorganized external application pipeline
+  job/write contract from Claude later today; do not implement that adapter
+  before reviewing the contract. Started approximately 07:24 UTC. All work stays
+  in `/Users/fraga/Documents/brainwire`; no push, publication or deployment.
+- **Done:** added `GraphClient.load_edges(source_label, relationship,
+  target_label, rows)`, a bounded iterable API parallel to `load_nodes`. Edge
+  rows use `source_id`/`target_id` plus properties; each transaction is capped
+  by the configured row and compact-JSON byte bounds. It refuses unknown
+  endpoints and rolls back their whole batch. Same endpoint/type rows merge;
+  omitted properties remain unchanged and `None` removes a property. Updated the
+  Python guide and README. Extended the real Bolt ingestion harness with edge
+  upsert/replay, deduplication and missing-endpoint rollback checks.
+- **TUI:** when the connected workspace opens without a graph sample configured,
+  the Graph pane now says no sample was configured and that no graph data was
+  queried; it no longer implies that a configured entity is missing. The
+  bilingual prompt gives the four CLI fields needed for the bounded preview.
+- **Verified:** all 16 Python client unit tests pass. Full
+  `cargo test --workspace --locked --offline` passed before the TUI prompt edit;
+  afterward, all 39 `brainwire-tui` tests passed. Workspace Clippy with
+  warnings denied, `cargo fmt --all -- --check`, and `git diff --check` pass.
+  The native Python
+  Bolt/restart acceptance passes with 100 synthetic nodes, batch size 25 and
+  the new 3-row edge scenario, including recovery and audit. Python compilation
+  passes. The current Cypher subset cannot read relationship variables, so the
+  Bolt acceptance verifies merged edge cardinality/endpoints; property-row
+  transformation is checked by the client unit test, not a query readback.
+- **UI / pending:** current connected TUI is genuinely read-only and offers
+  Ontology, Memory, Indexes and a fixed-signature bounded Graph sample. It has
+  no connected Cypher editor/import job panel; the demo remains synthetic. Keep
+  the selected Observatory layout and defer job progress/mapping UI to the
+  supplied pipeline contract. General ontology-to-source inference, CDC and
+  production external application binding remain open.
+- **Next step:** review the pipeline/job contract Allan brings from Claude,
+  then bind it to these shared node/edge batch semantics, source cursor and
+  explicit removal/reconciliation rules. For the October beta, close the
+  TUI/query workflow and run the agreed external application source qualification before
+  claiming source-ready operation.
+- **Blockers:** production source ontology/mapping, job/retry contract and
+  representative external application source profile have not yet been provided.
+
+### 2026-10-15 — retained-log exhaustion and recovery qualification
+
+- **Requested:** 30 minutes on distributed systems. Started 06:54:35 UTC.
+  Changes stayed in the standalone repository; no commit, push or deployment.
+- **Done:** added the opt-in `--log-cap-recovery` mode to the synthetic quorum
+  acceptance. It keeps the standard acceptance unchanged, uses a 1 MiB cap and
+  four-row setup, then issues bounded writes with stable request IDs. Before
+  the final proposal, all voters had 13,462 retained-log bytes free, less than
+  its 16,402 raw property bytes. Readiness still passed at that boundary, and
+  the following write got `CommitOutcomeUnknown`; the rebuilt candidate's
+  observation-only probe immediately afterward returned `fatal_storage_error`.
+  Added a safe stable `running_issue` category to Raft status and readiness;
+  it never exposes the fatal message or storage path. After
+  restarting the same voter identities and data volumes with a 1 GiB cap,
+  quorum lookup returned absent and same-ID retry applied the request once.
+  Replaying a known committed request returned `RequestAlreadyCommitted` before
+  rerunning its callback. All replicas converged at commit/apply index 45,
+  offline logical graph digests matched, and processes, proxies and temporary
+  data were cleaned. Candidate binary SHA-256:
+  `8008c6218a44d678512566c9e26c3bb4741aa306da61c584fd8428ab85ff8572`.
+- **Evidence/docs:** opt-in 17/17 checks and default 500-row 16/16 checks pass
+  on the rebuilt candidate; three further consecutive pre-diagnostic opt-in
+  repeats also passed 17/17. The four-row
+  receipt and reproduction commands are in
+  `docs/benchmarks/2026-10-15-distributed-ops.md`. The quorum guide, README and
+  [replication next-gates](docs/design/replication-next-gates.md) link the
+  qualification and retain its limits.
+- **Verified:** quorum Python self-check; `cluster_probe` (5 tests),
+  `cluster_inspect` (7 tests), replication storage (9 tests), full
+  `cargo test --workspace --locked --offline` and
+  `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`.
+  Compose, Swarm and Kubernetes manifests rendered locally; no containers were
+  started or resources applied. Formatting, Python compilation and diff checks
+  passed. Astra reviewed the final change and receipts with no blockers.
+- **Limits / next:** readiness passed at the capacity boundary; it is a Raft
+  quorum-read signal, not future-write capacity. The post-error
+  `fatal_storage_error` observation is not asserted as a universal behavior.
+  This is 1 MiB local native
+  process testing, not exhaustion at the 1 GiB default, power-loss/storage
+  corruption testing or multi-machine deployment. Snapshot transfer/purge and
+  joint membership remain separate high-risk gates; keep snapshots disabled.
+  Next step: implement a small, separately planned stage of the reviewed global
+  snapshot design, beginning with failure tests for an inconsistent applied cut.
+
+### 2026-10-14 — ACL read performance and distributed inspection
+
+- **Requested:** one hour focused on performance, plus new distributed-systems
+  features. Started 20:27 UTC. All changes and tests stayed local; no push,
+  publication or target deployment.
+- **Performance:** added borrowed transaction point reads over snapshot values
+  and staged writes/tombstones. ACL-governed Cypher now reads and decodes each
+  candidate node once, while charging node and ACL allocations before decode.
+  Unrestricted repeated-variable mismatches still reject before loading a large
+  target. The 100k and 1M synthetic comparisons use identical release harnesses,
+  two runs in opposite order, and 14 measured samples per query. Report and raw
+  JSON are in `docs/benchmarks/2026-10-14-acl-read-performance.md` and its
+  receipt directory. At 1M nodes, median gains range from 2.43x to 3.88x; this is
+  warm single-host embedded data, not a product SLO or external application workload.
+- **Distributed operations:** `cluster inspect` fans out to all configured
+  voters concurrently, records each peer's `response_time_ms`, keeps each
+  request's deadline and preserves voter-ID report order. It now reports
+  sampled commit/apply-index spread and per-voter lag when every initialized
+  voter supplies those indexes; incomplete or uninitialized samples omit the
+  comparison, which is explicitly non-atomic and never presented as readiness.
+  A synchronization test proves every voter is contacted before any response
+  is awaited. Local release acceptance with three native voter processes
+  passed all 15 quorum, partition, restart, request-idempotency, ACL and
+  offline-audit checks on 500 rows; all owned processes, fault proxies and
+  temporary data were cleaned. A second release run with the replication-lag
+  summary also passed all 15 checks; all voters were at committed/applied index
+  512 with zero sampled lag. Receipt:
+  `docs/benchmarks/2026-10-14-distributed-ops/acceptance-500-replication-progress.json`,
+  binary SHA-256 `d046506eaf9b821abb12da9dc1a3a522781c6163c618a27f7ec8a31bb6e82580`.
+  A third run kept one follower reachable for Status while dropping its consensus
+  traffic, then committed three writes on the majority: `cluster inspect` showed
+  a real three-index commit/apply gap and showed zero after healing. All 16
+  checks and owned-resource cleanup passed; receipt:
+  `docs/benchmarks/2026-10-14-distributed-ops/acceptance-500-live-lag.json`.
+  A repeat reproduced the same gap and catch-up; receipt:
+  `docs/benchmarks/2026-10-14-distributed-ops/acceptance-500-live-lag-repeat.json`.
+  The bounded catch-up poll now returns only when all three commit indexes are
+  equal and each applied index equals commit. Two subsequent release runs
+  passed all 16 checks and verified the three-index lag plus exact convergence
+  after healing: `docs/benchmarks/2026-10-14-distributed-ops/acceptance-500-live-lag-recovery.json`
+  and `docs/benchmarks/2026-10-14-distributed-ops/acceptance-500-live-lag-final-repeat.json`.
+  Inspection remains diagnostic, not a quorum/readiness proof.
+- **Verified:** full `cargo test --workspace --locked --offline -- --test-threads=1`,
+  full-workspace Clippy with `-D warnings`, formatting and diff checks passed
+  (628 tests across 54 suites). The focused inspect suite now has six tests,
+  including initialized voters with missing indexes; null progress and absent
+  lag fields are verified for that case and for invalid/stopped peers.
+  The release quorum acceptance is local native-process testing, not Kubernetes,
+  Swarm or multi-machine qualification. Astra reviewed the progress reporter,
+  requested the initialized-but-missing-index test, and later re-reviewed the
+  bounded convergence poll and receipts; no correctness blockers remain in
+  this diagnostic feature.
+- **Next / limits:** qualify mixed concurrent workloads, cold-cache and realistic
+  ingestion separately. The distributed release gates still include coordinated
+  snapshots/log compaction, dynamic membership and safe erased-voter replacement,
+  plus actual Docker/Kubernetes/Swarm and multi-machine network qualification.
+
 ### 2026-10-14 — Quorum operation and atomic Python ACL writes
 
 - **Requested:** use remaining weekly allowance from 7% toward 1%, checking actual
@@ -78,7 +676,7 @@ No line of code before the end of phase 2.
 - **Next / limits:** coordinated snapshots/log compaction, joint membership/new-ID
   disk-loss replacement and real machine/container qualification remain pending.
   Real cluster log exhaustion was not tested; storage-boundary exhaustion was.
-  Real client/DuckLake authoritative ACL mapping and importer integration remain
+  Real external application/DuckLake authoritative ACL mapping and importer integration remain
   open. No TUI changes or throughput claims; native Bolt TLS remains separate.
 
 
@@ -115,7 +713,7 @@ No line of code before the end of phase 2.
   release throughput, power/storage failures and three-machine Kubernetes/Swarm
   routing, peer TLS and persistent volumes. No current snapshot, purge, sharding,
   dynamic membership, graph drop/schema migration or erased-member replacement.
-  Native Bolt TLS and dynamic client adapter remain separate gates. TUI unchanged.
+  Native Bolt TLS and dynamic external application adapter remain separate gates. TUI unchanged.
 
 
 ### 2026-10-13 — Governed ingestion and recoverable deployment candidate
@@ -135,7 +733,7 @@ No line of code before the end of phase 2.
   property addition/removal for nodes/edges. A separate pinned DuckLake full-
   snapshot diff importer covers updates/deletes and resumes durable batch/source
   progress after lost acknowledgement. It uses real DuckLake with synthetic
-  managed Parquet fixtures, not the live client catalog or native CDC.
+  managed Parquet fixtures, not the live external application catalog or native CDC.
 - **Replication foundation:** canonical concrete-mutation batches, SHA-256,
   strict contiguous per-store ledger, synchronous atomic state+ledger and latest
   replay idempotency. Three-store/checkpoint/failed-commit tests pass. No consensus,
@@ -156,10 +754,10 @@ No line of code before the end of phase 2.
   candidate is qualified separately. One existing authentication timing test failed
   under concurrent builds; isolated and final full runs passed without changing it.
 - **Next step:** obtain the real source catalog/mapping and authoritative ACL
-  source; implement a capability-gated client adapter and atomic ACL ingestion;
+  source; implement a capability-gated external application adapter and atomic ACL ingestion;
   qualify representative governed workload. Replication is a separate reviewed
   workstream in `docs/design/replication-next-gates.md`, not extra replicas.
-- **Limits:** ACL list bound 256 vs larger client knowledge-grant corpus; static
+- **Limits:** ACL list bound 256 vs larger external application knowledge-grant corpus; static
   service policy only, no dynamic per-request binding. Snapshot differences scan
   full pinned snapshots and need exclusive source ownership. No live catalog
   provided, no production cutover, native CDC, ANN/text index or history claim.
@@ -198,7 +796,7 @@ No line of code before the end of phase 2.
   include projection and eager Cypher output; 256 MiB accounting limit, no RSS
   measurement. See `docs/benchmarks/2026-10-13-components.md`, raw receipts and
   source/binary provenance. Earlier frozen beta image/receipts were not changed.
-- **Next step / pending:** node-level ACL, the actual client adapter contract,
+- **Next step / pending:** node-level ACL, the actual external application adapter contract,
   Kubernetes/Swarm qualification of the new candidate and real replication
   remain outstanding. Algorithms are single-process over one graph snapshot;
   neither distributed execution nor persistent community IDs were introduced.
@@ -239,7 +837,7 @@ No line of code before the end of phase 2.
   template rendering. No graceful drain, exact COMMIT-phase kill hook, immediate
   cancellation or Kubernetes/Swarm runtime qualification is claimed.
 - **Verified:** 541 Rust workspace tests, zero failed/ignored, all-target Clippy
-  warnings denied and formatting; 17 Python-example and 23 client tests.
+  warnings denied and formatting; 17 Python-example and 23 external application tests.
   Frozen native SHA-256 1042c946cb85d6c6d5b234db85163f3478ab505f20b4fb896e3b8e515d963150;
   Linux image brainwire:beta-20261013 ID
   sha256:d08c2e5af98ea237b568b86bf58af99af7d80ae5425ad7aaecdc37f620d821d3.
@@ -268,18 +866,18 @@ No line of code before the end of phase 2.
   Synthetic qualification supports a controlled rebuildable single-node shadow
   beta, not a production or fully distributed release. Pre-existing docs-site and
   .DS_Store files were preserved; unsupported site examples are queued explicitly.
-- **Next step:** capability-gated client ingestion adapter against a disposable
+- **Next step:** capability-gated external application ingestion adapter against a disposable
   named graph and real required query/mapping fixtures. The actual GraphRepository
   suite has no Brainwire branch; node ACL, pagination, dynamic DDL/introspection
   and per-request timeout contracts are concrete compatibility gaps. Governed
   production reads must fail closed until equivalent enforcement is tested.
   Then qualify the selected protected runtime and representative workload.
-- **Blockers:** real client mapping/catalog/backend/workload approval, node ACL
+- **Blockers:** real external application mapping/catalog/backend/workload approval, node ACL
   integration, protected target-cluster execution (kind/node image absent here),
   graceful drain/cancellation/streaming, native TUI TLS, Raft, search/history/
   retention/object-storage recovery and reconciled/published docs remain pending.
 
-### 2026-10-12 — Protected client MVP source bridge and connected inspection
+### 2026-10-12 — Protected external application MVP source bridge and connected inspection
 
 - **Requested:** one additional hour, as much useful MVP implementation as possible,
   then reorganize the beta queue through October 31. Started at 17:01:27 UTC /
@@ -288,7 +886,7 @@ No line of code before the end of phase 2.
   All implementation and release artifacts remain local; no remote publication.
 - **Done:** bounded DuckDB SELECT → normalized immutable JSONL export and optional
   read-only local SQLite DuckLake export pinned to an explicit snapshot version.
-  Both reuse the client mapping/importer; active caller transactions, partial
+  Both reuse the external application mapping/importer; active caller transactions, partial
   publication and destination overwrite are rejected. DuckLake path overrides and
   implicit extension installation are disabled. Synthetic old snapshots survived
   newer source UPDATE/DELETE. Added Unicode `toLower`/`toUpper` with null/type
@@ -319,7 +917,7 @@ No line of code before the end of phase 2.
   10,681 updates, point/index p95 1.045/1.072ms and sampled RSS peak 93,424 KiB.
   Both verified latest acknowledged values after SIGKILL/reopen and audited indexes;
   these separate periods do not satisfy the one-hour continuous endurance gate.
-- **Decided:** propose a controlled single-node client shadow beta by October 31,
+- **Decided:** propose a controlled single-node external application shadow beta by October 31,
   with 19 remaining 20-minute sessions / 6h20. The full requested product matrix
   remains visible; replication, ANN/search, history, maintenance, object-storage
   support, fully connected operation and MCP are not silently declared complete.
@@ -330,7 +928,7 @@ No line of code before the end of phase 2.
   [local MVP quickstart](docs/mvp-quickstart.md); see the
   [dated beta queue](docs/2026-10-pilot-roadmap.md) for source mapping, actual backend,
   packaging, target execution, restore, performance and release decision gates.
-- **Blockers/limits:** actual client mappings, catalog/storage access and SLOs
+- **Blockers/limits:** actual external application mappings, catalog/storage access and SLOs
   need Allan's input. No TLS, native drain, authenticated idle bound or replicated
   failover claim. Connected refresh is synchronous; memory shows query reservations,
   not RSS/cache. SELECT is trusted, external mutable files are not transaction-pinned,
@@ -496,7 +1094,7 @@ No line of code before the end of phase 2.
   [connection guide](docs/bolt-auth.md), [container guide](docs/protected-containers.md),
   [updated beta security checklist](docs/beta-auth-checklist.md).
 
-### 2026-10-10 — client snapshot adapter and recovery acceptance
+### 2026-10-10 — external application snapshot adapter and recovery acceptance
 
 - **Requested:** 20 minutes of active work, starting 14:22:11 UTC / 16:22:11
   Europe/Paris. Continued the October 9–10 pilot workload/fixture dependency.
@@ -527,7 +1125,7 @@ No line of code before the end of phase 2.
   guard. Acceptance records denial/rollback and then uses a bounded primary-key
   write for recovery; budgets were not increased to hide this limit. Allocator
   reservations may survive rollback; the source byte cursor remains authoritative.
-- **Boundary:** client starter graph mapping is empty. Documented Zendesk
+- **Boundary:** external application starter graph mapping is empty. Documented Zendesk
   ontology fragment supplied candidate concepts, not a confirmed live mapping.
   Synthetic data only. Snapshot revisions require new source IDs and serial,
   chronological application per tenant/connector. No CDC, delete synchronization,
@@ -537,14 +1135,14 @@ No line of code before the end of phase 2.
   docs/beta-auth-checklist.md; consult Astra on policy/state/config first. Current
   AllowAll, RESET/LOGOFF behavior, read-only mutation checks and process-wide CALL
   telemetry need explicit denial tests. Do not expose current Bolt on a shared
-  network. Confirm real client export mapping before any live-data integration.
-- **Evidence/local:** docs/benchmarks/2026-10-10-client.md and its raw JSON,
+  network. Confirm real external application export mapping before any live-data integration.
+- **Evidence/local:** docs/benchmarks/2026-10-10-source-ingestion.md and its raw JSON,
   reproducible harnesses and final source inventory. Temporary stores and owned
   servers cleaned. All work local; no push, publication, PR or deployment.
 
 ### 2026-10-08 — October beta daily queue revised
 
-- **Requested:** organize the remaining month for an October 31 client-testable
+- **Requested:** organize the remaining month for an October 31 external application-testable
   beta toward production. Allan revised the cadence from 15 to **20 minutes/day**.
   October 9–31 gives 23 sessions / 460 minutes / 7h40, excluding today's completed
   implementation. This planning turn is not another timed coding session.
@@ -553,7 +1151,7 @@ No line of code before the end of phase 2.
   restore, representative performance and one-hour acceptance evidence, real
   TUI/docs, candidate freeze and three final buffer days. Added the cadence to
   AGENTS.md so future sessions retain it. No automation or deployment created.
-- **Boundary:** proposes a controlled single-node client shadow beta; the full
+- **Boundary:** proposes a controlled single-node external application shadow beta; the full
   requested matrix remains visible and is not credibly guaranteed in 7h40.
   Replication, ANN/search, complete history/maintenance, all source connectors,
   object backup, full connected TUI/MCP remain requirements, not completed work.
@@ -562,7 +1160,7 @@ No line of code before the end of phase 2.
 - **Review/checks:** advisory Astra checked priorities/dependencies; main applied
   the security-first order and protected freeze/fix buffer. Documentation-only:
   arithmetic/dates/links and git diff checks; no engine tests rerun unnecessarily.
-- **Next:** October 9 session freezes the client schema/IDs, representative
+- **Next:** October 9 session freezes the external application schema/IDs, representative
   source shape, queries and proposed beta support boundary. If source details are
   missing, list assumptions and use synthetic data until confirmed.
 - **Local:** docs/AGENTS/journal changes only; no push, publication or deployment.
@@ -752,7 +1350,7 @@ No line of code before the end of phase 2.
 - **Next:** investigate bounded node-read batching/reuse in large returned
   neighborhoods and indexed counts; measure release builds and representative
   property payloads. Continue bounded Python batch import and failure acceptance
-  before client integration. CSR projection/PageRank were not changed today.
+  before external application integration. CSR projection/PageRank were not changed today.
 - **Blockers:** none for this slice. Distributed replication, auth/TLS and
   DuckLake/Arrow incremental ingestion remain separate work. No push/publishing.
 
@@ -865,7 +1463,7 @@ No line of code before the end of phase 2.
 - **Limits/next step:** source evidence is ingestion-supplied, with no automatic
   freshness decay, usage collection, certified-owner verification or ACL. Domain
   filtering is not authorization. PageRank and source ranking are separate. Next:
-  validate this policy against real client questions and provenance requirements
+  validate this policy against real external application questions and provenance requirements
   before adding automatic evidence collection or a combined ranking.
 
 ### 2026-10-03, second hour: streaming reads, shared reservations and deadlines
@@ -935,7 +1533,7 @@ No line of code before the end of phase 2.
   [TUI gallery](docs/design/assets/2026-10-03-session2/README.md).
 - **October target:** Allan asked about an end-of-month product with Docker/K8s,
   direct Python individual/batch writes, independent graph creation, a docs site
-  and a polished TUI. Assessment: a tested client pilot is plausible; full
+  and a polished TUI. Assessment: a tested external application pilot is plausible; full
   production readiness and distributed HA are not promised. Proposed milestones:
   retained-volume deployment/recovery by Oct 10, Python/query/resource hardening
   by Oct 17, connected TUI/docs by Oct 24, workload validation/pilot by Oct 31.
@@ -949,11 +1547,11 @@ No line of code before the end of phase 2.
   production replication or automatic failover promise was made.
   Existing untracked `docs-site/` is a concept draft containing future syntax;
   preserve it and reconcile its advertised capabilities before publication.
-- **Immediate client pilot:** Allan asked whether testing this week is viable.
+- **Immediate external application pilot:** Allan asked whether testing this week is viable.
   Proposed a separate Docker graph, a small ontology, Python individual/batch
-  writes and representative queries/recovery checks. Audit client's actual
+  writes and representative queries/recovery checks. Audit external application's actual
   Cypher before pointing it at Brainwire; automatic DuckLake ingestion and
-  connected TUI remain pending. No existing client service was reconfigured.
+  connected TUI remain pending. No existing external application service was reconfigured.
 - **Next:** bounded Bolt cursors with cancellation and live allocation leases;
   grouped/write streaming afterward. Idle transactions can still hold quota.
   Preserve single-writer retained-volume deployments until replication and
@@ -1079,7 +1677,7 @@ No line of code before the end of phase 2.
 
 ### 2026-10-01, DuckLake-first Arrow ingestion direction
 
-- **Requested:** automate fast client ingestion, primarily DuckLake, also
+- **Requested:** automate fast external application ingestion, primarily DuckLake, also
   DuckDB, Parquet and Delta; assess Arrow in Rust.
 - **Checked:** official DuckLake change-feed/time-travel, Delta CDF, DuckDB Arrow
   output and Rust Arrow/Flight documentation; local code has Python/Bolt but no
@@ -1191,7 +1789,7 @@ No line of code before the end of phase 2.
   synthetic Graph/Query/Memory/Disk demo views.
 - **Measured:** local `db overview --json` showed `analytics-demo` 3 nodes/2
   edges, `staging-100k` 100,000 nodes/1,000,000 edges, and
-  `client_memory` empty. The 100K fixture's directory was 9.5 MiB on this
+  `external_memory` empty. The 100K fixture's directory was 9.5 MiB on this
   machine because its data are synthetic and highly compressible. An actual
   pt-BR TUI snapshot selected `staging-100k` and showed `Page`/`LINK` from its
   ontology. The small PageRank graph yielded Storage 0.4069, Recovery 0.3333
@@ -1332,7 +1930,7 @@ No line of code before the end of phase 2.
   ownership and bounded blocking execution, then `brainwire serve` and driver
   write/kill/restart tests. `db` administration is offline and needs exclusive
   access. Add container packaging only after that end-to-end server path works.
-  The local client Python environment has Neo4j driver 6.3.0; the historical
+  The local external application Python environment has Neo4j driver 6.3.0; the historical
   temporary 5.x environment exists but no longer imports `neo4j`, so refresh
   that test environment when the server is ready.
 - **Blockers:** none for local work. This is not yet a networked deployment;
@@ -1349,7 +1947,7 @@ No line of code before the end of phase 2.
   or production workload guarantees; [report](docs/benchmarks/2026-09-30-sparse-analytics.md).
 - **Verified:** both example sizes ran successfully, workspace tests passed,
   workspace clippy passed with warnings denied, formatting check passed.
-- **Commercial direction discussed:** client can be the first design partner
+- **Commercial direction discussed:** external application can be the first design partner
   while Brainwire remains a separate product. Recommend a narrow paid pilot
   before a production subscription, with explicit success criteria and a
   written ownership/commercial-use arrangement. Repository is currently
@@ -1808,7 +2406,7 @@ No line of code before the end of phase 2.
   (graph operations) and Task 10 (the kill -9 crash test), which closes Gate 1
   (due 2026-09-30).
 - **Driver 5.x:** production pins the Python driver to `neo4j>=5.0,<6`
-  (`client-core/pyproject.toml`). With Allan's OK, neo4j 5.28.6 went into a
+  (`external-core/pyproject.toml`). With Allan's OK, neo4j 5.28.6 went into a
   temporary venv in the session scratchpad, and the driver check and the demo
   pass with it too (Bolt 5.4, 0.083 ms per round trip). Rerun it after the fix
   wave.
@@ -1843,7 +2441,7 @@ No line of code before the end of phase 2.
 - **Decided under Allan's go-ahead (to review):** plan 2 on its own branch,
   merged back into `feat/brainwire` later; plan 2 Tasks 1 to 4 in one dispatch
   with one review; the driver check uses the neo4j 6.3.0 already in
-  `client-core/.venv`, so nothing was installed; nesting limit of 64 levels
+  `external-core/.venv`, so nothing was installed; nesting limit of 64 levels
   on the wire and on disk; `type_range` returns a `Result` (plan 3 uses it
   that way); `Cargo.lock` is committed right after the merge; the message cap
   is configurable through `serve_with_limit`. Every ruling, with what it costs
@@ -1938,7 +2536,7 @@ No line of code before the end of phase 2.
 - **Decided:** see the requirements table in the README. The name is
   Brainwire, with "brain" in it at Allan's request (Engrama and Brainfold were
   dropped). Approach approved: Rust + RocksDB. Launch on 2026-10-31, with
-  cluster/HA, RBAC and full openCypher in scope. The ACL follows the client
+  cluster/HA, RBAC and full openCypher in scope. The ACL follows the external application
   model (`AclPredicate`), native to the engine. No commit until the spec.
 - **Next step:** the spec in five sections, each approved before the next:
   (1) storage; (2) data model and security: ontology, ACL, RBAC, events;

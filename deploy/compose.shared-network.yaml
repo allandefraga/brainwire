@@ -1,0 +1,14 @@
+# Optional local integration overlay for a second Compose project.
+# Create this external network yourself and attach the consumer service to it.
+services:
+  brainwire:
+    networks:
+      default: {}
+      consumer:
+        aliases:
+          - brainwire
+
+networks:
+  consumer:
+    name: ${BRAINWIRE_SHARED_NETWORK:-brainwire-integration}
+    external: true

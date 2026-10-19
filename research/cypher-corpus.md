@@ -37,31 +37,31 @@
 
 | Alias | Path |
 |---|---|
-| `common` | `client-core/src/client_core/repository/_cypher_common.py` |
-| `neo4j` | `client-core/src/client_core/repository/neo4j.py` |
-| `falkordb` | `client-core/src/client_core/repository/falkordb.py` |
-| `hydradb` | `client-core/src/client_core/repository/hydradb.py` |
-| `visibility` | `client-core/src/client_core/auth/visibility.py` |
-| `lark` | `client-core/src/client_core/cypher/cypher_acl.lark` |
-| `cypher_acl` | `client-core/src/client_core/cypher/cypher_acl.py` |
-| `diagnose` | `client-core/src/client_core/cypher/diagnose.py` |
-| `pii` | `client-core/src/client_core/pii.py` |
-| `catalog` | `client-core/src/client_core/i18n/catalog.py` |
-| `generator` | `client-ai/services/memory-worker/memory_worker/cypher_generator.py` |
-| `graph_client` | `client-ai/services/memory-worker/memory_worker/graph_client.py` |
-| `layout` | `client-ai/services/memory-worker/memory_worker/layout.py` |
-| `pipeline` | `client-ai/services/memory-worker/memory_worker/pipeline.py` |
-| `graph.py` | `client-ai/services/memory-api/src/memory_api/db/graph.py` |
-| `memory.py` | `client-ai/services/memory-api/src/memory_api/api/v1/endpoints/memory.py` |
-| `phantom.py` | `client-ai/services/memory-api/src/memory_api/api/v1/endpoints/phantom.py` |
-| `query.py` | `client-ai/services/skills-api/src/skills_api/routers/query.py` |
-| `mcp_server` | `client-ai/services/mcp-server/src/mcp_server/server.py` |
-| `mcp_generic` | `client-ai/services/mcp-server/src/mcp_server/tools/generic.py` |
-| `view_modal` | `client-console-ui/app/(app)/memory/components/toolbar/create-view-modal.tsx` |
-| `fixture` | `client-core/tests/fixtures/cypher_sql_refusals.json` |
+| `common` | `external-core/src/external_core/repository/_cypher_common.py` |
+| `neo4j` | `external-core/src/external_core/repository/neo4j.py` |
+| `falkordb` | `external-core/src/external_core/repository/falkordb.py` |
+| `hydradb` | `external-core/src/external_core/repository/hydradb.py` |
+| `visibility` | `external-core/src/external_core/auth/visibility.py` |
+| `lark` | `external-core/src/external_core/cypher/cypher_acl.lark` |
+| `cypher_acl` | `external-core/src/external_core/cypher/cypher_acl.py` |
+| `diagnose` | `external-core/src/external_core/cypher/diagnose.py` |
+| `pii` | `external-core/src/external_core/pii.py` |
+| `catalog` | `external-core/src/external_core/i18n/catalog.py` |
+| `generator` | `external-ai/services/memory-worker/memory_worker/cypher_generator.py` |
+| `graph_client` | `external-ai/services/memory-worker/memory_worker/graph_client.py` |
+| `layout` | `external-ai/services/memory-worker/memory_worker/layout.py` |
+| `pipeline` | `external-ai/services/memory-worker/memory_worker/pipeline.py` |
+| `graph.py` | `external-ai/services/memory-api/src/memory_api/db/graph.py` |
+| `memory.py` | `external-ai/services/memory-api/src/memory_api/api/v1/endpoints/memory.py` |
+| `phantom.py` | `external-ai/services/memory-api/src/memory_api/api/v1/endpoints/phantom.py` |
+| `query.py` | `external-ai/services/skills-api/src/skills_api/routers/query.py` |
+| `mcp_server` | `external-ai/services/mcp-server/src/mcp_server/server.py` |
+| `mcp_generic` | `external-ai/services/mcp-server/src/mcp_server/tools/generic.py` |
+| `view_modal` | `external-console-ui/app/(app)/memory/components/toolbar/create-view-modal.tsx` |
+| `fixture` | `external-core/tests/fixtures/cypher_sql_refusals.json` |
 | `spec_err` | `docs/superpowers/specs/2026-09-15-mcp-tool-error-contract-design.md` |
-| `gb/` | `client-brain/tools/graph-bench/` |
-| `bench/` | `client-bench/` |
+| `gb/` | `external-brain/tools/graph-bench/` |
+| `bench/` | `external-bench/` |
 
 ## 1. Clauses
 
@@ -128,7 +128,7 @@
 ## 4. Schema, introspection and procedures
 
 - Index: `CREATE INDEX {name} IF NOT EXISTS FOR (n:{lbl}) ON (n.{p})`
-  (neo4j:721-724), named `client_<label>_<sha1>_<prop>`; an error containing
+  (neo4j:721-724), named `external_<label>_<sha1>_<prop>`; an error containing
   "already", "exist" or "equivalent" is swallowed as a rerun.
 - Who creates indexes: the pipeline, on every run, for `entity_id` of each
   label, for `Event`, for the match_fields and the indexed_fields

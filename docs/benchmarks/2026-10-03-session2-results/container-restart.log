@@ -12,5 +12,5 @@ cycle 3: verified after container restart
 cycle 4: verified after container restart
 cycle 5: verified after container restart
 cycle 6: verified after container restart
-{"database":"client_memory","scalar_indexes":"checked_active_declarations","status":"ok"}
+{"database":"default","scalar_indexes":"checked_active_declarations","status":"ok"}
 container restart and indexed-overwrite recovery: ok

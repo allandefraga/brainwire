@@ -1,0 +1,29 @@
+{
+ "fixture": "crates/server/tests/compose_restart.py --image brainwire:drain-check",
+ "compose_file": "deploy/compose.yaml (init: true, stop_grace_period 60s, server grace default 8000 ms)",
+ "image_id": "sha256:636f63b1f5edce37d7674ef8bc1f68747a3509009b4e51df612496b04fb06ec2",
+ "binary_sha256_in_image": "372bdeb0698cdc1db05b773b60e75b9894da6dcfafd6d444cc659bfbea2f6cae",
+ "platform": "Docker Desktop on macOS arm64; Linux aarch64 container, Debian GLIBC 2.36",
+ "driver": "neo4j 6.3.0",
+ "runs": [
+  {
+   "result": "PASS",
+   "audit": "ok"
+  },
+  {
+   "result": "PASS",
+   "audit": "ok"
+  },
+  {
+   "result": "PASS",
+   "audit": "ok"
+  }
+ ],
+ "checks": [
+  "commit during SIGTERM drain survives restart; exit 0",
+  "SIGKILL recovery",
+  "idle-only stop exits 0",
+  "offline audit ok"
+ ],
+ "not_covered": "Kubernetes/Swarm targets, amd64, multi-machine, load during drain beyond one open transaction"
+}

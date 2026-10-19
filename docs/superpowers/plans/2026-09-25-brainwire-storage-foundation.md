@@ -48,7 +48,7 @@ notes families.
 ## File structure
 
 ```
-client-brainwire/
+external-brainwire/
   Cargo.toml                         workspace
   rust-toolchain.toml                pinned toolchain
   crates/core/                       package brainwire-core (no I/O)
@@ -82,9 +82,9 @@ docs, commit `d1c50cfab`).
 Follow `superpowers:using-git-worktrees`. With consent:
 
 ```bash
-cd /Users/fraga/Documents/client-platform
+cd /Users/fraga/Documents/external-platform
 git worktree add .worktrees/brainwire feat/brainwire
-cd .worktrees/brainwire/client-brainwire
+cd .worktrees/brainwire/external-brainwire
 ```
 
 - [ ] **Step 2: Retire the untracked copy in the main checkout**
@@ -97,17 +97,17 @@ the new path of the folder.
 ## Task 1: Workspace scaffold
 
 **Files:**
-- Create: `client-brainwire/Cargo.toml`, `client-brainwire/rust-toolchain.toml`
-- Create: `client-brainwire/crates/core/Cargo.toml`, `crates/core/src/lib.rs`
-- Create: `client-brainwire/crates/store/Cargo.toml`, `crates/store/src/lib.rs`
-- Create: `client-brainwire/.gitignore`
+- Create: `external-brainwire/Cargo.toml`, `external-brainwire/rust-toolchain.toml`
+- Create: `external-brainwire/crates/core/Cargo.toml`, `crates/core/src/lib.rs`
+- Create: `external-brainwire/crates/store/Cargo.toml`, `crates/store/src/lib.rs`
+- Create: `external-brainwire/.gitignore`
 
 **Interfaces:**
 - Produces: packages `brainwire-core` and `brainwire-store` that build and test.
 
 - [ ] **Step 1: Write the workspace files**
 
-`client-brainwire/Cargo.toml`:
+`external-brainwire/Cargo.toml`:
 
 ```toml
 [workspace]
@@ -129,7 +129,7 @@ tempfile = "3"
 rocksdb = "0.25"
 ```
 
-`client-brainwire/rust-toolchain.toml`:
+`external-brainwire/rust-toolchain.toml`:
 
 ```toml
 [toolchain]
@@ -137,7 +137,7 @@ channel = "stable"
 components = ["clippy", "rustfmt"]
 ```
 
-`client-brainwire/.gitignore`:
+`external-brainwire/.gitignore`:
 
 ```
 /target
@@ -209,7 +209,7 @@ over about 2 minutes.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add client-brainwire/Cargo.toml client-brainwire/rust-toolchain.toml client-brainwire/.gitignore client-brainwire/crates
+git add external-brainwire/Cargo.toml external-brainwire/rust-toolchain.toml external-brainwire/.gitignore external-brainwire/crates
 git commit -m "chore(brainwire): scaffold the Rust workspace with core and store crates"
 ```
 
@@ -407,7 +407,7 @@ Expected: all `keys::tests` pass, including the three property tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/core
+git add external-brainwire/crates/core
 git commit -m "feat(brainwire): add order-preserving key encoding"
 ```
 
@@ -607,7 +607,7 @@ Expected: the four `ids::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/core
+git add external-brainwire/crates/core
 git commit -m "feat(brainwire): add node and edge ids with element ids"
 ```
 
@@ -925,7 +925,7 @@ Expected: `empty_row_round_trips`, `unknown_tag_is_an_error`,
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/core
+git add external-brainwire/crates/core
 git commit -m "feat(brainwire): add values and the row codec"
 ```
 
@@ -1344,7 +1344,7 @@ Expected: the five `schema::tests` pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add client-brainwire/crates/core
+git add external-brainwire/crates/core
 git commit -m "feat(brainwire): build the catalog from the platform ontology"
 ```
 
@@ -1529,7 +1529,7 @@ Expected: the three `db::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/store
+git add external-brainwire/crates/store
 git commit -m "feat(brainwire): open one RocksDB per database with shared resources"
 ```
 
@@ -1885,7 +1885,7 @@ Expected: the `db::tests` and the six `txn::tests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/store
+git add external-brainwire/crates/store
 git commit -m "feat(brainwire): add snapshot transactions where the first committer wins"
 ```
 
@@ -2083,7 +2083,7 @@ Expected: every test so far passes, including the four `alloc::tests`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/store
+git add external-brainwire/crates/store
 git commit -m "feat(brainwire): allocate ids in blocks that survive crashes"
 ```
 
@@ -2581,7 +2581,7 @@ Expected: every test passes, including the seven `graph::tests`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/store
+git add external-brainwire/crates/store
 git commit -m "feat(brainwire): add catalog persistence and graph operations"
 ```
 
@@ -2695,7 +2695,7 @@ Expected: all green.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client-brainwire/crates/store
+git add external-brainwire/crates/store
 git commit -m "test(brainwire): prove the store survives kill -9 without losing commits"
 ```
 

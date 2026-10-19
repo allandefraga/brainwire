@@ -6,7 +6,7 @@
   "rust_tests_ignored": 0,
   "rust_test_groups": 41,
   "python_examples_passed": 17,
-  "client_python_passed": 23,
+  "external_python_passed": 23,
   "clippy_passed": true,
   "fmt_passed": true,
   "checks": [
@@ -14,7 +14,7 @@
     "workspace all-target Clippy warnings denied",
     "workspace formatting check",
     "Python example unittest suite",
-    "client exporter/mapping/DuckLake unittest suite"
+    "external application exporter/mapping/DuckLake unittest suite"
   ],
   "logs": {
     "workspace": {
@@ -37,8 +37,8 @@
       "sha256": "ae23681ed2b16e3758e8b8ecb2fcb1811208fdcae61d277c4c128a8ca7dc86bd",
       "exit_code": 0
     },
-    "client-python": {
-      "path": "logs/client-python.log",
+    "external-python": {
+      "path": "logs/external-python.log",
       "sha256": "c9b280568d35a6ebb5d43688330986f936af2c719024a91c45a4092372ffa0ef",
       "exit_code": 0
     },

@@ -140,6 +140,29 @@ fn stopped_wrong_identity_and_redirect_do_not_pass_readiness() {
     let mut stopped = status();
     stopped["running"] = false.into();
     assert!(!probe(Some("liveness"), stopped, None).status.success());
+    for (issue, reason) in [
+        ("storage_error", "fatal_storage_error"),
+        ("panic", "raft_panicked"),
+        ("stopped", "raft_stopped"),
+    ] {
+        let mut failed = status();
+        failed["running"] = false.into();
+        failed["running_issue"] = issue.into();
+        let output = probe(Some("readiness"), failed, None);
+        assert!(!output.status.success());
+        assert_eq!(parsed(&output)["reason"], reason);
+    }
+    let mut contradictory = status();
+    contradictory["running_issue"] = "storage_error".into();
+    let output = probe(Some("readiness"), contradictory, None);
+    assert!(!output.status.success());
+    assert_eq!(parsed(&output)["reason"], "invalid_status");
+    let mut unknown_issue = status();
+    unknown_issue["running"] = false.into();
+    unknown_issue["running_issue"] = "private-error-detail".into();
+    let output = probe(Some("readiness"), unknown_issue, None);
+    assert!(!output.status.success());
+    assert_eq!(parsed(&output)["reason"], "invalid_status");
     let mut wrong = status();
     wrong["node_id"] = 2.into();
     assert!(!probe(Some("liveness"), wrong, None).status.success());

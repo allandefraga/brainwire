@@ -1,6 +1,6 @@
 """Synthetic three-process quorum/partition/restart acceptance on owned loopback ports.
 
-No host orchestration, shared store, client data or remote deployment is touched.
+No host orchestration, shared store, external application data or remote deployment is touched.
 Consensus snapshots remain unsupported; the final check is offline audit/digest equality.
 """
 import argparse
@@ -55,14 +55,23 @@ class Faults:
     def __init__(self):
         self.lock = threading.Lock()
         self.isolated = set()
+        self.status_only = set()
 
     def set(self, members):
         with self.lock:
             self.isolated = set(members)
+            self.status_only = set()
 
-    def blocked(self, sender, recipient):
+    def set_status_only(self, members):
         with self.lock:
-            return sender in self.isolated or recipient in self.isolated
+            self.isolated = set()
+            self.status_only = set(members)
+
+    def blocked(self, sender, recipient, method=None):
+        with self.lock:
+            if sender in self.isolated or recipient in self.isolated:
+                return True
+            return (sender in self.status_only or recipient in self.status_only) and method != "Status"
 
 
 class Proxy:
@@ -73,21 +82,36 @@ class Proxy:
             def handle(handler):
                 if not permits.acquire(blocking=False):
                     return
+                upstream = None
                 try:
-                    handler.request.settimeout(6)
-                    body = read_frame(handler.request)
-                    envelope = json.loads(body)
-                    if envelope.get("recipient") != member or faults.blocked(envelope.get("sender"), member):
-                        return
-                    with socket.create_connection(backend, timeout=2) as upstream:
-                        upstream.settimeout(6)
+                    # Peers reuse connections, so forward frames until either side
+                    # closes; a blocked frame drops both connections, as a partition.
+                    handler.request.settimeout(35)
+                    while True:
+                        body = read_frame(handler.request)
+                        envelope = json.loads(body)
+                        payload = envelope.get("payload")
+                        if isinstance(payload, str):
+                            method = payload
+                        elif isinstance(payload, dict):
+                            method = next(iter(payload), None)
+                        else:
+                            method = None
+                        if envelope.get("recipient") != member or faults.blocked(envelope.get("sender"), member, method):
+                            return
+                        if upstream is None:
+                            upstream = socket.create_connection(backend, timeout=2)
+                            upstream.settimeout(6)
                         write_frame(upstream, body)
                         reply = read_frame(upstream)
-                    if not faults.blocked(envelope.get("sender"), member):
+                        if faults.blocked(envelope.get("sender"), member, method):
+                            return
                         write_frame(handler.request, reply)
                 except (OSError, EOFError, ValueError, TypeError, AttributeError):
                     pass  # Never print envelopes: they contain the private peer token.
                 finally:
+                    if upstream is not None:
+                        upstream.close()
                     permits.release()
 
         class Server(socketserver.ThreadingTCPServer):
@@ -118,35 +142,52 @@ def port():
         return listener.getsockname()[1]
 
 
-def check_capacity(status):
-    assert status["max_log_bytes"] == MAX_LOG_BYTES
-    assert type(status["log_bytes"]) is int and 0 <= status["log_bytes"] <= MAX_LOG_BYTES
+def check_capacity(status, max_log_bytes=MAX_LOG_BYTES):
+    assert status["max_log_bytes"] == max_log_bytes
+    assert type(status["log_bytes"]) is int and 0 <= status["log_bytes"] <= max_log_bytes
     assert type(status["log_remaining_bytes"]) is int
-    assert status["log_remaining_bytes"] == MAX_LOG_BYTES - status["log_bytes"]
+    assert status["log_remaining_bytes"] == max_log_bytes - status["log_bytes"]
 
 
-def check_inspection(sample, unavailable=None):
+def check_inspection(sample, unavailable=None, max_log_bytes=MAX_LOG_BYTES):
     assert sample["kind"] == "diagnostic_sample"
     assert sample["scope"] == "independent status samples; not a quorum or write/read readiness proof"
-    assert sample["configured_max_log_bytes"] == MAX_LOG_BYTES
+    assert sample["configured_max_log_bytes"] == max_log_bytes
     complete = unavailable is None
     assert sample["complete"] is complete and sample["all_initialized"] is complete
     for key in ("retained_log_cap_agreement", "configured_log_cap_agreement"):
         assert sample[key] is (True if complete else None)
     members = sample["members"]
     assert len(members) == 3 and {item["node_id"] for item in members} == {1, 2, 3}
+    indexes = []
     for item in members:
+        assert type(item["response_time_ms"]) in (int, float) and item["response_time_ms"] >= 0
         if item["node_id"] == unavailable:
             assert item["diagnostic"] == "unavailable" and item["status"] is None
         else:
             assert item["diagnostic"] == "sampled" and item["initialized"] is True
             assert item["status"]["node_id"] == item["node_id"]
-            check_capacity(item["status"])
+            check_capacity(item["status"], max_log_bytes)
+            indexes.append((item["status"]["committed_index"], item["status"]["last_applied"]))
+    progress = sample["replication_progress"]
+    if unavailable is not None or any(index is None for pair in indexes for index in pair):
+        assert progress is None
+    else:
+        assert progress["basis"].startswith("concurrent independent samples")
+        for name, values in (("committed_index", [pair[0] for pair in indexes]),
+                             ("applied_index", [pair[1] for pair in indexes])):
+            assert progress[name] == {"min": min(values), "max": max(values),
+                                      "spread": max(values) - min(values)}
+        for item in members:
+            assert item["committed_index_lag"] == progress["committed_index"]["max"] - item["status"]["committed_index"]
+            assert item["applied_index_lag"] == progress["applied_index"]["max"] - item["status"]["last_applied"]
 
 
 def self_check():
     valid = {"max_log_bytes": MAX_LOG_BYTES, "log_bytes": 123, "log_remaining_bytes": MAX_LOG_BYTES - 123}
     check_capacity(valid)
+    check_capacity({"max_log_bytes": 1 << 20, "log_bytes": 123,
+                    "log_remaining_bytes": (1 << 20) - 123}, 1 << 20)
     for field, value in (("max_log_bytes", 0), ("log_bytes", -1), ("log_remaining_bytes", MAX_LOG_BYTES), ("log_bytes", True)):
         invalid = {**valid, field: value}
         try:
@@ -158,12 +199,32 @@ def self_check():
     inspection = {"kind": "diagnostic_sample", "scope": "independent status samples; not a quorum or write/read readiness proof",
         "configured_max_log_bytes": MAX_LOG_BYTES, "complete": True, "all_initialized": True,
         "retained_log_cap_agreement": True, "configured_log_cap_agreement": True,
-        "members": [{"node_id": member, "diagnostic": "sampled", "initialized": True,
-                     "status": {**valid, "node_id": member}} for member in (1, 2, 3)]}
+        "members": [{"node_id": member, "response_time_ms": 1.0,
+                     "diagnostic": "sampled", "initialized": True,
+                     "status": {**valid, "node_id": member,
+                                "committed_index": 10 + member,
+                                "last_applied": 9 + member},
+                     "committed_index_lag": 3 - member,
+                     "applied_index_lag": 3 - member}
+                    for member in (1, 2, 3)],
+        "replication_progress": {
+            "basis": "concurrent independent samples; not an atomic snapshot or readiness proof",
+            "committed_index": {"min": 11, "max": 13, "spread": 2},
+            "applied_index": {"min": 10, "max": 12, "spread": 2}}}
     check_inspection(inspection)
+    no_indexes = json.loads(json.dumps(inspection))
+    no_indexes["replication_progress"] = None
+    for member in no_indexes["members"]:
+        member["status"]["committed_index"] = None
+        member["status"]["last_applied"] = None
+        member.pop("committed_index_lag")
+        member.pop("applied_index_lag")
+    check_inspection(no_indexes)
     incomplete = json.loads(json.dumps(inspection))
     incomplete.update(complete=False, all_initialized=False, retained_log_cap_agreement=None, configured_log_cap_agreement=None)
-    incomplete["members"][1] = {"node_id": 2, "diagnostic": "unavailable", "status": None}
+    incomplete["replication_progress"] = None
+    incomplete["members"][1] = {"node_id": 2, "response_time_ms": 5.0,
+                                 "diagnostic": "unavailable", "status": None}
     check_inspection(incomplete, unavailable=2)
     for field, value in (("complete", True), ("retained_log_cap_agreement", True)):
         try:
@@ -187,6 +248,10 @@ def self_check():
     thread = threading.Thread(target=backend)
     thread.start()
     faults = Faults()
+    faults.set_status_only({1})
+    assert not faults.blocked(2, 1, "Status")
+    assert faults.blocked(2, 1, "AppendEntries")
+    faults.set(set())
     proxy = Proxy(1, listener.getsockname(), faults)
     try:
         envelope = json.dumps({"sender": 2, "recipient": 1, "token": "private-test-token", "payload": "Status"}).encode()
@@ -209,16 +274,17 @@ def self_check():
         proxy.close()
         listener.close()
     return {"self_check": "PASS", "runtime_exercised": False,
-            "checks": ["bounded peer proxy forwards one frame", "isolation blocks sender and recipient", "oversized header refused before body allocation", "capacity sample rejects mismatched limit/remaining and invalid counters", "incomplete inspect cannot claim completeness or capacity agreement"]}
+        "checks": ["bounded peer proxy forwards one frame", "isolation blocks sender and recipient", "status-only fault passes diagnostics but blocks consensus traffic", "oversized header refused before body allocation", "capacity sample rejects mismatched limit/remaining and invalid counters", "replication lag is derived only when all initialized voter indexes are present", "incomplete inspect cannot claim completeness or capacity agreement"]}
 
 
-def run(binary, rows):
+def run(binary, rows, log_cap_recovery=False):
     from neo4j import GraphDatabase, READ_ACCESS, __version__ as driver_version
     from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from examples.python.client import GraphClient, request_key as build_request_key
     if not 4 <= rows <= 500 or rows % 2:
         raise ValueError("rows must be even and between 4 and 500")
+    max_log_bytes = (1 << 20) if log_cap_recovery else MAX_LOG_BYTES
     binary = binary.resolve(strict=True)
     report = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "driver": driver_version,
               "rows": rows, "synthetic": True, "checks": [], "scope": "three independent native processes on loopback; not a machine-loss, TLS or snapshot qualification"}
@@ -269,7 +335,7 @@ def run(binary, rows):
             configs[member] = directory / "cluster.toml"
             configs[member].write_text(
                 f'node_id={member}\ncluster_id="{cluster_id}"\nlisten="127.0.0.1:{backend_ports[member]}"\n'
-                f'token_file={json.dumps(str(peer_token))}\nmax_log_bytes=1073741824\n' +
+                f'token_file={json.dumps(str(peer_token))}\nmax_log_bytes={max_log_bytes}\n' +
                 "".join(f'[[peers]]\nid={index}\naddress="{proxy.address}"\n' for index, proxy in enumerate(proxies, 1)))
 
         def redact(text):
@@ -361,8 +427,9 @@ def run(binary, rows):
             while time.monotonic() < deadline:
                 try:
                     snapshots = [status(member) for member in (1, 2, 3)]
-                    committed = max(item.get("committed_index") or 0 for item in snapshots)
-                    if committed and all((item.get("last_applied") or 0) >= committed for item in snapshots):
+                    committed = [item.get("committed_index") or 0 for item in snapshots]
+                    applied = [item.get("last_applied") or 0 for item in snapshots]
+                    if committed[0] and len(set(committed)) == 1 and applied == committed:
                         return snapshots
                 except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
                     pass
@@ -399,6 +466,30 @@ def run(binary, rows):
             assert report["local_probes"]["follower_readiness"]["reason"] == "not_local_leader"
             report["checks"].append("local leader readiness passes quorum read barrier; follower liveness passes while follower readiness fails; probes explicitly cover Raft only")
             report["checks"].append("committed bootstrap/create register two graphs; indexed nodes and trusted ACL restrict Alice; follower BEGIN refused")
+
+            faults.set_status_only({follower})
+            try:
+                time.sleep(0.15)
+                for index in range(3):
+                    query(current, "MATCH (p:Page {entity_id:'page-0'}) SET p.title=$title",
+                          title=f"replication-lag-{index}")
+                lag_inspection = json.loads(command(current, "inspect").stdout)
+                check_inspection(lag_inspection, max_log_bytes=max_log_bytes)
+                lagging_sample = next(item for item in lag_inspection["members"] if item["node_id"] == follower)
+                assert lag_inspection["complete"] and lag_inspection["all_initialized"]
+                assert max(lagging_sample["committed_index_lag"], lagging_sample["applied_index_lag"]) > 0
+                report["inspection_replication_lag"] = lag_inspection
+            finally:
+                faults.set(set())
+            lag_recovered = caught_up()
+            assert len({item["committed_index"] for item in lag_recovered}) == 1
+            assert len({item["last_applied"] for item in lag_recovered}) == 1
+            report["replication_lag_recovered_status"] = lag_recovered
+            current = leader()
+            query(current, "MATCH (p:Page {entity_id:'page-0'}) SET p.title='title-0'")
+            caught_up()
+            report["checks"].append("live inspect identifies a reachable follower with blocked replication and reports its sampled committed/applied lag; healing catches it up")
+
             pending_driver = driver(current)
             pending_resources = [pending_driver]
             pending_session = pending_driver.session(database="pages")
@@ -432,11 +523,11 @@ def run(binary, rows):
             faults.set(set())
             report["post_heal_status"] = caught_up()
             for sample in report["post_heal_status"]:
-                check_capacity(sample)
+                check_capacity(sample, max_log_bytes)
             report["inspection_healthy"] = json.loads(command(current, "inspect").stdout)
-            check_inspection(report["inspection_healthy"])
+            check_inspection(report["inspection_healthy"], max_log_bytes=max_log_bytes)
             assert report["inspection_healthy"]["cluster_id"] == cluster_id
-            report["checks"].append("healed three-voter status reports 1 GiB retained-log cap and exact remaining bytes; independent inspect samples agree without implying quorum readiness")
+            report["checks"].append("healed three-voter status reports configured retained-log cap, exact remaining bytes and sampled committed/applied index lag; independent inspect samples do not imply quorum readiness")
             inspection_victim = next(member for member in (1, 2, 3) if member != current)
             stop(inspection_victim)
             try:
@@ -444,7 +535,7 @@ def run(binary, rows):
                 assert inspection.returncode != 0, "incomplete inspection exited successfully"
                 report["inspection_incomplete"] = json.loads(inspection.stdout)
                 report["inspection_incomplete_exit_code"] = inspection.returncode
-                check_inspection(report["inspection_incomplete"], unavailable=inspection_victim)
+                check_inspection(report["inspection_incomplete"], unavailable=inspection_victim, max_log_bytes=max_log_bytes)
                 assert report["inspection_incomplete"]["cluster_id"] == cluster_id
             finally:
                 start(inspection_victim)
@@ -569,8 +660,120 @@ def run(binary, rows):
             assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == [{"n": rows + 4}]
             report["checks"].append("public atomic node+ACL helper exposes privileged acknowledged write to Alice; non-admin ACL rejection rolls back earlier MERGE with exact Forbidden error")
             report["post_atomic_status"] = caught_up()
+            if log_cap_recovery:
+                acknowledged = []
+                uncertain = None
+                capacity_callbacks = []
+                payloads = {}
+                capacity_samples = []
+                final_payload = "synthetic-log-cap-" + "x" * (16 << 10)
+
+                def capacity_write(seed):
+                    def operation(tx):
+                        capacity_callbacks.append(seed)
+                        tx.run("CREATE (p:Page {entity_id:$id,title:$title})",
+                               id=seed, title=payloads[seed]).consume()
+                    with driver(current) as client:
+                        return GraphClient(client, "pages").write_transaction(operation, request_id=seed)
+
+                for index in range(256):
+                    snapshots = [status(member) for member in (1, 2, 3)]
+                    for sample in snapshots:
+                        check_capacity(sample, max_log_bytes)
+                    capacity_samples.append(snapshots)
+                    remaining = sorted(item["log_remaining_bytes"] for item in snapshots)
+                    cannot_fit_quorum = remaining[1] < len(final_payload.encode())
+                    if cannot_fit_quorum:
+                        report["log_cap_bound_readiness"] = probe(current, "readiness", True)
+                        # A read barrier cannot establish space for a future proposal.
+                        after_probe = [status(member) for member in (1, 2, 3)]
+                        for sample in after_probe:
+                            check_capacity(sample, max_log_bytes)
+                        assert sorted(item["log_remaining_bytes"] for item in after_probe)[1] < len(final_payload.encode())
+                        report["log_cap_bound_status_after_readiness"] = after_probe
+                    seed = f"log-cap-{index}"
+                    payloads[seed] = final_payload if cannot_fit_quorum else "x" * min(16 << 10, max(128, remaining[0] // 32))
+                    try:
+                        capacity_write(seed)
+                        acknowledged.append(seed)
+                        assert not cannot_fit_quorum, "proposal acknowledged despite insufficient retained-log quorum capacity"
+                    except (Neo4jError, ServiceUnavailable, SessionExpired, OSError) as error:
+                        # A failed response never establishes whether COMMIT became durable.
+                        assert cannot_fit_quorum, "write failed before the objective raw-payload capacity bound"
+                        uncertain = seed
+                        report["log_cap_write_error"] = {"type": type(error).__name__,
+                            "code": getattr(error, "code", None), "diagnostic": redact(str(error))[-4096:]}
+                        post_error_probe = command(current, "probe", "--kind", "readiness", check=False)
+                        report["log_cap_post_error_readiness_observation_only"] = {
+                            "exit_code": post_error_probe.returncode,
+                            "sample": json.loads(post_error_probe.stdout)}
+                        break
+                assert acknowledged and uncertain is not None, "bounded synthetic writes did not reach the cap"
+                report["log_cap_acknowledged_request_ids"] = acknowledged
+                report["log_cap_uncertain_request_id"] = uncertain
+                for member in list(processes):
+                    stop(member)
+                report["log_cap_capacity_samples_before_writes"] = capacity_samples
+                report["log_cap_uncertain_raw_payload_bytes"] = len(payloads[uncertain].encode())
+                report["log_cap_exhaustion_basis"] = "before the failed proposal, a majority retained fewer free log bytes than its raw UTF-8 property alone; the serialized entry necessarily exceeds that lower bound"
+                for member in (1, 2, 3):
+                    original = configs[member].read_text()
+                    assert original.count(f"max_log_bytes={max_log_bytes}\n") == 1
+                    configs[member].write_text(original.replace(
+                        f"max_log_bytes={max_log_bytes}\n", f"max_log_bytes={MAX_LOG_BYTES}\n"))
+                report["log_cap_recovery_limits"] = {"initial": max_log_bytes, "restarted": MAX_LOG_BYTES}
+                for member in (1, 2, 3):
+                    start(member)
+                current = leader()
+                caught_up(timeout=60)
+                report["log_cap_recovery_readiness"] = probe(current, "readiness", True)
+                outcomes = {}
+                for seed in acknowledged + [uncertain]:
+                    key = build_request_key(cluster_id, "pages", "writer", seed)
+                    outcome = json.loads(command(current, "request", "--id", key).stdout)
+                    assert "Lookup" in outcome, "quorum-authoritative request lookup failed"
+                    outcomes[seed] = outcome
+                    if seed in acknowledged:
+                        assert "Applied" in outcome["Lookup"], "acknowledged request was lost"
+                # None is authoritative only because the request CLI performed its quorum barrier.
+                unresolved = outcomes[uncertain]["Lookup"]
+                if unresolved is None:
+                    try:
+                        capacity_write(uncertain)
+                    except Neo4jError as error:
+                        assert error.code == "Neo.ClientError.Transaction.RequestAlreadyCommitted", error.code
+                else:
+                    assert "Applied" in unresolved
+                key = build_request_key(cluster_id, "pages", "writer", uncertain)
+                resolved = json.loads(command(current, "request", "--id", key).stdout)
+                assert "Applied" in resolved["Lookup"]
+                report["log_cap_request_outcomes_before_retry"] = outcomes
+                report["log_cap_uncertain_resolved"] = resolved
+                callbacks_before_retry = len(capacity_callbacks)
+                try:
+                    capacity_write(acknowledged[0])
+                except Neo4jError as error:
+                    assert error.code == "Neo.ClientError.Transaction.RequestAlreadyCommitted", error.code
+                else:
+                    raise AssertionError("committed request replay unexpectedly acknowledged")
+                assert len(capacity_callbacks) == callbacks_before_retry
+                report["log_cap_committed_replay"] = {"request_id": acknowledged[0],
+                    "code": "Neo.ClientError.Transaction.RequestAlreadyCommitted", "callback_rerun": False}
+                for seed in acknowledged + [uncertain]:
+                    assert query(current, "MATCH (p:Page {entity_id:$id}) RETURN p.title AS title", id=seed) == [{"title": payloads[seed]}]
+                assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == [{"n": rows + 5 + len(acknowledged)}]
+                report["log_cap_recovery_status"] = caught_up(timeout=60)
+                for sample in report["log_cap_recovery_status"]:
+                    check_capacity(sample)
+                report["checks"].append("opt-in 1 MiB retained-log cap exhausts on bounded explicit writes; same voters and volumes restart with 1 GiB cap; quorum lookup resolves every ACK and uncertain COMMIT; stable request replay preserves each exact payload once and all commit/apply indexes converge")
+            report["graceful_stop"] = []
             for member in list(processes):
-                stop(member)
+                process, began = processes[member], time.monotonic()
+                stop(member, kill=False)
+                report["graceful_stop"].append({"member": member, "exit_code": process.returncode,
+                                                "exit_seconds": round(time.monotonic() - began, 6)})
+                assert process.returncode == 0, report["graceful_stop"]
+            report["checks"].append("SIGTERM drains and closes each voter in turn with exit 0")
             audits = {}
             for member in (1, 2, 3):
                 result = command(member, "audit", "--config", str(servers[member]), timeout=60)
@@ -628,7 +831,9 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--rows", type=int, default=200)
     parser.add_argument("--self-check", action="store_true")
+    parser.add_argument("--log-cap-recovery", action="store_true",
+        help="opt in to 1 MiB log exhaustion/recovery after a four-row acceptance fixture")
     args = parser.parse_args()
     if not args.self_check and not args.binary:
         parser.error("--binary must identify the parent-provided candidate")
-    print(json.dumps(self_check() if args.self_check else run(args.binary, args.rows), indent=2))
+    print(json.dumps(self_check() if args.self_check else run(args.binary, 4 if args.log_cap_recovery else args.rows, args.log_cap_recovery), indent=2))

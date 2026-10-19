@@ -164,13 +164,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = config(&dir.path().join("data"));
         let dbs = Databases::open_all(&config).unwrap();
-        assert_eq!(dbs.names(), vec!["client_memory"]);
-        assert!(dbs.get("client_memory").is_some());
+        assert_eq!(dbs.names(), vec!["default"]);
+        assert!(dbs.get("default").is_some());
         assert!(dbs.create("research").is_ok());
-        assert_eq!(dbs.names(), vec!["research", "client_memory"]);
+        assert_eq!(dbs.names(), vec!["default", "research"]);
         drop(dbs);
         let reopened = Databases::open_all(&config).unwrap();
-        assert_eq!(reopened.names(), vec!["research", "client_memory"]);
+        assert_eq!(reopened.names(), vec!["default", "research"]);
         assert!(reopened.get("research").is_some());
     }
 
@@ -180,7 +180,7 @@ mod tests {
         let config = config(&dir.path().join("data"));
         std::fs::create_dir_all(config.server.data_dir.join("notes")).unwrap();
         let dbs = Databases::open_all(&config).unwrap();
-        assert_eq!(dbs.names(), vec!["client_memory"]);
+        assert_eq!(dbs.names(), vec!["default"]);
         assert!(dbs.create("notes").is_err());
         for name in ["", ".", "..", "../escape", "a/b", "a\\b", " a", "a b"] {
             assert!(dbs.create(name).is_err(), "{name:?}");
@@ -201,7 +201,7 @@ mod tests {
         std::fs::create_dir_all(&config.server.data_dir).unwrap();
         symlink(&outside, config.server.data_dir.join("linked")).unwrap();
         let registry = Databases::open_all(&config).unwrap();
-        assert_eq!(registry.names(), vec!["client_memory"]);
+        assert_eq!(registry.names(), vec!["default"]);
         assert!(registry.create("linked").is_err());
     }
 

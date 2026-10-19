@@ -48,8 +48,8 @@ COMMIT, not a deterministic kill inside the storage commit phase.
 
 Finally it stops the server, runs `db check --json` and `db stats --json` for
 all three graphs, requires all audits to be `ok` and exact counts to match, then
-removes its owned process, storage and credentials. The native server has no
-SIGTERM drain guarantee; stopping for offline checks is a process boundary.
+removes its owned process, storage and credentials. SIGTERM drains only
+for a bounded grace; stopping for offline checks is a process boundary.
 
 ## Run with a frozen candidate
 

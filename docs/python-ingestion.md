@@ -3,7 +3,7 @@
 Python is the client; Brainwire runs the graph engine in Rust. Send parameterized
 Cypher over Bolt using the Neo4j Python driver. The acceptance harness currently
 verifies driver 5.28.6; this is a tested protocol subset, not full Neo4j feature
-compatibility. A [synthetic client ticket/comment snapshot adapter](client-shadow.md)
+compatibility. A [synthetic external application ticket/comment snapshot adapter](source-ingestion.md)
 now reuses the same importer; direct DuckLake reading and a production mapping
 remain separate integration tasks.
 
@@ -141,7 +141,7 @@ stops its child process and removes its temporary directory.
 
 ## Next integration: DuckLake first, Arrow into Rust
 
-Priority confirmed by Allan on 2026-10-01: client reads primarily from DuckLake;
+Priority confirmed by Allan on 2026-10-01: external application reads primarily from DuckLake;
 DuckDB, Parquet and Delta Lake should share the ingestion interface. This section
 is a proposed next implementation, not an installed connector or scheduled job.
 The approved design already proposes Arrow Flight; the workspace does not yet

@@ -200,7 +200,7 @@ Rules that keep all of Cypher valid:
   already reject the harmful cases (sources whose identifiers cannot converge),
   so Brainwire merges instead of refusing (decided 2026-09-26).
 
-### 2.2 ACL: the client model, inside the engine
+### 2.2 ACL: the external application model, inside the engine
 
 Storage:
 
@@ -235,7 +235,7 @@ Sessions:
   properties, because the adapter's post-filter depends on them to keep the row,
   and the adapter strips them before answering.
 - **User** (CLI, BI, any direct connection): logs in with the
-  client-identity JWT, validated through the JWKS. Brainwire derives the
+  external-identity JWT, validated through the JWKS. Brainwire derives the
   principals like `_principals_for` and the entry axis like
   `entry_connectors`. The set of open connectors stays empty until the
   memory-api publishes it through the admin API, which falls on the safe side:
@@ -264,7 +264,7 @@ Simple version, decided by Allan on 2026-09-24.
 - Commands in Neo4j syntax where one exists: `CREATE USER`, `DROP USER`,
   `GRANT ROLE`, `REVOKE ROLE`, `SHOW USERS`, `SHOW ROLES`; the database list is
   set with `ALTER USER <name> SET DATABASES [<db>, ...]`, a Brainwire extension.
-- The roles in the client JWT (`role:admin`, `role:consumer` and the others)
+- The roles in the external application JWT (`role:admin`, `role:consumer` and the others)
   map to the three through configuration.
 - RBAC decides what a person can do (read, write, administer); what they see
   stays with the row ACL. A graph write from a `reader` is refused before it
@@ -348,14 +348,14 @@ the platform sends today) and [research/bolt.md](../../../research/bolt.md)
   not Neo4j itself, whose name is a trademark of Neo4j, Inc. The Brainwire
   version goes in the `hints` and in `CALL dbms.components()`.
 - LOGON accepts three schemes: `basic` (users in `system`, argon2 hashes),
-  `bearer` (the client-identity JWT, validated by JWKS) and `none` only when
+  `bearer` (the external-identity JWT, validated by JWKS) and `none` only when
   enabled for local development. A token carrying the service capability opens
   a service session (section 2.2).
 - Messages: RUN, PULL and DISCARD with `qid`; BEGIN, COMMIT and ROLLBACK; RESET;
   GOODBYE; TELEMETRY accepted and ignored; ROUTE for `neo4j://`. After a
   FAILURE, IGNORED until RESET, as the state machine requires.
 - The database comes from `db` in BEGIN or RUN, with a configurable default
-  (`client_memory`); administration runs against `system`.
+  (`default`); administration runs against `system`.
 - Bookmark: `bw:<database>:<commit index>`. On a single node the index is the
   commit sequence; in the cluster, the Raft index.
 - Errors use the Neo4j codes the platform already recognizes by text:
@@ -398,7 +398,7 @@ health.
   (section 6). Anything that exposes Arrow (pandas, polars, pyarrow, DuckDB
   relations) goes in without a copy, and results come back with `to_arrow()`,
   `to_pandas()` and `to_polars()`.
-- The platform adapter `client_core/repository/brainwire.py` implements the
+- The platform adapter `external_core/repository/brainwire.py` implements the
   port: governed reads send the caller's `AclPredicate` as session context and
   need no post-filter, `merge_node` and bulk writes go through Flight, and the
   Cypher write hatches (`execute`, `execute_batch`, `execute_pipeline`) go
@@ -437,7 +437,7 @@ weight)` builds a compact in-memory CSR of the visible subgraph.
 
 All of them are Cypher procedures (`CALL bw.... YIELD ...`). The platform's
 governed read grammar refuses `CALL` today, so the MCP's `run_cypher` needs one
-small change in client-core: accept `CALL bw.*`, which Brainwire marks as
+small change in external-core: accept `CALL bw.*`, which Brainwire marks as
 read-only.
 
 ### 4.2 AI: `bw.ask`
@@ -545,10 +545,10 @@ an ontology type (decided by Allan on 2026-09-25).
 - **Offline import:** `brainwire import` reads the clean layer's Parquet (or CSV)
   and builds the database through SST ingestion (section 1.7), followed by an
   alias swap.
-- **Metrics:** Prometheus at `/metrics`, under `client_brainwire_*`: queries,
+- **Metrics:** Prometheus at `/metrics`, under `external_brainwire_*`: queries,
   latency histograms, cache hit rate, bytes per element, compaction backlog, WAL
   fsync latency, Raft lag, ACL cache hits. Counts and statistics only.
-- **Logs:** structured JSON, like `client_core.logging`. The slow query log
+- **Logs:** structured JSON, like `external_core.logging`. The slow query log
   keeps the query text and leaves the parameters out by default, since they may
   carry personal data.
 - **Health:** `/health` for liveness and `/ready` for readiness (databases open,
@@ -566,7 +566,7 @@ an ontology type (decided by Allan on 2026-09-25).
 - The ACL differential test: cases generated in Python and evaluated by
   `is_visible` become fixtures that the engine must match one by one.
 - The TCK harness (section 3.2) and the contract suite
-  (`client-core/tests/test_graph_repository_contract.py`) against Brainwire,
+  (`external-core/tests/test_graph_repository_contract.py`) against Brainwire,
   in CI.
 - Crash test: `kill -9` in a loop during writes, then invariants checked (every
   `pk` points to an existing node, `out` and `in` mirror each other, counters stay
@@ -578,4 +578,4 @@ an ontology type (decided by Allan on 2026-09-25).
   plus ingestion rate, bytes per element and RSS under the 16 GB limit, recorded
   at every gate.
 - CI: build, clippy, fmt, tests, TCK and contract suite on every change under
-  `client-brainwire/`; benchmarks run on the benchmark VM.
+  `external-brainwire/`; benchmarks run on the benchmark VM.

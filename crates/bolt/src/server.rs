@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
+use tokio::sync::{watch, Semaphore};
 
 use crate::chunk::{encode_message, ChunkReader};
 use crate::handshake::{negotiate, response, MAGIC};
@@ -132,10 +132,46 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    serve_until(
+        listener,
+        make_engine,
+        limits,
+        auth,
+        std::future::pending(),
+        std::time::Duration::ZERO,
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Serve until `shutdown` completes, then drain: stop accepting, close each
+/// session at its next idle message boundary (outside a transaction or result
+/// stream), refuse new work with a transient FAILURE, and wait at most `grace`
+/// for open transactions/streams to finish. Returns the number of sessions
+/// still open at the deadline; their unacknowledged work is abandoned when the
+/// caller stops the runtime. Engine calls already running are not interrupted.
+pub async fn serve_until<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+    shutdown: impl std::future::Future<Output = ()>,
+    grace: std::time::Duration,
+) -> std::io::Result<usize>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
     let make_engine = Arc::new(make_engine);
     let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
+    let (drain, draining) = watch::channel(false);
+    tokio::pin!(shutdown);
     loop {
-        let (stream, _) = match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            () = &mut shutdown => break,
+        };
+        let (stream, _) = match accepted {
             Ok(accepted) => accepted,
             Err(err) => {
                 // A single bad `accept()` must never end the process: with a
@@ -161,6 +197,7 @@ where
         };
         let make = Arc::clone(&make_engine);
         let auth = auth.clone();
+        let draining = draining.clone();
         tokio::spawn(async move {
             let _permit = permit;
             let _ = handle_connection_with_connection_timeouts(
@@ -170,9 +207,30 @@ where
                 auth,
                 DEFAULT_HANDSHAKE_TIMEOUT,
                 DEFAULT_AUTHENTICATION_TIMEOUT,
+                draining,
             )
             .await;
         });
+    }
+    drop(listener);
+    let _ = drain.send(true);
+    let all = u32::try_from(DEFAULT_MAX_CONNECTIONS).expect("connection limit fits u32");
+    let _ = tokio::time::timeout(grace, permits.acquire_many(all)).await;
+    Ok(DEFAULT_MAX_CONNECTIONS - permits.available_permits())
+}
+
+/// Sessions that can close without losing acknowledged or in-flight work.
+fn idle(state: State) -> bool {
+    matches!(
+        state,
+        State::Connected | State::Authentication | State::Ready | State::Failed
+    )
+}
+
+/// Completes once a drain starts; never, if the server has no drain signal.
+async fn drain_started(draining: &mut watch::Receiver<bool>) {
+    if draining.wait_for(|started| *started).await.is_err() {
+        std::future::pending::<()>().await;
     }
 }
 
@@ -276,6 +334,28 @@ async fn handle_connection_with_limits_and_timeouts<
         auth,
         handshake_timeout,
         authentication_timeout,
+        watch::channel(false).1,
+    )
+    .await
+}
+
+#[cfg(test)]
+async fn handle_connection_with_drain<
+    E: QueryEngine + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin,
+>(
+    stream: S,
+    engine: E,
+    draining: watch::Receiver<bool>,
+) -> std::io::Result<()> {
+    handle_connection_with_connection_timeouts(
+        stream,
+        engine,
+        ConnectionLimits::default(),
+        AuthMode::AllowAll,
+        DEFAULT_HANDSHAKE_TIMEOUT,
+        DEFAULT_AUTHENTICATION_TIMEOUT,
+        draining,
     )
     .await
 }
@@ -290,8 +370,9 @@ async fn handle_connection_with_connection_timeouts<
     auth: AuthMode,
     handshake_timeout: std::time::Duration,
     authentication_timeout: std::time::Duration,
+    mut draining: watch::Receiver<bool>,
 ) -> std::io::Result<()> {
-    let negotiated = tokio::time::timeout(handshake_timeout, async {
+    let handshake = tokio::time::timeout(handshake_timeout, async {
         let mut hello = [0u8; 20];
         stream.read_exact(&mut hello).await?;
         if hello[..4] != MAGIC {
@@ -301,8 +382,11 @@ async fn handle_connection_with_connection_timeouts<
         let version = negotiate(&proposals);
         stream.write_all(&response(version)).await?;
         Ok(version.is_some())
-    })
-    .await
+    });
+    let negotiated = tokio::select! {
+        negotiated = handshake => negotiated,
+        () = drain_started(&mut draining) => return Ok(()),
+    }
     .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "Bolt handshake timed out"))??;
     if !negotiated {
         return Ok(());
@@ -340,6 +424,21 @@ async fn handle_connection_with_connection_timeouts<
                 .filter(|_| input.is_empty())
                 .and_then(|v| parse_request(v).ok())
             {
+                Some(_) if *draining.borrow() && idle(session.state()) => {
+                    session.close();
+                    io_with_deadline(
+                        &mut session,
+                        authentication_deadline
+                            .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
+                        write_failure(
+                            &mut stream,
+                            "Neo.TransientError.General.DatabaseUnavailable",
+                            "server is shutting down; request not executed",
+                        ),
+                    )
+                    .await?;
+                    return Ok(());
+                }
                 Some(req) => {
                     let response_deadline = authentication_deadline;
                     check_io_deadline(&mut session, response_deadline.or(request_deadline))?;
@@ -401,12 +500,16 @@ async fn handle_connection_with_connection_timeouts<
                 }
             }
         }
-        let n = io_with_deadline(
-            &mut session,
-            authentication_deadline.or(request_deadline),
-            stream.read(&mut buf),
-        )
-        .await?;
+        let wait_for_drain = idle(session.state());
+        let n = tokio::select! {
+            biased;
+            n = io_with_deadline(
+                &mut session,
+                authentication_deadline.or(request_deadline),
+                stream.read(&mut buf),
+            ) => n?,
+            () = drain_started(&mut draining), if wait_for_drain => 0,
+        };
         if n == 0 {
             session.close();
             return Ok(());
@@ -1488,6 +1591,7 @@ mod tests {
             AuthMode::AllowAll,
             DEFAULT_HANDSHAKE_TIMEOUT,
             DEFAULT_AUTHENTICATION_TIMEOUT,
+            watch::channel(false).1,
         ))
     }
 
@@ -1658,5 +1762,147 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_millis(100), aborted.notified())
             .await
             .unwrap();
+    }
+
+    // Graceful stop: admission ends, idle sessions close at a message
+    // boundary, open transactions may finish within the grace period.
+
+    async fn login<S: AsyncRead + AsyncWrite + Unpin>(client: &mut S) {
+        handshake(client).await;
+        for tag in [0x01, 0x6a] {
+            send_request(client, tag, vec![PackValue::Map(vec![])]).await;
+            read_success(client).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn drain_closes_idle_sessions_and_stops_admission() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve_until(
+            listener,
+            || StubEngine,
+            ConnectionLimits::default(),
+            AuthMode::AllowAll,
+            async move {
+                let _ = stopped.await;
+            },
+            std::time::Duration::from_secs(5),
+        ));
+        let mut idle = TcpStream::connect(address).await.unwrap();
+        login(&mut idle).await;
+        let mut handshaking = TcpStream::connect(address).await.unwrap();
+        handshaking.write_all(&MAGIC).await.unwrap();
+        stop.send(()).unwrap();
+        for client in [&mut idle, &mut handshaking] {
+            let mut rest = Vec::new();
+            let closed = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                client.read_to_end(&mut rest),
+            )
+            .await
+            .expect("idle session closed by the drain");
+            // Closing with unread handshake bytes may surface as a reset.
+            match closed {
+                Ok(_) => assert!(rest.is_empty()),
+                Err(err) => assert_eq!(err.kind(), std::io::ErrorKind::ConnectionReset),
+            }
+        }
+        let open = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .expect("drain completes once sessions close")
+            .unwrap()
+            .unwrap();
+        assert_eq!(open, 0);
+        assert!(TcpStream::connect(address).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn drain_lets_an_open_transaction_commit_then_refuses_new_work() {
+        let (server, mut client) = tokio::io::duplex(4096);
+        let (drain, draining) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(handle_connection_with_drain(server, StubEngine, draining));
+        login_and_begin(&mut client).await;
+        drain.send(true).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!task.is_finished(), "a transaction is not idle");
+        send_request(
+            &mut client,
+            0x10,
+            vec![
+                PackValue::String("RETURN 1".into()),
+                PackValue::Map(vec![]),
+                PackValue::Map(vec![]),
+            ],
+        )
+        .await;
+        read_success(&mut client).await;
+        send_request(
+            &mut client,
+            0x2f,
+            vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+        )
+        .await;
+        read_success(&mut client).await;
+        // COMMIT and a pipelined BEGIN arrive together; only COMMIT runs.
+        let mut pipeline = Vec::new();
+        pack(
+            &PackValue::Struct {
+                tag: 0x12,
+                fields: vec![],
+            },
+            &mut pipeline,
+        );
+        let mut bytes = encode_message(&pipeline);
+        let mut begin = Vec::new();
+        pack(
+            &PackValue::Struct {
+                tag: 0x11,
+                fields: vec![PackValue::Map(vec![])],
+            },
+            &mut begin,
+        );
+        bytes.extend_from_slice(&encode_message(&begin));
+        client.write_all(&bytes).await.unwrap();
+        read_success(&mut client).await;
+        let mut refusal = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.read_to_end(&mut refusal),
+        )
+        .await
+        .expect("close after refusing new work")
+        .unwrap();
+        let (code, message) = decode_failure(&refusal);
+        assert_eq!(code, "Neo.TransientError.General.DatabaseUnavailable");
+        assert!(message.contains("not executed"));
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn drain_deadline_reports_sessions_still_open() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve_until(
+            listener,
+            || StubEngine,
+            ConnectionLimits::default(),
+            AuthMode::AllowAll,
+            async move {
+                let _ = stopped.await;
+            },
+            std::time::Duration::from_millis(100),
+        ));
+        let mut client = TcpStream::connect(address).await.unwrap();
+        login_and_begin(&mut client).await;
+        stop.send(()).unwrap();
+        let open = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .expect("the grace period bounds the drain")
+            .unwrap()
+            .unwrap();
+        assert_eq!(open, 1);
     }
 }

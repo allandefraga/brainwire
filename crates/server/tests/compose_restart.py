@@ -28,6 +28,11 @@ def run(image):
         return subprocess.run(["docker", "compose", "-p", project, "-f", str(root / "deploy/compose.yaml"), *args],
                               env=env, check=check, capture_output=True, text=True)
 
+    def exit_code():
+        container = compose("ps", "-a", "-q", "brainwire").stdout.strip()
+        return int(subprocess.run(["docker", "inspect", "-f", "{{.State.ExitCode}}", container],
+                                  check=True, capture_output=True, text=True).stdout)
+
     def ready():
         for _ in range(100):
             if compose("exec", "-T", "brainwire", "brainwire", "probe", "--mode", "ready", "--timeout-ms", "500", check=False).returncode == 0:
@@ -39,23 +44,48 @@ def run(image):
         compose("up", "-d", "--no-build")
         ready()
         compose("stop")
-        compose("run", "--rm", "--no-deps", "brainwire", "db", "apply-ontology", "client_memory", "/opt/brainwire/example-schema.json")
+        compose("run", "--rm", "--no-deps", "brainwire", "db", "apply-ontology", "default", "/opt/brainwire/example-schema.json")
+        compose("start")
+        ready()
+        # SIGTERM drain through the image: an open transaction still commits.
+        with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
+            with driver.session(database="default") as session:
+                tx = session.begin_transaction()
+                tx.run("CREATE (c:Customer {entity_id:'drain-customer', email:'drain@example.test'})").consume()
+                stopping = subprocess.Popen(["docker", "compose", "-p", project, "-f", str(root / "deploy/compose.yaml"), "stop"],
+                                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                for _ in range(100):
+                    if "shutdown requested" in compose("logs", "brainwire", check=False).stdout:
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError("container never received SIGTERM")
+                assert stopping.poll() is None, "an open transaction must hold the drain"
+                tx.commit()
+        assert stopping.wait(timeout=60) == 0
+        assert exit_code() == 0
+        assert "drained; all sessions closed" in compose("logs", "brainwire", check=False).stdout
         compose("start")
         ready()
         with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
-            with driver.session(database="client_memory") as session:
+            with driver.session(database="default") as session:
+                found = session.run("MATCH (c:Customer) WHERE c.email='drain@example.test' RETURN c.entity_id AS id").single()
+                assert found["id"] == "drain-customer"
                 session.run("CREATE (c:Customer {entity_id:'compose-customer', email:'compose@example.test'})").consume()
         compose("kill", "-s", "SIGKILL")
         compose("up", "-d", "--no-build", "--force-recreate")
         ready()
         with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
-            with driver.session(database="client_memory") as session:
+            with driver.session(database="default") as session:
                 found = session.run("MATCH (c:Customer) WHERE c.email='compose@example.test' RETURN c.entity_id AS id").single()
                 assert found["id"] == "compose-customer"
         compose("stop")
-        audit = json.loads(compose("run", "--rm", "--no-deps", "brainwire", "db", "check", "client_memory", "--json").stdout)
+        assert exit_code() == 0, "idle-only stop must drain cleanly"
+        audit = json.loads(compose("run", "--rm", "--no-deps", "brainwire", "db", "check", "default", "--json").stdout)
         assert audit["status"] == "ok", audit
-        print(json.dumps({"result": "PASS", "image": image, "project": project, "audit": audit}, indent=2))
+        print(json.dumps({"result": "PASS", "image": image, "project": project, "audit": audit,
+                          "checks": ["commit during SIGTERM drain survives restart; exit 0", "SIGKILL recovery",
+                                     "idle-only stop exits 0", "offline audit ok"]}, indent=2))
     finally:
         compose("down", "--volumes", "--remove-orphans")
 

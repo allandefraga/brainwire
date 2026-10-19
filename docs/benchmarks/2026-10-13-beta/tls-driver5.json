@@ -18,7 +18,7 @@
     "explicit rollback succeeds; committed rows/index survive backend SIGKILL/start and TLS reconnect"
   ],
   "audit": {
-    "database": "client_memory",
+    "database": "default",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },

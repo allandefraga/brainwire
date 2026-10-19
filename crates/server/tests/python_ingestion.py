@@ -16,8 +16,12 @@ import sys
 import tempfile
 import time
 
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
+from examples.python.client import GraphClient
 
 UPSERT = """
 UNWIND $rows AS row
@@ -56,6 +60,13 @@ def verify(session, rows):
     assert path["id"] == "id-0" and path["depth"] == 0
     reachable = session.run("CALL graph.reachable({source:'id-0', sourceLabel:'Customer', maxDepth:1}) YIELD node, depth RETURN node.entity_id AS id, depth").single()
     assert reachable["id"] == "id-0" and reachable["depth"] == 0
+    edges = session.run("MATCH (a:Customer)-[:RELATED]->(b:Customer) "
+                        "RETURN a.entity_id AS source,b.entity_id AS target").data()
+    edges.sort(key=lambda edge: (edge["source"], edge["target"]))
+    assert edges == [
+        {"source": "id-3", "target": "id-4"},
+        {"source": "id-4", "target": "id-5"},
+    ], edges
 
 
 def run(binary, rows, batch_size, query_mib):
@@ -80,7 +91,8 @@ query = "{query_mib}MiB"
         ontology.write_text(json.dumps({"version": "1", "nodes": [{
             "label": "Customer", "properties": ["email", "active", "tags", "embedding", "segment"],
             "indexed_fields": ["email", "active", "segment"],
-        }]}))
+        }], "edges": [{"type": "RELATED", "from": {"label": "Customer"},
+                       "to": {"label": "Customer"}, "properties": ["weight", "note"]}]}))
 
         def cli(*args):
             return subprocess.check_output([str(binary), *args, "--config", str(config)], env=env, text=True)
@@ -153,7 +165,50 @@ query = "{query_mib}MiB"
                                 session.run("MATCH (c:Customer {entity_id:'id-0'}) SET c.email='changed@example.test'").consume()
                                 session.run("MATCH (c:Customer {entity_id:'id-1'}) SET c.email=null").consume()
                                 session.run("MATCH (c:Customer {entity_id:'id-2'}) DETACH DELETE c").consume()
+                                graph = GraphClient(driver, "ingestion", batch_size=2)
+                                assert graph.load_edges("Customer", "RELATED", "Customer", [
+                                    {"source_id": "id-3", "target_id": "id-4", "weight": 0.2, "note": "keep-me"},
+                                    {"source_id": "id-3", "target_id": "id-4", "weight": 0.8},
+                                    {"source_id": "id-4", "target_id": "id-5", "weight": None},
+                                ]) == 3
+                                try:
+                                    graph.load_edges("Customer", "RELATED", "Customer", [
+                                        {"source_id": "id-5", "target_id": "id-4", "weight": 0.1, "note": "rollback"},
+                                        {"source_id": "id-3", "target_id": "missing", "weight": 9.0},
+                                    ])
+                                except ValueError as error:
+                                    assert "endpoints" in str(error)
+                                else:
+                                    raise AssertionError("missing edge endpoint must fail the batch")
                             verify(session, rows)
+                            if cycle == 1:
+                                graph = GraphClient(driver, "ingestion", batch_size=250)
+                                cleanup_count = 1000
+                                assert graph.load_nodes("Customer", (
+                                    {"entity_id": f"cleanup-{index}"}
+                                    for index in range(cleanup_count)
+                                )) == cleanup_count
+                                assert graph.load_edges("Customer", "RELATED", "Customer", (
+                                    {"source_id": "id-3", "target_id": "cleanup-0"}
+                                    if index == 0 else
+                                    {"source_id": f"cleanup-{index-1}", "target_id": f"cleanup-{index}"}
+                                    for index in range(cleanup_count)
+                                )) == cleanup_count
+                                delete_started = time.perf_counter()
+                                deleted = graph.delete_nodes("Customer", (
+                                    f"cleanup-{index}" for index in range(cleanup_count)
+                                ))
+                                deletion_seconds = time.perf_counter() - delete_started
+                                assert deleted == cleanup_count
+                                assert graph.delete_nodes("Customer", ["cleanup-999", "cleanup-999"]) == 0
+                                assert count(session, "") == rows - 1
+                                for entity_id in ("cleanup-0", "cleanup-999"):
+                                    assert count(session, f"{{entity_id:'{entity_id}'}}") == 0
+                                remaining_from_source = session.run(
+                                    "MATCH (a:Customer {entity_id:'id-3'})-[:RELATED]->(b:Customer) "
+                                    "RETURN b.entity_id AS target"
+                                ).data()
+                                assert remaining_from_source == [{"target": "id-4"}]
                             if cycle == 0:
                                 for name, query in (
                                     ("primaryPoint", "MATCH (c:Customer {entity_id:$id}) RETURN c.entity_id AS id"),
@@ -201,6 +256,7 @@ query = "{query_mib}MiB"
             assert "idx" in graph["storage"]
             print(json.dumps({"rows": rows, "batch_size": batch_size, "query_guard_mib": query_mib, "insert_seconds": durations[0],
                               "replay_seconds": durations[1], "recovered_nodes": graph["nodes"],
+                              "cleanup_nodes": cleanup_count, "delete_seconds": deletion_seconds,
                               "sst_files_before_crash": sst_before_crash,
                               "read_timings": read_timings, "driver": __import__("neo4j").__version__, "query_guard_rollback": "PASS", "numeric_index_recovery": "PASS", "result": "PASS"}, indent=2))
         finally:
@@ -216,8 +272,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--query-mib", type=int, default=32)
     args = parser.parse_args()
-    if args.rows < 4 or args.batch_size < 1:
-        parser.error("rows must be >= 4 and batch-size must be positive")
+    if args.rows < 6 or args.batch_size < 1:
+        parser.error("rows must be >= 6 and batch-size must be positive")
     if not 1 <= args.query_mib <= 256:
         parser.error("query-mib must be between 1 and 256")
     run(args.binary.resolve(), args.rows, args.batch_size, args.query_mib)

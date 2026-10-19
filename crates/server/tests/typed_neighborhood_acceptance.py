@@ -56,7 +56,7 @@ def run(binary, nodes, iterations, cli_iterations):
 
     if not 22 <= nodes <= 100000 or not 1 <= iterations <= 2000 or not 0 <= cli_iterations <= 20:
         raise ValueError("nodes 22..100000, iterations 1..2000, cli_iterations 0..20")
-    schema = ROOT / "examples/client/ontology.json"
+    schema = ROOT / "examples/source_ingestion/ontology.json"
     report = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
               "ontology_sha256": hashlib.sha256(schema.read_bytes()).hexdigest(),
               "driver": driver_version, "os": platform.platform(), "nodes_requested": nodes,

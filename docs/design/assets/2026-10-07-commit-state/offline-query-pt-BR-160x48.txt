@@ -4,7 +4,7 @@
 ┌Grafos nomeados────────────────────────────────────────────────────────────┐┌─PIPELINE DE ESCRITA─────────────────────────────────────────────────────────────┐
 │ GRAFO                     NÓS      ARESTAS                                ││Python -> Bolt -> Cypher                                                         │
 │▶ customers-100k             100000          0                             ││UNWIND $rows -> MERGE -> SET                                                     │
-│  client_memory                 0          0                             ││                                                                                 │
+│  default                         0          0                             ││                                                                                 │
 │                                                                           ││Nó + índices: um WriteBatch.                                                     │
 │                                                                           ││COMMIT sincroniza o WAL.                                                         │
 │                                                                           ││Flush cria SST depois.                                                           │

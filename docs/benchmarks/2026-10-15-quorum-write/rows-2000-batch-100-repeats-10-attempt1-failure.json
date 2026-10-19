@@ -1,0 +1,220 @@
+{
+  "result": "FAIL",
+  "error_type": "DatabaseUnavailable",
+  "error_code": "Neo.TransientError.General.DatabaseUnavailable",
+  "error": "{neo4j_code: Neo.TransientError.General.DatabaseUnavailable} {message: leader/quorum unavailable} {gql_status: 50N42} {gql_status_description: error: general processing exception - unexpected error. leader/quorum unavailable}",
+  "request_id": null,
+  "repeat": 4,
+  "mode": "single",
+  "row_offset": 1615,
+  "rows_in_failed_transaction": 1,
+  "failed_call_elapsed_ms": 24.886167,
+  "status_at_failure": {
+    "1": {
+      "cluster_id": "write-diagnostic-63e1d7598d1a4869bf81eb7decfb866b",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 1,
+      "leader": 1,
+      "last_log_index": 9697,
+      "last_applied": 9697,
+      "committed_index": 9697,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 9949926,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1063791898,
+      "running": true,
+      "running_issue": null
+    },
+    "2": {
+      "cluster_id": "write-diagnostic-63e1d7598d1a4869bf81eb7decfb866b",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 1,
+      "leader": 1,
+      "last_log_index": 9697,
+      "last_applied": 9697,
+      "committed_index": 9697,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 9949926,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1063791898,
+      "running": true,
+      "running_issue": null
+    },
+    "3": {
+      "cluster_id": "write-diagnostic-63e1d7598d1a4869bf81eb7decfb866b",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 1,
+      "leader": 1,
+      "last_log_index": 9697,
+      "last_applied": 9697,
+      "committed_index": 9697,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 9949926,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1063791898,
+      "running": true,
+      "running_issue": null
+    }
+  },
+  "request_lookup": {
+    "state": "unavailable",
+    "last_error": "no request id in error message"
+  },
+  "status_after_lookup": {
+    "1": {
+      "cluster_id": "write-diagnostic-63e1d7598d1a4869bf81eb7decfb866b",
+      "node_id": 1,
+      "state": "Leader",
+      "current_term": 1,
+      "leader": 1,
+      "last_log_index": 9697,
+      "last_applied": 9697,
+      "committed_index": 9697,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 9949926,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1063791898,
+      "running": true,
+      "running_issue": null
+    },
+    "2": {
+      "cluster_id": "write-diagnostic-63e1d7598d1a4869bf81eb7decfb866b",
+      "node_id": 2,
+      "state": "Follower",
+      "current_term": 1,
+      "leader": 1,
+      "last_log_index": 9697,
+      "last_applied": 9697,
+      "committed_index": 9697,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 9949926,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1063791898,
+      "running": true,
+      "running_issue": null
+    },
+    "3": {
+      "cluster_id": "write-diagnostic-63e1d7598d1a4869bf81eb7decfb866b",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 1,
+      "leader": 1,
+      "last_log_index": 9697,
+      "last_applied": 9697,
+      "committed_index": 9697,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 9949926,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1063791898,
+      "running": true,
+      "running_issue": null
+    }
+  },
+  "server_log_tails": {
+    "1": {
+      "bytes_total": 141,
+      "tail": "brainwire serve 127.0.0.1:49502 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)\n"
+    },
+    "2": {
+      "bytes_total": 141,
+      "tail": "brainwire serve 127.0.0.1:49503 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)\n"
+    },
+    "3": {
+      "bytes_total": 141,
+      "tail": "brainwire serve 127.0.0.1:49504 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)\n"
+    }
+  },
+  "note": "the failed write was not retried; a timeout does not mean rollback. request_lookup.state is authoritative only when it is Applied or absent",
+  "binary_sha256": "8662a2326e9983390c83e8ba1cf9519b3af66f2e6025695257f9e71b8eda45f5",
+  "driver": "6.3.0",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "rows_per_round": 2000,
+  "batch_size": 100,
+  "repeats": 10,
+  "leader_member": 1,
+  "completed_rounds": [
+    {
+      "repeat": 0,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.4356455000000001,
+      "max_ms": 53.113167
+    },
+    {
+      "repeat": 0,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 4.6233955,
+      "max_ms": 13.145791
+    },
+    {
+      "repeat": 1,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 4.144146,
+      "max_ms": 12.085917
+    },
+    {
+      "repeat": 1,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.4891045,
+      "max_ms": 24.12325
+    },
+    {
+      "repeat": 2,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.5292705,
+      "max_ms": 39.910167
+    },
+    {
+      "repeat": 2,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 5.1109585,
+      "max_ms": 17.017667
+    },
+    {
+      "repeat": 3,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 4.582479,
+      "max_ms": 16.794917
+    },
+    {
+      "repeat": 3,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.5570415,
+      "max_ms": 34.416417
+    }
+  ]
+}

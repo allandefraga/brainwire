@@ -19,7 +19,7 @@ export BRAINWIRE_BOLT_AUTH_FILE=/private/path/observer.json
   --edge-type HAS_COMMENT --target-label TicketComment
 ```
 
-The entity ID above is the first ticket produced by the synthetic client
+The entity ID above is the first ticket produced by the synthetic external application
 fixture and adapter. Quote it as shown; it is an identity value, not a Cypher
 expression. The four Graph flags configure one fixed neighborhood for this
 terminal session. Without them, the other three panes work normally; visiting

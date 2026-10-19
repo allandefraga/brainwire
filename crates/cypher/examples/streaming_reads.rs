@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"nodes":nodes,"queryBudgetBytes":limits.memory_bytes,"cacheMiB":64,"memtableMiB":4,"importMs":import_ms,"measurements":measurements,"unboundedResult":"memory_limit_and_reservation_release_verified","scope":"warm embedded debug, one warmup and five samples; query accounting is not RSS"})
+            &serde_json::json!({"profile":if cfg!(debug_assertions) {"debug"} else {"release"},"nodes":nodes,"queryBudgetBytes":limits.memory_bytes,"cacheMiB":64,"memtableMiB":4,"importMs":import_ms,"measurements":measurements,"unboundedResult":"memory_limit_and_reservation_release_verified","scope":format!("warm embedded {}, one warmup and five samples; query accounting is not RSS", if cfg!(debug_assertions) {"debug"} else {"release"})})
         )?
     );
     Ok(())

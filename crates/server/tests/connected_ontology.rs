@@ -80,7 +80,7 @@ fn connected_schema_selects_named_graphs_while_server_owns_storage() {
     for (graph, lang, expected, excluded) in [
         ("tickets", "en", "Customer", "KnowledgeSource"),
         ("knowledge", "pt-BR", "KnowledgeSource", "Customer"),
-        ("client_memory", "en", "No ontology declared", "Customer"),
+        ("default", "en", "No ontology declared", "Customer"),
     ] {
         let output = command(dir.path())
             .args([

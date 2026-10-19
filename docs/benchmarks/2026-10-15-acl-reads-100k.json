@@ -1,0 +1,39 @@
+{
+  "acl": "alternating alice/bob, every node has private ACL metadata",
+  "build": "release",
+  "cacheMiB": 64,
+  "importMs": 611.692292,
+  "measurements": {
+    "indexedEqualityCount": {
+      "expectedVisibleCount": 7143,
+      "maxMs": 38.082709,
+      "p50Ms": 33.650416,
+      "peakReservationBytes": 5920,
+      "query": "MATCH (c:Customer) WHERE c.segment=0 RETURN count(*)",
+      "samplesMs": [33.749208, 33.317, 38.082709, 33.619417, 32.439625, 33.650416, 36.394999999999996]
+    },
+    "labelCount": {
+      "expectedVisibleCount": 50000,
+      "maxMs": 150.659167,
+      "p50Ms": 149.760083,
+      "peakReservationBytes": 5589,
+      "query": "MATCH (c:Customer) RETURN count(*)",
+      "samplesMs": [149.764292, 149.586583, 150.659167, 149.760083, 150.214916, 149.685625, 149.292334]
+    },
+    "visiblePropertyCount": {
+      "expectedVisibleCount": 50000,
+      "maxMs": 223.517084,
+      "p50Ms": 221.571042,
+      "peakReservationBytes": 5782,
+      "query": "MATCH (c:Customer) RETURN count(c.ordinal)",
+      "samplesMs": [220.990541, 222.061208, 223.517084, 221.427375, 220.694083, 221.571042, 222.735167]
+    }
+  },
+  "memtableMiB": 4,
+  "nodes": 100000,
+  "principal": "alice",
+  "queryBudgetBytes": 268435456,
+  "samplesPerQuery": 7,
+  "scope": "warm embedded; excludes setup and database reopen; includes transaction begin, policy validation, query, commit; query accounting is not RSS",
+  "warmupsPerQuery": 1
+}

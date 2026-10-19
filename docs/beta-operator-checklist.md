@@ -4,7 +4,7 @@ Use this checklist with the [protected quickstart](mvp-quickstart.md),
 [protected transport qualification](benchmarks/2026-10-13-beta.md) and
 [ACL/incremental candidate qualification](benchmarks/2026-10-13-beta-acl.md) and
 [remaining gates](2026-10-pilot-roadmap.md). It is an operator rehearsal for a
-rebuildable shadow graph, not authorization to replace client's production
+rebuildable shadow graph, not authorization to replace external application's production
 store. Every live-source/deployment step needs an explicit selected environment.
 
 ## Before starting
@@ -74,11 +74,14 @@ scalar result with a full-property read or a cold multi-hop traversal.
 ## Stop, recover and restore rehearsal
 
 1. Stop ingestion and record its last acknowledged receipt. The server currently
-   has no graceful drain or immediate cancellation of blocking engine work.
+   drains on SIGTERM for `server.shutdown_grace_ms` but does not cancel running
+   engine work.
 2. Stop the owned server and wait for its process to exit before issuing offline
-   commands. SIGTERM is abrupt; SIGKILL is a separate forced-failure test. Current
-   synthetic qualification proves acknowledged indexed writes retained and pending
-   transactions discarded on restart; it does not locate an exact COMMIT phase.
+   commands. Exit code 0 means every session drained; 1 means the grace elapsed
+   and open work was abandoned. SIGKILL is a separate forced-failure test. Current
+   synthetic qualification proves a commit during the drain survives, acknowledged
+   indexed writes are retained and abandoned transactions are discarded on
+   restart; it does not locate an exact COMMIT phase.
 3. Run `brainwire db check <graph> --json` with the same stopped-store config.
    Require status `ok` and retain the receipt; never bypass a failed audit because
    a health probe connects successfully. Offline catalog opening discovers named
@@ -108,7 +111,7 @@ rehearsal, selected security boundary and measured resource envelope before the
 shadow beta. The comprehensive local verifier must reject missing or mismatched
 receipts; its PASS means only its declared synthetic scope passed.
 
-Keep production deployment conditional on actual client source/backend access,
+Keep production deployment conditional on actual external application source/backend access,
 queries/SLOs, the selected protected runtime target and upgrade/operator readiness.
 Raft, ANN/text search, ticket history/retention, object-storage recovery and fully
 connected administrative UI remain separate requested workstreams.

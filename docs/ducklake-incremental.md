@@ -1,19 +1,19 @@
 # Incremental graph updates from pinned DuckLake snapshots
 
-`examples/client/ducklake_incremental.py` compares two explicit versions of a
+`examples/source_ingestion/ducklake_incremental.py` compares two explicit versions of a
 local SQLite-backed DuckLake source. It emits authoritative upserts and physical
-deletions using the existing client ticket/comment mapping and stable scoped
+deletions using the existing external application ticket/comment mapping and stable scoped
 entity IDs. It reads both complete snapshots; this is a snapshot-difference
 bridge, not native DuckLake CDC or a live source subscription.
 
 The source must retain both catalog versions and their managed data files until
 export finishes. Only cached DuckLake/SQLite extensions are loaded; the example
 never INSTALLs extensions. Postgres catalogs, object-storage deployment and the
-actual client source are not qualified by these synthetic tests.
+actual external application source are not qualified by these synthetic tests.
 
 ## Immutable artifact contract
 
-Every JSONL row carries `contract_id=client-ducklake-diff-v1`, a caller-stable
+Every JSONL row carries `contract_id=external-ducklake-diff-v1`, a caller-stable
 `source_id`, `source_identity`, ordered `from_version`/`to_version`, canonical
 logical digests for both source snapshots and the expected change count.
 `source_identity` binds the absolute catalog path, lexical data path and exact
@@ -53,30 +53,30 @@ source versions/digests, counts and DuckDB/DuckLake versions.
 First export the old pinned version using the existing snapshot bridge and
 import it completely through `ingest_snapshot`. Registration requires the actual
 baseline file and its existing `ImportCheckpoint`: SHA-256, mapping contract
-`client-zendesk-snapshot-v1` and durable byte offset must exactly match the
+`external-zendesk-snapshot-v1` and durable byte offset must exactly match the
 complete file. Its canonical normalized contents must also match the delta's
 from-snapshot digest. Registration cannot merely assert that a baseline was
 applied.
 
 ```sh
-uv run --no-project --with duckdb==1.5.5 python -m examples.client.ducklake_incremental export \
+uv run --no-project --with duckdb==1.5.5 python -m examples.source_ingestion.ducklake_incremental export \
   --catalog /absolute/catalog.sqlite --data-path /absolute/managed-data \
-  --query-file examples/client/export_ducklake_snapshot.sql \
+  --query-file examples/source_ingestion/export_ducklake_snapshot.sql \
   --source-id tenant-zendesk --from-version 12 --to-version 18 \
   --output /absolute/private/changes-12-18.jsonl
 
 export BRAINWIRE_BOLT_AUTH_FILE=/absolute/private/writer.json
-uv run --no-project --with neo4j==6.3.0 python -m examples.client.ducklake_incremental register \
-  /absolute/private/changes-12-18.jsonl --database client-shadow \
+uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ducklake_incremental register \
+  /absolute/private/changes-12-18.jsonl --database support-demo \
   --baseline-file /absolute/private/snapshot-12.jsonl --baseline-source-id baseline-12
-uv run --no-project --with neo4j==6.3.0 python -m examples.client.ducklake_incremental ingest \
-  /absolute/private/changes-12-18.jsonl --database client-shadow --batch-size 250
+uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ducklake_incremental ingest \
+  /absolute/private/changes-12-18.jsonl --database support-demo --batch-size 250
 ```
 
 The SQL uses `source_lake.main` and must select the complete source scope, with
 all tickets before comments, as required by the existing exporter. The baseline
 uses the same scope; a selective query can only synchronize that selected view.
-See [snapshot ingestion](client-shadow.md) for creating the graph and loading
+See [snapshot ingestion](source-ingestion.md) for creating the graph and loading
 the first version. The module also exposes `export_incremental`,
 `initialize_source` and `ingest_incremental` for Python callers.
 
@@ -113,7 +113,7 @@ history, retention, tombstone preservation or selective edge ownership.
 
 ```sh
 uv run --no-project --with duckdb==1.5.5 --with neo4j==6.3.0 \
-  python -m unittest examples.client.test_ducklake_incremental -v
+  python -m unittest examples.source_ingestion.test_ducklake_incremental -v
 ```
 
 Tests use cached real DuckLake managed Parquet snapshots and private authenticated

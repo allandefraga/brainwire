@@ -618,12 +618,12 @@ mod tests {
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         let dbs = Arc::new(Databases::open_all(&config).unwrap());
-        let db = dbs.get("client_memory").unwrap();
+        let db = dbs.get("default").unwrap();
         let mapping: GraphMapping =
             serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
                 .unwrap();
         db.apply_ontology(&mapping).unwrap();
-        let mut engine = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+        let mut engine = DbEngine::new(Arc::clone(&dbs), "default".into()).unwrap();
         engine.begin(None).unwrap();
         engine
             .run(
@@ -655,7 +655,7 @@ mod tests {
         config.memory.query = crate::size::ByteSize(24_000);
         let dbs = Arc::new(Databases::open_all(&config).unwrap());
         dbs.create("second").unwrap();
-        let mut a = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+        let mut a = DbEngine::new(Arc::clone(&dbs), "default".into()).unwrap();
         let mut b = DbEngine::new(Arc::clone(&dbs), "second".into()).unwrap();
         let params = PackValue::Map(vec![("text".into(), PackValue::String("x".repeat(3000)))]);
         a.begin(None).unwrap();
@@ -693,12 +693,11 @@ mod tests {
             serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
                 .unwrap();
         databases
-            .get("client_memory")
+            .get("default")
             .unwrap()
             .apply_ontology(&mapping)
             .unwrap();
-        let engine =
-            DbEngine::new_protected(Arc::clone(&databases), "client_memory".into()).unwrap();
+        let engine = DbEngine::new_protected(Arc::clone(&databases), "default".into()).unwrap();
         (directory, databases, engine)
     }
 
@@ -720,7 +719,7 @@ mod tests {
         engine.begin(None).unwrap();
         engine.run(None, "MERGE (a:Customer {entity_id:'alice'}) MERGE (b:Customer {entity_id:'bob'}) MERGE (u:Customer {entity_id:'untagged'})", &PackValue::Map(vec![])).unwrap();
         engine.commit().unwrap();
-        let database = databases.get("client_memory").unwrap();
+        let database = databases.get("default").unwrap();
         let mut tx = database.begin();
         for name in ["alice", "bob"] {
             let id = find_by_entity_id(&tx, name, None).unwrap()[0];
@@ -738,7 +737,7 @@ mod tests {
         let access = |name: &str| {
             AccessContext::Authenticated(brainwire_bolt::auth::Principal {
                 id: name.into(),
-                graphs: BTreeMap::from([("client_memory".into(), GraphAccess::Read)]),
+                graphs: BTreeMap::from([("default".into(), GraphAccess::Read)]),
                 instance_admin: false,
                 node_visibility: Some(ReadVisibility {
                     principals: vec![name.into()],
@@ -878,7 +877,7 @@ mod tests {
         let (_directory, databases, mut engine) = scoped_engine_fixture();
         let empty = PackValue::Map(vec![]);
         engine
-            .set_access(grant("client_memory", GraphAccess::Read))
+            .set_access(grant("default", GraphAccess::Read))
             .unwrap();
         engine.begin(None).unwrap();
         engine
@@ -898,10 +897,10 @@ mod tests {
         );
         assert!(engine.commit().is_err());
         engine.abort().unwrap();
-        let db = databases.get("client_memory").unwrap();
+        let db = databases.get("default").unwrap();
         assert_eq!(db.stats().unwrap().nodes, 0);
         engine
-            .set_access(grant("client_memory", GraphAccess::Write))
+            .set_access(grant("default", GraphAccess::Write))
             .unwrap();
         engine.begin(None).unwrap();
         engine
@@ -929,10 +928,10 @@ mod tests {
     fn privilege_change_and_graph_switch_discard_pending_writes() {
         let (_directory, databases, mut engine) = scoped_engine_fixture();
         let empty = PackValue::Map(vec![]);
-        let db = databases.get("client_memory").unwrap();
+        let db = databases.get("default").unwrap();
         for change_principal in [true, false] {
             engine
-                .set_access(grant("client_memory", GraphAccess::Write))
+                .set_access(grant("default", GraphAccess::Write))
                 .unwrap();
             engine.begin(None).unwrap();
             engine
@@ -971,7 +970,7 @@ mod tests {
     }
 
     fn protected_session(engine: DbEngine) -> Session<DbEngine> {
-        let policy = brainwire_bolt::auth::AuthPolicy::from_json(br#"{"principals":[{"id":"writer","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"client_memory":"write"},"instance_admin":false},{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"client_memory":"read"},"instance_admin":false}]}"#).unwrap();
+        let policy = brainwire_bolt::auth::AuthPolicy::from_json(br#"{"principals":[{"id":"writer","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"default":"write"},"instance_admin":false},{"id":"reader","token_sha256":"a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e","graphs":{"default":"read"},"instance_admin":false}]}"#).unwrap();
         let mut session = Session::new(engine, AuthMode::Required(Arc::new(policy)));
         session.handle(Request::Hello {
             extra: PackValue::Map(vec![]),
@@ -1011,28 +1010,12 @@ mod tests {
             }
         );
         assert!(databases.query_pool().usage().reserved_bytes > 0);
-        assert_eq!(
-            databases
-                .get("client_memory")
-                .unwrap()
-                .stats()
-                .unwrap()
-                .nodes,
-            0
-        );
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
     }
 
     fn assert_session_write_discarded(databases: &Databases) {
         assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
-        assert_eq!(
-            databases
-                .get("client_memory")
-                .unwrap()
-                .stats()
-                .unwrap()
-                .nodes,
-            0
-        );
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
     }
 
     fn check_protected_logoff(explicit: bool) {
@@ -1161,12 +1144,12 @@ mod tests {
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         config.memory.query = crate::size::ByteSize(32_768);
         let dbs = Arc::new(Databases::open_all(&config).unwrap());
-        let db = dbs.get("client_memory").unwrap();
+        let db = dbs.get("default").unwrap();
         let mapping: GraphMapping =
             serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
                 .unwrap();
         db.apply_ontology(&mapping).unwrap();
-        let mut engine = DbEngine::new(dbs, "client_memory".into()).unwrap();
+        let mut engine = DbEngine::new(dbs, "default".into()).unwrap();
         let empty = PackValue::Map(vec![]);
         engine.begin(None).unwrap();
         engine
@@ -1204,12 +1187,12 @@ mod tests {
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         let dbs = Arc::new(Databases::open_all(&config).unwrap());
-        let db = dbs.get("client_memory").unwrap();
+        let db = dbs.get("default").unwrap();
         let mapping: GraphMapping =
             serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
                 .unwrap();
         db.apply_ontology(&mapping).unwrap();
-        let mut engine = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+        let mut engine = DbEngine::new(Arc::clone(&dbs), "default".into()).unwrap();
         let empty = PackValue::Map(vec![]);
         assert_eq!(
             engine.begin(Some("missing")).unwrap_err().code,
@@ -1256,14 +1239,14 @@ mod tests {
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         let dbs = Arc::new(Databases::open_all(&config).unwrap());
-        let db = dbs.get("client_memory").unwrap();
+        let db = dbs.get("default").unwrap();
         let mapping: GraphMapping =
             serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
                 .unwrap();
         db.apply_ontology(&mapping).unwrap();
         let empty = PackValue::Map(vec![]);
         for reset in [true, false] {
-            let engine = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+            let engine = DbEngine::new(Arc::clone(&dbs), "default".into()).unwrap();
             let mut session = Session::new(engine, AuthMode::AllowAll);
             session.handle(Request::Hello {
                 extra: empty.clone(),
@@ -1307,13 +1290,13 @@ mod tests {
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         let dbs = Arc::new(Databases::open_all(&config).unwrap());
-        let db = dbs.get("client_memory").unwrap();
+        let db = dbs.get("default").unwrap();
         let mapping: GraphMapping =
             serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
                 .unwrap();
         db.apply_ontology(&mapping).unwrap();
-        let mut first = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
-        let mut second = DbEngine::new(Arc::clone(&dbs), "client_memory".into()).unwrap();
+        let mut first = DbEngine::new(Arc::clone(&dbs), "default".into()).unwrap();
+        let mut second = DbEngine::new(Arc::clone(&dbs), "default".into()).unwrap();
         let empty = PackValue::Map(vec![]);
         first.begin(None).unwrap();
         second.begin(None).unwrap();

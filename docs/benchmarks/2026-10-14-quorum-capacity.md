@@ -47,7 +47,7 @@ See the [operations guide](../quorum-replication.md).
 Python `write_transaction` retains explicit request identity and does not retry
 uncertain writes automatically. `upsert_node_with_acl` commits one node patch and
 private ACL together; it requires trusted graph-write plus administration grants.
-See the [Python guide](../python-client.md). Actual client mapping and DuckLake
+See the [Python guide](../python-client.md). Actual external application mapping and DuckLake
 ACL integration remain pending; the source importer does not stamp ACL automatically.
 
 No snapshot transfer, log compaction, erased-voter replacement, dynamic membership,

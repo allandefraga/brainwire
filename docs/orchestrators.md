@@ -1,8 +1,9 @@
 # Docker, Kubernetes and Swarm test deployments
 
-The templates run one durable server with multiple named graphs. Replication
-is not implemented: increasing replicas creates independent stores. Keep one
-writer per RocksDB directory. Use a trusted isolated test network because the
+The templates run one durable server with multiple named graphs. These
+templates do not enable replication: increasing replicas creates independent stores.
+The [experimental quorum profile](quorum-replication.md) has a separate deployment
+path. Keep one writer per RocksDB directory. Use a trusted isolated test network because the
 development server is unprotected unless the optional
 [service-token policy](bolt-auth.md) is configured. Native TLS remains pending;
 see [protected overlays](protected-containers.md).
@@ -14,8 +15,12 @@ templates or provide a runnable replicated cluster.
 
 ## Docker Compose
 
+Run these commands from the repository root with Docker Engine running. For a
+ready-to-query synthetic ontology, use the [demo quickstart](container.md#fastest-local-start).
+The base template below creates an empty `default` graph:
+
 ```sh
-docker compose -p brainwire-test -f deploy/compose.yaml up --build -d
+docker compose -p brainwire-test -f deploy/compose.yaml up --build --wait --wait-timeout 900
 docker compose -p brainwire-test -f deploy/compose.yaml exec brainwire brainwire probe --mode ready
 ```
 
@@ -32,7 +37,7 @@ offline using the same volume:
 ```sh
 docker compose -p brainwire-test -f deploy/compose.yaml stop
 docker compose -p brainwire-test -f deploy/compose.yaml run --rm --no-deps brainwire \
-  db apply-ontology client_memory /opt/brainwire/example-schema.json
+  db apply-ontology default /opt/brainwire/example-schema.json
 docker compose -p brainwire-test -f deploy/compose.yaml start
 ```
 
@@ -40,6 +45,54 @@ Use `db create NAME --ontology ...` offline for additional graphs. The bundled
 schema is synthetic; mount an appropriate schema for other workloads.
 
 ## Kubernetes
+
+### Local laptop quickstart with kind
+
+Install Docker, `kubectl` and `kind` first, and run from the repository root.
+This creates a dedicated single-node cluster named `brainwire-demo` and a private
+kubeconfig, so commands do not use your existing cluster context. Choose another
+cluster name if `brainwire-demo` already exists; do not delete an existing cluster
+to reuse its name. The local image is loaded directly, without a registry:
+
+```sh
+docker build -t brainwire:local .
+BRAINWIRE_KUBE_DIR="$(mktemp -d)"
+BRAINWIRE_KUBECONFIG="$BRAINWIRE_KUBE_DIR/config"
+kind create cluster --name brainwire-demo --kubeconfig "$BRAINWIRE_KUBECONFIG" --wait 120s
+kind load docker-image brainwire:local --name brainwire-demo
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo create namespace brainwire-demo
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo apply -k deploy/kubernetes
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo rollout status statefulset/brainwire --timeout=900s
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo exec brainwire-0 -- brainwire probe --mode ready
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo port-forward service/brainwire 17687:7687
+```
+
+Run each step only after the previous one succeeds. Keep the last command running;
+clients connect to `bolt://127.0.0.1:17687`, database `default`. This starts an
+empty graph. The Docker demo's Python Customer example needs its bundled ontology
+and database `demo`; it cannot be copied unchanged into this empty graph. The
+[kind acceptance test](#checks) initializes the ontology offline and exercises
+Python writes and recovery end to end.
+
+Stop port-forwarding with Ctrl-C. In the same shell, inspect or restart the Pod:
+
+```sh
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo get pods,pvc
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo logs brainwire-0
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo delete pod brainwire-0
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo rollout status statefulset/brainwire --timeout=900s
+```
+
+The recreated Pod uses the same retained PVC. Deleting this disposable kind
+cluster permanently deletes its local graph data, including retained PVCs:
+
+```sh
+kind delete cluster --name brainwire-demo --kubeconfig "$BRAINWIRE_KUBECONFIG"
+rm -- "$BRAINWIRE_KUBECONFIG"
+rmdir -- "$BRAINWIRE_KUBE_DIR"
+```
+
+### Existing isolated cluster
 
 Render locally without contacting a cluster:
 
@@ -75,15 +128,17 @@ The memory limit is 2 GiB, cache 256 MiB, memtables 32 MiB inside that cache,
 and query setting 256 MiB. The query setting is a conservative per-RUN
 allocation guard and a shared concurrent reservation pool. It is not an RSS
 ceiling; the default cooperative execution deadline is 30 seconds. See
-[its boundaries](query-allocation-guards.md). A 60 s termination
-allowance does not promise graceful draining of every transaction. Acknowledged
+[its boundaries](query-allocation-guards.md). On SIGTERM the server
+drains for `server.shutdown_grace_ms` (default 8 s, inside the 60 s allowance);
+transactions still open after it are abandoned, so draining every transaction is
+not promised. Acknowledged
 commits sync the WAL; interrupted uncommitted writes must disappear.
 
 Acceptance: write synthetic indexed data via Python/Bolt, replace the Pod,
 wait for startup/readiness, then verify counts, index lookups and absence of
 uncommitted writes. Fence an unreachable old writer before force-deleting its
-Pod. This session checks the local manifest render and strict Kubernetes 1.36
-schema validation (both resources valid); live-cluster acceptance is provided by the isolated kind script below.
+Pod. Local manifest rendering and schema validation do not exercise a running
+cluster; live-cluster acceptance is provided by the isolated kind script below.
 The [session report](benchmarks/2026-10-03-guards-indexes-checkpoints-recovery.md)
 records the actual runtime result separately from manifest validation.
 

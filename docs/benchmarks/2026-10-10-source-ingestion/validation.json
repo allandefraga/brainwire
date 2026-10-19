@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-10",
+  "scope": "final source inventory; earlier receipts list their own executed cases, not every final harness case",
+  "binary_sha256": "7ec30a82d277601611382e45a705b336a2a551667a14ef061a36f4eea1fc0462",
+  "final_file_sha256": {
+    "examples/python/resumable_customers.py": "3d7d7eaeba880d76b24bd50977ab40b67c4a4f228fa72c3e5f5f2cd6064ab7b1",
+    "examples/python/test_resumable_customers.py": "45b93c181219f889c007d8b535e2742341bd9b3b589f03be4cf44a7c1d55e552",
+    "examples/python/resumable_customers_ontology.json": "db64ca2f634b40ee59437a9f66dbddd23778d34f373df6a05cbfd3885952ce2a",
+    "examples/source_ingestion/ingest_snapshot.py": "7c8b62b3f56e4173f1318678ad43bad006a4fff402a7db1f1c0c870eb0a4f0e9",
+    "examples/source_ingestion/test_ingest_snapshot.py": "2213d4cf5638eadf4547b0ee711b3604d7de3b072dbc6e7cebe031b0f81dec25",
+    "examples/source_ingestion/generate_fixture.py": "dfddd78d480c8ae5a4a19dc796daf7a22de5e6903de108660f30684149f9dd34",
+    "examples/source_ingestion/ontology.json": "ee19d596b483e2a9861281b3433d2e2b18be0529f73a7616881e53fa64845a29",
+    "docs/benchmarks/2026-10-10-source-ingestion/acceptance.py": "0c2699a4851679794844544c048a7a8b1f75e711008c283d985de26709c0f2ca",
+    "docs/benchmarks/2026-10-10-source-ingestion/old-catalog-acceptance.py": "2d2267d2b2179a879ff6e31fe9a8d4b234c4e40d8fe33bc3d74aa79bdcb3eefe"
+  },
+  "verification": {
+    "rust_workspace_tests": 438,
+    "python_importer_tests": 13,
+    "python_snapshot_tests": 3,
+    "workspace_clippy_all_targets": "PASS",
+    "rustfmt": "PASS",
+    "module_cli_help": "PASS",
+    "receipt_statuses_and_documentation_links": "PASS"
+  },
+  "receipts": [
+    "10000.json",
+    "100000.json",
+    "driver6-1000.json",
+    "legacy-customers.json",
+    "old-catalog.json",
+    "final-1000.json"
+  ]
+}

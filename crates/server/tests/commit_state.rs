@@ -97,7 +97,7 @@ fn commit_state_is_read_only_durable_and_scoped_to_each_graph() {
     }
     let untouched = json(
         command(&dir)
-            .args(["db", "commit-state", "client_memory", "--json"])
+            .args(["db", "commit-state", "default", "--json"])
             .output()
             .unwrap(),
     );

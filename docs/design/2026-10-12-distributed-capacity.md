@@ -70,7 +70,7 @@ losing that region removes quorum. A fixed placement designed to retain a
 majority after losing any one region necessarily requires cross-region write
 quorums even during healthy operation. Losing a fast follower, while retaining
 a majority, can also change which network/disk path determines confirmation
-time. The first client trial should state whether it tests
+time. The first external application trial should state whether it tests
 process, host, zone or region failure rather than calling all of them HA.
 
 ## Where confirmation time goes

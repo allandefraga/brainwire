@@ -222,7 +222,7 @@ with tempfile.TemporaryDirectory(prefix="brainwire-ontology-capture-") as tmp:
         resize=(80, 24),
     )
     capture("ontology-isolated-160x40", 160, 40, "en", "knowledge", [], env)
-    capture("ontology-empty-80x24", 80, 24, "en", "client_memory", [], env)
+    capture("ontology-empty-80x24", 80, 24, "en", "default", [], env)
 
 # Existing synthetic benchmark graph; offline, no graph writes.
 if args.existing_100k:

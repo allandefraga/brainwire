@@ -20,11 +20,24 @@ with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
                       ("TicketComment","c-1"), {"weight":0.7})
     graph.update_edge(("Ticket","t-42"), "HAS_COMMENT",
                       ("TicketComment","c-1"), {"weight":0.9}, remove=["old_score"])
+    removed = graph.delete_nodes("Ticket", obsolete_ticket_ids)
+    rows = graph.run_cypher(
+        "MATCH (t:Ticket {entity_id:$id})-[:HAS_COMMENT]->(c:TicketComment) "
+        "RETURN c.entity_id AS id, c.body AS body LIMIT 20",
+        {"id":"t-42"},
+    )
+    print(rows)
 ```
 
-This illustrates the generic mutation API; a client ingestion source must use
-the source-qualified identities and required fields in the
-[snapshot contract](client-shadow.md), rather than substituting `t-42`.
+`run_cypher(query, parameters={})` runs one statement against this client's
+named graph and returns fully materialized record dictionaries. Parameters are
+separate from query text. Each statement is atomic; the helper does not retry
+uncertain writes. Use `write_transaction(..., request_id=...)` for retained
+quorum request identities. See the [implemented Cypher grammar and examples](local-cypher.md)
+for supported clauses and explicit current limits.
+
+This illustrates the generic mutation API; a source-specific importer can
+apply its own stable identity mapping and schema contract.
 
 ## Property meanings
 
@@ -42,6 +55,16 @@ edge by source, type and destination. Updating a parallel-edge group is rejected
 when the preflight sees more than one relationship; arbitrary EdgeId editing is
 not exposed by this helper. Edge checks and patch occur in one transaction.
 
+`delete_nodes(label, entity_ids)` detach-deletes node IDs in bounded batches and
+returns the number removed. Incident edges are deleted with their node. IDs are
+deduplicated within each batch; missing IDs count as zero. Each batch is atomic,
+but earlier batches remain committed if a later batch fails. Use this for an
+explicit list of obsolete identities; it does not discover stale nodes or make
+a multi-batch snapshot reconciliation atomic. The helper bounds compact UTF-8
+ID bytes and item count, not exact Bolt bytes or process memory.
+Independent edge deletion is not exposed through this helper yet; deleting a
+node removes its incident edges as part of `DETACH DELETE`.
+
 ## Different load sources
 
 `load_nodes` accepts an iterable of flat dictionaries with `entity_id`, including
@@ -51,8 +74,20 @@ generators reading JSONL, DuckDB results or bounded Arrow record batches:
 graph.load_nodes("Ticket", (
     {"entity_id":f"t-{i}", "status":"open", "tags":[]} for i in range(1000)
 ))
+graph.load_edges("Ticket", "RELATED_TO", "Ticket", (
+    {"source_id":f"t-{i}", "target_id":f"t-{i+1}", "weight":0.8}
+    for i in range(999)
+))
 # For an Arrow batch: graph.load_nodes("Ticket", batch.to_pylist())
 ```
+
+`load_edges(source_label, relationship, target_label, rows)` uses the same row
+and byte limits as node batches. Edge rows require `source_id` and `target_id`;
+other fields are relationship properties. Endpoints must already exist. The
+endpoint/type pair is the MERGE identity, so replay updates supplied properties,
+preserves omitted properties and removes fields supplied as `None`. Each bounded
+batch commits atomically; a missing endpoint rolls back that batch, while earlier
+batches remain committed.
 
 | Producer | Feed to the same API | Responsibility |
 | --- | --- | --- |
@@ -67,7 +102,7 @@ Arrow-to-Python conversion is interoperable, not zero-copy Rust/Bolt ingestion.
 Lists are allowed property values; vector similarity indexes are not provided by
 this helper. The ontology remains authoritative for accepted property types.
 
-The helper preserves input order for repeated identities, including mixed
+The helpers preserve input order for repeated identities, including mixed
 property shapes. Each bounded batch commits atomically; a later invalid row or
 failed batch does not undo earlier batches. The byte estimate counts compact
 UTF-8 JSON input, not exact Bolt bytes, wire quota or RSS. Values are null, bool,
@@ -77,11 +112,12 @@ underscore, and at most 128 characters; values are parameters, never query text.
 ACL property names are reserved. This helper is currently a repository example,
 not a published/installable SDK.
 
-For replay after a lost acknowledgement, use the
+`load_nodes` and `load_edges` do not maintain a persistent source cursor. For
+replay after a lost acknowledgement, use the
 [durable snapshot importer](python-ingestion.md) or
 [version-pinned incremental DuckLake importer](ducklake-incremental.md).
-`load_nodes` has no persistent source cursor and is not a CDC service. Rerunning
-authoritative upserts is idempotent only for the same identities and values.
+Those batch helpers are idempotent only for the same identities and values; they
+are not a CDC service.
 
 ## Trusted ACL stamping
 
@@ -112,7 +148,7 @@ ACL authorization/validation failure rolls both back. This API requires an
 unrestricted trusted principal with graph-write and instance-administration grants.
 It does not infer permissions from ordinary properties or make an untrusted caller
 an administrator. The snapshot/diff importer still does not automatically supply
-or stamp authoritative ACLs: real client mapping and importer integration remain
+or stamp authoritative ACLs: real external application mapping and importer integration remain
 open. See [node ACL](node-acl.md).
 
 ## Explicit quorum transaction identity

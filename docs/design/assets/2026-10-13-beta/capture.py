@@ -137,7 +137,7 @@ def main():
         parser.error("--nodes must be 22..100000 to qualify the 20-row bound")
     binary = args.binary.resolve(strict=True)
     font = ImageFont.truetype(os.environ.get("BRAINWIRE_CAPTURE_FONT", "/System/Library/Fonts/Menlo.ttc"), 18)
-    schema = ROOT/"examples/client/ontology.json"
+    schema = ROOT/"examples/source_ingestion/ontology.json"
     receipt = {"dataset":"synthetic single high-degree ticket", "nodes_requested":args.nodes,
         "binary_sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),
         "ontology_sha256":hashlib.sha256(schema.read_bytes()).hexdigest(),

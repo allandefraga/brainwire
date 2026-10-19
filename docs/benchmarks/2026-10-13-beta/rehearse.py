@@ -39,12 +39,12 @@ def run(binary):
     tasks = (
         ("ducklake-100000", "docs/benchmarks/2026-10-12-mvp/acceptance.py",
          ["--tickets", "100000", "--ducklake", "--captures", str(DIRECTORY / "source-captures")]),
-        ("recovery-100000", "docs/benchmarks/2026-10-10-client/acceptance.py", ["--tickets", "100000"]),
+        ("recovery-100000", "docs/benchmarks/2026-10-10-source-ingestion/acceptance.py", ["--tickets", "100000"]),
         ("multigraph-100000", "crates/server/tests/multigraph_acceptance.py", ["--rows-per-graph", "100000"]),
         ("typed-neighborhood-100000", "crates/server/tests/typed_neighborhood_acceptance.py",
          ["--nodes", "100000", "--iterations", "1000", "--cli-iterations", "20"]),
     )
-    summary = {"binary_sha256": NATIVE_SHA, "scope": "four local synthetic scenarios; not real client or replication", "phases": {}}
+    summary = {"binary_sha256": NATIVE_SHA, "scope": "four local synthetic scenarios; not real external application or replication", "phases": {}}
     for name, script, options in tasks:
         output = DIRECTORY / (name + ".json")
         output.unlink(missing_ok=True)

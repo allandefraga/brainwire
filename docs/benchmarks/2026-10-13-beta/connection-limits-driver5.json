@@ -15,7 +15,7 @@
   "liveness_pool": "first reuse succeeded after default expiry",
   "default_pool": "first reuse failed; explicit new connection succeeded",
   "audit": {
-    "database": "client_memory",
+    "database": "default",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },

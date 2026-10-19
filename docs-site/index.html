@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Brainwire graph database documentation">
+  <title>Brainwire Docs</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23070d0b'/%3E%3Cpath d='M17 34 32 17l15 17-15 14z' fill='none' stroke='%236dff4b' stroke-width='5'/%3E%3Ccircle cx='32' cy='17' r='5' fill='%2300e5d4'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#overview"><span class="mark">◈</span><span>brainwire<small>graph database</small></span></a>
+      <div class="version">DOCS / 0.1 LOCAL</div>
+      <nav aria-label="Documentation">
+        <a class="active" href="#overview">Overview</a>
+        <a href="#cypher">Cypher</a>
+        <a href="#indexes">Indexes</a>
+        <a href="#functions">Functions</a>
+        <a href="#search">Search</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#recovery">Recovery</a>
+      </nav>
+      <div class="sidebar-foot">English first<br><span>Português coming next</span></div>
+    </aside>
+    <main>
+      <header class="topbar"><span class="crumb">BRAINWIRE / DOCUMENTATION</span><span class="status"><i></i> local design preview</span></header>
+      <section id="overview" class="hero">
+        <p class="eyebrow">GRAPH + DOCUMENT + VECTOR</p>
+        <h1>Build context<br><em>that stays connected.</em></h1>
+        <p class="lede">Brainwire is a durable graph database with Cypher at the center. Nodes, relationships, documents and embeddings live in one queryable context.</p>
+        <div class="hero-actions"><a class="button primary" href="#cypher">Start with Cypher <span>↗</span></a><a class="button" href="#architecture">See the architecture</a></div>
+      </section>
+      <section class="signal-grid" aria-label="Capabilities">
+        <article><span class="signal-number">01</span><h2>Graph native</h2><p>Model entities and relationships first. Every feature returns to the graph.</p></article>
+        <article><span class="signal-number">02</span><h2>Search ready</h2><p>Exact filters, full text and vector similarity can share one Cypher workflow.</p></article>
+        <article><span class="signal-number">03</span><h2>Recoverable</h2><p>Persistent volumes, snapshots and replication are designed around restart safety.</p></article>
+      </section>
+      <section id="cypher" class="content-section">
+        <div class="section-kicker">01 / LANGUAGE</div><div><h2>Cypher is the front door.</h2><p>Use one expressive language for graph traversal, filtering, projections and search. Brainwire keeps the execution model explicit and composable.</p>
+        <div class="code"><div class="code-head"><span>cypher</span><button data-copy="MATCH (doc:Document)-[:MENTIONS]->(topic)\nWHERE topic.name = $topic\nRETURN doc.title, doc.embedding\nLIMIT 10">copy</button></div><pre><code>MATCH (doc:Document)-[:MENTIONS]-&gt;(topic)
+WHERE topic.name = $topic
+RETURN doc.title, doc.embedding
+LIMIT 10</code></pre></div></div>
+      </section>
+      <section id="indexes" class="content-section split"><div><div class="section-kicker">02 / INDEXES</div><h2>Choose the access path.</h2><p>Indexes make the graph predictable at scale. Define them close to the data they accelerate.</p></div><div class="cards"><article class="mini-card"><b>BTREE</b><h3>Exact + range</h3><code>CREATE INDEX user_email<br>ON :User(email)</code><p>Fast equality, ordering and bounded ranges.</p></article><article class="mini-card"><b>FULLTEXT</b><h3>Text relevance</h3><code>CREATE FULLTEXT INDEX docs<br>ON :Document(body)</code><p>Tokenized search over document fields.</p></article><article class="mini-card accent"><b>VECTOR</b><h3>Semantic neighbors</h3><code>CREATE VECTOR INDEX docs_embedding<br>ON :Document(embedding)</code><p>Typed float32 embeddings with a declared dimension and metric.</p></article></div></section>
+      <section id="functions" class="content-section split"><div><div class="section-kicker">03 / FUNCTIONS</div><h2>Small functions, clear intent.</h2><p>Functions keep queries readable and let applications move from raw records to useful context.</p></div><div class="function-list"><div><code>text.contains(value, query)</code><span>case-aware text filter</span></div><div><code>vector.distance(a, b, 'cosine')</code><span>similarity score</span></div><div><code>graph.degree(node, 'out')</code><span>relationship cardinality</span></div><div><code>document.chunks(doc)</code><span>document provenance</span></div></div></section>
+      <section id="search" class="content-section search-panel"><div class="section-kicker">04 / SEARCH</div><h2>Search across connected context.</h2><p>Start with a candidate set, score it, then traverse the relationships that explain the result.</p><div class="search-flow"><span>Document</span><b>→</b><span>vector.search()</span><b>→</b><span>MENTIONS</span><b>→</b><span>Answer context</span></div><div class="note"><strong>Design rule</strong><span>Search indexes are rebuildable. The graph and source documents remain authoritative.</span></div></section>
+      <section id="architecture" class="content-section"><div class="section-kicker">05 / ARCHITECTURE</div><h2>One context, clear boundaries.</h2><p>Inspired by the useful parts of modern contextual data platforms: a durable database core, explicit services around it and Kubernetes as an optional operational layer.</p><div class="architecture"><div class="arch-row"><span class="arch-label">Clients</span><div class="arch-box">Cypher / Bolt / CLI</div></div><div class="arch-row"><span class="arch-label">Brainwire</span><div class="arch-box bright">Query engine <small>graph · document · vector</small></div><div class="arch-box">Index manager</div></div><div class="arch-row"><span class="arch-label">Durability</span><div class="arch-box">RocksDB on persistent SSD</div><div class="arch-box">Snapshots → object storage</div></div></div></section>
+      <section id="recovery" class="content-section recovery"><div><div class="section-kicker">06 / RECOVERY</div><h2>Restart is part of the contract.</h2><p>Each replica owns its database volume. A restart reopens the same files, replays the log and verifies graph invariants before serving traffic.</p></div><div class="recovery-steps"><span><b>01</b> write</span><span><b>02</b> commit</span><span><b>03</b> restart</span><span><b>04</b> verify</span></div></section>
+      <footer><span>Brainwire Docs · local preview</span><span>Cypher-centered / recovery-aware</span></footer>
+    </main>
+  </div>
+  <script>
+    document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => { await navigator.clipboard.writeText(button.dataset.copy); button.textContent = 'copied'; setTimeout(() => button.textContent = 'copy', 1200); }));
+  </script>
+</body>
+</html>

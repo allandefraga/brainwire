@@ -40,3 +40,18 @@ receipts remain evidence for their original frozen candidates only.
 Object storage can hold future coordinated snapshots; it does not replace
 consensus, synchronous local durability or majority acknowledgement. A generic
 load balancer must not send arbitrary Bolt transactions to followers.
+
+The October 15 local acceptance adds a bounded 1 MiB retained-log exhaustion
+and same-volume recovery scenario. Three native voters reached a point where
+each had less free log space than the raw property bytes of the next identical
+proposal; readiness still passed its Raft quorum-read barrier, then the client
+returned an uncertain outcome on the write. This confirms readiness does not
+assure future-write capacity. The rebuilt candidate's observation-only probe
+immediately afterward reported the safe category `fatal_storage_error`; this
+is recorded without asserting the exact post-error state as universal. After
+raising the cap and
+restarting the original volumes, quorum lookup resolved the request as absent,
+same-ID retry applied it once, and replica audits matched. This partially
+qualifies cap recovery only; it does not exhaust the 1 GiB default, test power
+loss/corruption or replace production-sized sustained-load qualification. See
+the [receipt and limits](../benchmarks/2026-10-15-distributed-ops.md).

@@ -32,7 +32,7 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
     assert!(listed.status.success(), "{:?}", listed);
     assert_eq!(
         String::from_utf8(listed.stdout).unwrap(),
-        "research\nclient_memory\n"
+        "default\nresearch\n"
     );
     let query = command(&dir)
         .args([
@@ -202,11 +202,11 @@ fn overview_reports_multiple_independent_graphs() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let graphs = value["graphs"].as_array().unwrap();
     assert_eq!(graphs.len(), 3); // Includes the configured default graph.
-    assert_eq!(graphs[0]["name"], "knowledge");
-    assert_eq!(graphs[0]["nodes"], 0);
-    assert_eq!(graphs[0]["ontology_version"], 1);
-    assert_eq!(graphs[1]["name"], "client_memory");
-    assert_eq!(graphs[1]["ontology_version"], serde_json::Value::Null);
+    assert_eq!(graphs[0]["name"], "default");
+    assert_eq!(graphs[0]["ontology_version"], serde_json::Value::Null);
+    assert_eq!(graphs[1]["name"], "knowledge");
+    assert_eq!(graphs[1]["nodes"], 0);
+    assert_eq!(graphs[1]["ontology_version"], 1);
     assert_eq!(graphs[2]["name"], "tickets");
     assert_eq!(graphs[2]["nodes"], 1);
     assert_eq!(graphs[2]["ontology_version"], 1);
@@ -341,7 +341,7 @@ fn ontology_view_reads_real_catalog_signatures_properties_and_empty_graphs() {
             "--overview",
             "--snapshot",
             "--graph",
-            "client_memory",
+            "default",
             "--view",
             "ontology",
         ])

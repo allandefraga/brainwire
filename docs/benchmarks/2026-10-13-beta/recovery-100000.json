@@ -33,20 +33,20 @@
   "rollback_allocator_counter_advanced": false,
   "large_write_guard_rejected": true,
   "audit": {
-    "database": "client-shadow-synthetic",
+    "database": "support-demo",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },
   "validation_audit": {
-    "database": "client-validation",
+    "database": "validation",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },
   "checkpoint": {
     "commit_sequence": "1496",
     "commit_sequence_tracked": true,
-    "database": "client-shadow-synthetic",
-    "destination": "/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-client-e88ohnil/data/restored",
+    "database": "support-demo",
+    "destination": "/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-external-e88ohnil/data/restored",
     "scope": "single_graph_committed_native_checkpoint",
     "status": "checkpoint_created"
   },

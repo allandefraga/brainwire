@@ -1,7 +1,9 @@
-"""Protected native SIGTERM recovery with owned synthetic stores and processes.
+"""Protected native SIGTERM drain and recovery with owned synthetic stores.
 
-SIGTERM is abrupt today. This checks durable acknowledgements, pending rollback,
-uncertain unacknowledged RUN atomicity and termination after a slow reader starts.
+SIGTERM starts a bounded drain. This checks refused admission, an explicit
+transaction committed during the drain, rollback of a transaction abandoned at
+the grace deadline, uncertain unacknowledged RUN atomicity, a stalled reader
+bounded by the deadline and prompt exit with only idle sessions.
 """
 import argparse
 import hashlib
@@ -21,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 HANDSHAKE = bytes.fromhex("6060b01700000405000000000000000000000000")
 ROWS = 1000
 UNCERTAIN_ROWS = 200
+GRACE_MS = 3000
 
 
 def pack(value):
@@ -87,7 +90,7 @@ def run(binary):
 
     report = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "driver": driver_version,
               "os": platform.platform(), "signal": "SIGTERM", "synthetic": True, "baseline_rows": ROWS,
-              "uncertain_rows": UNCERTAIN_ROWS, "termination": [], "checks": []}
+              "uncertain_rows": UNCERTAIN_ROWS, "shutdown_grace_ms": GRACE_MS, "termination": [], "checks": []}
     with tempfile.TemporaryDirectory(prefix="brainwire-termination-") as folder:
         path = Path(folder).resolve()
         path.chmod(0o700)
@@ -105,7 +108,7 @@ def run(binary):
                    BRAINWIRE_SERVER_DEFAULT_DATABASE=DATABASE, BRAINWIRE_SERVER_AUTH_FILE=str(path / "policy.json"),
                    BRAINWIRE_BOLT_AUTH_FILE=str(path / "health.json"), BRAINWIRE_MEMORY_CACHE="64MiB",
                    BRAINWIRE_MEMORY_MEMTABLES="16MiB", BRAINWIRE_MEMORY_QUERY="64MiB",
-                   BRAINWIRE_SERVER_MAX_MESSAGE="8MiB")
+                   BRAINWIRE_SERVER_MAX_MESSAGE="8MiB", BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS=str(GRACE_MS))
         server = None
         raw = None
         owned_sockets = []
@@ -128,14 +131,43 @@ def run(binary):
                     time.sleep(0.03)
             raise AssertionError("owned protected server readiness timeout")
 
-        def terminate(case):
-            nonlocal server
-            began = time.monotonic()
+        stop_began = None
+
+        def signal_stop():
+            nonlocal stop_began
+            stop_began = time.monotonic()
             server.terminate()
-            code = server.wait(timeout=5)
-            elapsed = time.monotonic() - began
+
+        def wait_stop(case, drained):
+            nonlocal server
+            code = server.wait(timeout=GRACE_MS / 1000 + 5)
+            elapsed = time.monotonic() - stop_began
             report["termination"].append({"case": case, "exit_code": code, "exit_seconds": round(elapsed, 6)})
             server = None
+            # 0 means every session closed; 1 means the grace deadline abandoned some.
+            if drained is None:
+                drained = code == 0
+            assert code == (0 if drained else 1), (case, code)
+            if drained:
+                assert elapsed < GRACE_MS / 1000, (case, elapsed)
+            else:
+                assert GRACE_MS / 1000 <= elapsed < GRACE_MS / 1000 + 3, (case, elapsed)
+
+        def terminate(case, drained):
+            signal_stop()
+            wait_stop(case, drained)
+
+        def admission_refused():
+            began = time.monotonic()
+            while time.monotonic() - began < 2:
+                try:
+                    socket.create_connection(address, timeout=0.2).close()
+                except ConnectionRefusedError:
+                    return round(time.monotonic() - began, 6)
+                except ConnectionResetError:
+                    pass  # queued in the backlog as the listener closed; retry
+                time.sleep(0.02)
+            raise AssertionError("listener still accepting during drain")
 
         def driver(name):
             return GraphDatabase.driver("bolt://" + endpoint, auth=(name, tokens[name]), connection_timeout=3,
@@ -178,12 +210,31 @@ def run(binary):
             with driver("writer") as connection:
                 with connection.session(database=DATABASE) as session:
                     transaction = session.begin_transaction()
+                    transaction.run("CREATE (c:Customer {entity_id:'drain-commit', email:'drain-create@example.test', active:true})").consume()
+                    signal_stop()
+                    report["drain_admission_refused_seconds"] = admission_refused()
+                    assert server.poll() is None, "an open transaction holds the drain"
+                    transaction.run("MATCH (c:Customer {entity_id:'term-999'}) SET c.email='drain-overwrite@example.test'").consume()
+                    transaction.commit()
+            wait_stop("explicit transaction committed during drain", drained=True)
+            report["drain_commit_recovery_ready_seconds"] = start()
+            assert query("MATCH (c:Customer) WHERE c.email='drain-create@example.test' RETURN c.entity_id AS id") == [{"id": "drain-commit"}]
+            assert query("MATCH (c:Customer) WHERE c.email='drain-overwrite@example.test' RETURN c.entity_id AS id") == [{"id": "term-999"}]
+            assert query("MATCH (c:Customer) WHERE c.email='term-999@example.test' RETURN c.entity_id AS id") == []
+            assert query("MATCH (c:Customer) WHERE c.active=true RETURN count(*) AS n") == [{"n": ROWS + 1}]
+            query("MATCH (c:Customer {entity_id:'drain-commit'}) DETACH DELETE c", name="writer")
+            query("MATCH (c:Customer {entity_id:'term-999'}) SET c.email='term-999@example.test'", name="writer")
+            baseline()
+            report["checks"].append("SIGTERM refuses new connections; an open transaction runs and commits within the grace; its CREATE and indexed overwrite survive restart; exit 0")
+            with driver("writer") as connection:
+                with connection.session(database=DATABASE) as session:
+                    transaction = session.begin_transaction()
                     try:
                         transaction.run("CREATE (c:Customer {entity_id:'pending-term', email:'pending-create@example.test'})").consume()
                         transaction.run("MATCH (c:Customer {entity_id:'term-500'}) SET c.email='pending-overwrite@example.test'").consume()
                         assert transaction.run("MATCH (c:Customer {entity_id:'term-500'}) RETURN c.email AS email").single()["email"] == "pending-overwrite@example.test"
                         baseline()
-                        terminate("pending explicit transaction")
+                        terminate("explicit transaction abandoned at the grace deadline", drained=False)
                     finally:
                         try:
                             transaction.close()
@@ -191,13 +242,14 @@ def run(binary):
                             pass
             report["pending_recovery_ready_seconds"] = start()
             baseline()
-            report["checks"].append("acknowledged 1000 indexed writes survive; pending explicit CREATE and indexed overwrite disappear")
+            report["checks"].append("acknowledged 1000 indexed writes survive; a transaction left open past the grace exits 1 and its CREATE and indexed overwrite disappear")
             raw = raw_reader("writer")
             uncertain = [{"id": f"uncertain-{i}", "email": f"uncertain-{i}@example.test"} for i in range(UNCERTAIN_ROWS)]
             request(raw, 0x10, "UNWIND $rows AS row CREATE (c:Customer {entity_id:row.id, email:row.email, active:false})",
                     {"rows": uncertain}, {"db": DATABASE})
             # The request is submitted, but no RUN/SUCCESS or commit acknowledgement is read.
-            terminate("RUN submitted without acknowledgement")
+            # The server may refuse it as a drain arrives, or run it and wait for PULL.
+            terminate("RUN submitted without acknowledgement", drained=None)
             raw.close()
             raw = None
             report["uncertain_recovery_ready_seconds"] = start()
@@ -220,18 +272,21 @@ def run(binary):
             report["slow_reader_requested_socket_receive_buffer"] = 1024
             report["slow_reader_socket_receive_buffer"] = raw.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
             # First RECORD observed; stop reading. No claim of an exact blocked-write phase.
-            terminate("PULL first RECORD observed then reader stopped")
+            terminate("PULL first RECORD observed then reader stopped", drained=False)
             raw.close()
             raw = None
             report["slow_reader_recovery_ready_seconds"] = start()
             baseline()
             assert query("MATCH (c:Customer) RETURN count(*) AS n") == [{"n": ROWS + count}]
-            report["checks"].append("SIGTERM exits within 5 seconds after first large PULL record; restart preserves committed graph")
-            terminate("offline audit stop")
+            report["checks"].append("a stalled reader holds the drain only until the grace deadline; restart preserves committed graph")
+            with driver("reader") as idle:
+                idle.verify_connectivity()
+                terminate("idle pooled driver connection only", drained=True)
+            report["checks"].append("idle authenticated sessions close at once and the drained process exits 0")
             report["audit"] = json.loads(cli("db", "check", DATABASE, "--json"))
             assert report["audit"]["status"] == "ok"
             report["result"] = "PASS"
-            report["scope"] = "native single-node SIGTERM recovery; abrupt termination, no drain or exact commit/blocked-write phase hook"
+            report["scope"] = "native single-node SIGTERM drain and recovery; no interruption of running engine calls, no exact commit-phase kill hook"
         finally:
             for connection in owned_sockets:
                 connection.close()

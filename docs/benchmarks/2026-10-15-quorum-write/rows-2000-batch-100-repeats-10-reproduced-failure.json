@@ -1,0 +1,252 @@
+{
+  "result": "FAIL",
+  "error_type": "ClientError",
+  "error_code": "Neo.ClientError.Transaction.CommitOutcomeUnknown",
+  "error": "{neo4j_code: Neo.ClientError.Transaction.CommitOutcomeUnknown} {message: leader/quorum unavailable; commit outcome may be unknown for request 19cb8e8fd6110414c2b091d89235678e1a997c63a6c23e64252ddb3bf1a928a0} {gql_status: 50N42} {gql_status_description: error: general processing exception - unexpected error. leader/quorum unavailable; commit outcome may be unknown for request 19cb8e8fd6110414c2b091d89235678e1a997c63a6c23e64252ddb3bf1a928a0}",
+  "request_id": "19cb8e8fd6110414c2b091d89235678e1a997c63a6c23e64252ddb3bf1a928a0",
+  "repeat": 6,
+  "mode": "single",
+  "row_offset": 55,
+  "rows_in_failed_transaction": 1,
+  "failed_call_elapsed_ms": 3220.58725,
+  "status_at_failure": {
+    "1": {
+      "cluster_id": "write-diagnostic-36f59927587842cba223745830d3fc17",
+      "node_id": 1,
+      "state": "Follower",
+      "current_term": 4,
+      "leader": 2,
+      "last_log_index": 12178,
+      "last_applied": 12178,
+      "committed_index": 12178,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 13204275,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1060537549,
+      "running": true,
+      "running_issue": null
+    },
+    "2": {
+      "cluster_id": "write-diagnostic-36f59927587842cba223745830d3fc17",
+      "node_id": 2,
+      "state": "Leader",
+      "current_term": 4,
+      "leader": 2,
+      "last_log_index": 12178,
+      "last_applied": 12178,
+      "committed_index": 12178,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 13204275,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1060537549,
+      "running": true,
+      "running_issue": null
+    },
+    "3": {
+      "cluster_id": "write-diagnostic-36f59927587842cba223745830d3fc17",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 4,
+      "leader": 2,
+      "last_log_index": 12178,
+      "last_applied": 12178,
+      "committed_index": 12178,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 13204275,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1060537549,
+      "running": true,
+      "running_issue": null
+    }
+  },
+  "request_lookup": {
+    "state": "absent",
+    "via_voter": 1,
+    "attempts": 1,
+    "outcome": {
+      "Lookup": null
+    }
+  },
+  "status_after_lookup": {
+    "1": {
+      "cluster_id": "write-diagnostic-36f59927587842cba223745830d3fc17",
+      "node_id": 1,
+      "state": "Follower",
+      "current_term": 4,
+      "leader": 2,
+      "last_log_index": 12178,
+      "last_applied": 12178,
+      "committed_index": 12178,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 13204275,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1060537549,
+      "running": true,
+      "running_issue": null
+    },
+    "2": {
+      "cluster_id": "write-diagnostic-36f59927587842cba223745830d3fc17",
+      "node_id": 2,
+      "state": "Leader",
+      "current_term": 4,
+      "leader": 2,
+      "last_log_index": 12178,
+      "last_applied": 12178,
+      "committed_index": 12178,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 13204275,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1060537549,
+      "running": true,
+      "running_issue": null
+    },
+    "3": {
+      "cluster_id": "write-diagnostic-36f59927587842cba223745830d3fc17",
+      "node_id": 3,
+      "state": "Follower",
+      "current_term": 4,
+      "leader": 2,
+      "last_log_index": 12178,
+      "last_applied": 12178,
+      "committed_index": 12178,
+      "membership": [
+        1,
+        2,
+        3
+      ],
+      "log_bytes": 13204275,
+      "max_log_bytes": 1073741824,
+      "log_remaining_bytes": 1060537549,
+      "running": true,
+      "running_issue": null
+    }
+  },
+  "server_log_tails": {
+    "1": {
+      "bytes_total": 141,
+      "tail": "brainwire serve 127.0.0.1:55329 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)\n"
+    },
+    "2": {
+      "bytes_total": 141,
+      "tail": "brainwire serve 127.0.0.1:55330 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)\n"
+    },
+    "3": {
+      "bytes_total": 141,
+      "tail": "brainwire serve 127.0.0.1:55331 databases=[] cache=64 MiB memtables=16 MiB query=64 MiB (shared query reservations + per-RUN guard; not RSS)\n"
+    }
+  },
+  "note": "the failed write was not retried; a timeout does not mean rollback. request_lookup.state is authoritative only when it is Applied or absent",
+  "binary_sha256": "8662a2326e9983390c83e8ba1cf9519b3af66f2e6025695257f9e71b8eda45f5",
+  "driver": "6.3.0",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "rows_per_round": 2000,
+  "batch_size": 100,
+  "repeats": 10,
+  "leader_member": 1,
+  "completed_rounds": [
+    {
+      "repeat": 0,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.63225,
+      "max_ms": 33.075791
+    },
+    {
+      "repeat": 0,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 3.885604,
+      "max_ms": 43.603417
+    },
+    {
+      "repeat": 1,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 3.844,
+      "max_ms": 9.255916
+    },
+    {
+      "repeat": 1,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.559979,
+      "max_ms": 120.133542
+    },
+    {
+      "repeat": 2,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.411354,
+      "max_ms": 67.8175
+    },
+    {
+      "repeat": 2,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 5.355938,
+      "max_ms": 15.337209
+    },
+    {
+      "repeat": 3,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 4.655791499999999,
+      "max_ms": 73.237
+    },
+    {
+      "repeat": 3,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.516521,
+      "max_ms": 76.968542
+    },
+    {
+      "repeat": 4,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.446208,
+      "max_ms": 80.816417
+    },
+    {
+      "repeat": 4,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 4.0257085,
+      "max_ms": 11.0585
+    },
+    {
+      "repeat": 5,
+      "mode": "batch",
+      "transactions": 20,
+      "p50_ms": 3.9083335000000003,
+      "max_ms": 13.059334
+    },
+    {
+      "repeat": 5,
+      "mode": "single",
+      "transactions": 2000,
+      "p50_ms": 1.605187,
+      "max_ms": 96.917917
+    }
+  ]
+}

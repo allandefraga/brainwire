@@ -16,9 +16,48 @@ fn acl_property(name: &str) -> bool {
     name.get(..4)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("acl_"))
 }
+fn node_with_visibility(
+    ctx: &Context<'_, '_>,
+    id: NodeId,
+) -> Result<Option<(NodeRecord, bool)>, ExecError> {
+    let Some(policy) = ctx.visibility else {
+        return Ok(get_node_with_control::<ExecError>(ctx.txn, id, |bytes| {
+            ctx.budget.charge(bytes)
+        })?
+        .map(|record| (record, true)));
+    };
+    // The private ACL is needed only while evaluating visibility. Keep its
+    // reservation temporary while retaining the decoded node for the caller.
+    let (result, node_charge) = {
+        let _visibility_scope = ctx.budget.scope();
+        let result = get_node_with_visibility_and_control::<ExecError>(
+            ctx.txn,
+            ctx.catalog,
+            id,
+            policy,
+            |bytes| ctx.budget.charge(bytes),
+        )?;
+        let node_charge = result
+            .as_ref()
+            .map_or(0, |(_, _, node_charge)| *node_charge);
+        (result, node_charge)
+    };
+    let Some((record, visible, _)) = result else {
+        return Ok(None);
+    };
+    ctx.budget.charge(node_charge)?;
+    Ok(Some((record, visible)))
+}
 fn node_record(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeRecord, ExecError> {
-    if !visible(ctx, id)? {
-        return Err(ExecError::Forbidden("node is not readable"));
+    if ctx.visibility.is_some() {
+        let Some((record, visible)) = node_with_visibility(ctx, id)? else {
+            return Err(ExecError::Forbidden("node is not readable"));
+        };
+        return if visible {
+            Ok(record)
+        } else {
+            Err(ExecError::Forbidden("node is not readable"))
+        };
     }
     Ok(
         get_node_with_control::<ExecError>(ctx.txn, id, |bytes| ctx.budget.charge(bytes))?
@@ -37,7 +76,13 @@ fn node_type<'a>(
 }
 
 pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, ExecError> {
-    let mut record = node_record(ctx, id)?;
+    node_out_from_record(ctx, node_record(ctx, id)?, id)
+}
+fn node_out_from_record(
+    ctx: &Context<'_, '_>,
+    mut record: NodeRecord,
+    id: NodeId,
+) -> Result<NodeOut, ExecError> {
     let ty = node_type(ctx, id)?;
     let mut props = BTreeMap::new();
     for column in &ty.columns {
@@ -125,18 +170,29 @@ fn matches(
 ) -> Result<Option<Bindings>, ExecError> {
     // Stored rows/ACLs used only to test the candidate are dropped before its bindings escape.
     let _scope = ctx.budget.scope();
-    if !visible(ctx, id)? {
-        return Ok(None);
-    }
-    let Some(row) = bind(row, pat, id) else {
-        return Ok(None);
+    let (record, row) = if ctx.visibility.is_some() {
+        let record = match node_with_visibility(ctx, id)? {
+            None | Some((_, false)) => return Ok(None),
+            Some((record, true)) => record,
+        };
+        let Some(row) = bind(row, pat, id) else {
+            return Ok(None);
+        };
+        (record, row)
+    } else {
+        let Some(row) = bind(row, pat, id) else {
+            return Ok(None);
+        };
+        let record =
+            get_node_with_control::<ExecError>(ctx.txn, id, |bytes| ctx.budget.charge(bytes))?
+                .ok_or(GraphError::NodeNotFound(id))?;
+        (record, row)
     };
     if pat.props.is_empty() {
         // Validate existence/corruption, without constructing unused properties.
-        node_record(ctx, id)?;
         return Ok((pat.label.as_ref() == Some(&node_type(ctx, id)?.label)).then_some(row));
     }
-    let node = node_out(ctx, id)?;
+    let node = node_out_from_record(ctx, record, id)?;
     if pat.label.as_ref() != Some(&node.label) {
         return Ok(None);
     }

@@ -1,0 +1,6787 @@
+{
+  "version": "1",
+  "nodes": [
+    {
+      "label": "Person",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57FF48"
+    },
+    {
+      "label": "Organization",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57CBD0"
+    },
+    {
+      "label": "Account",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#E8BD58"
+    },
+    {
+      "label": "ContactPoint",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#6DA8E8"
+    },
+    {
+      "label": "Contract",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57FF48"
+    },
+    {
+      "label": "Product",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57CBD0"
+    },
+    {
+      "label": "Opportunity",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#E8BD58"
+    },
+    {
+      "label": "Invoice",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#6DA8E8"
+    },
+    {
+      "label": "Payment",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57FF48"
+    },
+    {
+      "label": "Ticket",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57CBD0"
+    },
+    {
+      "label": "Message",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#E8BD58"
+    },
+    {
+      "label": "Attachment",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#6DA8E8"
+    },
+    {
+      "label": "Document",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57FF48"
+    },
+    {
+      "label": "KnowledgeArticle",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57CBD0"
+    },
+    {
+      "label": "Tag",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#E8BD58"
+    },
+    {
+      "label": "Campaign",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#6DA8E8"
+    },
+    {
+      "label": "Event",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57FF48"
+    },
+    {
+      "label": "Location",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#57CBD0"
+    },
+    {
+      "label": "Department",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#E8BD58"
+    },
+    {
+      "label": "Role",
+      "properties": [
+        "entity_id",
+        "name",
+        "source_id",
+        "created_at",
+        "updated_at",
+        "weight",
+        "valid_from",
+        "valid_to",
+        "embedding_ref"
+      ],
+      "indexed_fields": [
+        "entity_id",
+        "source_id"
+      ],
+      "display_color": "#6DA8E8"
+    }
+  ],
+  "edges": [
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Person"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Organization"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Account"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "ContactPoint"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Contract"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Product"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Opportunity"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Invoice"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Payment"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Ticket"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Message"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Attachment"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Document"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "KnowledgeArticle"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Tag"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Campaign"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Event"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Location"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Department"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Person"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Organization"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Account"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "ContactPoint"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Contract"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Product"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Opportunity"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Invoice"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Payment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Ticket"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Message"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Attachment"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "PART_OF",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Document"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "KnowledgeArticle"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "RELATES_TO",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Tag"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "REFERENCES",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Campaign"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "AFFECTS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Event"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "OWNS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Location"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "ASSIGNED_TO",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Department"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    },
+    {
+      "type": "TRIGGERS",
+      "from": {
+        "label": "Role"
+      },
+      "to": {
+        "label": "Role"
+      },
+      "properties": [
+        "weight",
+        "confidence",
+        "valid_from",
+        "valid_to",
+        "source_id"
+      ]
+    }
+  ]
+}

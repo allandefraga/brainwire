@@ -721,16 +721,69 @@ pub fn get_node_with_control<E: From<GraphError> + From<StoreError>>(
 ) -> Result<Option<NodeRecord>, E> {
     control(0)?;
     let key = id.0.to_be_bytes();
-    let mut record = None;
-    txn.visit_prefix::<E>(Cf::Node, &key, |found, bytes| {
-        if found == key {
-            control(estimate_node_allocation(bytes)?)?;
-            let (entity_id, row) = decode_node(bytes)?;
-            record = Some(NodeRecord { id, entity_id, row });
-        }
-        Ok(())
-    })?;
-    Ok(record)
+    txn.with_get(Cf::Node, &key, |bytes| {
+        let Some(bytes) = bytes else {
+            return Ok(None);
+        };
+        control(estimate_node_allocation(bytes)?)?;
+        let (entity_id, row) = decode_node(bytes)?;
+        Ok(Some(NodeRecord { id, entity_id, row }))
+    })
+}
+
+fn get_node_and_acl_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    id: NodeId,
+    control: &mut impl FnMut(usize) -> Result<(), E>,
+) -> Result<Option<(NodeRecord, Option<NodeAcl>, usize)>, E> {
+    let key = id.0.to_be_bytes();
+    txn.with_get(Cf::Node, &key, |node_bytes| {
+        let Some(node_bytes) = node_bytes else {
+            return Ok(None);
+        };
+        let node_charge = estimate_node_allocation(node_bytes)?;
+        txn.with_get(Cf::Acl, &key, |acl_bytes| {
+            let acl_charge = acl_bytes
+                .map(estimate_acl_allocation)
+                .transpose()?
+                .unwrap_or(0);
+            node_charge.checked_add(acl_charge).ok_or_else(|| {
+                StoreError::Corrupt("visibility allocation estimate overflow".into())
+            })?;
+            control(node_charge)?;
+            if acl_charge != 0 {
+                control(acl_charge)?;
+            }
+            let (entity_id, row) = decode_node(node_bytes)?;
+            let acl = acl_bytes.map(decode_node_acl).transpose()?;
+            Ok(Some((NodeRecord { id, entity_id, row }, acl, node_charge)))
+        })
+    })
+}
+
+/// Fetch a node and its private ACL through point reads, decode the row once,
+/// and return whether it is visible under `policy` and the retained node
+/// estimate. `Some((record, false, _))`
+/// distinguishes a hidden existing node from a missing node for trusted
+/// callers that need to preserve their existing error behavior.
+pub fn get_node_with_visibility_and_control<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    catalog: &Catalog,
+    id: NodeId,
+    policy: &ReadVisibility,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<Option<(NodeRecord, bool, usize)>, E> {
+    policy.validate().map_err(GraphError::from)?;
+    control(0)?;
+    Ok(
+        get_node_and_acl_with_control(txn, id, &mut control)?.map(|(record, acl, node_charge)| {
+            let visible = policy.is_visible(
+                acl.as_ref(),
+                has_document_id(Some(catalog), id, &record.row),
+            );
+            (record, visible, node_charge)
+        }),
+    )
 }
 
 fn estimate_acl_allocation(bytes: &[u8]) -> Result<usize, StoreError> {
@@ -828,45 +881,10 @@ pub fn node_visible_with_control<E: From<GraphError> + From<StoreError>>(
     policy: &ReadVisibility,
     mut control: impl FnMut(usize) -> Result<(), E>,
 ) -> Result<bool, E> {
-    policy.validate().map_err(GraphError::from)?;
-    control(0)?;
-    let key = id.0.to_be_bytes();
-    let mut visible = false;
-    txn.visit_prefix::<E>(Cf::Node, &key, |node_key, node_bytes| {
-        if node_key != key {
-            return Ok(());
-        }
-        let mut evaluate = |acl_bytes: Option<&[u8]>| -> Result<bool, E> {
-            let node_charge = estimate_node_allocation(node_bytes)?;
-            let acl_charge = acl_bytes
-                .map(estimate_acl_allocation)
-                .transpose()?
-                .unwrap_or(0);
-            node_charge.checked_add(acl_charge).ok_or_else(|| {
-                StoreError::Corrupt("visibility allocation estimate overflow".into())
-            })?;
-            control(node_charge)?;
-            if acl_charge != 0 {
-                control(acl_charge)?;
-            }
-            let (_, row) = decode_node(node_bytes)?;
-            let acl = acl_bytes.map(decode_node_acl).transpose()?;
-            Ok(policy.is_visible(acl.as_ref(), has_document_id(Some(catalog), id, &row)))
-        };
-        let mut found_acl = false;
-        txn.visit_prefix::<E>(Cf::Acl, &key, |acl_key, acl_bytes| {
-            if acl_key == key {
-                found_acl = true;
-                visible = evaluate(Some(acl_bytes))?;
-            }
-            Ok(())
-        })?;
-        if !found_acl {
-            visible = evaluate(None)?;
-        }
-        Ok(())
-    })?;
-    Ok(visible)
+    Ok(
+        get_node_with_visibility_and_control(txn, catalog, id, policy, &mut control)?
+            .is_some_and(|(_, visible, _)| visible),
+    )
 }
 
 /// Lists nodes of one type in partition zero by their encoded id order.
@@ -1070,7 +1088,7 @@ pub fn in_edges(txn: &Txn, dst: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
     edges(txn, Cf::In, dst)
 }
 
-/// Same listing as `edges`, but through `scan_prefix_for_update`: the whole
+/// Same listing as `edges`, but through `visit_prefix_for_update`: the whole
 /// (cf, node-prefix) range becomes a tracked dependency, so a concurrent
 /// `merge_edge` that adds a *new* edge under this node — one this scan could
 /// not have seen — makes whichever of the two transactions commits second
@@ -1080,14 +1098,15 @@ pub fn in_edges(txn: &Txn, dst: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
 /// commit order; this closes the other half.
 fn edges_for_update(txn: &mut Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
     let mut found = Vec::new();
-    for (key, _) in txn.scan_prefix_for_update(cf, &node.0.to_be_bytes())? {
-        let (_, edge_type, other, id) = decode_edge_key(&key)?;
+    txn.visit_prefix_for_update::<GraphError>(cf, &node.0.to_be_bytes(), |key, _| {
+        let (_, edge_type, other, id) = decode_edge_key(key)?;
         found.push(EdgeRef {
             edge_type,
             other,
             id,
         });
-    }
+        Ok(())
+    })?;
     Ok(found)
 }
 
@@ -1605,6 +1624,59 @@ mod tests {
     }
 
     #[test]
+    fn high_degree_detach_streams_snapshot_and_transaction_overlay_edges() {
+        let (_d, _r, db, cat) = setup();
+        let mut seed = db.begin();
+        let hub = merge_node(&mut seed, &cat, "Customer", "hub", &BTreeMap::new()).unwrap();
+        let neighbor =
+            merge_node(&mut seed, &cat, "Company", "neighbor", &BTreeMap::new()).unwrap();
+        seed.commit().unwrap();
+
+        let edge_type = EdgeTypeId(1);
+        let mut seed = db.begin();
+        for id in 0..2_048 {
+            let id = EdgeId(id);
+            seed.put(Cf::Out, edge_key(hub, edge_type, neighbor, id), Vec::new());
+            seed.put(Cf::In, edge_key(neighbor, edge_type, hub, id), Vec::new());
+        }
+        // A self-loop appears in both prefix scans; the outgoing pass stages
+        // the incoming tombstone before the incoming scan starts.
+        seed.put(
+            Cf::Out,
+            edge_key(hub, edge_type, hub, EdgeId(2_048)),
+            Vec::new(),
+        );
+        seed.put(
+            Cf::In,
+            edge_key(hub, edge_type, hub, EdgeId(2_048)),
+            Vec::new(),
+        );
+        seed.commit().unwrap();
+
+        let mut delete = db.begin();
+        // A staged tombstone must stay hidden, while a staged insertion must
+        // be included in the dependency-tracked streaming scan.
+        delete.delete(Cf::Out, edge_key(hub, edge_type, neighbor, EdgeId(0)));
+        delete.delete(Cf::In, edge_key(neighbor, edge_type, hub, EdgeId(0)));
+        delete.put(
+            Cf::Out,
+            edge_key(hub, edge_type, neighbor, EdgeId(2_049)),
+            Vec::new(),
+        );
+        delete.put(
+            Cf::In,
+            edge_key(neighbor, edge_type, hub, EdgeId(2_049)),
+            Vec::new(),
+        );
+        detach_delete(&mut delete, hub).unwrap();
+        delete.commit().unwrap();
+
+        assert!(get_node(&db.begin(), hub).unwrap().is_none());
+        assert!(in_edges(&db.begin(), neighbor).unwrap().is_empty());
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
     fn acl_properties_are_refused_for_now() {
         let (_d, _r, db, cat) = setup();
         let mut t = db.begin();
@@ -1787,7 +1859,7 @@ mod tests {
     // the *opposite* commit order from the four tests above — merge_edge
     // reaches commit() FIRST, and a concurrent detach_delete of an endpoint,
     // whose own snapshot predates the merge and so never saw the new edge,
-    // commits second. Before `edges_for_update`/`scan_prefix_for_update`,
+    // commits second. Before `edges_for_update` tracked its prefix,
     // this order left the new edge dangling and check_invariants silent
     // about it (see git history of this file, and task-9-report.md's "Fix
     // round 1" section, for the previous version of this test that pinned

@@ -113,7 +113,7 @@ def run(kind_binary, image, rows, node_image):
                         process.kill()
                         process.wait()
 
-        def verify(uri, database="client_memory"):
+        def verify(uri, database="default"):
             with GraphDatabase.driver(uri, auth=None, connection_timeout=3) as driver:
                 with driver.session(database=database) as session:
                     assert session.run("MATCH (c:Customer) RETURN count(*) AS n").single()["n"] == rows
@@ -137,11 +137,11 @@ def run(kind_binary, image, rows, node_image):
             version = json.loads(kube("version", "-o", "json"))["serverVersion"]["gitVersion"]
             pvc_uid = kube("get", "pvc/data-brainwire-0", "-o", "jsonpath={.metadata.uid}")
             stop()
-            offline_job("initialize", ["db", "apply-ontology", "client_memory", "/opt/brainwire/example-schema.json"])
+            offline_job("initialize", ["db", "apply-ontology", "default", "/opt/brainwire/example-schema.json"])
             start()
             with endpoint() as uri:
                 with GraphDatabase.driver(uri, auth=None) as driver:
-                    with driver.session(database="client_memory") as session:
+                    with driver.session(database="default") as session:
                         for offset in range(0, rows, 250):
                             batch = [{"id": f"k8s-{i}", "email": f"k8s-{i}@example.test", "segment": i % 7} for i in range(offset, min(offset + 250, rows))]
                             session.run("UNWIND $rows AS row MERGE (c:Customer {entity_id:row.id}) SET c.email=row.email, c.segment=row.segment", rows=batch).consume()
@@ -153,7 +153,7 @@ def run(kind_binary, image, rows, node_image):
                 old_restarts = pod["status"]["containerStatuses"][0]["restartCount"]
                 with endpoint() as uri:
                     with GraphDatabase.driver(uri, auth=None) as driver:
-                        with driver.session(database="client_memory") as session:
+                        with driver.session(database="default") as session:
                             tx = session.begin_transaction()
                             tx.run("MATCH (c:Customer {entity_id:'k8s-0'}) SET c.email='pending-k8s', c.segment=999999").consume()
                             assert tx.run("MATCH (c:Customer) WHERE c.email='pending-k8s' RETURN count(*) AS n").single()["n"] == 1
@@ -188,9 +188,9 @@ def run(kind_binary, image, rows, node_image):
                 recoveries.append({"action": action, "podUid": pod["metadata"]["uid"], "restartCount": pod["status"]["containerStatuses"][0]["restartCount"]})
                 print(f"verified {action}, same retained PVC", flush=True)
             stop()
-            audit = json.loads(offline_job("audit", ["db", "check", "client_memory", "--json"]))
+            audit = json.loads(offline_job("audit", ["db", "check", "default", "--json"]))
             assert audit["status"] == "ok"
-            checkpoint = json.loads(offline_job("checkpoint", ["db", "checkpoint", "client_memory", "--destination", "/data/checkpoint-k8s"]))
+            checkpoint = json.loads(offline_job("checkpoint", ["db", "checkpoint", "default", "--destination", "/data/checkpoint-k8s"]))
             assert checkpoint["status"] == "checkpoint_created"
             checkpoint_audit = json.loads(offline_job("checkpoint-audit", ["db", "check", "checkpoint-k8s", "--json"]))
             assert checkpoint_audit["status"] == "ok"

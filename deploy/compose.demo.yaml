@@ -1,0 +1,50 @@
+services:
+  initialize-demo:
+    image: ${BRAINWIRE_IMAGE:-brainwire:local}
+    build:
+      context: ..
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ -f /data/demo/CURRENT ]; then
+          exit 0
+        fi
+        brainwire db create demo --ontology /opt/brainwire/example-schema.json
+    environment:
+      BRAINWIRE_SERVER_DATA_DIR: /data
+      BRAINWIRE_SERVER_DEFAULT_DATABASE: demo
+    volumes:
+      - brainwire-demo-data:/data
+    restart: "no"
+
+  brainwire:
+    image: ${BRAINWIRE_IMAGE:-brainwire:local}
+    build:
+      context: ..
+    depends_on:
+      initialize-demo:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${BRAINWIRE_BIND_PORT:-7687}:7687"
+    environment:
+      BRAINWIRE_SERVER_DATA_DIR: /data
+      BRAINWIRE_SERVER_DEFAULT_DATABASE: demo
+      BRAINWIRE_SERVER_LISTEN: 0.0.0.0:7687
+      BRAINWIRE_MEMORY_CACHE: 256MiB
+      BRAINWIRE_MEMORY_MEMTABLES: 32MiB
+      BRAINWIRE_MEMORY_QUERY: 256MiB
+    volumes:
+      - brainwire-demo-data:/data
+    mem_limit: 2g
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "brainwire", "probe", "--mode", "ready", "--timeout-ms", "500"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15m
+      retries: 3
+
+volumes:
+  brainwire-demo-data:

@@ -6,7 +6,7 @@ the embedded CLI. Only one process can hold a database; stop the server before
 running offline `brainwire db` or `brainwire cypher` commands against it.
 
 ```sh
-brainwire db create client_memory --ontology crates/core/tests/fixtures/graph_mapping.json
+brainwire db create default --ontology crates/core/tests/fixtures/graph_mapping.json
 brainwire serve
 ```
 
@@ -27,7 +27,7 @@ from neo4j import GraphDatabase
 
 with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None,
                           liveness_check_timeout=30) as driver:
-    with driver.session(database="client_memory") as session:
+    with driver.session(database="default") as session:
         record = session.run("RETURN 1 AS n").single()
         print(record["n"])
 ```
@@ -70,8 +70,10 @@ enforcement. After authentication, `server.io_timeout_ms` /
 separate absolute IO budgets, defaulting to 300,000 milliseconds. NOOPs and partial
 bytes do not renew the request budget; complete requests and response delivery
 start the next budget. Expiry closes idle explicit transactions and rolls back
-their pending changes. This does not bound synchronous engine initialization,
-execute native query cancellation or provide transaction drain. RocksDB execution
+their pending changes. This does not bound synchronous engine initialization or
+execute native query cancellation. SIGTERM/SIGINT start a bounded drain
+(`server.shutdown_grace_ms`, default 8,000 ms); see
+[termination recovery](termination-recovery.md). RocksDB execution
 runs outside Tokio's IO threads. Response encoding handles one frame at a time,
 but session results are still materialized in memory; simple reads process
 intermediate rows incrementally. `memory.query` bounds conservative per-RUN accounting and the
@@ -105,7 +107,7 @@ defines the later replicated-cluster and failure acceptance criteria.
 
 ## Connected ontology inspection
 
-`brainwire shell --connect 127.0.0.1:7687 --graph client_memory --view ontology`
+`brainwire shell --connect 127.0.0.1:7687 --graph default --view ontology`
 reads a complete schema snapshot while this server is running. It uses the same
 `CALL db.schema()` procedure available to Python Bolt clients; `r` refreshes and
 failed refreshes retain an explicitly stale snapshot. See the
@@ -123,4 +125,5 @@ for graph/read/write grants, native/Python clients, restart-based rotation and
 transport limits. Authenticated containers use the [secret overlays](protected-containers.md).
 The [TLS proxy guide](protected-transport.md) qualifies strict Python certificate
 checks and pool reuse across the proxy's shorter 60-second idle timeout. Native
-SIGTERM remains abrupt; see [termination recovery](termination-recovery.md).
+SIGTERM drains open transactions for a bounded grace; see
+[termination recovery](termination-recovery.md).

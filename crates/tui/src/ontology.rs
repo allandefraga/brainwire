@@ -216,6 +216,45 @@ fn connections(
     lines
 }
 
+fn connection_catalog(ontology: &OntologySummary, lang: Language) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::raw(format!(
+        "{} {} {}",
+        ontology.edges.len(),
+        lang.choose(
+            "assinaturas declaradas • schema, nao dados",
+            "declared signatures • schema only, not stored edges",
+        ),
+        lang.choose("• direções preservadas", "• directions preserved")
+    ))];
+    if ontology.edges.is_empty() {
+        lines.push(Line::raw(lang.choose(
+            "Nenhuma conexão declarada no schema.",
+            "No connections declared in this schema.",
+        )));
+    }
+    for (index, edge) in ontology.edges.iter().enumerate() {
+        let properties = if edge.properties.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "  [{}]",
+                edge.properties
+                    .iter()
+                    .map(|value| terminal_text(value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        lines.push(Line::raw(format!(
+            "{:>3}  {}{}",
+            index + 1,
+            signature(edge),
+            properties
+        )));
+    }
+    lines
+}
+
 fn scrolled(frame: &mut Frame, area: Rect, paragraph: Paragraph<'_>, scroll: u16) -> u16 {
     let width = area.width.saturating_sub(2);
     if width == 0 || area.height <= 2 {
@@ -238,6 +277,7 @@ pub(crate) fn render(
     selected: usize,
     scroll: &mut u16,
     inspect: bool,
+    all_connections: bool,
     lang: Language,
     no_color: bool,
 ) {
@@ -247,7 +287,9 @@ pub(crate) fn render(
     }
     let mut max_scroll = 0;
     let wide = area.width >= 100;
-    let columns = if wide {
+    let columns = if all_connections {
+        Layout::horizontal([Constraint::Length(22), Constraint::Min(1)]).split(area)
+    } else if wide {
         Layout::horizontal([
             Constraint::Length(22),
             Constraint::Min(30),
@@ -295,8 +337,30 @@ pub(crate) fn render(
         columns[0],
     );
     let graph_area = columns[1];
-    let detail_area = if wide { columns[2] } else { columns[1] };
-    if let Some(node) = ontology.nodes.get(selected) {
+    let detail_area = if wide && !all_connections {
+        columns[2]
+    } else {
+        columns[1]
+    };
+    if all_connections {
+        let lines = connection_catalog(ontology, lang);
+        max_scroll = max_scroll.max(scrolled(
+            frame,
+            graph_area,
+            Paragraph::new(lines)
+                .style(text_style(PALE, no_color))
+                .wrap(Wrap { trim: false })
+                .block(panel(
+                    lang.choose(
+                        "TODAS AS CONEXÕES • PgUp/PgDn",
+                        "ALL CONNECTIONS • PgUp/PgDn",
+                    ),
+                    GREEN,
+                    no_color,
+                )),
+            *scroll,
+        ));
+    } else if let Some(node) = ontology.nodes.get(selected) {
         if wide || !inspect {
             let lines = connections(
                 node,
@@ -388,6 +452,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw(
         schema: &OntologySummary,
         width: u16,
@@ -395,6 +460,7 @@ mod tests {
         selected: usize,
         scroll: u16,
         inspect: bool,
+        all_connections: bool,
         lang: Language,
     ) -> (String, Terminal<TestBackend>) {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -408,24 +474,26 @@ mod tests {
                     selected,
                     &mut scroll,
                     inspect,
+                    all_connections,
                     lang,
                     true,
                 )
             })
             .unwrap();
-        let text = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
+        let text = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         (text, terminal)
     }
 
     #[test]
     fn wide_schema_has_directed_boxes_and_inspector() {
-        let (text, terminal) = draw(&schema(), 160, 48, 0, 0, false, Language::En);
+        let (text, terminal) = draw(&schema(), 160, 48, 0, 0, false, false, Language::En);
         for expected in [
             "Customer",
             "Company",
@@ -453,11 +521,11 @@ mod tests {
 
     #[test]
     fn compact_toggle_and_localization_preserve_canonical_names() {
-        let (graph, _) = draw(&schema(), 80, 24, 0, 0, false, Language::PtBr);
+        let (graph, _) = draw(&schema(), 80, 24, 0, 0, false, false, Language::PtBr);
         assert!(graph.contains("CONEXÕES"));
         assert!(graph.contains("WORKS_AT"));
         assert!(!graph.contains("PROPRIEDADES"));
-        let (inspector, _) = draw(&schema(), 80, 24, 0, 0, true, Language::PtBr);
+        let (inspector, _) = draw(&schema(), 80, 24, 0, 0, true, false, Language::PtBr);
         assert!(inspector.contains("PROPRIEDADES"));
         assert!(inspector.contains("ÍNDICES DECLARADOS"));
         assert!(inspector.contains("Customer -[:WORKS_AT]-> Company"));
@@ -481,7 +549,7 @@ mod tests {
         let detail = inspector(&ontology.nodes[0], &ontology, Language::En);
         assert!(detail.contains("Customer -[:WORKS_AT]-> Company"));
         assert!(detail.contains("Customer -[:WORKS_AT]-> UndeclaredEndpoint"));
-        let (scrolled, _) = draw(&ontology, 80, 24, 0, u16::MAX, false, Language::En);
+        let (scrolled, _) = draw(&ontology, 80, 24, 0, u16::MAX, false, false, Language::En);
         assert!(scrolled.contains("DECLARED_11"));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let mut scroll = u16::MAX;
@@ -493,6 +561,7 @@ mod tests {
                     &ontology,
                     0,
                     &mut scroll,
+                    false,
                     false,
                     Language::En,
                     true,
@@ -511,18 +580,102 @@ mod tests {
                     0,
                     &mut scroll,
                     false,
+                    false,
                     Language::En,
                     true,
                 )
             })
             .unwrap();
         assert_ne!(&last_page, terminal.backend().buffer());
-        let (company, _) = draw(&ontology, 80, 24, 1, 0, false, Language::En);
+        let (company, _) = draw(&ontology, 80, 24, 1, 0, false, false, Language::En);
         assert!(!company.contains("self-loop"));
         ontology.edges[0].name = "UNTRUSTED\x1b[31m\nNAME".into();
-        let (escaped, _) = draw(&ontology, 160, 48, 0, 0, false, Language::En);
+        let (escaped, _) = draw(&ontology, 160, 48, 0, 0, false, false, Language::En);
         assert!(escaped.contains("UNTRUSTED\\u{1b}"));
         assert!(!escaped.contains('\x1b'));
+    }
+
+    fn complete_schema() -> OntologySummary {
+        let nodes = (0..20)
+            .map(|index| OntologyNode {
+                label: format!("Entity{index:02}"),
+                properties: vec!["entity_id: String".into(), "name: String".into()],
+                indexed_fields: vec!["entity_id".into()],
+            })
+            .collect();
+        let edges = (0..20)
+            .flat_map(|source| {
+                (0..20).map(move |target| OntologyEdge {
+                    name: "RELATES_TO".into(),
+                    source: format!("Entity{source:02}"),
+                    target: format!("Entity{target:02}"),
+                    properties: if (source + target) % 7 == 0 {
+                        vec!["weight: Float".into()]
+                    } else {
+                        Vec::new()
+                    },
+                })
+            })
+            .collect();
+        OntologySummary { nodes, edges }
+    }
+
+    #[test]
+    fn complete_connection_catalog_exposes_every_signature_and_scrolls_at_all_sizes() {
+        let ontology = complete_schema();
+        assert_eq!(ontology.nodes.len(), 20);
+        assert_eq!(ontology.edges.len(), 400);
+        let expected = (1..=400).collect::<std::collections::BTreeSet<_>>();
+        let mut reached = std::collections::BTreeSet::new();
+
+        for scroll in (0..400).step_by(10) {
+            let (page, _) = draw(&ontology, 160, 48, 0, scroll, false, true, Language::En);
+            for line in page.lines() {
+                let content = line.split('│').nth(3).unwrap_or(line);
+                let words = content.split_whitespace().collect::<Vec<_>>();
+                for pair in words.windows(2) {
+                    if pair[1].starts_with("Entity") {
+                        if let Ok(number) = pair[0].parse::<usize>() {
+                            if (1..=400).contains(&number) {
+                                let source = (number - 1) / 20;
+                                let target = (number - 1) % 20;
+                                let signature =
+                                    format!("Entity{source:02} -[:RELATES_TO]-> Entity{target:02}");
+                                assert!(content.contains(&signature), "{content}");
+                                reached.insert(number);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(reached, expected);
+
+        for (width, height) in [(80, 24), (120, 30), (160, 48)] {
+            let (first, _) = draw(&ontology, width, height, 0, 0, false, true, Language::En);
+            assert!(
+                first.contains("400 declared signatures"),
+                "{width}x{height}: {first}"
+            );
+            assert!(
+                first.contains("Entity00 -[:RELATES_TO]-> Entity00"),
+                "{width}x{height}: {first}"
+            );
+            let (last, _) = draw(
+                &ontology,
+                width,
+                height,
+                0,
+                u16::MAX,
+                false,
+                true,
+                Language::En,
+            );
+            assert!(
+                last.contains("Entity19 -[:RELATES_TO]-> Entity19"),
+                "{width}x{height}: {last}"
+            );
+        }
     }
 
     #[test]
@@ -534,10 +687,11 @@ mod tests {
             usize::MAX,
             u16::MAX,
             false,
+            false,
             Language::En,
         );
         assert!(empty.contains("No ontology declared"));
-        let (isolated, _) = draw(&schema(), 80, 24, 2, 0, false, Language::En);
+        let (isolated, _) = draw(&schema(), 80, 24, 2, 0, false, false, Language::En);
         assert!(isolated.contains("Isolated type"));
         let mut schema = schema();
         schema.nodes[0].label = "Untrusted\x1b[31m\n公司".repeat(20);
@@ -560,11 +714,12 @@ mod tests {
                     usize::MAX,
                     u16::MAX,
                     inspect,
+                    false,
                     Language::En,
                 );
             }
         }
-        let (text, _) = draw(&schema, 160, 48, 0, 0, true, Language::En);
+        let (text, _) = draw(&schema, 160, 48, 0, 0, true, false, Language::En);
         assert!(!text.contains('\x1b'));
         assert!(!text.contains('\x07'));
         assert!(text.contains("\\u{1b}"));

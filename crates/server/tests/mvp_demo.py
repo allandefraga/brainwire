@@ -10,7 +10,7 @@ from neo4j import GraphDatabase
 
 
 def write(driver, rows):
-    with driver.session(database="client_memory") as session:
+    with driver.session(database="default") as session:
         tx = session.begin_transaction()
         tx.run("CREATE (c:Customer {entity_id: 'discarded'})").consume()
         tx.rollback()
@@ -44,7 +44,7 @@ def write(driver, rows):
 
 
 def read(driver, rows):
-    with driver.session(database="client_memory") as session:
+    with driver.session(database="default") as session:
         count = session.run("MATCH (c:Customer) RETURN count(*) AS n").single()["n"]
         assert count == rows + 2, count
         assert session.run(

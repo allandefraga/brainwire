@@ -25,7 +25,7 @@
     "tickets": 10000,
     "comments": 20000,
     "bytes": 29039330,
-    "mapping_contract_id": "client-zendesk-snapshot-v1",
+    "mapping_contract_id": "external-zendesk-snapshot-v1",
     "sha256": "5f536fdfc61f71c3e1905ec6e25d578bc9cef8636dbbd942305f7e85341f237d"
   },
   "source_mode": "read-only DuckDB file",

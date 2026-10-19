@@ -9,7 +9,7 @@ or configure automatic work.
 
 The complete requested product remains the target described by the feature
 matrix below. Delivering every pending row in 6 hours is not a credible commitment.
-The executable schedule proposes a **controlled single-node client beta**;
+The executable schedule proposes a **controlled single-node external application beta**;
 it does not rename that subset as a completed distributed/full-feature beta.
 Reduced October acceptance scope is a visible planning proposal, not an assertion
 that Allan withdrew any requirement. If the complete matrix is mandatory on
@@ -23,7 +23,7 @@ authorization. This is a work queue, not a configured automatic daily run.
 
 Private node ACL now filters MATCH, traversals, ranking and sparse algorithms;
 protected static policies and privileged stamping are available. The dynamic
-client adapter and authoritative ACL source integration remain open. Python
+external application adapter and authoritative ACL source integration remain open. Python
 now offers atomic per-node upsert + ACL replacement; the snapshot importer does
 not automatically use it. Python has
 single/batch upserts and partial property addition/removal on nodes and edges.
@@ -53,7 +53,7 @@ of coding is not a one-hour endurance test. Do not assume scheduled wakeups or
 unattended acceptance jobs exist. A blocked task consumes a later slot or displaces
 a lower-priority task; there is no hidden buffer of unlimited extra development.
 
-The October 12 gate assesses the client workload and API/storage gaps. October
+The October 12 gate assesses the external application workload and API/storage gaps. October
 24 is the candidate/feature-freeze gate. October 31 is a release decision based on
 evidence, not a promise to deploy regardless of failed gates.
 
@@ -61,7 +61,7 @@ evidence, not a promise to deploy regardless of failed gates.
 
 - One durable instance with multiple independent named graphs. Python/Bolt writes
   and supported Cypher/indexes remain the engine path. No second ingestion engine.
-- client first consumes an explicitly scoped synthetic/anonymized data profile,
+- external application first consumes an explicitly scoped synthetic/anonymized data profile,
   then a separately authorized source snapshot. Define stable entity IDs, mapping,
   overwrite semantics and a replay-safe progress cursor before integration.
 - DuckLake stays the priority source. Start with a pinned source snapshot exported
@@ -76,12 +76,12 @@ evidence, not a promise to deploy regardless of failed gates.
   restore acceptance, and explicit Kubernetes/Swarm evidence status. Container
   scheduling does not supply replica durability or machine-loss failover.
 - Real supported TUI inspection/status, EN/PT-BR, a local documentation quickstart,
-  limits, runbook and measured client workload. Connected unsupported panels stay
+  limits, runbook and measured external application workload. Connected unsupported panels stay
   explicitly unavailable; a demo panel is never acceptance evidence.
 
 Use shadow mode first: DuckLake remains authoritative and a new independent graph
 can be rebuilt. Beta testing and production readiness are different decisions.
-Do not make Brainwire the sole copy of essential client records until security,
+Do not make Brainwire the sole copy of essential external application records until security,
 restoration, failure and workload acceptance pass and deployment is authorized.
 
 ## Current foundation — implemented, not the whole beta
@@ -148,11 +148,11 @@ sharding and distributed execution require their own future design and tests.
 
 ## Progress recorded October 10
 
-The [client shadow fixture](client-shadow.md) implements the executable
+The [external application shadow fixture](source-ingestion.md) implements the executable
 Ticket/TicketComment ingestion slice using documented Zendesk concepts. Source
 identity, required fields, example queries and proposed workload limits are now
 written down; they are a **synthetic candidate contract**, not an approved live
-client mapping. Direct DuckLake input and production sample shape remain open.
+external application mapping. Direct DuckLake input and production sample shape remain open.
 Actual release acceptance covers 100K tickets + 200K comments + 200K edges,
 atomic source progress, update/null/index behavior, replay, SIGKILL and fresh
 checkpoint restore. This is not the full 100K/1M target or an endurance certificate.
@@ -184,7 +184,7 @@ final input. It verifies active caller-transaction refusal before BEGIN, rather
 than using a nested BEGIN probe. A read-only local SQLite DuckLake exporter now
 requires an explicit version and existing managed data, with overrides/implicit
 extension installation disabled. Synthetic pinned snapshots survive later source
-UPDATE/DELETE; live client catalog/backends, mapping and CDC remain open.
+UPDATE/DELETE; live external application catalog/backends, mapping and CDC remain open.
 Connected Memory and Indexes now use authenticated server procedures, complete
 bounded snapshots, EN/PT explanations, sample age and stale refresh status.
 Memory requires instance administration; ordinary graph readers can inspect indexes.
@@ -226,13 +226,37 @@ index and replication examples are recorded in the
 [documentation reconciliation queue](docs-site-beta-reconciliation.md).
 The final sustained-load and source/recovery receipts are recorded in the
 [October 13 qualification report](benchmarks/2026-10-13-beta.md); local evidence
-must not be extended into a real client deployment or replicated reliability.
-A read-only [client port comparison](client-contract-gap.md) found no Brainwire
+must not be extended into a real external application deployment or replicated reliability.
+A read-only [external application port comparison](graph-adapter-compatibility.md) found no Brainwire
 adapter in the real conformance suite. Private engine node ACL is now implemented;
 dynamic adapter visibility binding, query pagination,
 online DDL/introspection and per-request timeout contracts remain concrete blockers
 to a production drop-in. The next adapter slice must gate its ingestion subset and
 fail clearly on unsupported dynamic governed-read contracts.
+
+## Progress recorded October 15
+
+The October 15 shutdown slot now has a native bounded drain. SIGTERM/SIGINT
+close the listener, close idle sessions, refuse new work on them with a transient
+error, and let explicit transactions and result streams finish within
+`server.shutdown_grace_ms` (default 8 s). Exit 0 means a complete drain; exit 1
+means sessions were abandoned. RocksDB now closes on the main thread before exit;
+the first build aborted intermittently because engine threads closed it during
+C++ static destruction. The [drain qualification](benchmarks/2026-10-15-graceful-drain.md)
+covers commit-during-drain, abandoned transaction, unacknowledged RUN, stalled
+reader and idle pool with drivers 5/6, plus a three-voter SIGTERM stop. Running
+engine calls are not interrupted. On October 16 the Compose fixture passed three
+times in a Linux (aarch64, glibc) container: commit during drain, exit 0 and
+offline audit; Kubernetes/Swarm targets remain unexercised.
+
+The experimental quorum's intermittent `leader/quorum unavailable` and
+`CommitOutcomeUnknown` under sequential writes had one cause: a new TCP
+connection per peer RPC exhausted local ports (58,046 TIME_WAIT sockets). Peer
+connections are now reused; the reproducing 2000×100×10 loopback run and the
+500-row quorum acceptance pass ([diagnosis](benchmarks/2026-10-15-quorum-write/README.md)).
+A six-minute soak (800k rows) then passed once; its repeat lost leadership
+mid-run after an undiagnosed sub-2 s pause (RocksDB stalls ruled out). This is
+loopback evidence on a busy host, not multi-machine qualification.
 
 ## Daily execution queue — October 13–31
 
@@ -246,17 +270,17 @@ visible. Do not split a storage invariant merely to mark a day complete.
 | Oct 13 | Choose and test the pilot transport boundary | One documented protected route: same-host loopback or an encrypted tunnel/proxy with verified client behavior; no public plaintext Bolt |
 | Oct 14 | Qualify admission and slow-client limits for the pilot | Negotiation/authentication IO budgets and permit cleanup are implemented; reconcile request/batch limits, PackStream decoding allocations outside the query pool and authenticated slow-client exposure |
 | Oct 15 | Resolve shutdown and cancellation support boundary | Test idle handshake, idle transaction, RUN, COMMIT and slow reader during termination; implement safe drain across later sessions or explicitly restrict pilot to supervised stop/recovery |
-| Oct 16 | Validate the real client source contract | Approved ticket/comment columns, IDs, null/deletion policy, important queries, volumes and payloads; DuckLake catalog access remains an external dependency |
-| Oct 17 | Qualify the approved client DuckLake backend | Local SQLite pinning/export is tested; validate actual catalog/storage backend, explicit version and retained managed files; otherwise retain tested local-source/immutable-input profile |
+| Oct 16 | Validate the real external application source contract | Approved ticket/comment columns, IDs, null/deletion policy, important queries, volumes and payloads; DuckLake catalog access remains an external dependency |
+| Oct 17 | Qualify the approved external application DuckLake backend | Local SQLite pinning/export is tested; validate actual catalog/storage backend, explicit version and retained managed files; otherwise retain tested local-source/immutable-input profile |
 | Oct 18 | Test source revision ordering and import recovery | Revisions use new source IDs and serial chronological import; duplicates, null/overwrite, missing parent, changed file and lost commit receipt; no CDC/delete synchronization claim |
 | Oct 19 | Freeze the single-instance Docker package | Candidate image digest, protected config/retained path, fresh install, Python and connected TUI smoke; reconcile documented query/value limits |
 | Oct 20 | Qualify the chosen orchestration target | Execute retained-volume recovery on an authorized disposable Kubernetes or Swarm target; otherwise mark that target unqualified and retain validated Docker profile |
 | Oct 21 | Rehearse backup, restore and restart on the candidate | Exact checkpoint/cursor/index receipts, fresh-directory restore, acknowledged writes retained; documented restore time and operator procedure |
-| Oct 22 | Measure representative client queries | Agree latency/throughput/RSS limits before running; 100K nodes / 1M edges only if within declared profile; actual payloads, degree distribution and filters |
-| Oct 23 | Qualify sustained load for the selected client profile | Local one-hour synthetic gate completed Oct 13; run/review the selected representative resource/query profile, errors, RSS, p95/p99 and recovery rather than substituting localhost evidence |
+| Oct 22 | Measure representative external application queries | Agree latency/throughput/RSS limits before running; 100K nodes / 1M edges only if within declared profile; actual payloads, degree distribution and filters |
+| Oct 23 | Qualify sustained load for the selected external application profile | Local one-hour synthetic gate completed Oct 13; run/review the selected representative resource/query profile, errors, RSS, p95/p99 and recovery rather than substituting localhost evidence |
 | Oct 24 | Candidate decision and feature freeze | Security/source/recovery/workload gates pass or become explicit no-go items; assign remaining slots only to measured blockers |
 | Oct 25 | Reconcile real TUI and local docs release preview | Memory/index/ontology screenshots and permissions; query/source limits; existing docs-site draft reconciled without inventing unsupported tabs or publishing |
-| Oct 26 | Run a complete client shadow rehearsal | Install → schema → authorized source snapshot → import → expected query answers → restart → fresh restore, recorded against the candidate hash |
+| Oct 26 | Run a complete external application shadow rehearsal | Install → schema → authorized source snapshot → import → expected query answers → restart → fresh restore, recorded against the candidate hash |
 | Oct 27 | Prepare upgrade, rollback and beta package | Pin versions, configuration and scope; operator checklist, restore-based rollback, unresolved limitations and local release notes |
 | Oct 28 | Buffer: highest-priority blocker | Correctness/security/recovery first; affected acceptance repeated |
 | Oct 29 | Buffer: integration/performance blocker | Fix measured issue or complete missing evidence; no cosmetic work ahead of blockers |
@@ -281,15 +305,15 @@ release dependencies. No infrastructure credential or live data is presumed.
 | Gate | October decision evidence | Status on October 13 |
 | --- | --- | --- |
 | Data contract | Explicit authoritative fields/IDs and snapshot identity; null/overwrite/parent semantics; deletes/history unsupported unless independently proven | Synthetic DuckDB/SQLite DuckLake snapshot path passes; real mapping/backend approval pending (Oct 16–18) |
-| Security | Graph grants and denied operations, private credentials, selected encrypted or loopback boundary, documented administration access | Tokens/grants and strict single-host TLS proxy acceptance pass with drivers 5/6; selected client route and protected target execution pending |
-| Resource behavior | Declared connection/message/query/result limits, measured slow/disconnected-client cleanup; no RSS or immediate-cancellation claim | Decoded-input quotas, authenticated complete-request IO budgets, idle transaction rollback and default 300s timeout pass; immediate cancellation/global RSS ceiling/drain remain unsupported |
+| Security | Graph grants and denied operations, private credentials, selected encrypted or loopback boundary, documented administration access | Tokens/grants and strict single-host TLS proxy acceptance pass with drivers 5/6; selected external application route and protected target execution pending |
+| Resource behavior | Declared connection/message/query/result limits, measured slow/disconnected-client cleanup; no RSS or immediate-cancellation claim | Decoded-input quotas, authenticated complete-request IO budgets, idle transaction rollback and default 300s timeout pass; bounded native SIGTERM drain passes natively (Oct 15); immediate cancellation/global RSS ceiling remain unsupported |
 | Recovery | Pending work rolls back, acknowledged writes survive crash, restart/replay and fresh checkpoint restore pass exact audits | Final 100k-ticket pending cursor/index rollback, fresh restore, three-graph SIGKILL and abrupt SIGTERM audits pass; selected operator/runtime rehearsal pending (Oct 21/26) |
-| Performance | Agreed client workload/resource envelope with actual p95/p99, throughput, payload/degree distribution and sustained-load duration; synthetic localhost results are supporting evidence | Synthetic 100k-ticket bridge passes; final one-hour synthetic 100k-node mixed load passes with measured latency/RSS and crash audit; representative client workload/SLO envelope still pending (Oct 22) |
+| Performance | Agreed external application workload/resource envelope with actual p95/p99, throughput, payload/degree distribution and sustained-load duration; synthetic localhost results are supporting evidence | Synthetic 100k-ticket bridge passes; final one-hour synthetic 100k-node mixed load passes with measured latency/RSS and crash audit; representative external application workload/SLO envelope still pending (Oct 22) |
 | Deployment | Reproducible pinned Docker single-owner package; Kubernetes/Swarm supported only for profiles actually exercised, without replica/failover claims | Final protected Linux Compose acceptance passes; package freeze and chosen protected orchestration target pending (Oct 19–20) |
 | Product | Real EN/PT inspection, executable Python/Cypher examples, local docs preview, limits and operator runbook; no simulated acceptance tab | Four connected EN/PT panes and actual 100k-node captures pass; Graph is a sampled selected neighborhood. Reconcile docs-site draft and operational UI scope (Oct 25) |
 | Release | Candidate hashes, unresolved risks, rollback rehearsal and explicit ready/conditional/no-go decision on October 31 | Local qualification receipts saved; feature freeze, shadow rehearsal and release/rollback decision pending (Oct 24–31) |
 
-The proposed October beta is suitable first for a rebuildable client shadow
+The proposed October beta is suitable first for a rebuildable external application shadow
 graph. Putting it on the critical production path is a separate decision based
 on these receipts. Raft, ANN/vector search, temporal history, retention jobs and
 fully connected operation remain requested full-product work; do not hide them
@@ -302,13 +326,14 @@ inside this narrower release label. No guaranteed production SLA is established.
 | Distribution | Deterministic mutation/apply, three-voter Raft, leader loss, partitions, snapshots and whole-cluster restart | All graphs/catalogs/allocators/progress replicated; distinct-machine failure acceptance; local counter alone is insufficient |
 | Search/indexes | Range indexes, lexical documents, exact vectors then ANN, resumable builds/freshness | Mutation/rebuild/delete correctness; measured recall/filter/latency and memory |
 | Temporal/maintenance | Node AND edge history, valid/recorded clocks, weights across history, resumable retention/deprecation | Atomic revisions, ticket transitions, late events and exact dry-run/cleanup sets |
+| Agent platform | Initial Python agent layer for bounded, cited graph context and explicit memory; see [agent platform proposal](agent-platform-mvp.md) | Node AND edge revisions, identity-bound ACL, idempotent memory writes, bounded runner and two-principal acceptance |
 | Sources | Full DuckLake incremental change capture including deletes, DuckDB/Parquet/Delta adapters and Arrow comparison | Durable source event/checkpoint contract, schema evolution, replay and reconciliation |
 | Storage/operation | Checksummed object-storage backups/blobs, validated multi-machine profiles and upgrades | Interrupted upload, complete manifests, restore/RPO and upgrade rollback |
 | Product | Fully connected Observatory, query/jobs/history/maintenance tabs, hosted docs and MCP | Shared authenticated APIs, real bounded status and examples; publication separately authorized |
 
 These are not dropped. Their dates require a new capacity decision based on the
 October pilot evidence. The next large engine tasks are coordinated snapshots and log compaction;
-this revision deliberately puts the client pilot blockers ahead of claiming
+this revision deliberately puts the external application pilot blockers ahead of claiming
 an untested distributed system in a 6-hour remaining development budget.
 
 Temporal/history and replication work cannot independently invent transaction or
@@ -353,7 +378,7 @@ intake remains frozen while those blockers are fixed.
 
 **October 31:** classify separately:
 
-- **client shadow beta:** validated source/input and queries on independent data,
+- **external application shadow beta:** validated source/input and queries on independent data,
   security/isolation appropriate to its environment, reproducible restart/restore,
   documented limits and measured workload results.
 - **Production candidate:** all shadow gates plus shared-environment security,
@@ -400,7 +425,7 @@ target, show the gap and record a visible support limit or release decision; do 
 quietly change the dataset, disable history or omit network/replication costs.
 
 Use 100,000 nodes / 1,000,000 relationships as the representative supported
-client profile where it fits the declared resources; a smaller passing profile
+external application profile where it fits the declared resources; a smaller passing profile
 is explicitly a smaller support limit. The full product additionally requires
 100,000 search vectors on its declared memory profile. Stress toward
 1,000,000 nodes / 10,000,000 relationships with explicit bounds and separate
@@ -446,7 +471,7 @@ MCP should adapt the same supported APIs and permission model, with bounded
 results and explicit mutation scope. It does not replace the Python driver or
 create a second storage/query implementation. Vector search and multi-machine
 replication remain explicit competing priorities; do not promise both plus all
-beta gates in the same month. Prefer measured client requirements when choosing
+beta gates in the same month. Prefer measured external application requirements when choosing
 which large capability follows reliable ingestion and operation.
 
 ## December extension, proposed October 3
@@ -458,7 +483,7 @@ smaller operational scope than simultaneously building a fully managed SaaS.
 
 The desired release includes independent Docker/Compose/Kubernetes installation,
 multiple graphs, Python and MCP over the same APIs, individual/batch writes,
-incremental client ingestion, measured query/index behavior, basic history and
+incremental external application ingestion, measured query/index behavior, basic history and
 retention, a connected polished TUI, versioned documentation, authentication,
 graph isolation, metrics, backup/restore and a documented upgrade path.
 

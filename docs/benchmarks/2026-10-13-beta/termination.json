@@ -42,7 +42,7 @@
   "slow_reader_socket_receive_buffer": 322386,
   "slow_reader_recovery_ready_seconds": 0.015861,
   "audit": {
-    "database": "client_memory",
+    "database": "default",
     "scalar_indexes": "checked_active_declarations",
     "status": "ok"
   },

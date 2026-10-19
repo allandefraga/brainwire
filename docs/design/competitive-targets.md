@@ -1,14 +1,14 @@
 # Workload-specific differentiation targets
 
 Brainwire is a local MVP; superiority over FalkorDB or Neo4j is not established.
-Choose one client workload and measure complete ingestion, index/projection
+Choose one external application workload and measure complete ingestion, index/projection
 build, queries, memory, storage and recovery on frozen comparable resources.
 Record competitor versions/editions, supported syntax and enabled indexes.
 
 | Hypothesis | Brainwire target | Evidence required |
 | --- | --- | --- |
 | Lake-to-graph operation | DuckLake-first Python ingestion, explicit versions, replay-safe progress and reconciliation | Identical insert/update/delete batches, lost acknowledgements, schema/source changes, rows/s and peak RAM |
-| Governed analytics | client row/connector/document visibility applied before traversal, components and ranking | Shared authorization corpus, no hidden topology/score/count leaks, policy overhead and failure behavior |
+| Governed analytics | external application row/connector/document visibility applied before traversal, components and ranking | Shared authorization corpus, no hidden topology/score/count leaks, policy overhead and failure behavior |
 | Ticket history | Durable node/edge revisions, as-of questions and scoped retention | Exact ticket transitions, late events, historical neighborhood/weights and restartable cleanup |
 | Operator experience | Real terminal schema, memory, files, indexes, ingestion and recovery explanations | Time/error rate for real inspect/restart/restore tasks; no simulated panels counted as evidence |
 | Sparse disk-backed workload | RocksDB canonical graph and measured ephemeral CSR analytics | Hot/cold/skewed-degree latency, projection+algorithm total cost, bytes/entity and crash recovery |

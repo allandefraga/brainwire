@@ -1,0 +1,57 @@
+{
+  "benchmark": "detach_delete_adjacency_collection",
+  "config": {
+    "cache_bytes": 268435456,
+    "conflict_history_keys": 50000,
+    "id_block": 4096,
+    "memtable_bytes": 33554432,
+    "order": "materialized first on even repetitions, streaming first on odd repetitions",
+    "repeats": 9,
+    "warmup": "invariant check plus one full scan per method"
+  },
+  "exact_vectors_equal": true,
+  "fixture": {
+    "adjacency_records": 40000,
+    "encoded_out_row_bytes": 14,
+    "in_value_bytes": 0,
+    "incoming_degree": 10000,
+    "invariants": "passed",
+    "logical_relationships": 20000,
+    "nodes": 10001,
+    "outgoing_degree": 10000,
+    "payload_bytes": 0,
+    "payload_pattern": "repeated ASCII x; compressible synthetic data",
+    "sst_flushed_before_reopen": true,
+    "total_hub_degree": 20000
+  },
+  "materialized": {
+    "median_ms": 3.617,
+    "samples_ms": [
+      3.847375,
+      3.659542,
+      3.681708,
+      3.5410839999999997,
+      3.6645,
+      3.5765,
+      3.5625,
+      3.617,
+      3.581375
+    ]
+  },
+  "median_speedup": 3.192880150913683,
+  "scope": "warm-cache Out+In scans including EdgeRef vector construction; excludes transaction creation/drop, vector drop, delete staging and commit",
+  "streaming": {
+    "median_ms": 1.132833,
+    "samples_ms": [
+      1.498292,
+      1.130833,
+      1.1326669999999999,
+      1.124541,
+      1.132833,
+      1.129792,
+      1.210959,
+      1.1464999999999999,
+      1.170833
+    ]
+  }
+}

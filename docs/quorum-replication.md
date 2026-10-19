@@ -93,7 +93,7 @@ schemas; the serialized replicated command must also fit its 2 MiB limit.
 python3 - <<'PY' > /tmp/brainwire-quorum-demo/schemas.json
 import json
 from pathlib import Path
-print(json.dumps({"tickets": json.loads(Path("examples/client/ontology.json").read_text())}))
+print(json.dumps({"tickets": json.loads(Path("examples/source_ingestion/ontology.json").read_text())}))
 PY
 ./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" \
   init --schemas "$bw_demo_root/schemas.json" --request-id initial-tickets
@@ -111,7 +111,7 @@ this increment has no graph drop or ontology migration operation.
 ./target/release/brainwire cluster --cluster-config "$bw_demo_root/node2/cluster.toml" status
 ./target/release/brainwire cluster --cluster-config "$bw_demo_root/node3/cluster.toml" status
 ./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" \
-  create --graph research --ontology examples/client/ontology.json --request-id create-research
+  create --graph research --ontology examples/source_ingestion/ontology.json --request-id create-research
 ./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" \
   request --id initial-tickets
 ```
@@ -122,20 +122,54 @@ this increment has no graph drop or ontology migration operation.
 ./target/release/brainwire cluster --cluster-config "$bw_demo_root/node1/cluster.toml" inspect
 ```
 
-Its JSON includes individual statuses, `complete`, `all_initialized`,
+Its JSON includes individual statuses and per-peer `response_time_ms` elapsed RPC
+attempt times (round-trip time when the peer responds), `complete`, `all_initialized`,
 `retained_log_cap_agreement` and `configured_log_cap_agreement`. Unavailable or
 invalid peers remain explicit entries; incomplete samples report unknown cap
 agreement as `null`. Incomplete/running-false samples or differing capacities
 exit nonzero after printing the diagnostic report. An uninitialized group can
-produce complete samples with `all_initialized=false`. Collection is sequential
-and each peer has a bounded request deadline. Independent status samples do not
+produce complete samples with `all_initialized=false`. All three peer requests run
+concurrently, each with its own bounded request deadline; a slow or unavailable
+voter does not postpone contacting the others. Report entries remain ordered by
+voter ID regardless of response order. Independent status samples do not
 prove quorum or readiness for the next write; transaction barriers remain authoritative.
+When all three initialized voters report committed and applied indexes,
+`replication_progress` shows the sampled min/max/spread and each voter's lag
+behind the highest sampled index. These requests run concurrently but are not
+an atomic snapshot, so transient differences can reflect timing; missing indexes
+or incomplete membership make the progress summary `null`.
+
+For example, a healthy three-voter sample can report:
+
+```json
+{
+  "replication_progress": {
+    "basis": "concurrent independent samples; not an atomic snapshot or readiness proof",
+    "committed_index": {"min": 512, "max": 512, "spread": 0},
+    "applied_index": {"min": 512, "max": 512, "spread": 0}
+  },
+  "members": [
+    {"node_id": 1, "committed_index_lag": 0, "applied_index_lag": 0},
+    {"node_id": 2, "committed_index_lag": 0, "applied_index_lag": 0},
+    {"node_id": 3, "committed_index_lag": 0, "applied_index_lag": 0}
+  ]
+}
+```
+
+Treat a nonzero spread as a diagnostic signal, not a routing decision: repeat
+the inspection to see whether the follower catches up. Use the local readiness
+probe on the intended write leader for the actual quorum read barrier; it is
+the transaction barrier, not the sampled indexes, that decides whether the
+leader can serve a linearizable operation.
 
 Status is local diagnostic telemetry: leader, term, membership, last log,
 committed/applied progress, retained log bytes, configured byte cap, remaining
-log bytes and running state. It is not a
-quorum health proof. Graph creation follows the leader; accessing a new graph
-also requires explicit grants in the Bolt policy on every voter and a server
+log bytes and running state. A stopped Raft node also reports the stable
+`running_issue` category `storage_error`, `panic` or `stopped`; the response never
+includes the underlying fatal message or storage path. Older voters without
+this optional field remain readable. Status is not a quorum health proof. Graph
+creation follows the leader; accessing a new graph also requires explicit
+grants in the Bolt policy on every voter and a server
 restart to reload that policy. Private cluster controls use the peer secret,
 not the Bolt reader token; protect access as administrative authority.
 
@@ -153,6 +187,8 @@ never follows a leader redirect, so a follower cannot be marked ready via anothe
 member. Failure prints a redacted diagnostic JSON and exits nonzero.
 Readiness is a momentary Raft-only sample, not a test of graph availability, Bolt
 permissions or future write capacity. Leadership can change immediately afterward.
+For a stopped node, readiness maps the same categories to `fatal_storage_error`,
+`raft_panicked` or `raft_stopped` while keeping details redacted.
 Allow up to 5 seconds for liveness and 10 seconds for readiness; configure an
 external probe timeout accordingly. Current standalone manifests are unchanged
 and are not qualified three-voter deployment profiles.
@@ -246,6 +282,14 @@ file accepts 32–256 ASCII token characters; keep keys and tokens private. This
 secures the peer plane. Native Bolt is still plaintext; client ingress needs the
 separate [protected transport](protected-transport.md) boundary.
 
+Voters reuse authenticated peer connections for Raft replication and votes
+(up to 8 idle per peer, reused within 10 s; a server keeps an authenticated
+connection open 30 s for its next request). Each request is still authenticated
+and, with TLS, certificate-checked. Earlier builds opened one connection per
+RPC; sustained writes then exhausted local ports and broke quorum reads
+([diagnosis](benchmarks/2026-10-15-quorum-write/README.md)). A voter that still
+closes after one request keeps working through a single fresh-connection retry.
+
 Mount and retain the **whole** `server.data_dir` for each voter: its identity file,
 consensus RocksDB, committed graph registry, every graph RocksDB and application
 ledgers. Give each voter its own volume; never share a RocksDB directory. Restart
@@ -280,7 +324,10 @@ files to make space. Lowering the cap below retained bytes refuses startup.
 Query allocation budgets are not a promise
 about replication/RocksDB process RSS.
 
-Stop **all three servers** before an offline audit, then run for each voter:
+SIGTERM drains a voter's client sessions for `server.shutdown_grace_ms`, then
+stops it; it does not transfer leadership first, so the remaining voters elect a
+new leader as after a process loss. Stop **all three servers** before an offline
+audit, then run for each voter:
 
 ```sh
 for i in 1 2 3; do
@@ -294,3 +341,10 @@ once acknowledged writes have caught up; an audit alone does not prove safe
 replacement of a lost voter. The local synthetic qualification harness is
 [`quorum_replication.py`](../crates/server/tests/quorum_replication.py), covering
 majority failover, partition refusal, retained-disk restart and request outcomes.
+The [October 14 distributed-operations follow-up](benchmarks/2026-10-14-distributed-ops.md)
+records the parallel-inspection change and the latest local release acceptance.
+The [October 15 log-cap recovery qualification](benchmarks/2026-10-15-distributed-ops.md)
+adds an opt-in small-cap test that resolves an uncertain commit against the
+same retained voter volumes after the configured limit is raised. It is not
+evidence that the 1 GiB default has been exhausted or that multi-machine
+recovery is qualified.

@@ -1,5 +1,5 @@
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ BRAINWIRE / ONTOLOGY / client_memory • offline schema • no declared indexes│
+│ BRAINWIRE / ONTOLOGY / default • offline schema • no declared indexes        │
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌TYPES • ↑↓────────┐┌ONTOLOGY──────────────────────────────────────────────────┐
 │No types.         ││No ontology declared for this graph.                      │

@@ -43,6 +43,8 @@ struct Cached {
     reply: Reply,
 }
 struct Inner {
+    // Declared before `application`: the consensus log closes before the graph
+    // stores are released, which `serve`'s shutdown relies on.
     db: DB,
     io: Mutex<()>,
     sm: Mutex<Option<String>>,

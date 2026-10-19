@@ -82,7 +82,7 @@ out of the timed runs. Release and cold-cache measurements remain future work.
 
 The acceptance script copies the closed fixture into an isolated temporary
 server directory. It never writes to the supplied fixture. It uses the Neo4j
-5.28.6 driver and the same Bolt/Cypher engine available to client:
+5.28.6 driver and the same Bolt/Cypher engine available to external application:
 
 ```sh
 cargo build --locked --offline -p brainwire-server --bin brainwire

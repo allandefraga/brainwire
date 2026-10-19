@@ -1,0 +1,48 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ BRAINWIRE / ONTOLOGY / ontology20_stress • offline schema • indexes ready                                                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌TYPES • ↑↓──────────┐┌ALL CONNECTIONS • PgUp/PgDn─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│> Person            ││400 declared signatures • directions preserved                                                                                          │
+│  Organization      ││  1  Person -[:RELATES_TO]-> Person  [weight, confidence, valid_from, valid_to, source_id]                                              │
+│  Account           ││  2  Person -[:RELATES_TO]-> Payment  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│  ContactPoint      ││  3  Person -[:RELATES_TO]-> Event  [weight, confidence, valid_from, valid_to, source_id]                                               │
+│  Contract          ││  4  Organization -[:RELATES_TO]-> ContactPoint  [weight, confidence, valid_from, valid_to, source_id]                                  │
+│  Product           ││  5  Organization -[:RELATES_TO]-> Attachment  [weight, confidence, valid_from, valid_to, source_id]                                    │
+│  Opportunity       ││  6  Organization -[:RELATES_TO]-> Role  [weight, confidence, valid_from, valid_to, source_id]                                          │
+│  Invoice           ││  7  Account -[:RELATES_TO]-> ContactPoint  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  Payment           ││  8  Account -[:RELATES_TO]-> Attachment  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│  Ticket            ││  9  Account -[:RELATES_TO]-> Role  [weight, confidence, valid_from, valid_to, source_id]                                               │
+│  Message           ││ 10  ContactPoint -[:RELATES_TO]-> Opportunity  [weight, confidence, valid_from, valid_to, source_id]                                   │
+│  Attachment        ││ 11  ContactPoint -[:RELATES_TO]-> Tag  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│  Document          ││ 12  Contract -[:RELATES_TO]-> Opportunity  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  KnowledgeArticle  ││ 13  Contract -[:RELATES_TO]-> Tag  [weight, confidence, valid_from, valid_to, source_id]                                               │
+│  Tag               ││ 14  Product -[:RELATES_TO]-> Organization  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│  Campaign          ││ 15  Product -[:RELATES_TO]-> Ticket  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│  Event             ││ 16  Product -[:RELATES_TO]-> Location  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│  Location          ││ 17  Opportunity -[:RELATES_TO]-> Organization  [weight, confidence, valid_from, valid_to, source_id]                                   │
+│  Department        ││ 18  Opportunity -[:RELATES_TO]-> Ticket  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│  Role              ││ 19  Opportunity -[:RELATES_TO]-> Location  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│                    ││ 20  Invoice -[:RELATES_TO]-> Contract  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 21  Invoice -[:RELATES_TO]-> Document  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 22  Payment -[:RELATES_TO]-> Contract  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 23  Payment -[:RELATES_TO]-> Document  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 24  Ticket -[:RELATES_TO]-> Invoice  [weight, confidence, valid_from, valid_to, source_id]                                             │
+│                    ││ 25  Ticket -[:RELATES_TO]-> Campaign  [weight, confidence, valid_from, valid_to, source_id]                                            │
+│                    ││ 26  Message -[:RELATES_TO]-> Invoice  [weight, confidence, valid_from, valid_to, source_id]                                            │
+│                    ││ 27  Message -[:RELATES_TO]-> Campaign  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 28  Attachment -[:RELATES_TO]-> Account  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│                    ││ 29  Attachment -[:RELATES_TO]-> Message  [weight, confidence, valid_from, valid_to, source_id]                                         │
+│                    ││ 30  Attachment -[:RELATES_TO]-> Department  [weight, confidence, valid_from, valid_to, source_id]                                      │
+│                    ││ 31  Document -[:RELATES_TO]-> Account  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 32  Document -[:RELATES_TO]-> Message  [weight, confidence, valid_from, valid_to, source_id]                                           │
+│                    ││ 33  Document -[:RELATES_TO]-> Department  [weight, confidence, valid_from, valid_to, source_id]                                        │
+│                    ││ 34  KnowledgeArticle -[:RELATES_TO]-> Product  [weight, confidence, valid_from, valid_to, source_id]                                   │
+│                    ││ 35  KnowledgeArticle -[:RELATES_TO]-> KnowledgeArticle  [weight, confidence, valid_from, valid_to, source_id]                          │
+│                    ││ 36  Tag -[:RELATES_TO]-> Product  [weight, confidence, valid_from, valid_to, source_id]                                                │
+│                    ││ 37  Tag -[:RELATES_TO]-> KnowledgeArticle  [weight, confidence, valid_from, valid_to, source_id]                                       │
+│                    ││ 38  Campaign -[:RELATES_TO]-> Person  [weight, confidence, valid_from, valid_to, source_id]                                            │
+│                    ││ 39  Campaign -[:RELATES_TO]-> Payment  [weight, confidence, valid_from, valid_to, source_id]                                           │
+└────────────────────┘└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ←→ graph • ↑↓ type • a all connections • Enter inspect • PgUp/Dn scroll • Tab • q quit                                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

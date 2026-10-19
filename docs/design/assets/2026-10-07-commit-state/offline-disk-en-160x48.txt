@@ -3,14 +3,14 @@
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Graphs • ←→─────────────┐┌─DISK & FILES / customers-100k─────────────────────────────────────┐┌EXPLAIN • F1 • PgUp/PgDn───────────────────────────────────────┐
 │> customers-100k        ││ FILE                      TYPE         SIZE                       ││000024.sst                                                     │
-│  client_memory       ││> 000024.sst               sst          30.5 KiB                   ││                                                               │
+│  default               ││> 000024.sst               sst          30.5 KiB                   ││                                                               │
 │                        ││  000025.sst               sst          14.5 KiB                   ││Type: sst                                                      │
 │                        ││  000067.sst               sst         118.5 KiB                   ││Size: 30.5 KiB                                                 │
 │                        ││  000068.sst               sst          54.4 KiB                   ││CF: node                                                       │
 │                        ││  000109.sst               sst         118.5 KiB                   ││LSM level: L6                                                  │
 │                        ││  000110.sst               sst          54.5 KiB                   ││SST entries: 5000                                              │
-│                        ││  000140.sst               sst         231.4 KiB                   ││Tombstones: 0                                                  │
-│                        ││  000146.sst               sst          87.3 KiB                   ││                                                               │
+│                        ││  000140.sst               sst         231.5 KiB                   ││Tombstones: 0                                                  │
+│                        ││  000146.sst               sst          87.4 KiB                   ││                                                               │
 │                        ││  000151.sst               sst         118.6 KiB                   ││Sorted key/value data on disk. Created by flush or compaction; │
 │                        ││  000152.sst               sst          54.6 KiB                   ││preserves records beyond RAM.                                  │
 │                        ││  000158.sst               sst          87.3 KiB                   ││                                                               │
@@ -22,13 +22,13 @@
 │                        ││  000195.sst               sst          84.4 KiB                   ││                                                               │
 │                        ││  000196.sst               sst          48.4 KiB                   ││                                                               │
 │                        ││  000197.sst               sst          87.3 KiB                   ││                                                               │
-│                        ││  000203.sst               sst          84.4 KiB                   ││                                                               │
-│                        ││  000204.sst               sst          48.5 KiB                   ││                                                               │
+│                        ││  000203.sst               sst          84.5 KiB                   ││                                                               │
+│                        ││  000204.sst               sst          48.6 KiB                   ││                                                               │
 │                        ││  000205.sst               sst          87.3 KiB                   ││                                                               │
 │                        ││  000210.sst               sst           1.7 KiB                   ││                                                               │
 │                        ││  000213.sst               sst           1.3 KiB                   ││                                                               │
 │                        ││  000214.sst               sst          84.4 KiB                   ││                                                               │
-│                        ││  000215.sst               sst          48.4 KiB                   ││                                                               │
+│                        ││  000215.sst               sst          48.5 KiB                   ││                                                               │
 │                        ││  000216.sst               sst          87.3 KiB                   ││                                                               │
 │                        ││  000237.log               wal               0 B                   ││                                                               │
 │                        ││  000241.sst               sst               0 B                   ││                                                               │
@@ -38,7 +38,7 @@
 │                        ││  LOG                      diagnostic  133.9 KiB                   ││                                                               │
 └────────────────────────┘└───────────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 ┌STORAGE FLOW──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-commit-state-capture-c4_i9bze/data/customers-100k                                                  │
+│/var/folders/0p/1s2c8pxd0nxbvxwzjnr4h96w0000gn/T/brainwire-commit-state-capture-4udxawty/data/customers-100k                                                  │
 │WRITE: WAL + memtables (RAM) -> flush -> SST L0 -> compaction L1+                                                                                             │
 │READ: cache -> memtables/SST. Indexes are persisted records too.                                                                                              │
 │Configured RAM is not reserved. Query: per-RUN guard + server pool, not RSS. ? values are unknown.                                                            │
