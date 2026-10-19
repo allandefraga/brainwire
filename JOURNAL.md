@@ -41,6 +41,143 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-19 — reproducible local comparison with Neo4j and FalkorDB
+
+- **Requested:** do the real comparison described in the benchmark page and
+  make the results clear with charts.
+- **Done:** executed the pinned Docker harness against Brainwire, Neo4j Community
+  and FalkorDB, one at a time with 4 CPU / 8 GiB limits, using a deterministic
+  10k-node / 20k-edge graph. Added per-operation timing samples to the raw JSON,
+  exact semantic checks (indexed values, neighbor sets, update counts and
+  post-restart properties), waited for Neo4j indexes, and verified FalkorDB's
+  persistent data directory/mount. Updated the comparison report and SVG. The
+  report explicitly labels the graceful same-container restart test and the
+  non-equivalent client/protocol and durability configurations. Temporary
+  smoke receipts were removed; the final receipt is retained.
+- **Measured:** Brainwire: indexed point p95 0.654 ms, one-hop p95 0.944 ms,
+  update-series median/max 42.149/48.268 ms, ingest 28,261 records/s. Neo4j:
+  2.177 ms, 8.249 ms, 77.763/173.122 ms, 15,392 records/s. FalkorDB: 0.462 ms,
+  0.346 ms, 21.175/30.180 ms, 73,099 records/s. All recovered 10k nodes and
+  20k edges following graceful container restart with persistent volumes.
+- **Verified:** release Docker image built and the complete comparison harness
+  passed; all per-system semantic and persistence checks passed; Python syntax,
+  SVG parsing, docs-site checks and `git diff --check` are recorded at handoff.
+  Seven release-helper tests pass both at the current version and against a
+  simulated already-bumped worktree; 46 Python client tests pass. Host `cargo`
+  is unavailable, so Rust tests could not be run locally.
+- **Decided:** use these as a transparent local engineering baseline only, not a
+  vendor ranking or production claim. Five update samples are reported as median
+  and maximum rather than p95; fresh ingest is a single measurement per system.
+- **Next step:** repeat multiple randomized rounds on a Linux host, include cold
+  and warm cache states, capture peak memory and query plans, and test abrupt
+  kill/container recreation before making broader durability or performance
+  claims.
+- **Blockers:** this host is macOS arm64; database client protocols differ;
+  configurations are not durability-equivalent; only one fixed-order run was
+  completed. `cargo` is not installed on this host.
+
+
+### 2026-10-19 — benchmark charts and release/CI status
+
+- **Requested:** clarify whether the version/release pipeline is in place and
+  make benchmark results easy to understand with charts, including a future
+  comparison to Neo4j and FalkorDB.
+- **Done:** added a benchmark overview with two charts based only on retained
+  Brainwire receipts: one-hour 100k-node mixed-load latency and short three-voter
+  batch-write throughput. Linked the overview from the README and documented a
+  fair, repeatable comparison protocol. No competitor result is fabricated.
+  Clarified the local release-to-tag workflow and that current repository
+  settings do not require CI for direct `main` updates. Reduced CI Cargo build
+  parallelism to one after the latest run's Rust linker crashed while linking
+  test binaries.
+- **Verified:** latest Documentation site workflow passed. Latest CI on
+  `b6a3eb4` failed during Rust test linking (`rust-lld` bus error); previous
+  `v0.1.1` release failed before publication on runner capacity. The local CI
+  mitigation is not yet committed or tested on GitHub. Benchmark SVG/data is
+  tied to the dated local receipts, not a Neo4j/FalkorDB comparison.
+- **Decided:** repository and artifacts remain private. Do not push or publish
+  as part of this session. Comparative claims wait until equivalent workloads
+  are executed against all three products.
+- **Next step:** verify the local workflow and documentation changes, commit the
+  intended pending work only after review, then run the revised CI on GitHub.
+  After a green CI, prepare a new SemVer tag rather than reusing `v0.1.1`.
+- **Blockers:** `cargo` is not installed in this local executor; the revised
+  runner behavior is not yet known.
+
+### 2026-10-19 — local SemVer releases and private image pipeline
+
+- **Requested:** make release/deploy automation work locally, choose major,
+  minor or patch versions from the change, keep all distribution private, and
+  make every delivered version straightforward to run.
+- **Done:** added a local release preview/apply helper. It derives major from
+  breaking-change commits, minor from `feat:`, patch otherwise; synchronizes
+  Cargo, lockfile, Kubernetes release pin and marked install docs; refuses a
+  dirty worktree or non-`main` branch; runs local gates; creates only a local
+  release commit and annotated tag. It never pushes. Added SemVer tests and a
+  release guide. Reduced CI debug/incremental artifacts after the failed
+  `v0.1.1` runner exhausted disk. The tag workflow now validates SemVer,
+  builds and checks the exact versioned Docker image through Python/Bolt and
+  persisted-volume restarts before pushing to private GHCR, records the image
+  digest on the GitHub release, derives prerelease status from `-beta.N` /
+  `-rc.N`, and verifies or safely resumes same-commit partial publications.
+- **Verified:** seven release-helper tests, preview (`v0.1.2` stable or
+  `v0.1.2-beta.1` with `--prerelease beta`), `actionlint`, docs-site links and
+  `git diff --check` pass. Applying was refused as designed because existing
+  local license/docs work is still uncommitted. No commit, tag, push, or
+  publication was made. `cargo` is unavailable in this executor, so Rust tests
+  and Docker image build were not run here. A fresh GitHub runner must confirm
+  the disk-space fix and release workflow.
+- **Decided:** repository and GHCR remain private. Never move/reuse a release
+  tag; publish corrections with a new version. A plain SemVer tag is stable; a
+  prerelease suffix is required for a GitHub prerelease.
+- **Next step:** review and commit the current local work when ready, preview
+  `python3 scripts/release.py --prerelease beta`, then use `--apply` on a clean
+  `main` to produce a local versioned commit/tag. Push only when explicitly
+  requested; the first new tag will validate the updated private pipeline.
+- **Blockers:** full Rust and container checks were not executable locally
+  because `cargo` is missing; the previous remote `v0.1.1` run failed before
+  publication due to runner disk exhaustion.
+
+### 2026-10-19 — Git author identity
+
+- **Requested:** use the user's personal Gmail identity for Git and avoid
+  exposing the former work address.
+- **Done:** set both global and repository-local `user.email` to the requested
+  Gmail identity. No email address was added to project documentation.
+- **Verified:** new Git commits will use the requested identity. Existing
+  history still contains 250 author/committer email entries using the previous
+  identity across 129 commits.
+- **Next step:** before making the repository public, decide whether to rewrite
+  the existing history to replace those identities. Rewriting keeps the commit
+  sequence and file changes but changes commit hashes and requires coordinated
+  remote ref updates; the repository remains private meanwhile.
+- **Blockers:** existing history was previously requested to be preserved, so
+  it has not been rewritten without a clear instruction.
+
+### 2026-10-19 — Apache-2.0 adoption and Docker metadata
+
+- **Requested:** choose a license that lets people discover, use and adopt
+  Brainwire publicly, while retaining a viable commercial path; clarify Docker
+  implications.
+- **Decided:** Apache-2.0 best fits broad adoption, commercial/BYOC usage,
+  redistribution and an explicit patent grant. It also allows others to sell
+  modified or unmodified versions, so it does not preserve exclusivity.
+- **Done:** added the standard Apache-2.0 text and copyright notice, set the
+  workspace license to `Apache-2.0`, and updated the Docker image with the
+  license file and OCI license label. Updated README and container docs. Kept
+  `publish = false` so individual Rust crates are not released to crates.io.
+- **Verified:** `cargo metadata` reports `Apache-2.0` for all seven crates;
+  docs-site validation and `git diff --check` pass. The local Docker CLI did not
+  return from a build attempt and was interrupted, so image packaging is not
+  yet verified. Changes remain local.
+- **Next step:** before people can actually access it, make the GitHub source
+  repository public and publish a release/image whose source tag contains this
+  license. Confirm all copyright holders and third-party notices before that
+  public launch.
+- **Blockers:** the GitHub repository and GHCR package are currently private;
+  the existing `v0.1.1` tag predates this license change. Review preserved
+  commit metadata before making the repository public.
+
 ### 2026-10-19 — GitHub About, release and access clarity
 
 - **Requested:** make the repository overview clearer, explain its license and

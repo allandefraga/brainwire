@@ -191,6 +191,13 @@ where
                 continue;
             }
         };
+        // Bolt exchanges several small request/response frames. Disable Nagle's
+        // algorithm so a response is not delayed while waiting for another
+        // small packet to fill a TCP segment.
+        if let Err(err) = stream.set_nodelay(true) {
+            eprintln!("brainwire-bolt: failed to enable TCP_NODELAY: {err}");
+            continue;
+        }
         let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
             drop(stream);
             continue;

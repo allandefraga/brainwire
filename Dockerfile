@@ -21,6 +21,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/release/brainwire /src/brainwire
 
 FROM debian:bookworm-slim
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libstdc++6 && \
     rm -rf /var/lib/apt/lists/* && \
@@ -29,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mkdir /data && chown brainwire:brainwire /data
 
 COPY --from=builder /src/brainwire /usr/local/bin/brainwire
+COPY LICENSE /usr/share/licenses/brainwire/LICENSE
 COPY crates/core/tests/fixtures/graph_mapping.json /opt/brainwire/example-schema.json
 
 ENV BRAINWIRE_SERVER_DATA_DIR=/data \

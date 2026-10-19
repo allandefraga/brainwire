@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="690" viewBox="0 0 1200 690" role="img" aria-labelledby="title desc">
+  <title id="title">Brainwire local benchmark measurements</title>
+  <desc id="desc">Left: p95 and p99 latency in milliseconds from a one-hour mixed workload on 100,000 synthetic nodes. Right: row throughput for individual writes and batches of 100 in a short three-voter, single-host diagnostic.</desc>
+  <rect width="1200" height="690" rx="24" fill="#101820"/>
+  <text x="54" y="58" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="27" font-weight="700">What we have measured</text>
+  <text x="54" y="88" fill="#a8b8b2" font-family="system-ui,sans-serif" font-size="15">Synthetic local workloads · receipts linked in the benchmark documentation</text>
+  <line x1="600" y1="120" x2="600" y2="630" stroke="#34443f"/>
+
+  <text x="58" y="145" fill="#54e58b" font-family="system-ui,sans-serif" font-size="19" font-weight="700">1-hour mixed workload</text>
+  <text x="58" y="170" fill="#a8b8b2" font-family="system-ui,sans-serif" font-size="14">100k nodes · latency (ms) · four readers + throttled writer</text>
+  <rect x="58" y="194" width="14" height="14" rx="3" fill="#54e58b"/><text x="80" y="206" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="13">p95</text>
+  <rect x="128" y="194" width="14" height="14" rx="3" fill="#45c7d2"/><text x="150" y="206" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="13">p99</text>
+  <text x="58" y="250" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">Primary read</text>
+  <rect x="190" y="230" width="37" height="13" rx="6" fill="#54e58b"/><text x="236" y="242" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="13">1.557</text>
+  <rect x="190" y="248" width="101" height="13" rx="6" fill="#45c7d2"/><text x="300" y="260" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="13">4.292</text>
+  <text x="58" y="319" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">Scalar-index read</text>
+  <rect x="190" y="299" width="38" height="13" rx="6" fill="#54e58b"/><text x="237" y="311" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="13">1.623</text>
+  <rect x="190" y="317" width="106" height="13" rx="6" fill="#45c7d2"/><text x="305" y="329" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="13">4.483</text>
+  <text x="58" y="388" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">Indexed write ack</text>
+  <rect x="190" y="368" width="146" height="13" rx="6" fill="#54e58b"/><text x="343" y="380" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="13">6.214</text>
+  <rect x="190" y="386" width="321" height="13" rx="6" fill="#45c7d2"/><text x="518" y="398" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="13">13.636</text>
+  <line x1="190" y1="423" x2="520" y2="423" stroke="#53635e"/>
+  <text x="190" y="444" fill="#95a59f" font-family="system-ui,sans-serif" font-size="12">0</text><text x="352" y="444" fill="#95a59f" font-family="system-ui,sans-serif" font-size="12">7</text><text x="495" y="444" fill="#95a59f" font-family="system-ui,sans-serif" font-size="12">14 ms</text>
+  <text x="58" y="500" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">9.43M primary reads · 9.43M indexed reads</text>
+  <text x="58" y="524" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">65,927 acknowledged indexed updates · 3,600 s</text>
+  <text x="58" y="574" fill="#95a59f" font-family="system-ui,sans-serif" font-size="13">After SIGKILL: last 200 acknowledged writes verified; audit passed.</text>
+
+  <text x="640" y="145" fill="#54e58b" font-family="system-ui,sans-serif" font-size="19" font-weight="700">Quorum batch-write diagnostic</text>
+  <text x="640" y="170" fill="#a8b8b2" font-family="system-ui,sans-serif" font-size="14">3 voters on one host · row throughput (rows/s)</text>
+  <text x="640" y="250" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">Single-row writes</text>
+  <rect x="640" y="268" width="25" height="23" rx="5" fill="#45c7d2"/><text x="678" y="285" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="15" font-weight="700">841 rows/s</text>
+  <text x="640" y="344" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">Batches of 100</text>
+  <rect x="640" y="362" width="460" height="23" rx="5" fill="#54e58b"/><text x="1110" y="379" fill="#f2f7f4" font-family="system-ui,sans-serif" font-size="15" font-weight="700">32,090</text>
+  <text x="640" y="420" fill="#54e58b" font-family="system-ui,sans-serif" font-size="23" font-weight="700">≈38×</text>
+  <text x="718" y="420" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="15">observed rows/s in this short run</text>
+  <text x="640" y="464" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">100-row transaction acknowledgement p95: 3.748 ms</text>
+  <text x="640" y="488" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">20,000 rows recovered after same-volume restart</text>
+  <text x="640" y="512" fill="#dbe5e0" font-family="system-ui,sans-serif" font-size="14">All voter digests matched.</text>
+  <rect x="640" y="557" width="500" height="51" rx="10" fill="#26332f"/>
+  <text x="660" y="580" fill="#f5c76b" font-family="system-ui,sans-serif" font-size="14" font-weight="700">Not a Neo4j/FalkorDB comparison</text>
+  <text x="660" y="598" fill="#b7c4bf" font-family="system-ui,sans-serif" font-size="12">Synthetic data · localhost · no external speedup claim</text>
+</svg>

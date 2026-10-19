@@ -29,10 +29,9 @@ Run it locally or in Docker with a persistent volume.
 out-of-the-box RAG pipeline. Your application chooses what to ingest; Brainwire
 keeps entities and relationships connected so your app can ask better questions.
 
-> **0.1.1 · beta prerelease.** This release adds bounded relationship deletion
-> from Cypher and Python. Brainwire is under active development and has
-> not been qualified for production. Check the beta checklist below before
-> using important data; later changes on `main` may differ from the tag.
+> **v0.1.1 · private beta candidate.** <!-- brainwire-release-version --> Brainwire is under active development and has
+> not been qualified for production. The release pipeline publishes a versioned
+> image only after source and container recovery checks pass.
 
 ## ⚡ Quickstart
 
@@ -140,17 +139,23 @@ in this repository; it is **not** a separately published Python package.
 ## Releases, images and docs
 
 Every push to `main` runs formatting, workspace tests, Clippy, Python helper
-tests and a real Bolt/Python ingestion and restart check. The `v*` tag workflow
-repeats those checks, builds the Docker image from that exact tag, publishes the
-versioned image to GitHub Container Registry (GHCR), and creates a GitHub
-prerelease with generated notes. It does not publish a floating `latest` tag.
+tests, release-version tests and a real Bolt/Python ingestion and restart check.
+The `v*` tag workflow repeats those checks, builds a versioned Docker image,
+verifies the image through Python/Bolt writes and retained-volume restarts,
+then pushes that same image to the private GitHub Container Registry (GHCR) and
+creates a GitHub release with its digest attached. A `-beta.N` or `-rc.N` tag
+creates a prerelease; a plain SemVer tag creates a stable release. It does not
+publish a floating `latest` tag.
 The docs site in `docs-site/` is link-checked and packaged as a private Actions
 artifact on pushes to `main`. GitHub Pages is unavailable for this private repo
 on its current plan; publishing a live public site requires a different plan or
 an external host.
 
-The source is tagged `v0.1.1`. Its GitHub Actions release workflow must finish
-successfully before the prerelease and private container image are available.
+The source is tagged `v0.1.1`. <!-- brainwire-release-version --> Its release
+workflow failed before publishing because the GitHub runner ran out of disk
+space ([run details](https://github.com/allandefraga/brainwire/actions/runs/39229131214)).
+The revised pipeline reduces Rust build artifacts; the next versioned tag will
+rerun checks and test the container before a private image is available.
 After that, these commands authenticate Docker to GHCR and download the server
 image to your local Docker engine. They do not start Brainwire or copy graph
 data:
@@ -159,7 +164,7 @@ data:
 docker login ghcr.io -u YOUR_GITHUB_USERNAME
 # At the password prompt, enter a GitHub personal access token (classic)
 # with read:packages access. Do not use your GitHub account password.
-docker pull ghcr.io/allandefraga/brainwire:v0.1.1
+docker pull ghcr.io/allandefraga/brainwire:v0.1.1 # brainwire-release-version
 ```
 
 `docker login ghcr.io` authenticates Docker to GitHub Container Registry. The
@@ -167,6 +172,9 @@ token is needed because this repository and its container package are private.
 The release workflow uses GitHub's built-in `GITHUB_TOKEN` to publish the image;
 you only need your own token when pulling it from another machine. See GitHub's
 [GHCR authentication guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-with-a-personal-access-token-classic).
+Use the [local release workflow](docs/releasing.md) to preview and create a
+SemVer version, synchronize Docker/Kubernetes references, and make a local tag
+without pushing it.
 The Compose quickstart above builds locally from source; see the
 [container guide](docs/container.md) for running the published image with a
 persistent graph-data volume.
@@ -193,6 +201,16 @@ files and memory values are synthetic. For real local files and named graphs,
 use the [offline backoffice](docs/multi-graph-backoffice.md) with the server
 stopped so the shell can acquire the RocksDB lock.
 
+## Performance snapshot
+
+These are measured local runs on synthetic data, not production SLOs. See the
+[Brainwire-only receipts](docs/benchmarks/README.md) and the separate
+[local diagnostic against Neo4j and FalkorDB](docs/benchmarks/comparison/README.md).
+
+![Brainwire benchmark charts: one-hour mixed workload latency and quorum batch-write throughput](docs/benchmarks/assets/brainwire-performance.svg)
+
+![Local synthetic workload comparison with Neo4j and FalkorDB](docs/benchmarks/assets/comparison-20261019.svg)
+
 ## The honest beta checklist
 
 - This is not full Neo4j Cypher compatibility. See the exact supported grammar
@@ -213,7 +231,8 @@ stopped so the shell can acquire the RocksDB lock.
 - Text/vector indexes, arbitrary object serialization, sharding and a published
   SDK are not included.
 - Performance receipts use synthetic local workloads. They are not production
-  SLOs or a comparison against another database.
+  SLOs or a comparison against another database. See the [benchmark results and
+  comparison status](docs/benchmarks/README.md).
 
 The current release boundary and acceptance evidence are tracked in the
 [October beta roadmap](docs/2026-10-pilot-roadmap.md). For an application trial,
@@ -234,6 +253,7 @@ the authority until integration, security, recovery and workload gates pass.
 | Resume version-pinned source snapshot differences | [DuckLake incremental ingestion](docs/ducklake-incremental.md) |
 | Configure authentication and network protection | [Auth](docs/bolt-auth.md) · [container auth](docs/protected-containers.md) · [TLS boundary](docs/protected-transport.md) |
 | Evaluate experimental quorum replication | [Quorum operations and limitations](docs/quorum-replication.md) |
+| Review measured performance and comparison status | [Benchmarks](docs/benchmarks/README.md) |
 | Review measurements, recovery and remaining gates | [Beta roadmap](docs/2026-10-pilot-roadmap.md) · [operator checklist](docs/beta-operator-checklist.md) |
 | See design decisions | [Design documents](docs/design/) · [session journal](JOURNAL.md) |
 
@@ -256,18 +276,27 @@ Cypher, indexes, restart and the connected TUI with synthetic data.
 
 ## Release status and license
 
-**Version:** `v0.1.1` · private beta candidate · not production-qualified.
+**Version:** `v0.1.1` · private beta candidate · not production-qualified. <!-- brainwire-release-version -->
 The [tag source](https://github.com/allandefraga/brainwire/tree/v0.1.1) identifies
-the exact source snapshot. The release workflow publishes a GitHub prerelease
-and versioned Docker image to GHCR only after its checks pass. Follow the
+the exact source snapshot. That tag predates adoption of Apache-2.0 and carries
+no open-source license grant; use a later tagged release for Apache-licensed
+distribution. The release workflow marks `-beta.N` and `-rc.N` tags as
+prereleases and plain SemVer tags as stable releases. It publishes a versioned
+Docker image to GHCR only after source and container recovery checks pass. Follow the
 [release workflow](https://github.com/allandefraga/brainwire/actions/workflows/release.yml)
 for its current status. It does not publish a Rust crate or Python package. The
 image is a delivery artifact, not a production-readiness claim; see the
 [beta checklist](#the-honest-beta-checklist).
 
-**License:** this repository has no open-source license. `UNLICENSED` in the
-Cargo workspace describes that license status. `publish = false` is a separate
-Cargo setting: it prevents `cargo publish` from uploading the Rust crates to
-registries such as crates.io. It does **not** block GitHub releases or Docker
-image publication. Without a license, the default copyright rules apply; see
-GitHub's explanation of [licensing a repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository).
+**License:** Brainwire uses [Apache-2.0](LICENSE), a permissive open-source
+license. People may use, modify, redistribute, and sell the software, including
+for commercial and BYOC deployments, while following its notice and license
+terms. Others may sell their own versions too; this license does not reserve
+exclusive commercial rights. The Docker image includes the license at
+`/usr/share/licenses/brainwire/` and carries the `Apache-2.0` license label.
+`publish = false` is separate: it keeps these Rust crates from being uploaded to
+package registries such as crates.io. It does not prevent use of the source or
+Docker image and does not control GitHub releases.
+
+The GitHub repository and GHCR package are still private, so this license
+change alone does not make the source or image available to the public.

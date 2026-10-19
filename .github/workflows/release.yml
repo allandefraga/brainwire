@@ -4,6 +4,10 @@ on:
   push:
     tags: ["v*"]
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -27,12 +31,24 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import re
           import tomllib
 
           with open("Cargo.toml", "rb") as manifest:
               version = tomllib.load(manifest)["workspace"]["package"]["version"]
           expected = f"v{version}"
           actual = os.environ["RELEASE_TAG"]
+          semver = re.fullmatch(
+              r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+              r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?",
+              actual,
+          )
+          if not semver:
+              raise SystemExit(f"tag {actual!r} is not a supported SemVer release tag")
+          if semver.group(4):
+              for identifier in semver.group(4).split("."):
+                  if identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0"):
+                      raise SystemExit(f"numeric prerelease identifier {identifier!r} has a leading zero")
           if actual != expected:
               raise SystemExit(f"tag {actual!r} does not match workspace version {expected!r}")
           PY
@@ -40,13 +56,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate image metadata
         id: metadata
@@ -58,20 +67,123 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-      - name: Build and publish tested release image
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for a completed or interrupted publication
+        id: publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/brainwire
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            release_prerelease="$(gh release view "$RELEASE_TAG" --json isPrerelease --jq '.isPrerelease')"
+            expected_prerelease=false
+            [[ "$RELEASE_TAG" == *-* ]] && expected_prerelease=true
+            test "$release_prerelease" = "$expected_prerelease"
+            mkdir -p .release-check
+            gh release download "$RELEASE_TAG" --pattern release-metadata.txt --dir .release-check
+            grep -Fx "image=$RELEASE_IMAGE" .release-check/release-metadata.txt
+            grep -Fx "source=$GITHUB_SHA" .release-check/release-metadata.txt
+            digest="$(sed -n 's/^digest=//p' .release-check/release-metadata.txt)"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            docker pull "$RELEASE_IMAGE"
+            repository_digest="$(docker image inspect "$RELEASE_IMAGE" --format '{{index .RepoDigests 0}}')"
+            test "$repository_digest" = "$IMAGE_REPOSITORY@$digest"
+            {
+              echo "already_complete=true"
+              echo "resume_from_image=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "Verified previously completed release $RELEASE_TAG ($digest)." >> "$GITHUB_STEP_SUMMARY"
+          elif docker manifest inspect "$RELEASE_IMAGE" >/dev/null 2>&1; then
+            docker pull "$RELEASE_IMAGE"
+            revision="$(docker image inspect "$RELEASE_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+            test "$revision" = "$GITHUB_SHA" || {
+              echo "Refusing to replace $RELEASE_IMAGE: its source revision is $revision, not $GITHUB_SHA." >&2
+              exit 1
+            }
+            repository_digest="$(docker image inspect "$RELEASE_IMAGE" --format '{{index .RepoDigests 0}}')"
+            digest="${repository_digest##*@}"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            {
+              echo "already_complete=false"
+              echo "resume_from_image=true"
+              echo "digest=$digest"
+            } >> "$GITHUB_OUTPUT"
+            echo "Resuming release creation for the already-tested image $digest." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "already_complete=false"
+              echo "resume_from_image=false"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the release image locally
+        if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          platforms: linux/amd64
+          load: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Create GitHub prerelease
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the Bolt acceptance driver
+        if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
+        run: python -m pip install neo4j==5.28.7
+
+      - name: Verify the exact image and retained-volume recovery
+        if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
+        env:
+          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
+        run: >-
+          python crates/server/tests/container_restart.py
+          --image "$RELEASE_IMAGE" --rows 100 --cycles 1
+
+      - name: Publish the verified image and record its digest
+        if: steps.publication.outputs.already_complete != 'true'
+        env:
+          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/brainwire
+          RESUME_FROM_IMAGE: ${{ steps.publication.outputs.resume_from_image }}
+          RESUMED_DIGEST: ${{ steps.publication.outputs.digest }}
+        run: |
+          if [[ "$RESUME_FROM_IMAGE" == "true" ]]; then
+            digest="$RESUMED_DIGEST"
+          else
+            docker push "$RELEASE_IMAGE" 2>&1 | tee image-push.log
+            digest="$(sed -nE 's/.*digest: (sha256:[0-9a-f]+).*/\1/p' image-push.log | tail -n 1)"
+          fi
+          test -n "$digest"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'image=%s\ndigest=%s\nsource=%s\n' \
+            "$RELEASE_IMAGE" "$digest" "$GITHUB_SHA" > release-metadata.txt
+          cat release-metadata.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub release with the tested image digest
+        if: steps.publication.outputs.already_complete != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          gh release create "${GITHUB_REF_NAME}"
-          --title "Brainwire ${GITHUB_REF_NAME}"
-          --generate-notes --prerelease
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            gh release create "$RELEASE_TAG" \
+              --title "Brainwire $RELEASE_TAG" --generate-notes --prerelease \
+              release-metadata.txt
+          else
+            gh release create "$RELEASE_TAG" \
+              --title "Brainwire $RELEASE_TAG" --generate-notes \
+              release-metadata.txt
+          fi

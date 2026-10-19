@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      CARGO_BUILD_JOBS: 2
+      CARGO_BUILD_JOBS: 1
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      CXXFLAGS: -g0
     steps:
       - uses: actions/checkout@v6
 
@@ -35,6 +39,9 @@ jobs:
       - name: Fetch locked dependencies
         run: cargo fetch --locked
 
+      - name: Check runner disk space
+        run: df -h "$GITHUB_WORKSPACE"
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -44,12 +51,19 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 
+      - name: Report runner disk space after Rust checks
+        if: always()
+        run: df -h "$GITHUB_WORKSPACE"
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Test Python client helpers
         run: python -m unittest discover -s examples/python -p 'test_*.py'
+
+      - name: Test local release versioning
+        run: python -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Build server for real Bolt acceptance
         run: cargo build --locked --offline -p brainwire-server --bin brainwire
