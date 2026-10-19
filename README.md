@@ -144,7 +144,10 @@ tests and a real Bolt/Python ingestion and restart check. The `v*` tag workflow
 repeats those checks, builds the Docker image from that exact tag, publishes the
 versioned image to GitHub Container Registry (GHCR), and creates a GitHub
 prerelease with generated notes. It does not publish a floating `latest` tag.
-The docs site deploys from `docs-site/` through GitHub Pages.
+The docs site in `docs-site/` is link-checked and packaged as a private Actions
+artifact on pushes to `main`. GitHub Pages is unavailable for this private repo
+on its current plan; publishing a live public site requires a different plan or
+an external host.
 
 After the first successful release workflow, pull the private image with:
 

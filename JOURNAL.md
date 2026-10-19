@@ -55,7 +55,7 @@ No line of code before the end of phase 2.
   the Rust workspace to `0.1.1`. Added CI for Rust/Python/Bolt acceptance, a
   tag workflow that verifies the Cargo and Kubernetes versions before creating
   a GitHub prerelease and publishing the exact tagged image to GHCR, and a
-  GitHub Pages deployment for `docs-site`. Added a Kubernetes release overlay
+  private CI artifact workflow for the docs site. Added a Kubernetes release overlay
   pinned to `ghcr.io/allandefraga/brainwire:v0.1.1` with an image pull secret;
   documented safe secret creation and Swarm credential forwarding.
 - **Verified:** workspace tests, warning-free Clippy, Rust formatting, 46 Python
@@ -70,9 +70,10 @@ No line of code before the end of phase 2.
   whether the old published history should be rewritten to scrub historical
   references; configure a real Kubernetes/Swarm target separately when one is
   selected.
-- **Blockers:** the existing `v0.1.0` commit/tag history contains old references.
-  Removing every trace requires explicit approval to rewrite `main` and remove
-  that old tag. No remote deployment target or cluster credentials are set.
+- **Blockers:** the private repository's current plan does not support GitHub
+  Pages. A public docs deployment needs a plan change or external host. The
+  existing `v0.1.0` history contains old references but is being preserved as
+  requested. No remote database deployment target or cluster credentials are set.
 
 ### 2026-10-19 — release documentation refresh
 

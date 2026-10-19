@@ -1,0 +1,34 @@
+name: Documentation site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate local links and assets
+        run: python scripts/check_docs_site.py
+
+      - name: Package private documentation site
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainwire-docs-${{ github.sha }}
+          path: docs-site/
+          if-no-files-found: error
+          retention-days: 30
