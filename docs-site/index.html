@@ -3,57 +3,100 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Brainwire graph database documentation">
-  <title>Brainwire Docs</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23070d0b'/%3E%3Cpath d='M17 34 32 17l15 17-15 14z' fill='none' stroke='%236dff4b' stroke-width='5'/%3E%3Ccircle cx='32' cy='17' r='5' fill='%2300e5d4'/%3E%3C/svg%3E">
+  <meta name="description" content="Brainwire 0.1 graph database: Python and Cypher, durable local RocksDB storage, and an honest guide to the beta.">
+  <title>Brainwire · Graph database documentation</title>
+  <link rel="icon" href="assets/brainwire-logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="shell">
-    <aside class="sidebar">
-      <a class="brand" href="#overview"><span class="mark">◈</span><span>brainwire<small>graph database</small></span></a>
-      <div class="version">DOCS / 0.1 LOCAL</div>
-      <nav aria-label="Documentation">
-        <a class="active" href="#overview">Overview</a>
-        <a href="#cypher">Cypher</a>
-        <a href="#indexes">Indexes</a>
-        <a href="#functions">Functions</a>
-        <a href="#search">Search</a>
-        <a href="#architecture">Architecture</a>
-        <a href="#recovery">Recovery</a>
-      </nav>
-      <div class="sidebar-foot">English first<br><span>Português coming next</span></div>
-    </aside>
-    <main>
-      <header class="topbar"><span class="crumb">BRAINWIRE / DOCUMENTATION</span><span class="status"><i></i> local design preview</span></header>
-      <section id="overview" class="hero">
-        <p class="eyebrow">GRAPH + DOCUMENT + VECTOR</p>
-        <h1>Build context<br><em>that stays connected.</em></h1>
-        <p class="lede">Brainwire is a durable graph database with Cypher at the center. Nodes, relationships, documents and embeddings live in one queryable context.</p>
-        <div class="hero-actions"><a class="button primary" href="#cypher">Start with Cypher <span>↗</span></a><a class="button" href="#architecture">See the architecture</a></div>
-      </section>
-      <section class="signal-grid" aria-label="Capabilities">
-        <article><span class="signal-number">01</span><h2>Graph native</h2><p>Model entities and relationships first. Every feature returns to the graph.</p></article>
-        <article><span class="signal-number">02</span><h2>Search ready</h2><p>Exact filters, full text and vector similarity can share one Cypher workflow.</p></article>
-        <article><span class="signal-number">03</span><h2>Recoverable</h2><p>Persistent volumes, snapshots and replication are designed around restart safety.</p></article>
-      </section>
-      <section id="cypher" class="content-section">
-        <div class="section-kicker">01 / LANGUAGE</div><div><h2>Cypher is the front door.</h2><p>Use one expressive language for graph traversal, filtering, projections and search. Brainwire keeps the execution model explicit and composable.</p>
-        <div class="code"><div class="code-head"><span>cypher</span><button data-copy="MATCH (doc:Document)-[:MENTIONS]->(topic)\nWHERE topic.name = $topic\nRETURN doc.title, doc.embedding\nLIMIT 10">copy</button></div><pre><code>MATCH (doc:Document)-[:MENTIONS]-&gt;(topic)
-WHERE topic.name = $topic
-RETURN doc.title, doc.embedding
-LIMIT 10</code></pre></div></div>
-      </section>
-      <section id="indexes" class="content-section split"><div><div class="section-kicker">02 / INDEXES</div><h2>Choose the access path.</h2><p>Indexes make the graph predictable at scale. Define them close to the data they accelerate.</p></div><div class="cards"><article class="mini-card"><b>BTREE</b><h3>Exact + range</h3><code>CREATE INDEX user_email<br>ON :User(email)</code><p>Fast equality, ordering and bounded ranges.</p></article><article class="mini-card"><b>FULLTEXT</b><h3>Text relevance</h3><code>CREATE FULLTEXT INDEX docs<br>ON :Document(body)</code><p>Tokenized search over document fields.</p></article><article class="mini-card accent"><b>VECTOR</b><h3>Semantic neighbors</h3><code>CREATE VECTOR INDEX docs_embedding<br>ON :Document(embedding)</code><p>Typed float32 embeddings with a declared dimension and metric.</p></article></div></section>
-      <section id="functions" class="content-section split"><div><div class="section-kicker">03 / FUNCTIONS</div><h2>Small functions, clear intent.</h2><p>Functions keep queries readable and let applications move from raw records to useful context.</p></div><div class="function-list"><div><code>text.contains(value, query)</code><span>case-aware text filter</span></div><div><code>vector.distance(a, b, 'cosine')</code><span>similarity score</span></div><div><code>graph.degree(node, 'out')</code><span>relationship cardinality</span></div><div><code>document.chunks(doc)</code><span>document provenance</span></div></div></section>
-      <section id="search" class="content-section search-panel"><div class="section-kicker">04 / SEARCH</div><h2>Search across connected context.</h2><p>Start with a candidate set, score it, then traverse the relationships that explain the result.</p><div class="search-flow"><span>Document</span><b>→</b><span>vector.search()</span><b>→</b><span>MENTIONS</span><b>→</b><span>Answer context</span></div><div class="note"><strong>Design rule</strong><span>Search indexes are rebuildable. The graph and source documents remain authoritative.</span></div></section>
-      <section id="architecture" class="content-section"><div class="section-kicker">05 / ARCHITECTURE</div><h2>One context, clear boundaries.</h2><p>Inspired by the useful parts of modern contextual data platforms: a durable database core, explicit services around it and Kubernetes as an optional operational layer.</p><div class="architecture"><div class="arch-row"><span class="arch-label">Clients</span><div class="arch-box">Cypher / Bolt / CLI</div></div><div class="arch-row"><span class="arch-label">Brainwire</span><div class="arch-box bright">Query engine <small>graph · document · vector</small></div><div class="arch-box">Index manager</div></div><div class="arch-row"><span class="arch-label">Durability</span><div class="arch-box">RocksDB on persistent SSD</div><div class="arch-box">Snapshots → object storage</div></div></div></section>
-      <section id="recovery" class="content-section recovery"><div><div class="section-kicker">06 / RECOVERY</div><h2>Restart is part of the contract.</h2><p>Each replica owns its database volume. A restart reopens the same files, replays the log and verifies graph invariants before serving traffic.</p></div><div class="recovery-steps"><span><b>01</b> write</span><span><b>02</b> commit</span><span><b>03</b> restart</span><span><b>04</b> verify</span></div></section>
-      <footer><span>Brainwire Docs · local preview</span><span>Cypher-centered / recovery-aware</span></footer>
-    </main>
-  </div>
-  <script>
-    document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => { await navigator.clipboard.writeText(button.dataset.copy); button.textContent = 'copied'; setTimeout(() => button.textContent = 'copy', 1200); }));
-  </script>
+<a class="skip" href="#main">Skip to documentation</a>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="720" height="160"></a>
+    <p class="version">DOCUMENTATION / 0.1 BETA</p>
+    <nav aria-label="Documentation sections">
+      <a href="#overview">Overview</a><a href="#start">Quickstart</a><a href="#cypher">Cypher &amp; Python</a><a href="#indexes">Indexes</a><a href="#algorithms">Graph algorithms</a><a href="#architecture">Storage &amp; recovery</a><a href="#limits">Beta boundaries</a><a href="#guides">All guides</a>
+    </nav>
+    <div class="sidebar-foot">Built in Rust. Connected by design.<br><a href="https://github.com/allandefraga/brainwire">View repository ↗</a></div>
+  </aside>
+  <main id="main">
+    <header class="topbar"><span>BRAINWIRE / DEVELOPER DOCS</span><span class="status"><i aria-hidden="true"></i> 0.1 beta · evolving</span></header>
+    <section id="overview" class="hero">
+      <p class="eyebrow">ENTITIES. RELATIONSHIPS. DURABLE STATE.</p>
+      <h1>Context has<br><em>connections.</em></h1>
+      <p class="lede">Give your applications a graph to work with. Write from Python, query with a supported subset of Cypher, and keep your data on a persistent volume.</p>
+      <div class="hero-actions"><a class="button primary" href="#start">Run your first graph <span aria-hidden="true">↗</span></a><a class="button" href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Language reference</a></div>
+      <p class="beta-note">An independent graph database in active development. Production qualification and full Neo4j compatibility are outside the current beta claim.</p>
+    </section>
+    <div class="signal-grid" aria-label="Available capabilities">
+      <article><span class="signal-number">01 / MODEL</span><h2>Many graphs.<br>Clear schemas.</h2><p>Independent named graphs, ontology catalogs, typed relationships and stable entity identities.</p></article>
+      <article><span class="signal-number">02 / CONNECT</span><h2>Python in.<br>Cypher out.</h2><p>Bolt connectivity, parameterized queries and bounded batches for nodes and relationships.</p></article>
+      <article><span class="signal-number">03 / KEEP</span><h2>Local storage.<br>Durable commits.</h2><p>RocksDB transactions and WAL durability. Retain the volume across container restarts.</p></article>
+    </div>
+    <section id="start" class="content-section">
+      <div class="section-heading"><span class="section-kicker">01 / FIRST CONNECTION</span><h2>A graph on your machine.</h2><p>Clone the repository, then run this from its root with Docker Engine and Compose installed. The first build compiles RocksDB and can take several minutes.</p></div>
+      <div class="code"><div class="code-head"><span>terminal / repository root</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  up --build --wait --wait-timeout 900</code></pre></div>
+      <div class="note"><strong>Local synthetic demo</strong><p>Connect to <code>bolt://127.0.0.1:7687</code>, database <code>demo</code>. This profile binds to localhost and disables authentication. Configure authentication and an encrypted transport boundary before connecting across untrusted networks.</p></div>
+      <p class="text-links"><a href="https://github.com/allandefraga/brainwire#-feed-it-from-python">Python first write ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Persistent Docker setup ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md">Protected containers ↗</a></p>
+    </section>
+    <section id="cypher" class="content-section split">
+      <div><span class="section-kicker">02 / LANGUAGE &amp; INGESTION</span><h2>One graph.<br>A familiar entry point.</h2><p>Use labeled nodes, typed one-hop patterns, parameters, <code>UNWIND</code>, <code>CREATE</code>, <code>MERGE</code>, property updates and removals. Scalar functions include <code>size</code>, <code>coalesce</code>, <code>toLower</code> and <code>toUpper</code>.</p><p>The Python helper supports bounded upserts and cleanup. Independent edge deletion keeps endpoints; plain Cypher <code>DELETE</code> is relationship-only. Node cleanup uses <code>DETACH DELETE</code>. Each batch is atomic; earlier batches remain committed if a later batch fails.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Explore the Python mutation API ↗</a></div>
+      <div><div class="code"><div class="code-head"><span>cypher / after the Python quickstart</span><button type="button" data-copy="query-code" aria-label="Copy relationship query">Copy</button></div><pre><code id="query-code">MATCH (c:Customer)-[:IN_SEGMENT]-&gt;(s:Segment)
+RETURN c.name AS customer, s.name AS segment
+LIMIT 20</code></pre></div><p class="caption">The quickstart applies the bundled ontology and writes Customer and Segment records. Unsupported syntax returns an error; read the exact grammar before porting an application.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Supported Cypher and limitations ↗</a></div>
+    </section>
+    <section id="indexes" class="content-section split">
+      <div><span class="section-kicker">03 / ACCESS PATHS</span><h2>Fast lookups.<br>Explicit readiness.</h2><p>Ontology <code>indexed_fields</code> and <code>er_fields</code> declare scalar equality indexes for strings, booleans and finite numbers. <code>entity_id</code> has a separate primary lookup.</p><p>Writes, property removal and deletion maintain index keys in the same RocksDB transaction. There is no Cypher <code>CREATE INDEX</code> or range index in this release.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/indexes.md">Index behavior and migration ↗</a></div>
+      <div><div class="code"><div class="code-head"><span>cypher / inspect declarations</span><button type="button" data-copy="index-code" aria-label="Copy index readiness query">Copy</button></div><pre><code id="index-code">CALL db.indexes() YIELD label, property, state
+RETURN label, property, state</code></pre></div><div class="mini-card"><span class="tag">READY ≠ EVERY PREDICATE</span><p>Equality can use a ready index. Lists, maps, ranges and unsupported predicates still scan. No cost-based planner or index intersections are claimed.</p></div></div>
+    </section>
+    <section id="algorithms" class="content-section">
+      <span class="section-kicker">04 / SPARSE GRAPH ANALYTICS</span><h2>Follow structure. Find importance.</h2><p>Read-only Cypher procedures project the graph into sparse CSR form within explicit node, relationship and memory bounds. A result <code>LIMIT</code> does not reduce the projection size.</p>
+      <div class="procedure-grid"><article><code>graph.project</code><p>Inspect projection size and sparse storage.</p></article><article><code>graph.degree</code><p>Count incoming and outgoing relationships.</p></article><article><code>graph.pagerank</code><p>Rank structural importance, with optional edge weights.</p></article><article><code>graph.reachable</code><p>Find directed reachability and minimum hop depth.</p></article><article><code>graph.shortestPath</code><p>Return one minimum-hop directed path.</p></article><article><code>graph.wcc / graph.scc</code><p>Find weakly or strongly connected components.</p></article></div>
+      <a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md">Procedure arguments, examples and limits ↗</a>
+    </section>
+    <section id="architecture" class="content-section">
+      <span class="section-kicker">05 / STORAGE &amp; RECOVERY</span><h2>Understand what keeps your data.</h2><p>The same executor serves local CLI and Bolt queries. A standalone server owns its RocksDB directory; containers retain that directory on a persistent volume.</p>
+      <div class="architecture" aria-label="Standalone write path"><span>Python / Bolt / CLI</span><b aria-hidden="true">→</b><span>Cypher + ontology</span><b aria-hidden="true">→</b><span>Atomic RocksDB transaction</span><b aria-hidden="true">→</b><span>WAL + persistent disk</span></div>
+      <div class="detail-grid"><article><h3>Restart with the same volume</h3><p>Reopen committed local state after restart. Offline <code>db check</code> audits graph and index invariants; readiness probes do not perform that audit.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/termination-recovery.md">Shutdown and recovery ↗</a></article><article><h3>Checkpoint deliberately</h3><p>Create and validate local checkpoints with the server stopped. Keep a tested restore procedure and a rebuildable source; a persistent volume alone is not a backup.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Checkpoint and restore guide ↗</a></article></div>
+    </section>
+    <section id="limits" class="content-section boundary">
+      <span class="section-kicker">06 / HONEST BETA BOUNDARIES</span><h2>Know what is ready to try.</h2>
+      <div class="detail-grid"><article><span class="tag">AVAILABLE FOR CONTROLLED TRIALS</span><h3>Graph infrastructure</h3><p>Named graphs, ontology catalogs, supported Cypher, Python batches, equality indexes, local durability and read-only connected TUI inspection. The TUI supports English and Portuguese; these documentation pages are English.</p></article><article><span class="tag warning">EXPERIMENTAL</span><h3>Three-voter quorum</h3><p>Optional quorum replication has local fault-test evidence. Multi-machine Kubernetes/Swarm failover, production HA and operational recovery remain qualification gates. Multiple pods alone do not provide replication.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/quorum-replication.md">Read replication limitations ↗</a></article></div>
+      <div class="not-shipped"><strong>Not shipped in 0.1</strong><p>Full-text or vector similarity indexes, object-storage-native persistence, sharding, historical node/edge revisions, a published Python SDK, and an agent runtime. Lists can hold vector components; that does not provide vector search. DuckLake ingestion compares pinned snapshots; it is not native CDC.</p></div>
+    </section>
+    <section id="guides" class="content-section">
+      <span class="section-kicker">07 / GO DEEPER</span><h2>From first write to a controlled beta.</h2>
+      <div class="guide-grid"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md"><span>01</span><strong>Python client</strong><small>Upsert, patch, batch and delete</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/ducklake-incremental.md"><span>02</span><strong>Incremental sources</strong><small>Pinned snapshot differences and resume</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/connected-status.md"><span>03</span><strong>Terminal workspace</strong><small>Real ontology, memory, index and graph views</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/node-acl.md"><span>04</span><strong>Access control</strong><small>Graph grants and node visibility</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md"><span>05</span><strong>Containers &amp; orchestration</strong><small>Deployment boundaries and retained storage</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/beta-operator-checklist.md"><span>06</span><strong>Operator checklist</strong><small>Evidence, workload and release gates</small></a></div>
+      <p class="caption">Repository guides require repository access while Brainwire is private. This is a static documentation landing page; no hosted database or registry image is implied.</p>
+    </section>
+    <footer><span>Brainwire / 0.1 beta documentation</span><a href="https://github.com/allandefraga/brainwire/blob/main/JOURNAL.md">Implementation journal ↗</a></footer>
+  </main>
+</div>
+<p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
+<script>
+  document.querySelectorAll('[data-copy]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const status = document.getElementById('copy-status');
+      const code = document.getElementById(button.dataset.copy);
+      try {
+        if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(code.textContent);
+        button.textContent = 'Copied';
+        status.textContent = 'Example copied to clipboard.';
+      } catch {
+        button.textContent = 'Select text';
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        status.textContent = 'Clipboard unavailable. Example selected; use your system copy shortcut.';
+      }
+      window.setTimeout(() => { button.textContent = 'Copy'; }, 2500);
+    });
+  });
+</script>
 </body>
 </html>

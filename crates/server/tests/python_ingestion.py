@@ -194,6 +194,19 @@ query = "{query_mib}MiB"
                                     {"source_id": f"cleanup-{index-1}", "target_id": f"cleanup-{index}"}
                                     for index in range(cleanup_count)
                                 )) == cleanup_count
+                                unlink = {"source_id": "id-3", "target_id": "cleanup-0"}
+                                assert graph.delete_edges("Customer", "RELATED", "Customer", [
+                                    unlink, unlink,
+                                    {"source_id": "cleanup-0", "target_id": "id-3"},
+                                    {"source_id": "missing", "target_id": "cleanup-0"},
+                                ]) == 1
+                                assert graph.delete_edges("Customer", "RELATED", "Customer", [unlink]) == 0
+                                assert count(session, "{entity_id:'id-3'}") == 1
+                                assert count(session, "{entity_id:'cleanup-0'}") == 1
+                                assert session.run(
+                                    "MATCH (a:Customer {entity_id:'cleanup-0'})-[:RELATED]->"
+                                    "(b:Customer {entity_id:'cleanup-1'}) RETURN count(*) AS n"
+                                ).single()["n"] == 1
                                 delete_started = time.perf_counter()
                                 deleted = graph.delete_nodes("Customer", (
                                     f"cleanup-{index}" for index in range(cleanup_count)
@@ -257,6 +270,7 @@ query = "{query_mib}MiB"
             print(json.dumps({"rows": rows, "batch_size": batch_size, "query_guard_mib": query_mib, "insert_seconds": durations[0],
                               "replay_seconds": durations[1], "recovered_nodes": graph["nodes"],
                               "cleanup_nodes": cleanup_count, "delete_seconds": deletion_seconds,
+                              "relationship_delete_replay": "PASS",
                               "sst_files_before_crash": sst_before_crash,
                               "read_timings": read_timings, "driver": __import__("neo4j").__version__, "query_guard_rollback": "PASS", "numeric_index_recovery": "PASS", "result": "PASS"}, indent=2))
         finally:

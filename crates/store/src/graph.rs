@@ -1110,6 +1110,30 @@ fn edges_for_update(txn: &mut Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>,
     Ok(found)
 }
 
+/// Delete one physical directed relationship and its incoming mirror.
+/// Track both keys so a concurrent MERGE cannot silently overwrite deletion.
+pub fn delete_edge(
+    txn: &mut Txn,
+    source: NodeId,
+    edge_type: EdgeTypeId,
+    target: NodeId,
+    id: EdgeId,
+) -> Result<bool, GraphError> {
+    let out = edge_key(source, edge_type, target, id);
+    let incoming = edge_key(target, edge_type, source, id);
+    let mut exists = false;
+    txn.visit_prefix_for_update::<StoreError>(Cf::Out, &out, |key, _| {
+        exists |= key == out;
+        Ok(())
+    })?;
+    txn.visit_prefix_for_update::<StoreError>(Cf::In, &incoming, |_, _| Ok(()))?;
+    if exists {
+        txn.delete(Cf::Out, out);
+        txn.delete(Cf::In, incoming);
+    }
+    Ok(exists)
+}
+
 pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
     let (entity_id, row) = read_node(txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
     if let Some(bytes) = txn.get(Cf::Meta, CATALOG_KEY)? {
@@ -1291,6 +1315,51 @@ mod tests {
                 .unwrap();
         let cat = db.apply_ontology(&mapping).unwrap();
         (dir, res, db, cat)
+    }
+
+    #[test]
+    fn delete_edge_removes_both_mirrors_and_conflicts_with_concurrent_merge() {
+        for merge_first in [false, true] {
+            let (_dir, _resources, db, catalog) = setup();
+            let (source, target) = seed_customer_and_company(&db, &catalog);
+            let edge_type = catalog.edge_type("WORKS_AT").unwrap().id;
+            let mut seed = db.begin();
+            merge_edge(
+                &mut seed,
+                &catalog,
+                source,
+                "WORKS_AT",
+                target,
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            seed.commit().unwrap();
+            let mut deletion = db.begin();
+            let mut merge = db.begin();
+            assert!(delete_edge(&mut deletion, source, edge_type, target, EdgeId::MERGED).unwrap());
+            assert!(
+                !delete_edge(&mut deletion, source, edge_type, target, EdgeId::MERGED).unwrap()
+            );
+            assert!(out_edges(&deletion, source).unwrap().is_empty());
+            assert!(in_edges(&deletion, target).unwrap().is_empty());
+            merge_edge(
+                &mut merge,
+                &catalog,
+                source,
+                "WORKS_AT",
+                target,
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            if merge_first {
+                merge.commit().unwrap();
+                assert!(matches!(deletion.commit(), Err(TxnError::Conflict)));
+            } else {
+                deletion.commit().unwrap();
+                assert!(matches!(merge.commit(), Err(TxnError::Conflict)));
+            }
+            check_invariants(&db).unwrap();
+        }
     }
 
     #[test]

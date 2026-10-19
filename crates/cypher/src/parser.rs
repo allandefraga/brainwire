@@ -8,6 +8,7 @@
 //!            | MERGE pattern
 //!            | CREATE pattern (',' pattern)*
 //!            | SET var '.' key '=' expr (',' var '.' key '=' expr)*
+//!            | DELETE var (',' var)*
 //!            | DETACH DELETE var (',' var)*
 //!            | UNWIND expr AS var
 //!            | CALL name ('.' name)* '(' [expr (',' expr)*] ')'
@@ -30,7 +31,7 @@
 //!
 //! Anything else (`OPTIONAL MATCH`, `WITH`, `ORDER BY`, `SKIP`,
 //! variable-length relationships, several labels, several hops, functions
-//! other than `count`, `size`, `coalesce`, `toLower` and `toUpper`, `DELETE` without `DETACH`) is rejected with a
+//! other than `count`, `size`, `coalesce`, `toLower` and `toUpper`) is rejected with a
 //! `ParseError` whose message starts with `not supported yet: `.
 //!
 //! Nesting through parentheses, lists and maps (including function
@@ -238,7 +239,7 @@ impl<'a> Parser<'a> {
             "OPTIONAL" => Err(self.error_here("not supported yet: OPTIONAL MATCH")),
             "WITH" => Err(self.error_here("not supported yet: WITH")),
             "CALL" => self.parse_call(),
-            "DELETE" => Err(self.error_here("not supported yet: DELETE without DETACH")),
+            "DELETE" => self.parse_delete(),
             _ => Err(self.error_here(EXPECTED_CLAUSE)),
         }
     }
@@ -343,6 +344,16 @@ impl<'a> Parser<'a> {
         self.expect(Tok::Eq, "'='")?;
         let value = self.parse_expr()?;
         Ok(SetItem { var, prop, value })
+    }
+
+    fn parse_delete(&mut self) -> Result<Clause, ParseError> {
+        self.advance(); // DELETE
+        let mut vars = vec![self.expect_ident("a relationship variable")?];
+        while self.check(&Tok::Comma) {
+            self.advance();
+            vars.push(self.expect_ident("a relationship variable")?);
+        }
+        Ok(Clause::Delete(vars))
     }
 
     fn parse_detach_delete(&mut self) -> Result<Clause, ParseError> {
@@ -1080,14 +1091,10 @@ mod tests {
     }
 
     #[test]
-    fn delete_without_detach_is_unsupported() {
-        let e = parse("MATCH (c:Customer {entity_id: 'c1'}) DELETE c").unwrap_err();
-        assert!(
-            e.message
-                .starts_with("not supported yet: DELETE without DETACH"),
-            "{}",
-            e.message
-        );
+    fn relationship_delete_parses_multiple_variables() {
+        let q = parse("MATCH (a:Page)-[r:LINK]->(b:Page) DELETE r, s").unwrap();
+        assert_eq!(q.clauses[1], Clause::Delete(vec!["r".into(), "s".into()]));
+        assert!(parse("DELETE").is_err());
     }
 
     // -- nesting limit -------------------------------------------------------

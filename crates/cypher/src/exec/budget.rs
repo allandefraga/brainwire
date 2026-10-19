@@ -190,6 +190,7 @@ impl<'a> Budget<'a> {
                     .saturating_add(key.len())
                     .saturating_add(match binding {
                         Binding::Node(_) => size_of::<NodeId>(),
+                        Binding::Relationship(_) => size_of::<Relationship>(),
                         Binding::Value(v) => value_bytes(v),
                     })
             })

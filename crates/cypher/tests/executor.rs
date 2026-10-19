@@ -161,7 +161,6 @@ fn static_errors_survive_empty_input() {
     }
     for q in [
         "MATCH (c) RETURN c",
-        "MATCH (c:Customer)-[r:WORKS_AT]->(k:Company) RETURN c",
         "MATCH (c:Customer)-[:WORKS_AT {role: 'x'}]->(k:Company) RETURN c",
         "CREATE (c:Customer)",
     ] {

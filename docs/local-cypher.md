@@ -105,7 +105,8 @@ materialized and subject to conservative accounting.
   typed edges between bound nodes.
 - Labeled `MATCH`, primary-key lookup or label scan, one outgoing/incoming hop,
   property equality and `WHERE` expressions.
-- `UNWIND`, node property `SET`, and `DETACH DELETE`.
+- `UNWIND`, node property `SET`, `DETACH DELETE` for nodes, and `DELETE r` for
+  bound relationships.
 - `RETURN` values or nodes, top-level `count` aggregation and grouping,
   nonnegative integer `LIMIT`, parameters and three-valued boolean logic.
 - Scalar `size(expression)` for lists and strings; null propagates.
@@ -114,8 +115,12 @@ materialized and subject to conservative accounting.
   explicit `YIELD`, aliases, optional `WHERE` and final `RETURN`/`LIMIT`.
   See [sparse analytics](sparse-analytics.md) for runnable examples and limits.
 
-Unsupported constructs return an explicit error. Relationship variables and
-relationship property filters are not implemented. The executor streams
+Unsupported constructs return an explicit error. Relationship variables are
+supported only to identify relationships for `DELETE r`; returning relationship
+values, reading relationship properties, relationship property filters, and
+relationship `SET`/`CREATE`/`MERGE` bindings are not implemented. `DELETE r`
+removes directed edges of the bound type between matched endpoints, preserves
+the endpoint nodes, and respects graph write authorization. The executor streams
 supported read pipelines; writes, grouped aggregates,
 CALL and final query results remain materialized. `memory.query` enforces
 conservative accounting rather than a hard RSS ceiling. Full Cypher and

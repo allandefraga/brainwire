@@ -4,7 +4,9 @@ use std::cmp::Ordering;
 pub(super) fn scalar(binding: Binding) -> Result<Value, ExecError> {
     match binding {
         Binding::Value(v) => Ok(v),
-        Binding::Node(_) => Err(ExecError::Semantic("expected a value, found a node".into())),
+        Binding::Node(_) | Binding::Relationship(_) => {
+            Err(ExecError::Semantic("expected a scalar value".into()))
+        }
     }
 }
 pub(super) fn boolean(binding: Binding) -> Result<Option<bool>, ExecError> {
@@ -171,6 +173,7 @@ fn int_float(i: i64, f: f64) -> Option<Ordering> {
 fn order(a: &Binding, b: &Binding) -> Option<Ordering> {
     match (a, b) {
         (Binding::Node(a), Binding::Node(b)) => Some(a.cmp(b)),
+        (Binding::Relationship(a), Binding::Relationship(b)) => Some(a.cmp(b)),
         (Binding::Value(a), Binding::Value(b)) => match (a, b) {
             (Value::Int(a), Value::Int(b)) => Some(a.cmp(b)),
             (Value::Int(a), Value::Float(b)) => int_float(*a, *b),
@@ -227,6 +230,9 @@ pub(super) fn out(v: Binding, ctx: &Context<'_, '_>) -> Result<Out, ExecError> {
     match v {
         Binding::Value(v) => Ok(Out::Value(v)),
         Binding::Node(id) => Ok(Out::Node(graph::node_out(ctx, id)?)),
+        Binding::Relationship(_) => Err(ExecError::Unsupported(
+            "RETURN relationship values is not supported".into(),
+        )),
     }
 }
 pub(super) fn project_row(
@@ -293,6 +299,7 @@ pub(super) fn project(
                         |sum, b| {
                             sum.saturating_add(match b {
                                 Binding::Node(_) => 16,
+                                Binding::Relationship(_) => std::mem::size_of::<Relationship>(),
                                 Binding::Value(v) => budget::value_bytes(v),
                             })
                         },

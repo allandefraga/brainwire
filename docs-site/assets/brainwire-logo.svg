@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-labelledby="title desc">
+  <title id="title">Brainwire</title>
+  <desc id="desc">A bright green graph mark connected to the Brainwire wordmark.</desc>
+  <g fill="none" stroke="#46ff61" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M44 36h35l25 28-25 28H44M44 36v56M52 64h28" stroke-width="9"/>
+    <path d="M44 36 18 18M44 36 18 110M79 36l31-18M104 64l24 0M79 92l31 18" stroke-width="5" opacity=".86"/>
+  </g>
+  <g fill="#46ff61">
+    <circle cx="18" cy="18" r="9"/><circle cx="44" cy="36" r="10"/>
+    <circle cx="128" cy="64" r="9"/><circle cx="18" cy="110" r="9"/>
+    <circle cx="110" cy="18" r="7" opacity=".82"/><circle cx="110" cy="110" r="7" opacity=".82"/>
+  </g>
+  <text x="158" y="99" fill="#f4f7f4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="68" font-weight="700" letter-spacing="2">BRAINWIRE</text>
+</svg>

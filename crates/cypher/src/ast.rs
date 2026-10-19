@@ -25,6 +25,7 @@ pub enum Clause {
     Create(Vec<Pattern>),
     Set(Vec<SetItem>),
     DetachDelete(Vec<String>),
+    Delete(Vec<String>),
     Unwind {
         expr: Expr,
         var: String,

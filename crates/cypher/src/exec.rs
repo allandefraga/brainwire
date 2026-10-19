@@ -101,7 +101,15 @@ impl From<StoreError> for ExecError {
 #[derive(Debug, Clone, PartialEq)]
 enum Binding {
     Node(NodeId),
+    Relationship(Relationship),
     Value(Value),
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Relationship {
+    source: NodeId,
+    edge_type: brainwire_core::ids::EdgeTypeId,
+    target: NodeId,
+    id: brainwire_core::ids::EdgeId,
 }
 type Bindings = BTreeMap<String, Binding>;
 struct Context<'a, 'db> {
@@ -146,7 +154,11 @@ impl QueryAccess {
     fn authorize(self, query: &Query) -> Result<(), ExecError> {
         for clause in &query.clauses {
             match clause {
-                Clause::Create(_) | Clause::Merge(_) | Clause::Set(_) | Clause::DetachDelete(_) => {
+                Clause::Create(_)
+                | Clause::Merge(_)
+                | Clause::Set(_)
+                | Clause::DetachDelete(_)
+                | Clause::Delete(_) => {
                     if !self.write {
                         return Err(ExecError::Forbidden("graph write access required"));
                     }
@@ -504,7 +516,11 @@ fn execute_clauses(
         && query.clauses.iter().any(|clause| {
             matches!(
                 clause,
-                Clause::Create(_) | Clause::Merge(_) | Clause::Set(_) | Clause::DetachDelete(_)
+                Clause::Create(_)
+                    | Clause::Merge(_)
+                    | Clause::Set(_)
+                    | Clause::DetachDelete(_)
+                    | Clause::Delete(_)
             ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl")
         })
     {
@@ -684,6 +700,33 @@ fn execute_clauses(
                         overlay_bytes = txn.estimated_memory_bytes();
                         wrote = true;
                     }
+                }
+            }
+            Clause::Delete(vars) => {
+                let mut relationships = BTreeSet::new();
+                for row in &rows {
+                    for var in vars {
+                        budget.check_deadline()?;
+                        let Some(Binding::Relationship(edge)) = row.get(var) else {
+                            return Err(ExecError::Semantic(format!(
+                                "{var} is not a bound relationship"
+                            )));
+                        };
+                        if relationships.insert(*edge) {
+                            budget.charge(std::mem::size_of::<Relationship>() + 64)?;
+                        }
+                    }
+                }
+                for edge in relationships {
+                    wrote |= brainwire_store::graph::delete_edge(
+                        txn,
+                        edge.source,
+                        edge.edge_type,
+                        edge.target,
+                        edge.id,
+                    )?;
+                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                    overlay_bytes = txn.estimated_memory_bytes();
                 }
             }
             Clause::DetachDelete(vars) => {

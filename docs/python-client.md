@@ -62,8 +62,36 @@ but earlier batches remain committed if a later batch fails. Use this for an
 explicit list of obsolete identities; it does not discover stale nodes or make
 a multi-batch snapshot reconciliation atomic. The helper bounds compact UTF-8
 ID bytes and item count, not exact Bolt bytes or process memory.
-Independent edge deletion is not exposed through this helper yet; deleting a
-node removes its incident edges as part of `DETACH DELETE`.
+
+## Delete edges while keeping nodes
+
+`delete_edges(source_label, relationship, target_label, rows)` deletes directed
+relationships between exact endpoint labels and identities. It keeps both
+endpoints and other relationship types intact:
+
+```python
+removed_edges = graph.delete_edges("Ticket", "HAS_COMMENT", "TicketComment", [
+    {"source_id": "t-42", "target_id": "c-1"},
+    {"source_id": "t-43", "target_id": "c-2"},
+])
+```
+
+Rows are an iterable of flat dictionaries with `source_id` and `target_id`.
+Repeated pairs are deduplicated within each batch. Missing endpoints or edges
+count as zero, so replaying an already deleted pair is safe. The result counts
+deleted physical relationships: if a pair has parallel edges of the selected
+type, **all matching edges are removed**. This differs from `update_edge`, which
+requires exactly one matching relationship and rejects ambiguous parallel edges.
+
+The helper bounds each batch by item count and compact UTF-8 JSON input bytes,
+not exact Bolt bytes, deleted-edge count or process memory. Each batch commits
+atomically; earlier batches remain committed if a later input row or batch fails.
+It does not discover stale relationships, maintain a source cursor or delete
+arbitrary EdgeIds. Apply source-specific reconciliation before calling it.
+
+Internally the helper uses parameterized Cypher `DELETE` on a relationship
+variable. Plain `DELETE` is limited to relationships; node cleanup uses
+`DETACH DELETE`. This does not imply full Neo4j `DELETE` compatibility.
 
 ## Different load sources
 

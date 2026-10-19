@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Node,
+    Relationship,
     Value,
 }
 type Scope = BTreeMap<String, Kind>;
@@ -41,6 +42,10 @@ fn expr_checked(
     evaluate: bool,
 ) -> Result<(), ExecError> {
     match e {
+        Expr::Prop(base, _) if matches!(base.as_ref(), Expr::Var(var) if scope.get(var) == Some(&Kind::Relationship)) =>
+        {
+            return Err(unsupported("relationship property reads are not supported"));
+        }
         Expr::Var(v) if !scope.contains_key(v) => {
             return Err(semantic(format!("unknown variable {v}")))
         }
@@ -106,7 +111,7 @@ fn properties(p: &[(String, Expr)], scope: &Scope, ctx: &Context<'_, '_>) -> Res
 }
 fn node_var(p: &NodePat, scope: &mut Scope) -> Result<(), ExecError> {
     if let Some(v) = &p.var {
-        if scope.get(v) == Some(&Kind::Value) {
+        if scope.get(v).is_some_and(|kind| *kind != Kind::Node) {
             return Err(semantic(format!("{v} is not a node")));
         }
         scope.insert(v.clone(), Kind::Node);
@@ -131,10 +136,12 @@ fn pattern(
         if ctx.catalog.edge_type(&rel.rel_type).is_none() {
             return Err(semantic(format!("unknown edge type {}", rel.rel_type)));
         }
-        if rel.var.is_some() {
-            return Err(unsupported("relationship variables are not supported"));
-        }
         if write {
+            if rel.var.is_some() {
+                return Err(unsupported(
+                    "relationship variables in writes are not supported",
+                ));
+            }
             for endpoint in [&p.start, end] {
                 if endpoint.label.is_some() || !endpoint.props.is_empty() {
                     return Err(unsupported("edge writes need bare bound node endpoints"));
@@ -158,6 +165,15 @@ fn pattern(
             properties(&p.start.props, scope, ctx)?;
             node_var(end, scope)?;
             properties(&end.props, scope, ctx)?;
+            if let Some(var) = &rel.var {
+                if scope
+                    .get(var)
+                    .is_some_and(|kind| *kind != Kind::Relationship)
+                {
+                    return Err(semantic(format!("{var} is not a relationship")));
+                }
+                scope.insert(var.clone(), Kind::Relationship);
+            }
         }
     } else if write {
         if p.start.label.is_none() || !p.start.props.iter().any(|(k, _)| k == "entity_id") {
@@ -248,6 +264,15 @@ pub(super) fn query(query: &Query, ctx: &Context<'_, '_>) -> Result<(), ExecErro
                     expr(&item.value, &scope, ctx, false)?;
                 }
             }
+            Clause::Delete(vars) => {
+                for var in vars {
+                    if scope.get(var) != Some(&Kind::Relationship) {
+                        return Err(semantic(format!(
+                            "{var} is not a bound relationship; use DETACH DELETE for nodes"
+                        )));
+                    }
+                }
+            }
             Clause::DetachDelete(vars) => {
                 for v in vars {
                     bound(v, &scope)?;
@@ -271,6 +296,10 @@ pub(super) fn query(query: &Query, ctx: &Context<'_, '_>) -> Result<(), ExecErro
                     return Err(unsupported("RETURN must be final"));
                 }
                 for item in items {
+                    if matches!(&item.expr, Expr::Var(var) if scope.get(var) == Some(&Kind::Relationship))
+                    {
+                        return Err(unsupported("RETURN relationship values is not supported"));
+                    }
                     expr(&item.expr, &scope, ctx, true)?;
                 }
                 if let Some(e) = limit {

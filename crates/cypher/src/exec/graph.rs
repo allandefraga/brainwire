@@ -291,7 +291,23 @@ where
             };
             visit_edges_of_type::<E>(ctx.txn, cf, id, edge_type, |edge| {
                 let _edge_scope = ctx.budget.scope();
-                if let Some(row) = matches(ctx, &row, end, edge.other)? {
+                if let Some(mut row) = matches(ctx, &row, end, edge.other)? {
+                    if let Some(var) = &rel.var {
+                        let (source, target) = match rel.direction {
+                            Direction::Out => (id, edge.other),
+                            Direction::In => (edge.other, id),
+                        };
+                        let binding = Binding::Relationship(Relationship {
+                            source,
+                            target,
+                            edge_type,
+                            id: edge.id,
+                        });
+                        if row.get(var).is_some_and(|previous| previous != &binding) {
+                            return Ok(());
+                        }
+                        row.insert(var.clone(), binding);
+                    }
                     ctx.budget.bindings(&row)?;
                     visit(row)?;
                 }

@@ -22,8 +22,10 @@ Allan's current language.
 1. A new entry **at the top** of the list, with: done, decided, next step,
    blockers.
 2. Brainwire now lives in its standalone repository at
-   `/Users/fraga/Documents/brainwire`, on `codex/brainwire`. Nothing is pushed
-   unless Allan asks. The old platform branch and its worktrees are historical
+   `/Users/fraga/Documents/brainwire`; `main` tracks `origin/main`. Verify the
+   current branch and working tree before changing files. Pushes and releases
+   require Allan's explicit request for the relevant work. The old platform
+   branch and its worktrees are historical
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
@@ -38,6 +40,77 @@ Allan's current language.
 No line of code before the end of phase 2.
 
 ## Entries
+
+### 2026-10-19 — v0.1.1 release candidate and versioned deployment path
+
+- **Requested:** make the public-facing README polished, add a Brainwire logo,
+  remove all application-specific coupling, and prepare releases, tags,
+  deployments and CI/CD on GitHub. Keep Docker, Swarm and Kubernetes images
+  consistently versioned.
+- **Done:** implemented bounded Cypher `DELETE r` and Python
+  `GraphClient.delete_edges`, preserving endpoint nodes and enforcing graph
+  write authorization, adjacency consistency, memory limits and batch rules.
+  Refreshed the README and developer docs, added matching SVG logos, clarified
+  beta capabilities and limits, and documented relationship deletion. Bumped
+  the Rust workspace to `0.1.1`. Added CI for Rust/Python/Bolt acceptance, a
+  tag workflow that verifies the Cargo and Kubernetes versions before creating
+  a GitHub prerelease and publishing the exact tagged image to GHCR, and a
+  GitHub Pages deployment for `docs-site`. Added a Kubernetes release overlay
+  pinned to `ghcr.io/allandefraga/brainwire:v0.1.1` with an image pull secret;
+  documented safe secret creation and Swarm credential forwarding.
+- **Verified:** workspace tests, warning-free Clippy, Rust formatting, 46 Python
+  client tests, `actionlint`, rendered Kubernetes manifests and `git diff
+  --check` passed. Docker built `brainwire:v0.1.1-rc` from this tree; the
+  container reports `brainwire 0.1.1`. Search of the current
+  source/documentation tree found no external application name or integration
+  coupling.
+- **Decided:** version all release artifacts with the same `v0.1.1` tag. Publish
+  only a prerelease; production qualification remains open.
+- **Next step:** publish local commit `e4d38e3` and tag after resolving
+  whether the old published history should be rewritten to scrub historical
+  references; configure a real Kubernetes/Swarm target separately when one is
+  selected.
+- **Blockers:** the existing `v0.1.0` commit/tag history contains old references.
+  Removing every trace requires explicit approval to rewrite `main` and remove
+  that old tag. No remote deployment target or cluster credentials are set.
+
+### 2026-10-19 — release documentation refresh
+
+- **Requested:** improve onboarding and documentation while preparing the next
+  release from `main`.
+- **Observed baseline:** local `main` and `origin/main` point to `8b32f69`
+  (`Prepare Brainwire v0.1.0`); annotated tag `v0.1.0` resolves to that commit.
+  The working tree was clean at the start of this documentation slice. Earlier
+  entries describing uncommitted work or no remote are historical snapshots.
+- **Done:** replaced the stale uncommitted/local-only README status, clarified
+  the source-tag versus package/image distinction, and added a real connected
+  TUI walkthrough alongside explicit synthetic/offline boundaries. Added direct
+  navigation to indexes, connected status, DuckLake snapshot differences and
+  experimental quorum operations. Documented dependency caching before offline
+  Cargo commands. Updated the session workflow to identify `main` and its
+  upstream rather than the historical `codex/brainwire` branch. Documented the
+  new bounded `GraphClient.delete_edges` API, endpoint/type scoping, physical
+  parallel-edge deletion counts, replay and partial-batch failure semantics;
+  limited the Cypher claim to relationship `DELETE`. Replaced the remaining
+  application-specific brand references in historical entries with generic
+  external-integration wording, preserving Brainwire's independent identity.
+- **Verified:** checked the README's relative links against repository files;
+  checked Docker/Python schema names against the bundled ontology, and connected
+  shell flags against the built binary's `shell --help` and existing guides;
+  checked the baseline Git refs and
+  `git diff --check`. These documentation checks do not repeat runtime or
+  production qualification. A case-insensitive audit of all tracked and
+  nonignored untracked paths and contents found zero external application brand
+  matches. A broader audit found ignored historical recovery artifacts under
+  `.superpowers/sdd` and diagnostic logs under `data/default`; these local
+  artifacts remain outside the release tree. Old Git history and tags were not
+  rewritten.
+- **Next step:** integrate the session's feature work, run its targeted checks
+  and release verification, then record the actual final commit/tag and remote
+  publication outcome in a new entry.
+- **Limits:** this documentation slice creates no commit, tag, release or push.
+  Real source/ACL integration, temporal data history and multi-machine quorum
+  qualification remain open; the existing beta boundaries still apply.
 
 ### 2026-10-17 — bounded Python node cleanup
 
@@ -93,7 +166,7 @@ No line of code before the end of phase 2.
 ### 2026-10-17 — local 0.1 candidate and Docker/Python quickstart
 
 - **Requested:** prepare Brainwire 0.1 for GitHub later and make Docker startup
-  plus Python/Bolt ingestion straightforward for a client integration session.
+  plus Python/Bolt ingestion straightforward for an external integration session.
 - **Done:** rewrote the root README as a v0.1 entry point: local-candidate
   status, Docker demo, parameterized Python writes for nodes/edges, feature
   boundaries, security warning and links to operational guides. Removed
@@ -118,7 +191,7 @@ No line of code before the end of phase 2.
   reader/writer, 1,000 writes, pending-transaction SIGKILL rollback, retained
   volume and offline audit). Isolated containers/networks/volumes were removed.
 - **Limits:** this is a local 0.1 candidate check, not a frozen release or live
-  client integration. The checkout contains extensive uncommitted changes;
+  external application integration. The checkout contains extensive uncommitted changes;
   no exact release tree has been selected or tagged. The workspace still says
   `publish = false`, `license = UNLICENSED`, no Git remote is configured, and
   no separately installable Python package exists. The demo profile has auth
@@ -126,7 +199,7 @@ No line of code before the end of phase 2.
   multi-machine quorum qualification and node/edge temporal revisions remain
   open; temporal history is not included in the 0.1 claim.
 - **Next:** review and freeze an exact candidate tree with Allan; tomorrow,
-  validate the client adapter and ACL contract using authorized representative
+  validate the external adapter and ACL contract using authorized representative
   data, starting in shadow mode. Resolve the repository/image license before a
   distributable release. Publish only after explicit authorization.
 - **Blockers:** safe GitHub push/release requires an explicit remote and exact

@@ -100,12 +100,50 @@ Render locally without contacting a cluster:
 kubectl kustomize deploy/kubernetes
 ```
 
-Provide the image to an isolated test cluster first. `brainwire:local` must be
-available on its worker; change the image for other environments. No image
-publication or cluster deployment is performed by the templates themselves.
+The base manifest uses `brainwire:local` for local image builds. Published
+releases use a separate overlay pinned to the release tag. For a private GHCR
+package, create a namespace-scoped Kubernetes pull secret with a GitHub token
+that has `read:packages` access. This prompt keeps the token out of shell
+history, command arguments, and repository files:
 
 ```sh
-kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes
+kubectl create namespace YOUR_TEST_NAMESPACE
+python3 - YOUR_TEST_NAMESPACE <<'PY'
+import base64
+import getpass
+import json
+import subprocess
+import sys
+
+username = input("GitHub username: ")
+token = getpass.getpass("GitHub token (read:packages): ")
+auth = base64.b64encode(f"{username}:{token}".encode()).decode()
+docker_config = json.dumps({"auths": {"ghcr.io": {"auth": auth}}})
+secret = {
+    "apiVersion": "v1",
+    "kind": "Secret",
+    "metadata": {"name": "ghcr-pull", "namespace": sys.argv[1]},
+    "type": "kubernetes.io/dockerconfigjson",
+    "data": {".dockerconfigjson": base64.b64encode(docker_config.encode()).decode()},
+}
+subprocess.run(
+    ["kubectl", "apply", "-f", "-"],
+    input=json.dumps(secret), text=True, check=True,
+)
+PY
+kubectl kustomize deploy/kubernetes-release
+kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
+```
+
+The current overlay pins `ghcr.io/allandefraga/brainwire:v0.1.1`; update its
+`newTag` together with the Cargo workspace version when cutting a release. It
+references the `ghcr-pull` secret for kubelet image pulls; logging in on your
+workstation alone does not authenticate cluster nodes. For
+immutable deployments, replace the tag with the published image digest. Applying
+the manifest starts a service in the cluster; it does not create or qualify a
+cluster for you.
+
+```sh
 kubectl rollout status -n YOUR_TEST_NAMESPACE statefulset/brainwire
 kubectl port-forward -n YOUR_TEST_NAMESPACE service/brainwire 7687:7687
 ```
@@ -150,10 +188,14 @@ image there. Equal local volume names on different machines are different data.
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=YOUR_TEST_IMAGE
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.1.1
 docker stack config --compose-file deploy/swarm.yaml
-docker stack deploy --compose-file deploy/swarm.yaml brainwire-test
+docker stack deploy --with-registry-auth --compose-file deploy/swarm.yaml brainwire-test
 ```
+
+Log in to GHCR on the manager first. `--with-registry-auth` forwards those
+credentials to workers so private image pulls succeed; use a token with
+`read:packages` permission. Keep the token out of stack files and Git.
 
 Bolt is available only on the stack's overlay network, with no published host
 port. Updates and rollbacks use `stop-first` so tasks do not overlap on the

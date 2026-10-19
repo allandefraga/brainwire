@@ -225,6 +225,50 @@ class GraphClient:
             total += self._write(lambda tx: apply(tx, batch))
         return total
 
+    def delete_edges(self, source_label, relationship, target_label, rows):
+        """Delete all physical directed edges for exact endpoint pairs/type.
+
+        Each flat row has only source_id and target_id. Batches are bounded by
+        count and compact UTF-8 JSON bytes and atomic individually. Missing
+        endpoints or edges count zero; earlier complete batches survive errors.
+        """
+        source_label, relationship, target_label = map(
+            identifier, (source_label, relationship, target_label))
+        if isinstance(rows, (str, bytes, bytearray, Mapping)):
+            raise ValueError("rows must be an iterable of endpoint dictionaries")
+        try:
+            rows = iter(rows)
+        except TypeError as error:
+            raise ValueError("rows must be an iterable of endpoint dictionaries") from error
+        total, batch, size = 0, [], 0
+
+        def apply(tx, items):
+            pairs = dict.fromkeys((row["source_id"], row["target_id"]) for row in items)
+            records = [{"source_id": source, "target_id": target} for source, target in pairs]
+            query = (f"UNWIND $rows AS row MATCH (a:{source_label} {{entity_id:row.source_id}})"
+                     f"-[r:{relationship}]->(b:{target_label} {{entity_id:row.target_id}}) "
+                     "DELETE r RETURN count(*) AS deleted")
+            return tx.run(query, rows=records).single()["deleted"]
+
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {"source_id", "target_id"}:
+                raise ValueError("each deletion row must contain only source_id and target_id")
+            row = {"source_id": _entity(row["source_id"]), "target_id": _entity(row["target_id"])}
+            encoded = json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            if len(encoded) > self.batch_bytes:
+                raise ValueError("one edge exceeds the batch byte limit")
+            if batch and size + len(encoded) > self.batch_bytes:
+                total += self._write(lambda tx, items=batch: apply(tx, items))
+                batch, size = [], 0
+            batch.append(row)
+            size += len(encoded)
+            if len(batch) == self.batch_size or size == self.batch_bytes:
+                total += self._write(lambda tx, items=batch: apply(tx, items))
+                batch, size = [], 0
+        if batch:
+            total += self._write(lambda tx, items=batch: apply(tx, items))
+        return total
+
     def load_edges(self, source_label, relationship, target_label, rows):
         """Merge endpoint/type-identified edges from bounded flat dictionaries.
 

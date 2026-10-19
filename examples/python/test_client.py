@@ -138,6 +138,46 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(driver.committed), 1)
         self.assertEqual(driver.committed[0][0][1]["ids"], ["committed"])
 
+    def test_delete_edges_deduplicates_pairs_and_counts_physical_relationships(self):
+        driver = Driver([3, 0])
+        graph = GraphClient(driver, "tickets", batch_size=2)
+        pair = {"source_id": "a", "target_id": "b"}
+        self.assertEqual(graph.delete_edges("Page", "LINK", "Page", [pair, pair, pair]), 3)
+        calls = [call for batch in driver.committed for call in batch]
+        self.assertEqual([params["rows"] for _, params in calls], [[pair], [pair]])
+        self.assertTrue(all("DELETE r RETURN count(*) AS deleted" in query for query, _ in calls))
+        self.assertTrue(all("[r:LINK]->" in query for query, _ in calls))
+
+    def test_delete_edges_rejects_malformed_rows_without_flushing_pending_batch(self):
+        for bad in [None, {}, {"source_id": "a", "target_id": "b", "extra": 1},
+                    {"source_id": "a", "target_id": ""}]:
+            driver = Driver()
+            graph = GraphClient(driver, "tickets", batch_size=2)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                graph.delete_edges("Page", "LINK", "Page", iter([{"source_id": "a", "target_id": "b"}, bad]))
+            self.assertEqual(driver.committed, [])
+        for rows in [None, "a", b"a", {}]:
+            with self.assertRaises(ValueError):
+                graph.delete_edges("Page", "LINK", "Page", rows)
+
+    def test_delete_edges_late_invalid_input_preserves_completed_batches(self):
+        driver = Driver([1])
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        with self.assertRaises(ValueError):
+            graph.delete_edges("Page", "LINK", "Page", iter([{"source_id": "a", "target_id": "b"}, {}]))
+        self.assertEqual(len(driver.committed), 1)
+
+    def test_delete_edges_bytes_empty_and_oversized_rows(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_bytes=34)
+        self.assertEqual(graph.delete_edges("Page", "LINK", "Page", []), 0)
+        self.assertFalse(hasattr(driver, "database"))
+        self.assertEqual(graph.delete_edges("Page", "LINK", "Page", [
+            {"source_id": "é", "target_id": "b"}, {"source_id": "a", "target_id": "b"}]), 2)
+        self.assertEqual(len(driver.committed), 2)
+        with self.assertRaisesRegex(ValueError, "byte limit"):
+            graph.delete_edges("Page", "LINK", "Page", [{"source_id": "x" * 100, "target_id": "b"}])
+
     def test_edge_batches_are_bounded_and_preserve_relationship_properties(self):
         driver = Driver()
         graph = GraphClient(driver, "tickets", batch_size=2)
