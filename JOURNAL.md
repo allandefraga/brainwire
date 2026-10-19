@@ -41,6 +41,30 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-19 — GitHub About, release and access clarity
+
+- **Requested:** make the repository overview clearer, explain its license and
+  `publish = false`, clarify the GHCR login/pull commands, and check whether a
+  separate website needs to be created.
+- **Done:** added a concise GitHub About description and relevant topics; left
+  Website blank because the docs are not publicly hosted. Updated the README to
+  distinguish a source tag from a successful prerelease/image publication,
+  explain that `publish = false` blocks Cargo registry publishing only, and
+  show how GHCR login and `docker pull` work for this private image. Preserved
+  the repo's private visibility and all existing history.
+- **Verified:** the GitHub About panel shows the saved description/topics. The
+  `v0.1.1` release workflow is still running; the README links to its status and
+  makes image availability conditional on success. GitHub Pages is not enabled
+  for this private repository on its current plan, so there is no public docs
+  URL yet and no external site/account was created.
+- **Next step:** check the release workflow and its GHCR package after it
+  finishes. If a public documentation URL becomes important, choose either a
+  Pages-capable plan or a separate static host/domain then; neither is needed
+  for private source access or the container registry.
+- **Blockers:** the release workflow must pass before the private image can be
+  pulled. The repository has no open-source license; choose one before
+  distributing source or binaries beyond the intended private beta.
+
 ### 2026-10-19 — v0.1.1 release candidate and versioned deployment path
 
 - **Requested:** make the public-facing README polished, add a Brainwire logo,

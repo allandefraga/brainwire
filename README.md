@@ -149,17 +149,27 @@ artifact on pushes to `main`. GitHub Pages is unavailable for this private repo
 on its current plan; publishing a live public site requires a different plan or
 an external host.
 
-After the first successful release workflow, pull the private image with:
+The source is tagged `v0.1.1`. Its GitHub Actions release workflow must finish
+successfully before the prerelease and private container image are available.
+After that, these commands authenticate Docker to GHCR and download the server
+image to your local Docker engine. They do not start Brainwire or copy graph
+data:
 
 ```sh
-docker login ghcr.io
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+# At the password prompt, enter a GitHub personal access token (classic)
+# with read:packages access. Do not use your GitHub account password.
 docker pull ghcr.io/allandefraga/brainwire:v0.1.1
 ```
 
-GHCR inherits this repository's private access. Authenticate with a GitHub
-token that has package read access before pulling. The Compose quickstart above
-builds locally from source; see the [container guide](docs/container.md) for
-using a published image and retaining its data volume.
+`docker login ghcr.io` authenticates Docker to GitHub Container Registry. The
+token is needed because this repository and its container package are private.
+The release workflow uses GitHub's built-in `GITHUB_TOKEN` to publish the image;
+you only need your own token when pulling it from another machine. See GitHub's
+[GHCR authentication guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-with-a-personal-access-token-classic).
+The Compose quickstart above builds locally from source; see the
+[container guide](docs/container.md) for running the published image with a
+persistent graph-data volume.
 
 ## See what the TUI can do
 
@@ -246,9 +256,18 @@ Cypher, indexes, restart and the connected TUI with synthetic data.
 
 ## Release status and license
 
-This is a private beta prerelease. The Rust workspace declares `publish =
-false` and `UNLICENSED`; the workflow publishes a versioned container image and
-GitHub release, but no Rust crates or Python package. Choose and review a
-license before wider distribution. The image is a delivery artifact, not a
-production-readiness claim. See the [application delivery](docs/container.md#application-delivery)
-guide and the [journal](JOURNAL.md) for evidence and remaining release gates.
+**Version:** `v0.1.1` · private beta candidate · not production-qualified.
+The [tag source](https://github.com/allandefraga/brainwire/tree/v0.1.1) identifies
+the exact source snapshot. The release workflow publishes a GitHub prerelease
+and versioned Docker image to GHCR only after its checks pass. Follow the
+[release workflow](https://github.com/allandefraga/brainwire/actions/workflows/release.yml)
+for its current status. It does not publish a Rust crate or Python package. The
+image is a delivery artifact, not a production-readiness claim; see the
+[beta checklist](#the-honest-beta-checklist).
+
+**License:** this repository has no open-source license. `UNLICENSED` in the
+Cargo workspace describes that license status. `publish = false` is a separate
+Cargo setting: it prevents `cargo publish` from uploading the Rust crates to
+registries such as crates.io. It does **not** block GitHub releases or Docker
+image publication. Without a license, the default copyright rules apply; see
+GitHub's explanation of [licensing a repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository).
