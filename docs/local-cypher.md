@@ -111,9 +111,10 @@ materialized and subject to conservative accounting.
   nonnegative integer `LIMIT`, parameters and three-valued boolean logic.
 - Scalar `size(expression)` for lists and strings; null propagates.
 - String-only `toLower(expression)` and `toUpper(expression)`; null propagates.
-- Read-only `CALL graph.project`, `graph.degree` and `graph.pagerank`, with
-  explicit `YIELD`, aliases, optional `WHERE` and final `RETURN`/`LIMIT`.
-  See [sparse analytics](sparse-analytics.md) for runnable examples and limits.
+- Read-only `CALL graph.project`, `graph.degree`, `graph.pagerank` and
+  `knowledge.rank`, with explicit `YIELD`, aliases, optional `WHERE` and final
+  `RETURN`/`LIMIT`. See [sparse analytics](sparse-analytics.md) and
+  [explainable knowledge ranking](knowledge-ranking.md) for examples and limits.
 
 Unsupported constructs return an explicit error. Relationship variables are
 supported only to identify relationships for `DELETE r`; returning relationship

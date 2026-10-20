@@ -127,6 +127,7 @@ Do not add `--volumes` unless you intend to delete the demo database.
 - A Python convenience client with bounded node cleanup and independent edge
   deletion, plus JSONL and source-snapshot import examples.
 - Graph operations including PageRank, shortest path, reachability, WCC and SCC.
+- Explainable `knowledge.rank` source ranking with per-query evidence weights.
 - A terminal backoffice with a synthetic demo, an offline local inspector and
   a connected read-only workspace for ontology, memory, indexes and bounded
   graph neighborhoods.

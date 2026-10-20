@@ -18,7 +18,50 @@ pub(super) struct RankOptions {
     domain: Option<String>,
     top_k: usize,
     max_candidates: usize,
+    weights: [f64; 5],
 }
+
+fn weights(options: &BTreeMap<String, Value>) -> Result<[f64; 5], ExecError> {
+    let Some(value) = options.get("weights") else {
+        return Ok(SIGNALS.map(|(_, weight)| weight));
+    };
+    let Value::Map(supplied) = value else {
+        return Err(semantic(
+            "weights must be a map with all five ranking signals",
+        ));
+    };
+    if supplied.len() != SIGNALS.len()
+        || SIGNALS
+            .iter()
+            .any(|(name, _)| !supplied.contains_key(*name))
+        || supplied
+            .keys()
+            .any(|key| !SIGNALS.iter().any(|(name, _)| *name == key.as_str()))
+    {
+        return Err(semantic(
+            "weights must specify authority, authorRelevance, usage, certified and freshness",
+        ));
+    }
+    let mut values = [0.0; 5];
+    for (index, (name, _)) in SIGNALS.iter().enumerate() {
+        values[index] = match &supplied[*name] {
+            Value::Int(weight) if *weight >= 0 => *weight as f64,
+            Value::Float(weight) if weight.is_finite() && *weight >= 0.0 => *weight,
+            _ => {
+                return Err(semantic(format!(
+                    "weight {name} must be a finite non-negative number"
+                )))
+            }
+        };
+    }
+    let total: f64 = values.iter().sum();
+    if !total.is_finite() || total <= 0.0 {
+        return Err(semantic("weights must have a positive finite sum"));
+    }
+    values.iter_mut().for_each(|weight| *weight /= total);
+    Ok(values)
+}
+
 pub(super) fn options(args: &[Expr], ctx: &Context<'_, '_>) -> Result<RankOptions, ExecError> {
     if args.len() != 1 {
         return Err(semantic("knowledge.rank requires one options map"));
@@ -27,7 +70,16 @@ pub(super) fn options(args: &[Expr], ctx: &Context<'_, '_>) -> Result<RankOption
         return Err(semantic("knowledge.rank options must be a map"));
     };
     for key in map.keys() {
-        if !["label", "term", "domain", "topK", "maxCandidates"].contains(&key.as_str()) {
+        if ![
+            "label",
+            "term",
+            "domain",
+            "topK",
+            "maxCandidates",
+            "weights",
+        ]
+        .contains(&key.as_str())
+        {
             return Err(semantic(format!("unknown option {key} for knowledge.rank")));
         }
     }
@@ -41,6 +93,7 @@ pub(super) fn options(args: &[Expr], ctx: &Context<'_, '_>) -> Result<RankOption
         domain: text(&map, "domain")?,
         top_k: integer(&map, "topK", 10, 1000)?,
         max_candidates: integer(&map, "maxCandidates", 10_000, 1_000_000)?,
+        weights: weights(&map)?,
     })
 }
 
@@ -69,9 +122,12 @@ impl Ord for Candidate {
             .then(self.node.cmp(&other.node))
     }
 }
-fn contributions(props: &BTreeMap<String, Value>) -> Result<[f64; 5], ExecError> {
+fn contributions(
+    props: &BTreeMap<String, Value>,
+    weights: &[f64; 5],
+) -> Result<[f64; 5], ExecError> {
     let mut parts = [0.0; 5];
-    for (i, (name, weight)) in SIGNALS.iter().enumerate() {
+    for (i, (name, _)) in SIGNALS.iter().enumerate() {
         let signal = match props.get(*name) {
             None | Some(Value::Null) => 0.0,
             Some(Value::Bool(certified)) if *name == "certified" => {
@@ -98,7 +154,7 @@ fn contributions(props: &BTreeMap<String, Value>) -> Result<[f64; 5], ExecError>
                 )))
             }
         };
-        parts[i] = signal * weight;
+        parts[i] = signal * weights[i];
     }
     Ok(parts)
 }
@@ -136,7 +192,7 @@ pub(super) fn run(
         {
             return Ok(());
         }
-        let parts = contributions(&node.props)?;
+        let parts = contributions(&node.props, &opts.weights)?;
         let candidate = Candidate {
             node: id,
             score: parts.iter().sum(),
