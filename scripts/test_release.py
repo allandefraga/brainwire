@@ -1,4 +1,5 @@
 import unittest
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -83,6 +84,14 @@ class ReleaseFileTests(unittest.TestCase):
             f"newTag: v{second_candidate}",
             second_update[Path("deploy/kubernetes-release/kustomization.yaml")],
         )
+
+    def test_local_acceptance_uses_the_configured_cargo_target_directory(self):
+        with patch.dict(os.environ, {"CARGO_TARGET_DIR": "/tmp/brainwire-target"}):
+            with patch.object(release.subprocess, "run") as run:
+                release.run_local_release_checks()
+        acceptance = run.call_args_list[6].args[0]
+        self.assertEqual(acceptance[acceptance.index("--binary") + 1],
+                         "/tmp/brainwire-target/debug/brainwire")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,9 @@ class QueryResult:
 class Driver:
     def __init__(self, counts=()):
         self.committed, self.counts = [], iter(counts)
+        self.fail_on_write = None
+        self.write_count = 0
+        self.retry_write = False
 
     def session(self, *, database):
         self.database = database
@@ -33,6 +36,9 @@ class Driver:
         pass
 
     def execute_write(self, callback):
+        self.write_count += 1
+        if self.write_count == self.fail_on_write:
+            raise RuntimeError("write failed")
         captured = []
         driver = self
 
@@ -42,6 +48,9 @@ class Driver:
                 return Result(next(driver.counts, len(params.get("rows", [1]))))
 
         result = callback(Tx())
+        if self.retry_write:
+            captured.clear()
+            result = callback(Tx())
         self.committed.append(captured)
         return result
 
@@ -85,6 +94,53 @@ class ClientTests(unittest.TestCase):
         records = [row for batch in driver.committed for _, params in batch for row in params["rows"]]
         self.assertEqual([row["status"] for row in records], ["first","second","last",None])
         self.assertEqual(driver.database,"tickets")
+
+    def test_load_nodes_reports_only_committed_batches_with_cumulative_input_rows(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=2)
+        progress = []
+        count = graph.load_nodes("Ticket", [
+            {"entity_id": "a"}, {"entity_id": "b"}, {"entity_id": "c"}
+        ], on_batch=lambda batch, total: progress.append((batch, total)))
+        self.assertEqual(count, 3)
+        self.assertEqual(progress, [(1, 2), (2, 3)])
+        self.assertEqual(driver.write_count, 2)
+
+    def test_load_edges_does_not_report_a_batch_that_failed_to_commit(self):
+        driver = Driver()
+        driver.fail_on_write = 2
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        progress = []
+        with self.assertRaisesRegex(RuntimeError, "write failed"):
+            graph.load_edges("Page", "LINK", "Page", [
+                {"source_id": "a", "target_id": "b"},
+                {"source_id": "b", "target_id": "c"},
+            ], on_batch=lambda batch, total: progress.append((batch, total)))
+        self.assertEqual(progress, [(1, 1)])
+        self.assertEqual(len(driver.committed), 1)
+
+    def test_load_progress_callback_must_be_callable(self):
+        graph = GraphClient(Driver(), "tickets")
+        with self.assertRaisesRegex(ValueError, "on_batch must be callable"):
+            graph.load_nodes("Ticket", [], on_batch=True)
+
+    def test_load_progress_callback_runs_after_commit_and_cannot_undo_it(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        def fail_after_commit(batch, total):
+            raise RuntimeError("checkpoint failed")
+        with self.assertRaisesRegex(RuntimeError, "checkpoint failed"):
+            graph.load_nodes("Ticket", [{"entity_id": "committed"}], on_batch=fail_after_commit)
+        self.assertEqual(len(driver.committed), 1)
+
+    def test_load_progress_callback_runs_once_when_managed_transaction_retries(self):
+        driver = Driver()
+        driver.retry_write = True
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        progress = []
+        graph.load_nodes("Ticket", [{"entity_id": "retry-safe"}],
+                         on_batch=lambda batch, total: progress.append((batch, total)))
+        self.assertEqual(progress, [(1, 1)])
 
     def test_delete_nodes_deduplicates_ids_and_detaches_in_atomic_batches(self):
         driver = Driver([1, 2, 0])
@@ -181,12 +237,17 @@ class ClientTests(unittest.TestCase):
     def test_edge_batches_are_bounded_and_preserve_relationship_properties(self):
         driver = Driver()
         graph = GraphClient(driver, "tickets", batch_size=2)
+        progress = []
         rows = [
             {"source_id": "a", "target_id": "b", "weight": 0.2},
             {"source_id": "a", "target_id": "c", "weight": 0.8, "kind": "related"},
             {"source_id": "b", "target_id": "c", "weight": None},
         ]
-        self.assertEqual(graph.load_edges("Page", "LINK", "Page", rows), 3)
+        self.assertEqual(graph.load_edges(
+            "Page", "LINK", "Page", rows,
+            on_batch=lambda batch, total: progress.append((batch, total)),
+        ), 3)
+        self.assertEqual(progress, [(1, 2), (2, 3)])
         self.assertEqual([len(batch) for batch in driver.committed], [2, 1])
         calls = [call for batch in driver.committed for call in batch]
         self.assertTrue(all("UNWIND $rows AS row" in query for query, _ in calls))

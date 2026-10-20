@@ -146,14 +146,18 @@ class GraphClient:
     def upsert_node(self, label, entity_id, properties=None):
         return self.load_nodes(label, [{"entity_id": _entity(entity_id), **_properties({} if properties is None else properties)}])
 
-    def load_nodes(self, label, rows):
+    def load_nodes(self, label, rows, *, on_batch=None):
         """Consume an iterable of flat dicts containing entity_id and supplied properties.
 
         Bounds count compact UTF-8 JSON input bytes, not Bolt wire bytes/RSS.
         For restartable immutable files use the durable-checkpoint importer instead.
+        ``on_batch(batch_number, total_rows)`` runs after each successful commit.
         """
+        if on_batch is not None and not callable(on_batch):
+            raise ValueError("on_batch must be callable")
         label = identifier(label)
         total, batch, size = 0, [], 0
+        batches, committed_rows = 0, 0
 
         def apply(tx, items):
             written = 0
@@ -165,6 +169,14 @@ class GraphClient:
                 written += tx.run(query, rows=records).single()["processed"]
             return written
 
+        def write_batch(items):
+            nonlocal total, batches, committed_rows
+            total += self._write(lambda tx: apply(tx, items))
+            batches += 1
+            committed_rows += len(items)
+            if on_batch is not None:
+                on_batch(batches, committed_rows)
+
         for row in rows:
             if not isinstance(row, dict) or "entity_id" not in row:
                 raise ValueError("each node row must be a dict containing entity_id")
@@ -174,12 +186,12 @@ class GraphClient:
             if len(encoded) > self.batch_bytes:
                 raise ValueError("one node exceeds the batch byte limit")
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
-                total += self._write(lambda tx: apply(tx, batch))
+                write_batch(batch)
                 batch, size = [], 0
             batch.append(json.loads(encoded))
             size += len(encoded)
         if batch:
-            total += self._write(lambda tx: apply(tx, batch))
+            write_batch(batch)
         return total
 
     def delete_nodes(self, label, entity_ids):
@@ -269,17 +281,21 @@ class GraphClient:
             total += self._write(lambda tx, items=batch: apply(tx, items))
         return total
 
-    def load_edges(self, source_label, relationship, target_label, rows):
+    def load_edges(self, source_label, relationship, target_label, rows, *, on_batch=None):
         """Merge endpoint/type-identified edges from bounded flat dictionaries.
 
         Each row contains ``source_id`` and ``target_id`` plus edge properties.
         Each batch is atomic; every endpoint must exist or that batch rolls back.
         Omitted edge properties are preserved and supplied nulls remove properties.
+        ``on_batch(batch_number, total_rows)`` runs after each successful commit.
         """
+        if on_batch is not None and not callable(on_batch):
+            raise ValueError("on_batch must be callable")
         source_label = identifier(source_label)
         target_label = identifier(target_label)
         relationship = identifier(relationship)
         total, batch, size = 0, [], 0
+        batches, committed_rows = 0, 0
 
         def apply(tx, items):
             written = 0
@@ -297,6 +313,14 @@ class GraphClient:
                 written += count
             return written
 
+        def write_batch(items):
+            nonlocal total, batches, committed_rows
+            total += self._write(lambda tx: apply(tx, items))
+            batches += 1
+            committed_rows += len(items)
+            if on_batch is not None:
+                on_batch(batches, committed_rows)
+
         for row in rows:
             if not isinstance(row, dict) or not {"source_id", "target_id"}.issubset(row):
                 raise ValueError("each edge row must contain source_id and target_id")
@@ -309,12 +333,12 @@ class GraphClient:
             if len(encoded) > self.batch_bytes:
                 raise ValueError("one edge exceeds the batch byte limit")
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
-                total += self._write(lambda tx, items=batch: apply(tx, items))
+                write_batch(batch)
                 batch, size = [], 0
             batch.append(json.loads(encoded))
             size += len(encoded)
         if batch:
-            total += self._write(lambda tx, items=batch: apply(tx, items))
+            write_batch(batch)
         return total
 
     def update_node(self, label, entity_id, properties=None, *, remove=()):

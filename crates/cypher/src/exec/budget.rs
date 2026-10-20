@@ -63,7 +63,7 @@ impl Reservation {
         let result =
             self.pool
                 .reserved
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |reserved| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |reserved| {
                     reserved
                         .checked_add(extra)
                         .filter(|total| *total <= self.pool.limit)

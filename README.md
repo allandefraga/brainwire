@@ -152,11 +152,13 @@ artifact on pushes to `main`. GitHub Pages is unavailable for this private repo
 on its current plan; publishing a live public site requires a different plan or
 an external host.
 
-The source is tagged `v0.2.0-beta.1`. <!-- brainwire-release-version --> Its release
-workflow failed before publishing because the GitHub runner ran out of disk
-space ([run details](https://github.com/allandefraga/brainwire/actions/runs/39229131214)).
-The revised pipeline reduces Rust build artifacts; the next versioned tag will
-rerun checks and test the container before a private image is available.
+The previous candidate, `v0.2.0-beta.1`, did not publish: its 22m37s CI run
+passed workspace tests, then Clippy rejected a deprecated Rust atomic API under
+`-D warnings` ([run details](https://github.com/allandefraga/brainwire/actions/runs/39428295694)).
+The pipeline now pins the same Rust 1.98.1 toolchain as Docker and caches build
+artifacts, including when another check fails. The first cold run can still be
+slow; the cache's effect and the repaired CI must be confirmed on GitHub before
+the next image is available.
 After that, these commands authenticate Docker to GHCR and download the server
 image to your local Docker engine. They do not start Brainwire or copy graph
 data:
@@ -260,9 +262,9 @@ the authority until integration, security, recovery and workload gates pass.
 
 ## Build it locally
 
-Install Rust stable as selected by `rust-toolchain.toml`. The Docker builder
-uses Rust 1.98.1. The commands below use `--offline`, so dependencies must already
-be cached. On the first connected build, run `cargo fetch --locked` first.
+Install Rust 1.98.1 as selected by `rust-toolchain.toml`; CI and the Docker
+builder use the same version. The commands below use `--offline`, so dependencies
+must already be cached. On the first connected build, run `cargo fetch --locked` first.
 Then run:
 
 ```sh

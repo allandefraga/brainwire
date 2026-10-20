@@ -211,6 +211,8 @@ def clean_worktree() -> bool:
 
 
 def run_local_release_checks() -> None:
+    env = os.environ.copy()
+    target_dir = Path(env.get("CARGO_TARGET_DIR", "target"))
     commands = (
         ["cargo", "fmt", "--all", "--", "--check"],
         ["cargo", "test", "--workspace", "--locked", "--offline"],
@@ -218,10 +220,20 @@ def run_local_release_checks() -> None:
         [sys.executable, "-m", "unittest", "discover", "-s", "examples/python", "-p", "test_*.py"],
         [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"],
         ["cargo", "build", "--locked", "--offline", "-p", "brainwire-server", "--bin", "brainwire"],
-        [sys.executable, "crates/server/tests/python_ingestion.py", "--binary", "target/debug/brainwire", "--rows", "100", "--batch-size", "25", "--query-mib", "32"],
+        [
+            sys.executable,
+            "crates/server/tests/python_ingestion.py",
+            "--binary",
+            str(target_dir / "debug" / "brainwire"),
+            "--rows",
+            "100",
+            "--batch-size",
+            "25",
+            "--query-mib",
+            "32",
+        ],
         [sys.executable, "scripts/check_docs_site.py"],
     )
-    env = os.environ.copy()
     env.setdefault("CARGO_BUILD_JOBS", "2")
     env["CARGO_INCREMENTAL"] = "0"
     env["CARGO_PROFILE_DEV_DEBUG"] = "0"

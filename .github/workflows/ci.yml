@@ -34,7 +34,21 @@ jobs:
           sudo apt-get install --yes clang libclang-dev cmake pkg-config
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
+
+      - name: Restore Rust build artifacts
+        id: rust-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug/build
+            target/debug/deps
+            target/debug/.fingerprint
+          key: ${{ runner.os }}-rust-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
@@ -75,3 +89,15 @@ jobs:
         run: >-
           python crates/server/tests/python_ingestion.py
           --binary target/debug/brainwire --rows 100 --batch-size 25 --query-mib 32
+
+      - name: Save Rust build artifacts
+        if: ${{ always() && !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug/build
+            target/debug/deps
+            target/debug/.fingerprint
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

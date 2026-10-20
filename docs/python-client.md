@@ -109,6 +109,25 @@ graph.load_edges("Ticket", "RELATED_TO", "Ticket", (
 # For an Arrow batch: graph.load_nodes("Ticket", batch.to_pylist())
 ```
 
+Long imports can report progress after each batch commit:
+
+```python
+def checkpoint(batch_number, total_rows):
+    print(f"committed batch {batch_number}: {total_rows} input rows")
+
+graph.load_nodes("Ticket", rows, on_batch=checkpoint)
+```
+
+`on_batch` is optional and works for both `load_nodes` and `load_edges`. Its
+arguments are the one-based batch number and cumulative **input row** count for
+this call; they are not counts of newly created graph elements. The callback
+runs only after the corresponding transaction commits. If it raises, that
+batch remains committed and the exception propagates. A caller persisting its
+own checkpoint should therefore use stable entity/edge identities so a retry
+can safely replay the committed batch.
+This callback reports progress only; it does not create a durable source cursor
+or make the entire load atomic. For restartable imports, use the importer below.
+
 `load_edges(source_label, relationship, target_label, rows)` uses the same row
 and byte limits as node batches. Edge rows require `source_id` and `target_id`;
 other fields are relationship properties. Endpoints must already exist. The
