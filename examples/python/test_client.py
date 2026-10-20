@@ -18,6 +18,47 @@ class QueryResult:
         return self.rows
 
 
+class ArrowBatch:
+    def __init__(self, rows):
+        self.rows = rows
+        self.converted = False
+        self.num_rows = len(rows)
+        self.root = self
+        self.conversion_sizes = []
+
+    def to_pylist(self):
+        self.converted = True
+        self.root.conversion_sizes.append(self.num_rows)
+        return self.rows
+
+    def slice(self, offset, length):
+        batch = ArrowBatch(self.rows[offset:offset + length])
+        batch.root = self.root
+        return batch
+
+
+class ArrowReader:
+    def __init__(self, *batches):
+        self.batches = batches
+        self.position = 0
+
+    def read_next_batch(self):
+        if self.position == len(self.batches):
+            raise StopIteration
+        batch = self.batches[self.position]
+        self.position += 1
+        return batch
+
+
+class ArrowTable:
+    def __init__(self, *batches):
+        self.batches = batches
+
+    def to_batches(self, *, max_chunksize=None):
+        self.max_chunksize = max_chunksize
+        return iter(self.batches)
+
+
 class Driver:
     def __init__(self, counts=()):
         self.committed, self.counts = [], iter(counts)
@@ -105,6 +146,31 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(count, 3)
         self.assertEqual(progress, [(1, 2), (2, 3)])
         self.assertEqual(driver.write_count, 2)
+
+    def test_load_nodes_consumes_arrow_record_batch_reader_incrementally(self):
+        first = ArrowBatch([{"entity_id": "a"}, {"entity_id": "b"}, {"entity_id": "c"}])
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=2)
+
+        self.assertEqual(graph.load_nodes("Ticket", ArrowReader(first)), 3)
+        self.assertEqual(first.conversion_sizes, [2, 1])
+        self.assertEqual(
+            [len(params["rows"]) for batch in driver.committed for _, params in batch],
+            [2, 1],
+        )
+
+    def test_load_nodes_accepts_arrow_table_and_single_record_batch(self):
+        table_batch = ArrowBatch([{"entity_id": "table-row"}])
+        record_batch = ArrowBatch([{"entity_id": "batch-row"}])
+        driver = Driver()
+        graph = GraphClient(driver, "tickets")
+
+        table = ArrowTable(table_batch)
+        self.assertEqual(graph.load_nodes("Ticket", table), 1)
+        self.assertEqual(graph.load_nodes("Ticket", record_batch), 1)
+        self.assertEqual(table.max_chunksize, graph.batch_size)
+        self.assertTrue(table_batch.converted)
+        self.assertTrue(record_batch.converted)
 
     def test_load_edges_does_not_report_a_batch_that_failed_to_commit(self):
         driver = Driver()

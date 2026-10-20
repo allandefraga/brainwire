@@ -41,6 +41,29 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-20 — direct bounded Arrow ingestion in Python
+
+- **Requested:** continue a short engineering session; leave atomic graph
+  generations for later; commit and push the work.
+- **Done:** confirmed the `v0.3.0-beta.1` CI and release workflows succeeded.
+  CI took 23m43s; its artifact-cache lookup was cold (`Cache not found`) and it
+  saved the Rust artifacts at the end. Added direct Python ingestion from Arrow
+  `Table`, `RecordBatch`, and `RecordBatchReader`, including the reader's
+  `read_next_batch()` API. Conversion is sliced to the configured graph batch
+  size before dictionary rows pass through existing row/byte bounds. Documented
+  DuckDB reader usage and ownership; no Arrow dependency or zero-copy claim.
+- **Verified:** 53 Python client tests and 8 release-helper tests pass;
+  actionlint, docs-site validation and `git diff --check` pass. Manual integration
+  with PyArrow and DuckDB accepted a 103-row Table, a 41-row RecordBatch, and a
+  250-row DuckDB Arrow reader; each write remained at or under 37 rows.
+- **Decided:** ship this additive Python source adapter on `main` without making
+  a new release tag yet. Atomic graph generations remain deferred.
+- **Next step:** verify the CI run restores the cache saved by the prior cold
+  run, then compare its total and Rust-test duration before claiming a speedup.
+- **Blockers:** warm-cache runtime has not yet been measured; this feature still
+  converts Arrow slices to Python dictionaries and is not a native Arrow/Rust
+  ingestion path.
+
 ### 2026-10-20 — batch progress and CI runtime repair
 
 - **Requested:** make Brainwire more professional with a feature, create a new

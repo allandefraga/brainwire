@@ -99,6 +99,47 @@ def _parameters(properties):
     }
 
 
+def _batch_rows(chunk, max_rows):
+    to_pylist = getattr(chunk, "to_pylist", None)
+    if not callable(to_pylist):
+        yield chunk
+        return
+
+    row_count = getattr(chunk, "num_rows", None)
+    slice_batch = getattr(chunk, "slice", None)
+    if type(row_count) is int and row_count > max_rows and callable(slice_batch):
+        for offset in range(0, row_count, max_rows):
+            yield from slice_batch(offset, max_rows).to_pylist()
+    else:
+        yield from to_pylist()
+
+
+def _input_rows(source, max_batch_rows):
+    """Yield bounded Python mappings from iterables or Arrow-like sources."""
+    to_batches = getattr(source, "to_batches", None)
+    if callable(to_batches):
+        chunks = to_batches(max_chunksize=max_batch_rows)
+    else:
+        read_next_batch = getattr(source, "read_next_batch", None)
+        if callable(read_next_batch):
+            def read_batches():
+                while True:
+                    try:
+                        yield read_next_batch()
+                    except StopIteration:
+                        return
+            chunks = read_batches()
+        else:
+            to_pylist = getattr(source, "to_pylist", None)
+            if callable(to_pylist):
+                yield from _batch_rows(source, max_batch_rows)
+                return
+            chunks = source
+
+    for chunk in chunks:
+        yield from _batch_rows(chunk, max_batch_rows)
+
+
 class GraphClient:
     def __init__(self, driver, database, *, batch_size=250, batch_bytes=1 << 20):
         _entity(database)
@@ -177,7 +218,7 @@ class GraphClient:
             if on_batch is not None:
                 on_batch(batches, committed_rows)
 
-        for row in rows:
+        for row in _input_rows(rows, self.batch_size):
             if not isinstance(row, dict) or "entity_id" not in row:
                 raise ValueError("each node row must be a dict containing entity_id")
             props = _properties({key: value for key, value in row.items() if key != "entity_id"})
@@ -321,7 +362,7 @@ class GraphClient:
             if on_batch is not None:
                 on_batch(batches, committed_rows)
 
-        for row in rows:
+        for row in _input_rows(rows, self.batch_size):
             if not isinstance(row, dict) or not {"source_id", "target_id"}.issubset(row):
                 raise ValueError("each edge row must contain source_id and target_id")
             props = _properties({key: value for key, value in row.items()

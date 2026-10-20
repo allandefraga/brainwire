@@ -96,7 +96,9 @@ variable. Plain `DELETE` is limited to relationships; node cleanup uses
 ## Different load sources
 
 `load_nodes` accepts an iterable of flat dictionaries with `entity_id`, including
-generators reading JSONL, DuckDB results or bounded Arrow record batches:
+generators reading JSONL and DuckDB results. It also accepts Arrow `Table`,
+`RecordBatch`, and `RecordBatchReader` objects directly when they provide
+`to_batches()`, `to_pylist()`, or `read_next_batch()`:
 
 ```python
 graph.load_nodes("Ticket", (
@@ -106,16 +108,16 @@ graph.load_edges("Ticket", "RELATED_TO", "Ticket", (
     {"source_id":f"t-{i}", "target_id":f"t-{i+1}", "weight":0.8}
     for i in range(999)
 ))
-# For an Arrow batch: graph.load_nodes("Ticket", batch.to_pylist())
-```
-
-Long imports can report progress after each batch commit:
-
-```python
 def checkpoint(batch_number, total_rows):
     print(f"committed batch {batch_number}: {total_rows} input rows")
 
-graph.load_nodes("Ticket", rows, on_batch=checkpoint)
+# DuckDB relation -> Arrow RecordBatchReader -> bounded graph writes:
+arrow_reader = relation.fetch_arrow_reader(batch_size=2_000)
+graph.load_nodes("Ticket", arrow_reader, on_batch=checkpoint)
+
+# Arrow Table and RecordBatch are also accepted directly:
+graph.load_nodes("Ticket", arrow_table)
+graph.load_edges("Ticket", "RELATED_TO", "Ticket", record_batch)
 ```
 
 `on_batch` is optional and works for both `load_nodes` and `load_edges`. Its
@@ -141,11 +143,16 @@ batches remain committed.
 | Python list/generator | Flat typed dictionaries | Stable IDs and ontology fields |
 | JSONL | Decode one JSON object per line | Mapping; use durable importer for restart |
 | CSV | Transform reader rows to typed dictionaries | Parse numbers/bools/lists explicitly |
-| DuckDB / Parquet / Arrow | Bounded results or `batch.to_pylist()` | Mapping and bounded materialization |
+| DuckDB / Parquet / Arrow | Bounded results or Arrow objects directly | Mapping and bounded materialization |
 | DuckLake incremental | Separate pinned snapshot-diff importer | Source identity, baseline and cursor |
 | Other sources, including Delta | Source library produces the same dictionaries | No native Delta reader is provided |
 
-Arrow-to-Python conversion is interoperable, not zero-copy Rust/Bolt ingestion.
+Arrow batches are converted to Python dictionaries in slices no larger than
+the SDK's row limit, then split again by its row/byte bounds. This avoids
+materializing an entire table as one Python list, but it is not zero-copy
+Rust/Bolt ingestion. The SDK does not require PyArrow; supplied objects need
+the standard `to_batches()`, `to_pylist()`, or `read_next_batch()` methods.
+RecordBatchReader sources are consumed but not closed; the caller owns them.
 Lists are allowed property values; vector similarity indexes are not provided by
 this helper. The ontology remains authoritative for accepted property types.
 
