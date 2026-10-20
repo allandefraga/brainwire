@@ -51,13 +51,13 @@ these commands to consume a versioned image from a private registry without
 building it locally:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.2.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.3.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --wait --wait-timeout 900
 ```
 
 Log in to the registry first with `docker login ghcr.io`. Release images are
-tagged with the exact Git release tag (for example `v0.2.0-beta.1`). <!-- brainwire-release-version --> The
+tagged with the exact Git release tag (for example `v0.3.0-beta.1`). <!-- brainwire-release-version --> The
 Kubernetes release overlay pins the same tag. For a deployment requiring
 immutable provenance, resolve the published image to its digest and pin that
 digest in your environment's deployment configuration. `up` can be repeated safely;

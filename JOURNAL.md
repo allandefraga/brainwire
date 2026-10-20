@@ -52,19 +52,19 @@ No line of code before the end of phase 2.
   `try_update`, pinned Rust 1.98.1 consistently across CI and Docker, and added
   Cargo build-artifact caching that saves even after a failed check. Updated
   release helper support for isolated `CARGO_TARGET_DIR` and corrected README
-  status for the failed v0.2.0-beta.1 run.
-- **Verified:** 51 Python SDK tests, 8 release-helper tests, actionlint, docs-site
-  validation, and `git diff --check` pass. The GitHub run failed after 22m37s:
-  workspace tests passed after 21m44s, then Clippy rejected the deprecated API
-  with warnings denied. Full Rust tests, Clippy, server build and local release
-  gates are running in Docker because the host has no Rust toolchain.
-- **Decided:** keep changes local. A new version tag is conditional on the full
-  release gate passing; no push or publication is part of this request.
-- **Next step:** finish Docker validation, commit the feature on `main`, and run
-  the release helper for the next minor beta tag if all acceptance checks pass.
-  GitHub must run again to measure the cache and confirm the CI repair.
-- **Blockers:** first Linux RocksDB compilation is taking time; GitHub has not
-  yet verified the new cache or repaired pipeline.
+  status for the failed v0.2.0-beta.1 run. Released locally as `v0.3.0-beta.1`.
+- **Verified:** 654 Rust tests pass, as do workspace Clippy with warnings denied,
+  formatting, server build, 51 Python SDK tests, 8 release-helper tests,
+  actionlint, docs-site validation, and the 100-row Python ingest/replay/restart
+  acceptance test. The failing GitHub run lasted 22m37s: workspace tests passed
+  after 21m44s, then Clippy rejected the deprecated API. The release helper
+  created the local release commit and tag after re-running all release gates.
+- **Decided:** keep changes and `v0.3.0-beta.1` local; nothing was pushed or
+  published. GitHub must run again to measure the cache and confirm the CI fix.
+- **Next step:** push only when requested; then inspect the GitHub run's cache
+  hit and completion time before claiming the CI runtime improved.
+- **Blockers:** remote CI and cache behavior remain unverified until the next
+  authorized push.
 
 ### 2026-10-20 — configurable knowledge ranking and beta release
 
