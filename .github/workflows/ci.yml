@@ -38,7 +38,7 @@ jobs:
 
       - name: Restore Rust build artifacts
         id: rust-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
@@ -83,7 +83,7 @@ jobs:
         run: cargo build --locked --offline -p brainwire-server --bin brainwire
 
       - name: Install Neo4j Bolt driver
-        run: python -m pip install neo4j==5.28.7
+        run: python -m pip install neo4j==5.28.4
 
       - name: Verify Python ingestion, edge deletion and restart recovery
         run: >-
@@ -92,7 +92,7 @@ jobs:
 
       - name: Save Rust build artifacts
         if: ${{ always() && !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: |
             ~/.cargo/registry

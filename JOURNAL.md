@@ -55,14 +55,18 @@ No line of code before the end of phase 2.
 - **Verified:** 53 Python client tests and 8 release-helper tests pass;
   actionlint, docs-site validation and `git diff --check` pass. Manual integration
   with PyArrow and DuckDB accepted a 103-row Table, a 41-row RecordBatch, and a
-  250-row DuckDB Arrow reader; each write remained at or under 37 rows.
+  250-row DuckDB Arrow reader; each write remained at or under 37 rows. Pushed
+  commit `e3328a0`; its GitHub CI passed in 3m37s with the 639 MiB Rust cache
+  restored. Workspace tests took 2m13s versus 21m53s on the previous cold run;
+  Clippy took 13s. The run also exposed Node 20 deprecation and a yanked Neo4j
+  driver pin, which were updated to cache action v5 and Neo4j 5.28.4 LTS.
 - **Decided:** ship this additive Python source adapter on `main` without making
   a new release tag yet. Atomic graph generations remain deferred.
-- **Next step:** verify the CI run restores the cache saved by the prior cold
-  run, then compare its total and Rust-test duration before claiming a speedup.
-- **Blockers:** warm-cache runtime has not yet been measured; this feature still
-  converts Arrow slices to Python dictionaries and is not a native Arrow/Rust
-  ingestion path.
+- **Next step:** verify the cache-action and driver-pin maintenance change in
+  GitHub Actions. Arrow values still convert to Python dictionaries; measure
+  throughput and memory before proposing a native Rust/Arrow path.
+- **Blockers:** none for the current feature; the next cache run should also
+  validate v5 on the GitHub-hosted runner.
 
 ### 2026-10-20 — batch progress and CI runtime repair
 

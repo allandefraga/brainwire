@@ -142,7 +142,7 @@ jobs:
 
       - name: Install the Bolt acceptance driver
         if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
-        run: python -m pip install neo4j==5.28.7
+        run: python -m pip install neo4j==5.28.4
 
       - name: Verify the exact image and retained-volume recovery
         if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
