@@ -26,6 +26,23 @@ The five numeric contributions sum to the score. Python can use the same query
 through the existing Neo4j driver/Bolt path, replacing the options literal with
 `$options` and passing a Python dictionary.
 
+Override the evidence weights for a particular query when a product needs a
+different ranking policy:
+
+```cypher
+CALL knowledge.rank({label:'KnowledgeSource', term:'revenue', domain:'finance',
+  weights:{authority:0.1, authorRelevance:0.1, usage:0.5, certified:0.1, freshness:0.2}})
+YIELD node, score, contributions
+RETURN node.entity_id, score, contributions
+```
+
+The supplied map must include all five signal names and finite, non-negative
+numbers whose sum is also finite. Brainwire normalizes them to sum to `1`; an
+all-zero map is invalid.
+Each candidate's reported contributions use that normalized policy and still
+sum to its score. Missing source evidence remains zero rather than causing the
+other signals to be renormalized. Omitting `weights` retains the defaults below.
+
 ## Policy v1
 
 | Stored property | Input | Maximum contribution |
@@ -54,6 +71,9 @@ when records require separate permissions. Native TLS remains pending.
 
 - One options map is required: `label` and `term` are nonempty strings;
   optional `domain` is a nonempty string. Matching is exact and case-sensitive.
+- Optional `weights` overrides all five policy weights at query time; partial
+  maps, unknown signals, negative/nonfinite values, a nonfinite sum and all-zero
+  weights fail.
 - `topK` defaults to 10, range 1–1,000. `maxCandidates` defaults to 10,000,
   range 1–1,000,000. Unknown options are rejected.
 - Results descend by score; ties use ascending internal node ID. `YIELD`

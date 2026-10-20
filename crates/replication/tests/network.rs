@@ -342,28 +342,37 @@ async fn pooled_peer_connections_serve_quorum_reads_and_writes() {
     )
     .await
     .unwrap();
-    let started = tokio::time::Instant::now();
-    let leader = loop {
-        if let Some(id) = fixture.rafts[0].metrics().borrow().current_leader {
-            break id;
-        }
-        assert!(started.elapsed() < Duration::from_secs(10));
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    };
-    let raft = &fixture.rafts[leader as usize - 1];
     for i in 0..300 {
-        raft.ensure_linearizable()
-            .await
-            .unwrap_or_else(|e| panic!("quorum read {i}: {e}"));
         let command = Command::Write {
             request_id: format!("sustained-{i}"),
             graph: "g".into(),
             expected_revision: 0,
             batch: vec![1],
         };
-        raft.client_write(command)
-            .await
-            .unwrap_or_else(|e| panic!("write {i}: {e}"));
+        let operation_started = tokio::time::Instant::now();
+        loop {
+            let leader = fixture
+                .rafts
+                .iter()
+                .find_map(|raft| raft.metrics().borrow().current_leader);
+            if let Some(leader) = leader {
+                let raft = &fixture.rafts[leader as usize - 1];
+                match raft.ensure_linearizable().await {
+                    Ok(_) => match raft.client_write(command.clone()).await {
+                        Ok(_) => break,
+                        Err(error) if error.forward_to_leader::<BasicNode>().is_some() => {}
+                        Err(error) => panic!("write {i}: {error}"),
+                    },
+                    Err(error) if error.forward_to_leader::<BasicNode>().is_some() => {}
+                    Err(error) => panic!("quorum read {i}: {error}"),
+                }
+            }
+            assert!(
+                operation_started.elapsed() < Duration::from_secs(10),
+                "no stable leader for operation {i}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
     fixture.shutdown().await;
 }

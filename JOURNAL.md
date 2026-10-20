@@ -41,6 +41,34 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-20 — configurable knowledge ranking and beta release
+
+- **Requested:** implement a feature, merge it to `main`, push to the private
+  repository and create the next minor version. Asked how to publish a long
+  write session atomically; clarified that this needs staged versions and a
+  short publish-pointer switch, while current transactions remain short.
+- **Done:** added per-query evidence weights to `knowledge.rank`, preserving
+  current defaults and returning contributions normalized to sum to the score.
+  Documented validation and usage. Made the 300-write quorum test follow the
+  current Raft leader and retry only explicit leader-forwarding errors, so an
+  election no longer fails the pooled-connection test.
+- **Verified:** all workspace Rust tests pass, including the 300-operation
+  network test; workspace Clippy and formatting pass; all 46 Python client
+  tests, 7 release-helper tests and the documentation-site check pass. The
+  release server binary builds, and the Python ingestion/restart acceptance
+  test passes for 100 rows. The source tree contains no project-specific
+  customer references. GitHub CI and release workflow results are pending the
+  authorized push.
+- **Decided:** release as `v0.2.0-beta.1`, a minor beta bump from `v0.1.1`.
+  Long-running writes should stage batches under a draft generation; readers
+  remain on the previous snapshot until validation completes and a durable
+  manifest/revision pointer is published. No one-hour RocksDB transaction.
+- **Next step:** commit the feature, merge local `main`, create the annotated
+  version tag, push `main` and the tag, then check CI, GHCR image publication
+  and GitHub release status.
+- **Blockers:** remote checks/publication have not run yet. The repository and
+  package remain private.
+
 ### 2026-10-19 — reproducible local comparison with Neo4j and FalkorDB
 
 - **Requested:** do the real comparison described in the benchmark page and

@@ -66,6 +66,63 @@ fn ranks_explains_filters_and_survives_reopen_with_index_or_scan() {
 }
 
 #[test]
+fn custom_weights_change_ranking_and_expose_normalized_contributions() {
+    let (_dir, db) = setup(true);
+    seed(&db);
+    let query = "CALL knowledge.rank({label:'Source',term:'revenue',domain:'finance',topK:2,weights:{authority:1,authorRelevance:1,usage:16,certified:1,freshness:1}}) YIELD node,score,contributions RETURN node.entity_id,score,contributions";
+    let ranked = run(&db, query);
+    assert_eq!(ranked.rows[0][0], Out::Value(Value::Str("popular".into())));
+    let Out::Value(Value::Float(score)) = ranked.rows[0][1] else {
+        panic!()
+    };
+    assert!((score - 0.8).abs() < 1e-12);
+    let Out::Value(Value::Map(parts)) = &ranked.rows[0][2] else {
+        panic!()
+    };
+    let Value::Float(usage) = parts["usage"] else {
+        panic!()
+    };
+    assert!((usage - 0.8).abs() < 1e-12);
+    assert_eq!(parts["authority"], Value::Float(0.0));
+    let total: f64 = parts
+        .values()
+        .map(|value| match value {
+            Value::Float(number) => *number,
+            _ => panic!("contributions must be floating point values"),
+        })
+        .sum();
+    assert!((total - score).abs() < 1e-12);
+
+    for weights in [
+        "{authority:1}",
+        "{authority:-1,authorRelevance:0,usage:0,certified:0,freshness:0}",
+        "{authority:0,authorRelevance:0,usage:0,certified:0,freshness:0}",
+        "{authority:'high',authorRelevance:1,usage:1,certified:1,freshness:1}",
+        "{authority:1,authorRelevance:1,usage:1,certified:1,freshness:1,typo:1}",
+    ] {
+        let query = format!(
+            "CALL knowledge.rank({{label:'Source',term:'revenue',weights:{weights}}}) YIELD node RETURN node LIMIT 0"
+        );
+        assert!(execute(&db, &query, &BTreeMap::new()).is_err(), "{weights}");
+    }
+
+    for invalid_weight in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let params = BTreeMap::from([(
+            "weights".into(),
+            Value::Map(BTreeMap::from([
+                ("authority".into(), Value::Float(invalid_weight)),
+                ("authorRelevance".into(), Value::Float(1.0)),
+                ("usage".into(), Value::Float(1.0)),
+                ("certified".into(), Value::Float(1.0)),
+                ("freshness".into(), Value::Float(1.0)),
+            ])),
+        )]);
+        let query = "CALL knowledge.rank({label:'Source',term:'revenue',weights:$weights}) YIELD node RETURN node LIMIT 0";
+        assert!(execute(&db, query, &params).is_err());
+    }
+}
+
+#[test]
 fn updates_are_snapshot_local_and_invalid_signals_abort_prior_writes() {
     let (_dir, db) = setup(true);
     seed(&db);
