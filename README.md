@@ -29,7 +29,7 @@ Run it locally or in Docker with a persistent volume.
 out-of-the-box RAG pipeline. Your application chooses what to ingest; Brainwire
 keeps entities and relationships connected so your app can ask better questions.
 
-> **v0.3.0-beta.1 · private beta candidate.** <!-- brainwire-release-version --> Brainwire is under active development and has
+> **v0.4.0-beta.1 · private beta candidate.** <!-- brainwire-release-version --> Brainwire is under active development and has
 > not been qualified for production. The release pipeline publishes a versioned
 > image only after source and container recovery checks pass.
 
@@ -167,7 +167,7 @@ data:
 docker login ghcr.io -u YOUR_GITHUB_USERNAME
 # At the password prompt, enter a GitHub personal access token (classic)
 # with read:packages access. Do not use your GitHub account password.
-docker pull ghcr.io/allandefraga/brainwire:v0.3.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.4.0-beta.1 # brainwire-release-version
 ```
 
 `docker login ghcr.io` authenticates Docker to GitHub Container Registry. The
@@ -279,7 +279,7 @@ Cypher, indexes, restart and the connected TUI with synthetic data.
 
 ## Release status and license
 
-**Version:** `v0.3.0-beta.1` · private beta candidate · not production-qualified. <!-- brainwire-release-version -->
+**Version:** `v0.4.0-beta.1` · private beta candidate · not production-qualified. <!-- brainwire-release-version -->
 The [tag source](https://github.com/allandefraga/brainwire/tree/v0.1.1) identifies
 the exact source snapshot. That tag predates adoption of Apache-2.0 and carries
 no open-source license grant; use a later tagged release for Apache-licensed
