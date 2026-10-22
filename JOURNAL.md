@@ -59,16 +59,16 @@ No line of code before the end of phase 2.
 - **Verified:** 56 Python client tests, 19 DuckLake snapshot/incremental tests,
   8 release-helper tests, all Rust workspace tests and Clippy pass. The Rust
   suite includes process-kill/reopen and the new source-import `SIGKILL` test.
-  `actionlint`, docs-site validation, `git diff --check` pass; no client
-  references were found in README, docs, examples, scripts, crates, deploy or
-  workflows. Existing remote CI and docs workflows were green before these
-  changes; updated workflow has not yet run remotely.
+  `actionlint`, docs-site validation, `git diff --check`, and the release
+  helper's real Bolt acceptance pass. The helper created local release
+  `v0.4.0-beta.1`. No client references were found in README, docs, examples,
+  scripts, crates, deploy or workflows. Existing remote CI and docs workflows
+  were green before these changes; updated workflow has not yet run remotely.
 - **Decided:** publish this as a beta minor release if the local release helper
   and all gates pass; leave multi-writer lease coordination and distributed
   high availability outside this feature.
-- **Next step:** commit on `main`, run the repository release helper with the
-  beta channel, then push `main` and its generated tag and verify GitHub CI and
-  release workflows.
+- **Next step:** push `main` and the generated beta tag, then verify GitHub CI
+  and release workflows.
 - **Blockers:** none so far. Host Cargo is unavailable, so Rust and release
   validation use the repository's Rust 1.98.1 container toolchain.
 
