@@ -97,8 +97,14 @@ def read_batch(path, offset, size, batch_size, batch_bytes, line_bytes, *, norma
 
 def ingest(driver, database, file, source_id, batch_size=250,
            batch_bytes=1 << 20, line_bytes=64 << 10, *,
-           normalize_row=None, write_batch=None, contract_id=None):
-    """Return the durable byte cursor; every retry rereads its graph checkpoint."""
+           normalize_row=None, write_batch=None, contract_id=None,
+           max_batches=None):
+    """Import at most ``max_batches`` source batches; return the durable cursor.
+
+    Reaching the limit pauses cleanly between transactions. Call again with the
+    same source and mapping to resume from the graph checkpoint. A returned
+    cursor equal to the file size means complete; a smaller cursor means paused.
+    """
     if contract_id is not None and (not isinstance(contract_id, str) or not contract_id):
         raise ValueError("contract_id must be a nonempty string or None")
     if (normalize_row is not None or write_batch is not None) and contract_id is None:
@@ -110,6 +116,8 @@ def ingest(driver, database, file, source_id, batch_size=250,
         raise ValueError("source_id must be a nonempty string")
     if any(type(n) is not int or n <= 0 for n in (batch_size, batch_bytes, line_bytes)):
         raise ValueError("batch-size, batch-bytes and line-bytes must be positive integers")
+    if max_batches is not None and (type(max_batches) is not int or max_batches <= 0):
+        raise ValueError("max_batches must be a positive integer or None")
     if line_bytes > batch_bytes:
         raise ValueError("line-bytes must not exceed batch-bytes")
     path = Path(file)
@@ -119,32 +127,47 @@ def ingest(driver, database, file, source_id, batch_size=250,
         if signature(path) != original:
             raise ValueError("source changed during import")
 
-    def commit_batch(tx):
-        check_source()
-        checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
-        if checkpoint is None:
-            tx.run(INITIALIZE, source_id=source_id, sha256=digest, contract_id=contract_id).consume()
+    def commit_batch(batch_target):
+        def apply(tx):
+            check_source()
             checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
-        if checkpoint is None or checkpoint["sha256"] != digest:
-            raise ValueError("source ID already refers to a different SHA256")
-        if checkpoint.get("contract_id") != contract_id:
-            raise ValueError("source ID already refers to a different mapping contract")
-        rows, next_offset = read_batch(
-            path, checkpoint["next_offset"], original[2],
-            batch_size, batch_bytes, line_bytes, normalize_row=normalize_row,
-        )
-        check_source()
-        if rows:
-            writer(tx, rows)
-        if next_offset != checkpoint["next_offset"]:
-            tx.run(ADVANCE, source_id=source_id, next_offset=next_offset).consume()
-        check_source()
-        return next_offset
+            if checkpoint is None:
+                tx.run(INITIALIZE, source_id=source_id, sha256=digest, contract_id=contract_id).consume()
+                checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
+            if checkpoint is None or checkpoint["sha256"] != digest:
+                raise ValueError("source ID already refers to a different SHA256")
+            if checkpoint.get("contract_id") != contract_id:
+                raise ValueError("source ID already refers to a different mapping contract")
+            cursor = checkpoint["next_offset"]
+            # A managed-driver retry may follow a committed batch whose reply
+            # was lost. Keep this call pinned so the retry cannot consume the
+            # next source batch before a bounded run returns to its caller.
+            if max_batches is not None and batch_target[0] is not None and cursor >= batch_target[0]:
+                return cursor
+            rows, next_offset = read_batch(
+                path, cursor, original[2],
+                batch_size, batch_bytes, line_bytes, normalize_row=normalize_row,
+            )
+            if max_batches is not None and batch_target[0] is None:
+                batch_target[0] = next_offset
+            check_source()
+            if rows:
+                writer(tx, rows)
+            if next_offset != cursor:
+                tx.run(ADVANCE, source_id=source_id, next_offset=next_offset).consume()
+            check_source()
+            return next_offset
+        return apply
 
     with driver.session(database=database) as session:
+        committed_batches = 0
         while True:
-            offset = session.execute_write(commit_batch)
+            offset = session.execute_write(commit_batch([None]))
             if offset == original[2]:
+                check_source()
+                return offset
+            committed_batches += 1
+            if max_batches is not None and committed_batches >= max_batches:
                 check_source()
                 return offset
 
@@ -158,6 +181,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--batch-bytes", type=int, default=1 << 20)
     parser.add_argument("--line-bytes", type=int, default=64 << 10)
+    parser.add_argument("--max-batches", type=int,
+                        help="pause after this many committed source batches; rerun to resume")
     args = parser.parse_args()
     from neo4j import GraphDatabase
 
@@ -167,8 +192,11 @@ def main():
         from connection import auth_from_env
     with GraphDatabase.driver(args.uri, auth=auth_from_env(), liveness_check_timeout=30) as driver:
         offset = ingest(driver, args.database, args.file, args.source_id,
-                        args.batch_size, args.batch_bytes, args.line_bytes)
-    print(f"Source {args.source_id}: durable next_offset={offset} bytes")
+                        args.batch_size, args.batch_bytes, args.line_bytes,
+                        max_batches=args.max_batches)
+    size = Path(args.file).stat().st_size
+    state = "complete" if offset == size else "paused"
+    print(f"Source {args.source_id}: {state}; durable next_offset={offset}/{size} bytes")
 
 
 if __name__ == "__main__":

@@ -70,8 +70,15 @@ uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.duck
   /absolute/private/changes-12-18.jsonl --database support-demo \
   --baseline-file /absolute/private/snapshot-12.jsonl --baseline-source-id baseline-12
 uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ducklake_incremental ingest \
-  /absolute/private/changes-12-18.jsonl --database support-demo --batch-size 250
+  /absolute/private/changes-12-18.jsonl --database support-demo --batch-size 250 \
+  --max-batches 4
 ```
+
+`--max-batches` stops between committed batches and prints the durable
+byte cursor as `paused`. Rerun the same immutable artifact to resume; omit the
+limit to finish. `complete` means the cursor reached the artifact size. The
+source head remains pinned to the artifact while it is partial, so a competing
+or out-of-order artifact is still rejected.
 
 The SQL uses `source_lake.main` and must select the complete source scope, with
 all tickets before comments, as required by the existing exporter. The baseline

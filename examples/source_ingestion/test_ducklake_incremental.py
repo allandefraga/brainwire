@@ -52,7 +52,7 @@ class IncrementalTests(unittest.TestCase):
         self.assertEqual(list(self.output.parent.glob('.incremental-*.tmp')), [])
 
     @contextmanager
-    def graph(self):
+    def graph(self, *, with_restart=False):
         try:
             from neo4j import GraphDatabase
         except ImportError:
@@ -76,21 +76,42 @@ class IncrementalTests(unittest.TestCase):
                 return subprocess.run([str(binary), *args], env=env, cwd=ROOT, capture_output=True, text=True, check=True, timeout=30).stdout
             cli('db', 'create', 'shadow', '--ontology', str(Path(__file__).with_name('ontology.json')))
             with (root / 'server.log').open('w') as log:
-                server = subprocess.Popen([str(binary), 'serve'], env=env, cwd=ROOT, stdout=log, stderr=log)
-                try:
-                    for _ in range(150):
-                        self.assertIsNone(server.poll())
-                        try:
-                            cli('probe', '--address', address, '--timeout-ms', '100')
-                            break
-                        except subprocess.CalledProcessError:
-                            time.sleep(.03)
-                    else:
+                def start_server():
+                    process = subprocess.Popen([str(binary), 'serve'], env=env, cwd=ROOT, stdout=log, stderr=log)
+                    try:
+                        for _ in range(150):
+                            self.assertIsNone(process.poll())
+                            try:
+                                cli('probe', '--address', address, '--timeout-ms', '100')
+                                return process
+                            except subprocess.CalledProcessError:
+                                time.sleep(.03)
                         self.fail('protected server readiness timeout')
-                    with GraphDatabase.driver('bolt://' + address, auth=(writer['principal'], writer['credentials']),
-                                              liveness_check_timeout=30, max_transaction_retry_time=0) as driver:
-                        yield driver
+                    except BaseException:
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait(timeout=5)
+                        raise
+
+                def connect():
+                    return GraphDatabase.driver('bolt://' + address, auth=(writer['principal'], writer['credentials']),
+                                                liveness_check_timeout=30, max_transaction_retry_time=0)
+
+                server = start_server()
+                driver = connect()
+                def crash_and_restart():
+                    nonlocal server, driver
+                    server.kill()
+                    self.assertEqual(server.wait(timeout=5), -9)
+                    driver.close()
+                    server = start_server()
+                    driver = connect()
+                    return driver
+
+                try:
+                    yield (driver, crash_and_restart) if with_restart else driver
                 finally:
+                    driver.close()
                     if server.poll() is None:
                         server.terminate()
                     try:
@@ -168,6 +189,68 @@ class IncrementalTests(unittest.TestCase):
             self.assertEqual(offset, self.output.stat().st_size)
             self.assert_new_graph(driver)
             self.assertEqual(delta.ingest_incremental(driver, 'shadow', self.output, batch_size=1), offset)
+            self.assert_new_graph(driver)
+
+    def test_sigkill_resume_preserves_data_cursor_and_source_head(self):
+        receipt = self.export()
+        artifact = self.output.read_bytes()
+        first_offset = sum(map(len, artifact.splitlines(keepends=True)[:2]))
+        checkpoint_id = json.dumps([delta.CONTRACT_ID, 'synthetic-source', self.version,
+                                    receipt['to_version'], receipt['sha256']], separators=(',', ':'))
+        with self.graph(with_restart=True) as (driver, crash_and_restart):
+            self.bootstrap(driver)
+            class OneBatch:
+                def session(self, **kwargs):
+                    inner = driver.session(**kwargs)
+                    class Session:
+                        def __enter__(self):
+                            inner.__enter__()
+                            return self
+                        def __exit__(self, *args):
+                            return inner.__exit__(*args)
+                        def execute_write(self, callback):
+                            inner.execute_write(callback)
+                            raise RuntimeError('synthetic stop after first committed batch')
+                    return Session()
+            with self.assertRaisesRegex(RuntimeError, 'first committed batch'):
+                delta.ingest_incremental(OneBatch(), 'shadow', self.output, batch_size=2)
+
+            driver = crash_and_restart()
+            checkpoint_query = "MATCH (s:ImportCheckpoint {entity_id:$id}) RETURN s.next_offset AS offset,s.sha256 AS sha256"
+            head_query = "MATCH (s:ImportCheckpoint {entity_id:$id}) RETURN s.current_version AS version,s.snapshot_sha256 AS snapshot,s.active_artifact AS active"
+            self.assertEqual(self.graph_query(driver, checkpoint_query, id=checkpoint_id),
+                             [{'offset':first_offset, 'sha256':receipt['sha256']}])
+            self.assertEqual(self.graph_query(driver, head_query, id=delta.head_id('synthetic-source')),
+                             [{'version':self.version, 'snapshot':receipt['from_snapshot_sha256'], 'active':receipt['sha256']}])
+            self.assertEqual(self.graph_query(driver, 'MATCH (c:TicketComment) RETURN count(c) AS n'), [{'n':1}])
+            self.assertEqual(delta.ingest_incremental(driver, 'shadow', self.output, batch_size=2), len(artifact))
+            self.assert_new_graph(driver)
+            self.assertEqual(self.graph_query(driver, checkpoint_query, id=checkpoint_id),
+                             [{'offset':len(artifact), 'sha256':receipt['sha256']}])
+            self.assertEqual(self.graph_query(driver, head_query, id=delta.head_id('synthetic-source')),
+                             [{'version':receipt['to_version'], 'snapshot':receipt['to_snapshot_sha256'], 'active':None}])
+            self.assertEqual(self.output.read_bytes(), artifact)
+
+    def test_batch_limit_pauses_between_committed_delta_batches(self):
+        receipt = self.export()
+        artifact = self.output.read_bytes()
+        first_offset = sum(map(len, artifact.splitlines(keepends=True)[:2]))
+        checkpoint_id = json.dumps([delta.CONTRACT_ID, 'synthetic-source', self.version,
+                                    receipt['to_version'], receipt['sha256']], separators=(',', ':'))
+        with self.graph() as driver:
+            self.bootstrap(driver)
+            offset = delta.ingest_incremental(driver, 'shadow', self.output,
+                                              batch_size=2, max_batches=1)
+            self.assertEqual(offset, first_offset)
+            self.assertEqual(self.graph_query(driver,
+                "MATCH (s:ImportCheckpoint {entity_id:$id}) RETURN s.next_offset AS offset",
+                id=checkpoint_id), [{'offset':first_offset}])
+            self.assertEqual(self.graph_query(driver,
+                "MATCH (s:ImportCheckpoint {entity_id:$id}) RETURN s.current_version AS version,s.active_artifact AS active",
+                id=delta.head_id('synthetic-source')),
+                [{'version':self.version, 'active':receipt['sha256']}])
+            self.assertEqual(delta.ingest_incremental(driver, 'shadow', self.output,
+                                                      batch_size=2), len(artifact))
             self.assert_new_graph(driver)
 
     def test_baseline_requires_matching_completed_snapshot_checkpoint(self):

@@ -98,8 +98,14 @@ python3 -m examples.source_ingestion.generate_fixture /tmp/brainwire-external-ti
 uv run --no-project --with neo4j==5.28.6 python -m examples.source_ingestion.ingest_snapshot \
   /tmp/brainwire-external-tickets.jsonl --database support-demo \
   --uri bolt://127.0.0.1:17687 --source-id zendesk-synthetic-snapshot-001 \
-  --batch-size 250 --batch-bytes 1048576 --line-bytes 65536
+  --batch-size 250 --batch-bytes 1048576 --line-bytes 65536 \
+  --max-batches 4
 ```
+
+`--max-batches` pauses only after the requested number of committed batches.
+The command prints the durable cursor as `paused`; rerun the same command and
+source ID (omit `--max-batches` to finish) to resume. A cursor at the file size
+prints `complete`. Keep the JSONL file unchanged across runs.
 
 The generator refuses to overwrite an existing file. The module invocation is
 required because the adapter imports the shared example from the repository root.

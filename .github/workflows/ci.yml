@@ -59,6 +59,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      # Integration tests launch these executables through CARGO_BIN_EXE_*.
+      # Build them explicitly so partial CI cache restores cannot leave those
+      # paths pointing at missing executables.
+      - name: Build executables required by tests
+        run: cargo build --locked --offline --workspace --bins
+
       - name: Run workspace tests
         run: cargo test --workspace --locked --offline
 
@@ -78,9 +84,6 @@ jobs:
 
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
-
-      - name: Build server for real Bolt acceptance
-        run: cargo build --locked --offline -p brainwire-server --bin brainwire
 
       - name: Install Neo4j Bolt driver
         run: python -m pip install neo4j==5.28.4

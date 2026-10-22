@@ -215,11 +215,13 @@ def run_local_release_checks() -> None:
     target_dir = Path(env.get("CARGO_TARGET_DIR", "target"))
     commands = (
         ["cargo", "fmt", "--all", "--", "--check"],
+        # Build binaries used by integration tests. Partial artifact-cache
+        # restores may contain tests without their CARGO_BIN_EXE_* executables.
+        ["cargo", "build", "--locked", "--offline", "--workspace", "--bins"],
         ["cargo", "test", "--workspace", "--locked", "--offline"],
         ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--offline", "--", "-D", "warnings"],
         [sys.executable, "-m", "unittest", "discover", "-s", "examples/python", "-p", "test_*.py"],
         [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"],
-        ["cargo", "build", "--locked", "--offline", "-p", "brainwire-server", "--bin", "brainwire"],
         [
             sys.executable,
             "crates/server/tests/python_ingestion.py",

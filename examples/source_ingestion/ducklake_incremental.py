@@ -243,7 +243,8 @@ def initialize_source(driver, database, changes_file, baseline_file, baseline_so
         session.execute_write(register)
 
 
-def ingest_incremental(driver, database, file, batch_size=250, batch_bytes=1 << 20, line_bytes=65536):
+def ingest_incremental(driver, database, file, batch_size=250, batch_bytes=1 << 20,
+                       line_bytes=65536, *, max_batches=None):
     if any(type(n) is not int or n <= 0 for n in (batch_size, batch_bytes, line_bytes)) or line_bytes > batch_bytes:
         raise ValueError("batch bounds must be positive and line-bytes <= batch-bytes")
     meta, digest, original = validate_artifact(file, line_bytes)
@@ -272,7 +273,8 @@ def ingest_incremental(driver, database, file, batch_size=250, batch_bytes=1 << 
     if signature(Path(file)) != original:
         raise ValueError("artifact changed before import")
     offset = ingest(driver, database, file, checkpoint_id, batch_size, batch_bytes, line_bytes,
-                    normalize_row=normalize_change, write_batch=apply, contract_id=CONTRACT_ID)
+                    normalize_row=normalize_change, write_batch=apply,
+                    contract_id=CONTRACT_ID, max_batches=max_batches)
     if signature(Path(file)) != original:
         raise ValueError("artifact changed since validation")
     return offset
@@ -299,6 +301,8 @@ def main():
             child.add_argument("--baseline-source-id", required=True)
         else:
             child.add_argument("--batch-size", type=int, default=250)
+            child.add_argument("--max-batches", type=int,
+                               help="pause after this many committed source batches; rerun to resume")
     args = parser.parse_args()
     if args.command == "export":
         print(json.dumps(export_incremental(args.catalog, args.data_path, args.from_version, args.to_version,
@@ -311,7 +315,12 @@ def main():
                 initialize_source(driver, args.database, args.file, args.baseline_file, args.baseline_source_id)
                 print("Registered completed baseline checkpoint")
             else:
-                print(f"Durable next_offset={ingest_incremental(driver, args.database, args.file, args.batch_size)} bytes")
+                offset = ingest_incremental(driver, args.database, args.file,
+                                            args.batch_size,
+                                            max_batches=args.max_batches)
+                size = Path(args.file).stat().st_size
+                state = "complete" if offset == size else "paused"
+                print(f"{state}: durable next_offset={offset}/{size} bytes")
 
 
 if __name__ == "__main__":

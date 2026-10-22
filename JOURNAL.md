@@ -41,6 +41,37 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-22 — bounded resumable source ingestion and crash verification
+
+- **Requested:** use this hour to improve durable writes and failure recovery,
+  then commit, push to `origin/main`, and prepare a release.
+- **Done:** added `max_batches` to the shared resumable JSONL importer, snapshot
+  and DuckLake incremental CLI paths. Each invocation can pause only between
+  committed graph transactions and returns its durable byte cursor; invoking
+  again with the same immutable artifact and mapping resumes safely. Pinned the
+  batch target across managed-driver retries so a lost commit acknowledgement
+  cannot consume an extra batch. Added pause/resume, replay, invalid-bound and
+  lost-ack tests; exercised an actual server `SIGKILL` between DuckLake batches,
+  restart on the same disk, and completion from the persisted cursor. Updated
+  Python and DuckLake docs. Also made CI and the local release checker build all
+  workspace binaries before integration tests, whose cached executables use
+  absolute `CARGO_BIN_EXE_*` paths.
+- **Verified:** 56 Python client tests, 19 DuckLake snapshot/incremental tests,
+  8 release-helper tests, all Rust workspace tests and Clippy pass. The Rust
+  suite includes process-kill/reopen and the new source-import `SIGKILL` test.
+  `actionlint`, docs-site validation, `git diff --check` pass; no client
+  references were found in README, docs, examples, scripts, crates, deploy or
+  workflows. Existing remote CI and docs workflows were green before these
+  changes; updated workflow has not yet run remotely.
+- **Decided:** publish this as a beta minor release if the local release helper
+  and all gates pass; leave multi-writer lease coordination and distributed
+  high availability outside this feature.
+- **Next step:** commit on `main`, run the repository release helper with the
+  beta channel, then push `main` and its generated tag and verify GitHub CI and
+  release workflows.
+- **Blockers:** none so far. Host Cargo is unavailable, so Rust and release
+  validation use the repository's Rust 1.98.1 container toolchain.
+
 ### 2026-10-20 — direct bounded Arrow ingestion in Python
 
 - **Requested:** continue a short engineering session; leave atomic graph

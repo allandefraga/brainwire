@@ -173,6 +173,14 @@ replay after a lost acknowledgement, use the
 Those batch helpers are idempotent only for the same identities and values; they
 are not a CDC service.
 
+Long imports can be deliberately paused between durable batches with
+`--max-batches N` on the snapshot and DuckLake importer commands. The command
+prints `paused` with the committed byte cursor; rerun with the same immutable
+artifact, source ID and mapping to continue. A cursor equal to the artifact's
+byte size prints `complete`. The limit counts committed source batches, not
+individual records or source snapshots, and never splits a transaction.
+This is cooperative pausing: it cannot interrupt a batch already in flight.
+
 ## Trusted ACL stamping
 
 A trusted service with graph-write **and** instance-administration grants, and

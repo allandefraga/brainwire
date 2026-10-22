@@ -167,6 +167,32 @@ class ResumableCustomersTests(unittest.TestCase):
         self.ingest(driver)
         self.assertEqual([batch[0]["entity_id"] for batch in driver.attempted_batches], ["0", "1", "2"])
 
+    def test_batch_limited_import_returns_durable_cursor_and_resumes(self):
+        driver = Driver()
+        offset = self.ingest(driver, max_batches=1)
+        self.assertEqual(offset, len(self.lines[0]))
+        self.assertEqual(driver.checkpoints["synthetic-source"]["next_offset"], offset)
+        self.assertEqual(set(driver.customers), {"0"})
+
+        self.assertEqual(self.ingest(driver), self.path.stat().st_size)
+        self.assertEqual([batch[0]["entity_id"] for batch in driver.attempted_batches], ["0", "1", "2"])
+        attempts = copy.deepcopy(driver.attempted_batches)
+        self.assertEqual(self.ingest(driver), self.path.stat().st_size)
+        self.assertEqual(driver.attempted_batches, attempts)
+
+    def test_max_batches_must_be_positive_integer(self):
+        for value in (0, -1, True, 1.5):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "max_batches"):
+                self.ingest(Driver(), max_batches=value)
+
+    def test_max_batches_pins_cursor_across_lost_commit_ack_retry(self):
+        driver = Driver(retry="after_commit")
+        offset = self.ingest(driver, max_batches=1)
+        self.assertEqual(offset, len(self.lines[0]))
+        self.assertEqual(set(driver.customers), {"0"})
+        self.assertEqual(driver.checkpoints["synthetic-source"]["next_offset"], offset)
+        self.assertEqual(len(driver.attempted_batches), 1)
+
     def test_digest_mismatch_rejects_before_customer_changes(self):
         driver = Driver()
         self.ingest(driver)

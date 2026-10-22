@@ -109,9 +109,11 @@ def write_batch(tx, rows):
 
 
 def ingest_snapshot(driver, database, file, source_id, batch_size=250,
-                    batch_bytes=1 << 20, line_bytes=64 << 10):
+                    batch_bytes=1 << 20, line_bytes=64 << 10, *,
+                    max_batches=None):
     return ingest(driver, database, file, source_id, batch_size, batch_bytes, line_bytes,
-                  normalize_row=normalize_row, write_batch=write_batch, contract_id=CONTRACT_ID)
+                  normalize_row=normalize_row, write_batch=write_batch,
+                  contract_id=CONTRACT_ID, max_batches=max_batches)
 
 
 def main():
@@ -123,13 +125,18 @@ def main():
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--batch-bytes", type=int, default=1 << 20)
     parser.add_argument("--line-bytes", type=int, default=64 << 10)
+    parser.add_argument("--max-batches", type=int,
+                        help="pause after this many committed source batches; rerun to resume")
     args = parser.parse_args()
     from neo4j import GraphDatabase
     from examples.python.connection import auth_from_env
     with GraphDatabase.driver(args.uri, auth=auth_from_env(), liveness_check_timeout=30) as driver:
         offset = ingest_snapshot(driver, args.database, args.file, args.source_id,
-                                 args.batch_size, args.batch_bytes, args.line_bytes)
-    print(f"Source {args.source_id}: durable next_offset={offset} bytes")
+                                 args.batch_size, args.batch_bytes, args.line_bytes,
+                                 max_batches=args.max_batches)
+    size = Path(args.file).stat().st_size
+    state = "complete" if offset == size else "paused"
+    print(f"Source {args.source_id}: {state}; durable next_offset={offset}/{size} bytes")
 
 
 if __name__ == "__main__":
