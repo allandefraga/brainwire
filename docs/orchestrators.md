@@ -135,7 +135,7 @@ kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-The current overlay pins `ghcr.io/allandefraga/brainwire:v0.4.0-beta.1`. <!-- brainwire-release-version --> The local
+The current overlay pins `ghcr.io/allandefraga/brainwire:v0.5.0-beta.1`. <!-- brainwire-release-version --> The local
 release helper updates `newTag` with the Cargo workspace version. It
 references the `ghcr-pull` secret for kubelet image pulls; logging in on your
 workstation alone does not authenticate cluster nodes. For
@@ -188,7 +188,7 @@ image there. Equal local volume names on different machines are different data.
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.4.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.5.0-beta.1 # brainwire-release-version
 docker stack config --compose-file deploy/swarm.yaml
 docker stack deploy --with-registry-auth --compose-file deploy/swarm.yaml brainwire-test
 ```
