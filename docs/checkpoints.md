@@ -1,4 +1,4 @@
-# Offline native graph checkpoints
+# Native graph checkpoints
 
 A checkpoint copies one committed RocksDB graph, including its ontology,
 primary/scalar indexes and allocator high-water marks, into a new directory.
@@ -35,3 +35,46 @@ backup or object-storage durability. It has no scheduled retention, upload or
 restore manager. Protect and validate a copy on independent storage before
 relying on it against machine/disk loss. Tests reopen a checkpoint, audit it,
 read its indexes and write new nodes without reusing an existing identity.
+
+## Online checkpoints over Bolt
+
+A running server can create the same native checkpoint without stopping,
+when the operator configures a checkpoint root outside `server.data_dir`:
+
+```toml
+[server]
+data_dir = "/data"
+checkpoint_dir = "/backups"   # or BRAINWIRE_SERVER_CHECKPOINT_DIR
+```
+
+```cypher
+CALL db.checkpoint('nightly-2026-10-23')
+YIELD name, path, sequence, tracked
+RETURN name, path, sequence, tracked
+```
+
+The checkpoint is written to `<checkpoint_dir>/<name>` for the graph selected
+by the session. The name is 1-128 ASCII letters, digits, `-`, `_` or `.`, and
+cannot start with `.`; callers never supply a path. The root must already
+exist, and an existing name is refused. `sequence` and `tracked` have the same
+meaning as the offline receipt.
+
+Rules and limits:
+
+- Unset `checkpoint_dir` (the default) disables the procedure.
+- It requires an `instance_admin` principal; graph writers are refused.
+- It must be the first clause, with no writes or other procedures in the same
+  transaction. It is a side effect, not transactional: rolling back afterwards
+  does not delete the directory.
+- It captures committed data only. Commits on that graph wait while the
+  checkpoint is created; reads continue.
+- It is refused in replicated serving and for principals with node visibility
+  restrictions. One replica's copy is not a cluster backup.
+- The startup check that `checkpoint_dir` is outside `data_dir` compares paths
+  lexically; it does not resolve symlinks.
+
+Restore is offline: stop the server, copy or move the checkpoint directory into
+`server.data_dir` under an unused graph name (or point `--database` at it), run
+`brainwire db check <name> --json`, then start the server. Copy checkpoints to
+independent storage yourself; the root is usually on the same volume, where
+SST files may be hard links of the live store.

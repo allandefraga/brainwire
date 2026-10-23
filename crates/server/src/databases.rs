@@ -16,6 +16,7 @@ pub struct Databases {
     resources: Resources,
     query_limits: brainwire_cypher::ExecutionLimits,
     query_pool: Arc<brainwire_cypher::QueryMemoryPool>,
+    checkpoint_dir: Option<PathBuf>,
 }
 
 pub(crate) fn valid_name(name: &str) -> bool {
@@ -73,6 +74,7 @@ impl Databases {
                 usize::try_from(config.memory.query.0)
                     .map_err(|_| "memory.query exceeds platform address size")?,
             )),
+            checkpoint_dir: config.server.checkpoint_dir.clone(),
         };
         if !discover {
             return Ok(registry);
@@ -95,6 +97,9 @@ impl Databases {
 
     pub fn query_limits(&self) -> brainwire_cypher::ExecutionLimits {
         self.query_limits
+    }
+    pub fn checkpoint_dir(&self) -> Option<&std::path::Path> {
+        self.checkpoint_dir.as_deref()
     }
     pub fn query_pool(&self) -> Arc<brainwire_cypher::QueryMemoryPool> {
         Arc::clone(&self.query_pool)

@@ -14,6 +14,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
     match name {
         "db.schema" => Ok(&["version", "nodes", "relationships", "indexesReady"]),
         "db.commitState" => Ok(&["sequence", "tracked", "scope"]),
+        "db.checkpoint" => Ok(&["name", "path", "sequence", "tracked"]),
         "db.setNodeAcl" => Ok(&["updated"]),
         "db.indexes" => Ok(&["label", "property", "state"]),
         "db.memory" => Ok(&[
@@ -178,6 +179,8 @@ pub(super) fn validate(
     }
     if name == "db.setNodeAcl" {
         acl_options(args, ctx)?;
+    } else if name == "db.checkpoint" {
+        checkpoint_destination(args, ctx)?;
     } else if matches!(
         name,
         "db.indexes" | "db.memory" | "db.schema" | "db.commitState"
@@ -203,6 +206,38 @@ pub(super) fn validate(
         }
     }
     Ok(())
+}
+
+/// Only a plain name under the operator-configured root; never a caller path.
+fn checkpoint_destination(
+    args: &[Expr],
+    ctx: &Context<'_, '_>,
+) -> Result<(String, std::path::PathBuf), ExecError> {
+    let root = ctx
+        .checkpoint_dir
+        .ok_or_else(|| semantic("db.checkpoint is disabled; configure server.checkpoint_dir"))?;
+    if args.len() != 1 {
+        return Err(semantic("db.checkpoint requires one checkpoint name"));
+    }
+    let Value::Str(name) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+        return Err(semantic("checkpoint name must be a string"));
+    };
+    let valid = (1..=128).contains(&name.len())
+        && !name.starts_with('.')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+    if !valid {
+        return Err(semantic(
+            "checkpoint name must be 1-128 ASCII letters, digits, '-', '_' or '.', not starting with '.'",
+        ));
+    }
+    let path = root.join(&name);
+    // The store also refuses existing paths; this reports it as a client error.
+    if path.symlink_metadata().is_ok() {
+        return Err(semantic(format!("checkpoint {name:?} already exists")));
+    }
+    Ok((name, path))
 }
 
 fn acl_options(
@@ -330,6 +365,16 @@ pub(super) fn run(
     };
     if name == "db.schema" {
         return Ok(vec![bind(schema::values(ctx, yields.len())?)?]);
+    }
+    if name == "db.checkpoint" {
+        let (name, path) = checkpoint_destination(args, ctx)?;
+        let sequence = ctx.txn.database().checkpoint_with_sequence(&path)?;
+        return Ok(vec![bind(vec![
+            value(Value::Str(name)),
+            value(Value::Str(path.display().to_string())),
+            value(Value::Str(sequence.unwrap_or(0).to_string())),
+            value(Value::Bool(sequence.is_some())),
+        ])?]);
     }
     if name == "db.commitState" {
         let sequence = ctx.txn.snapshot_commit_sequence();

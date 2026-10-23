@@ -118,6 +118,7 @@ struct Context<'a, 'db> {
     params: &'a BTreeMap<String, Value>,
     budget: &'a Budget<'a>,
     visibility: Option<&'a ReadVisibility>,
+    checkpoint_dir: Option<&'a std::path::Path>,
 }
 
 /// Trusted prepared bytes; the caller must obtain quorum and apply before acknowledgement.
@@ -172,7 +173,7 @@ impl QueryAccess {
                             return Err(ExecError::Forbidden("node ACL updates require graph write and instance administrator access"));
                         }
                     }
-                    "db.memory" => {
+                    "db.memory" | "db.checkpoint" => {
                         if !self.instance_admin {
                             return Err(ExecError::Forbidden(
                                 "instance administrator access required",
@@ -206,6 +207,7 @@ pub struct QueryTransaction<'db> {
     visibility: Option<ReadVisibility>,
     ran: bool,
     replicated_mode: bool,
+    checkpoint_dir: Option<std::path::PathBuf>,
 }
 
 impl<'db> QueryTransaction<'db> {
@@ -246,6 +248,7 @@ impl<'db> QueryTransaction<'db> {
             visibility: None,
             ran: false,
             replicated_mode: false,
+            checkpoint_dir: None,
         })
     }
 
@@ -288,6 +291,12 @@ impl<'db> QueryTransaction<'db> {
             .map_err(|error| ExecError::Semantic(error.to_string()))?;
         self.visibility = Some(policy);
         Ok(self)
+    }
+
+    /// Enable `CALL db.checkpoint(name)` below this operator-owned directory.
+    pub fn with_checkpoint_dir(mut self, root: std::path::PathBuf) -> Self {
+        self.checkpoint_dir = Some(root);
+        self
     }
 
     pub fn state(&self) -> QueryTransactionState {
@@ -352,6 +361,46 @@ impl<'db> QueryTransaction<'db> {
         }
     }
 
+    /// A checkpoint is a non-transactional side effect: it captures committed
+    /// data only, so refuse forms where it would run per row, beside staged
+    /// writes, on one replica of a quorum group or under row-level visibility.
+    fn checkpoint_preconditions(&self, query: &Query) -> Result<(), ExecError> {
+        let position = query.clauses.iter().position(
+            |clause| matches!(clause, Clause::Call { name, .. } if name == "db.checkpoint"),
+        );
+        let Some(position) = position else {
+            return Ok(());
+        };
+        if position != 0 {
+            return Err(ExecError::Semantic(
+                "db.checkpoint must be the first clause".into(),
+            ));
+        }
+        if self.wrote
+            || query.clauses.iter().any(|clause| {
+                matches!(
+                    clause,
+                    Clause::Create(_)
+                        | Clause::Merge(_)
+                        | Clause::Set(_)
+                        | Clause::DetachDelete(_)
+                        | Clause::Delete(_)
+                        | Clause::Call { .. }
+                ) && !matches!(clause, Clause::Call { name, .. } if name == "db.checkpoint")
+            })
+        {
+            return Err(ExecError::Semantic(
+                "db.checkpoint cannot share a transaction with writes or other procedures".into(),
+            ));
+        }
+        if self.replicated_mode || self.visibility.is_some() {
+            return Err(ExecError::Forbidden(
+                "db.checkpoint is unavailable for replicated or visibility-restricted transactions",
+            ));
+        }
+        Ok(())
+    }
+
     fn run_parsed(
         &mut self,
         query: &Query,
@@ -359,6 +408,10 @@ impl<'db> QueryTransaction<'db> {
         source_bytes: usize,
     ) -> Result<QueryOutput, ExecError> {
         self.ran = true;
+        if let Err(error) = self.checkpoint_preconditions(query) {
+            self.fail();
+            return Err(error);
+        }
         let result = execute_clauses(
             self.txn.as_mut().expect("active transaction"),
             &self.catalog,
@@ -368,6 +421,7 @@ impl<'db> QueryTransaction<'db> {
             source_bytes,
             self.reservation.as_ref(),
             self.visibility.as_ref(),
+            self.checkpoint_dir.as_deref(),
         );
         match result {
             Ok((output, wrote)) => {
@@ -511,6 +565,7 @@ fn execute_clauses(
     source_bytes: usize,
     reservation: Option<&budget::Reservation>,
     visibility: Option<&ReadVisibility>,
+    checkpoint_dir: Option<&std::path::Path>,
 ) -> Result<(QueryOutput, bool), ExecError> {
     if visibility.is_some()
         && query.clauses.iter().any(|clause| {
@@ -540,6 +595,7 @@ fn execute_clauses(
             params,
             budget: &budget,
             visibility,
+            checkpoint_dir,
         },
     )?;
     if stream::supports(query) {
@@ -550,6 +606,7 @@ fn execute_clauses(
                 params,
                 budget: &budget,
                 visibility,
+                checkpoint_dir,
             },
             query,
         )
@@ -569,6 +626,7 @@ fn execute_clauses(
             params,
             budget: &budget,
             visibility,
+            checkpoint_dir,
         };
         match clause {
             Clause::Call {
@@ -595,6 +653,7 @@ fn execute_clauses(
                         params,
                         budget: &budget,
                         visibility,
+                        checkpoint_dir,
                     };
                     let mut filtered = Vec::new();
                     for row in rows {
@@ -665,6 +724,7 @@ fn execute_clauses(
                         params,
                         budget: &budget,
                         visibility,
+                        checkpoint_dir,
                     };
                     let mut changes: BTreeMap<NodeId, BTreeMap<String, Value>> = BTreeMap::new();
                     for item in items {
@@ -682,6 +742,7 @@ fn execute_clauses(
                                 params,
                                 budget: &budget,
                                 visibility,
+                                checkpoint_dir,
                             },
                             id,
                         )?;

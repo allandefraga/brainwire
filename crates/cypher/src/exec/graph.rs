@@ -362,6 +362,7 @@ pub(super) fn write_pattern(
         params,
         budget,
         visibility: None,
+        checkpoint_dir: None,
     };
     if let Some((rel, end)) = &pat.hop {
         let a = bound_node(row, pat.start.var.as_deref().expect("validated endpoint"))?;

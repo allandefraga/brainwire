@@ -257,6 +257,9 @@ fn worker(
                         continue;
                     }
                 };
+                if let Some(root) = databases.checkpoint_dir() {
+                    transaction = transaction.with_checkpoint_dir(root.to_path_buf());
+                }
                 if replica.is_some() {
                     transaction = transaction.with_replicated_ids();
                 }
@@ -699,6 +702,63 @@ mod tests {
             .unwrap();
         let engine = DbEngine::new_protected(Arc::clone(&databases), "default".into()).unwrap();
         (directory, databases, engine)
+    }
+
+    #[test]
+    fn online_checkpoint_uses_configured_root_and_requires_instance_admin() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("checkpoints");
+        std::fs::create_dir(&root).unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = directory.path().join("data");
+        config.server.checkpoint_dir = Some(root.clone());
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        let databases = Arc::new(Databases::open_all(&config).unwrap());
+        let mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        databases
+            .get("default")
+            .unwrap()
+            .apply_ontology(&mapping)
+            .unwrap();
+        let mut engine = DbEngine::new_protected(Arc::clone(&databases), "default".into()).unwrap();
+        let empty = PackValue::Map(vec![]);
+        let query = "CALL db.checkpoint('online-1') YIELD name, tracked RETURN name";
+        let principal = |instance_admin| {
+            AccessContext::Authenticated(brainwire_bolt::auth::Principal {
+                id: "synthetic-operator".into(),
+                graphs: BTreeMap::from([("default".into(), GraphAccess::Write)]),
+                instance_admin,
+                node_visibility: None,
+            })
+        };
+
+        engine.set_access(principal(false)).unwrap();
+        engine.begin(None).unwrap();
+        assert_eq!(
+            engine.run(None, query, &empty).err().unwrap().code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        engine.abort().unwrap();
+        assert!(!root.join("online-1").exists());
+
+        engine.set_access(principal(true)).unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(None, "CREATE (:Customer {entity_id:'kept'})", &empty)
+            .unwrap();
+        engine.commit().unwrap();
+        engine.begin(None).unwrap();
+        engine.run(None, query, &empty).unwrap();
+        engine.commit().unwrap();
+        let copy = brainwire_store::db::Database::open(
+            &root.join("online-1"),
+            &brainwire_store::db::Resources::new(brainwire_store::db::StoreConfig::for_tests()),
+        )
+        .unwrap();
+        assert_eq!(copy.stats().unwrap().nodes, 1);
     }
 
     fn grant(graph: &str, access: GraphAccess) -> AccessContext {

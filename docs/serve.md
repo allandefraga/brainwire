@@ -77,7 +77,9 @@ execute native query cancellation. SIGTERM/SIGINT start a bounded drain
 runs outside Tokio's IO threads. Response encoding handles one frame at a time,
 but session results are still materialized in memory; simple reads process
 intermediate rows incrementally. `memory.query` bounds conservative per-RUN accounting and the
-shared server reservation pool; `CALL db.memory()` exposes pool telemetry.
+shared server reservation pool; `CALL db.memory()` exposes pool telemetry. Setting
+`server.checkpoint_dir` enables admin-only online
+[`CALL db.checkpoint(name)`](checkpoints.md#online-checkpoints-over-bolt).
 `server.query_timeout_ms` sets a cooperative execution deadline (30 seconds by
 default). Resource failures roll back the complete transaction. These are not
 hard RSS or wall-clock ceilings. See [query limits](query-allocation-guards.md).

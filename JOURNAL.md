@@ -41,6 +41,38 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-23 — online admin checkpoints over Bolt
+
+- **Requested:** continue development with one verifiable, high-value
+  improvement; keep the work local (no push, tag or release).
+- **Done:** checkpoints previously required stopping the server. Added
+  admin-only `CALL db.checkpoint(name) YIELD name, path, sequence, tracked`,
+  enabled only when the new `server.checkpoint_dir`
+  (`BRAINWIRE_SERVER_CHECKPOINT_DIR`) is set. It reuses the native RocksDB
+  checkpoint that blocks commits during capture, writes to
+  `<checkpoint_dir>/<name>` (plain names only, no caller paths), refuses
+  existing names, must be the first clause without writes or other procedures,
+  and is refused for replicated serving and visibility-restricted principals.
+  Config rejects a root lexically inside or containing `data_dir`. Documented
+  in `docs/checkpoints.md`, `docs/serve.md`, the operator checklist and the
+  docs-site checkpoint card.
+- **Verified:** tests were written first (3 Cypher integration, 1 engine, 1
+  config). 659 workspace tests (`--no-fail-fast`; the existing
+  every-key env test was extended to the new key), denied-warning Clippy and fmt
+  pass in the `rust:1.98.1-bookworm` container with `-j 2` (the default
+  parallel link was OOM-killed). The release helper's Bolt acceptance
+  (`python_ingestion.py`, 100 rows) passed. Manual Bolt run with the real binary and neo4j 5.28.4: 500
+  synthetic nodes, online checkpoint, a later write, invalid and duplicate names
+  refused; after SIGTERM, the checkpoint moved into `data_dir`, `db check`
+  returned `ok` and counted 500 nodes while the live graph had 501. Docs-site
+  validation and `git diff --check` pass. No remote CI ran.
+- **Decided:** keep restore offline and per graph; no retention, upload or
+  multi-graph atomic snapshot. A side effect cannot be rolled back.
+- **Next step:** add a Python client helper and an operator script that copies
+  a named checkpoint to independent storage with a manifest (graph, sequence,
+  ontology version), then time a restore of a 100K-node checkpoint.
+- **Blockers:** none. Host Cargo still unavailable.
+
 ### 2026-10-22 — bounded resumable source ingestion and crash verification
 
 - **Requested:** use this hour to improve durable writes and failure recovery,

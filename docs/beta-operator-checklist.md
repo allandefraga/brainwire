@@ -90,7 +90,8 @@ scalar result with a full-property read or a cold multi-hop traversal.
    domains. Preserve the failed store and recover a verified copy rather than
    treating it as an empty database.
 4. Create a native checkpoint into a fresh directory with the documented
-   [checkpoint commands](checkpoints.md). Preserve ontology, input and cursor
+   [checkpoint commands](checkpoints.md), or online with admin-only
+   `CALL db.checkpoint(name)` when `server.checkpoint_dir` is set. Preserve ontology, input and cursor
    provenance alongside it. Checkpoints are local store copies, not object-storage
    manifests or coordinated multi-graph/distributed snapshots.
 5. Reopen the retained original and independently restore the checkpoint into a

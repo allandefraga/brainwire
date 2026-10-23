@@ -35,6 +35,8 @@ pub struct ServerSection {
     pub query_timeout_ms: u64,
     pub shutdown_grace_ms: u64,
     pub auth_file: Option<PathBuf>,
+    /// Root for online `CALL db.checkpoint(name)`; unset disables it.
+    pub checkpoint_dir: Option<PathBuf>,
 }
 
 impl Default for ServerSection {
@@ -50,6 +52,7 @@ impl Default for ServerSection {
             // Below Docker's default 10 s stop timeout, so the drain ends first.
             shutdown_grace_ms: 8_000,
             auth_file: None,
+            checkpoint_dir: None,
         }
     }
 }
@@ -106,7 +109,7 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 12] = [
+pub(crate) const KEYS: [&str; 13] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -116,6 +119,7 @@ pub(crate) const KEYS: [&str; 12] = [
     "server.query_timeout_ms",
     "server.shutdown_grace_ms",
     "server.auth_file",
+    "server.checkpoint_dir",
     "memory.cache",
     "memory.memtables",
     "memory.query",
@@ -170,6 +174,8 @@ struct FileServerSection {
     shutdown_grace_ms: Option<u64>,
     #[serde(default)]
     auth_file: Option<PathBuf>,
+    #[serde(default)]
+    checkpoint_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -255,6 +261,10 @@ fn apply_file(
     if let Some(path_value) = file.server.auth_file {
         config.server.auth_file = Some(auth_file_path(path_value)?);
         sources.insert("server.auth_file", Source::File(path.to_path_buf()));
+    }
+    if let Some(path_value) = file.server.checkpoint_dir {
+        config.server.checkpoint_dir = Some(nonblank_path("server.checkpoint_dir", path_value)?);
+        sources.insert("server.checkpoint_dir", Source::File(path.to_path_buf()));
     }
     if let Some(v) = file.memory.cache {
         config.memory.cache = v;
@@ -344,6 +354,15 @@ fn apply_env(
         sources.insert("server.auth_file", Source::Env(var));
     }
 
+    let var = env_var_name("server.checkpoint_dir");
+    if let Some(value) = env.get(&var) {
+        config.server.checkpoint_dir = Some(nonblank_path(
+            "server.checkpoint_dir",
+            PathBuf::from(value),
+        )?);
+        sources.insert("server.checkpoint_dir", Source::Env(var));
+    }
+
     let var = env_var_name("memory.cache");
     if let Some(v) = env.get(&var) {
         config.memory.cache = parse_byte_size(v, "memory.cache")?;
@@ -370,6 +389,16 @@ fn auth_file_path(path: PathBuf) -> Result<PathBuf, ConfigError> {
         return Err(ConfigError::BadValue {
             key: "server.auth_file".into(),
             message: "must be a nonblank path; omit the setting for local development mode".into(),
+        });
+    }
+    Ok(path)
+}
+
+fn nonblank_path(key: &str, path: PathBuf) -> Result<PathBuf, ConfigError> {
+    if path.to_string_lossy().trim().is_empty() {
+        return Err(ConfigError::BadValue {
+            key: key.into(),
+            message: "must be a nonblank path; omit the setting to disable it".into(),
         });
     }
     Ok(path)
@@ -404,6 +433,14 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
         return Err(ConfigError::Invalid(
             "server.shutdown_grace_ms must be between 0 and 3600000".into(),
         ));
+    }
+    if let Some(root) = &config.server.checkpoint_dir {
+        // Lexical guard: a checkpoint under data_dir would reopen as a named graph.
+        if root.starts_with(&config.server.data_dir) || config.server.data_dir.starts_with(root) {
+            return Err(ConfigError::Invalid(
+                "server.checkpoint_dir must be outside server.data_dir and not contain it".into(),
+            ));
+        }
     }
     if config.memory.query.0 == 0 {
         return Err(ConfigError::Invalid("memory.query must be positive".into()));
@@ -472,6 +509,10 @@ pub fn default_file() -> String {
          # Optional protected Bolt policy; omit for local development mode.\n\
          # auth_file = \"/run/secrets/brainwire-policy.json\"\n\
          \n\
+         # Optional root for online admin `CALL db.checkpoint(name)`; must be\n\
+         # outside data_dir. Omit to disable online checkpoints.\n\
+         # checkpoint_dir = \"/backups\"\n\
+         \n\
          [memory]\n\
          # RocksDB block cache. The memtables below are charged inside it.\n\
          cache = \"{cache}\"\n\
@@ -527,6 +568,12 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.auth_file" => config
             .server
             .auth_file
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unset>".into()),
+        "server.checkpoint_dir" => config
+            .server
+            .checkpoint_dir
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<unset>".into()),
@@ -591,6 +638,28 @@ mod tests {
                 &env(&[("BRAINWIRE_SERVER_MAX_DECODED_MESSAGE", invalid)])
             )
             .is_err());
+        }
+    }
+
+    #[test]
+    fn checkpoint_dir_is_optional_nonblank_and_outside_data_dir() {
+        let loaded = load(None, &env(&[])).unwrap();
+        assert_eq!(loaded.config.server.checkpoint_dir, None);
+        let loaded = load(
+            None,
+            &env(&[("BRAINWIRE_SERVER_CHECKPOINT_DIR", "/backups")]),
+        )
+        .unwrap();
+        assert!(describe(&loaded)
+            .iter()
+            .any(|(key, value, source)| *key == "server.checkpoint_dir"
+                && value == "/backups"
+                && source == "env BRAINWIRE_SERVER_CHECKPOINT_DIR"));
+        for invalid in ["", "  ", "./data", "./data/backups", "."] {
+            assert!(
+                load(None, &env(&[("BRAINWIRE_SERVER_CHECKPOINT_DIR", invalid)])).is_err(),
+                "{invalid:?}"
+            );
         }
     }
 
@@ -894,6 +963,7 @@ mod tests {
                 ("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS", "1250"),
                 ("BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS", "20000"),
                 ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
+                ("BRAINWIRE_SERVER_CHECKPOINT_DIR", "/backups"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
                 ("BRAINWIRE_MEMORY_QUERY", "128MiB"),
@@ -914,6 +984,10 @@ mod tests {
         assert_eq!(
             loaded.config.server.auth_file.as_deref(),
             Some(Path::new("/run/secrets/policy.json"))
+        );
+        assert_eq!(
+            loaded.config.server.checkpoint_dir.as_deref(),
+            Some(Path::new("/backups"))
         );
         assert_eq!(loaded.config.memory.cache.0, 1 << 30);
         assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
