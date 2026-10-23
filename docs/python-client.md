@@ -181,6 +181,21 @@ byte size prints `complete`. The limit counts committed source batches, not
 individual records or source snapshots, and never splits a transaction.
 This is cooperative pausing: it cannot interrupt a batch already in flight.
 
+## Online checkpoint
+
+An instance-admin client can capture the selected graph while the server runs,
+when the server sets `server.checkpoint_dir`:
+
+```python
+receipt = graph.checkpoint("nightly-2026-10-23")
+# {"graph": ..., "name": ..., "path": ..., "sequence": "...", "tracked": True,
+#  "ontology_version": ...}
+```
+
+The name is validated locally before connecting. See
+[checkpoints](checkpoints.md#copy-to-independent-storage-from-python) to copy
+the result to independent storage with a verifiable manifest.
+
 ## Trusted ACL stamping
 
 A trusted service with graph-write **and** instance-administration grants, and

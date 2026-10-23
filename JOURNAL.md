@@ -41,6 +41,32 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-23 (late) — checkpoint copy to independent storage, beta release
+
+- **Requested:** a scheduled ~45-minute session starting 23:40 CEST on features
+  and improvements, then push and release following `docs/releasing.md`
+  (explicitly authorized for this run). The one-shot schedule was deleted first.
+- **Done:** `GraphClient.checkpoint(name)` runs `CALL db.checkpoint` and returns
+  a receipt with graph, path, sequence, tracked and ontology version, validating
+  the name before connecting. New `examples/python/checkpoint_backup.py`
+  copies a checkpoint to another location through `DEST.partial`, fsyncs files
+  and directories, renames, and writes a SHA-256 `brainwire-manifest.json`;
+  `verify` reports missing/extra/changed files and exits 1 on problems. It
+  refuses existing destinations, symlinks and receipt/source name mismatches.
+  Documented in `docs/checkpoints.md` and `docs/python-client.md`.
+- **Verified:** 6 new Python tests written first; 62 Python client tests and the
+  release-helper tests pass; docs-site validation and `git diff --check` pass.
+  Real Bolt run (debug binary, container): 100K synthetic nodes loaded in 3.9 s,
+  online checkpoint 0.24 s, copy of 9 files / 3.1 MB 0.02 s, verify < 0.01 s,
+  restore copy plus full `db check` 2.9 s; restored 100,000 nodes versus 100,001
+  live after a later write. One local run, not a benchmark.
+- **Decided:** keep the copy tool as a Python example rather than a server
+  feature; no upload, encryption or retention. Release as `v0.5.0-beta.1`.
+- **Next step:** a retention/prune command for `checkpoint_dir` (keep N newest,
+  never delete the newest verified copy), and a restore helper that strips the
+  manifest and runs `db check`.
+- **Blockers:** none. Host Cargo unavailable; release gates run in the container.
+
 ### 2026-10-23 — online admin checkpoints over Bolt
 
 - **Requested:** continue development with one verifiable, high-value

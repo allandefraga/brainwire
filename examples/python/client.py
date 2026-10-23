@@ -169,6 +169,26 @@ class GraphClient:
         with self.driver.session(database=self.database) as session:
             return session.run(query, dict(parameters)).data()
 
+    def checkpoint(self, name):
+        """Create an online native checkpoint of this graph; return its receipt.
+
+        Requires an instance-admin principal and ``server.checkpoint_dir`` on
+        the server. ``name`` is a plain directory name, never a path. The
+        receipt adds the graph and its ontology version, which only changes
+        offline on a standalone server. The copy stays on the server's storage;
+        use ``checkpoint_backup.py copy`` to move it to independent storage.
+        """
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_\-][A-Za-z0-9_.\-]{0,127}", name):
+            raise ValueError("checkpoint name must be 1..128 ASCII letters/digits or -_. not starting with '.'")
+        with self.driver.session(database=self.database) as session:
+            version = session.run("CALL db.schema() YIELD version RETURN version", {}).data()[0]["version"]
+            row = session.run(
+                "CALL db.checkpoint($name) YIELD name, path, sequence, tracked "
+                "RETURN name, path, sequence, tracked",
+                {"name": name},
+            ).data()[0]
+        return {"graph": self.database, **row, "ontology_version": version}
+
     def write_transaction(self, operation, *, request_id):
         """Run once with a retained request seed on a quorum server's current leader.
 

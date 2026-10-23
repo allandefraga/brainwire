@@ -78,3 +78,44 @@ Restore is offline: stop the server, copy or move the checkpoint directory into
 `brainwire db check <name> --json`, then start the server. Copy checkpoints to
 independent storage yourself; the root is usually on the same volume, where
 SST files may be hard links of the live store.
+
+## Copy to independent storage from Python
+
+`GraphClient.checkpoint(name)` in the [Python client](python-client.md) runs
+the online procedure and returns a receipt with the graph, path, commit
+sequence and ontology version. `examples/python/checkpoint_backup.py` then
+copies the checkpoint directory to another location with a SHA-256 manifest:
+
+```python
+import json
+receipt = GraphClient(driver, "research").checkpoint("nightly-2026-10-23")
+open("receipt.json", "w").write(json.dumps(receipt))
+```
+
+```sh
+python -m examples.python.checkpoint_backup copy \
+  /backups/nightly-2026-10-23 /mnt/offsite/nightly-2026-10-23 --receipt receipt.json
+python -m examples.python.checkpoint_backup verify /mnt/offsite/nightly-2026-10-23
+```
+
+The copy runs on a host that can read the checkpoint root; the server keeps
+serving because a created checkpoint is never modified. It writes to
+`DEST.partial`, flushes every file and directory, then renames, so an
+interrupted copy never looks complete. Existing destinations, symlinks inside
+the checkpoint and a receipt whose name differs from the source directory are
+refused. `verify` rehashes every file and reports missing, extra or changed
+files; it exits 1 on any problem. The manifest file
+(`brainwire-manifest.json`) is not part of the store: remove it, or copy the
+directory without it, when restoring into `server.data_dir`.
+
+The ontology version is read in the same session just before the checkpoint.
+A standalone server only changes ontology offline, so the two agree. The
+manifest is a local file inventory, not an object-storage upload, encryption
+or retention policy.
+
+Synthetic measurement (2026-10-23, debug build in the `rust:1.98.1-bookworm`
+container, local disk, one run): 100,000 `Customer` nodes loaded in 3.9 s;
+online checkpoint 0.24 s; copy of 9 files / 3.1 MB 0.02 s; verify < 0.01 s;
+restore by copying into `data_dir` plus a full `db check` 2.9 s. The restored
+graph had 100,000 nodes; the live graph had 100,001 after a later write. These
+are local observations, not a benchmark or SLA.
