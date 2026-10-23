@@ -62,6 +62,14 @@ No line of code before the end of phase 2.
   live after a later write. One local run, not a benchmark.
 - **Decided:** keep the copy tool as a Python example rather than a server
   feature; no upload, encryption or retention. Release as `v0.5.0-beta.1`.
+- **Released:** `scripts/release.py --apply --prerelease beta` ran every gate
+  in the container and created `011f4b9` with annotated tag `v0.5.0-beta.1`.
+  Pushed with `git push origin main --follow-tags`. GitHub CI (21m17s),
+  Documentation site and Release (20m44s) succeeded. Release published
+  prerelease `v0.5.0-beta.1` and image
+  `ghcr.io/allandefraga/brainwire:v0.5.0-beta.1`
+  (`sha256:3b6a0918def13ca87b68efbf2418ede97e237b0901ba3e4ad2829433536d8207`,
+  source `011f4b9`) after its container recovery test.
 - **Next step:** a retention/prune command for `checkpoint_dir` (keep N newest,
   never delete the newest verified copy), and a restore helper that strips the
   manifest and runs `db check`.
