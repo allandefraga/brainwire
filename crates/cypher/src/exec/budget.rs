@@ -182,6 +182,11 @@ impl<'a> Budget<'a> {
     pub fn retain_bindings(&self, row: &Bindings) -> Result<(), ExecError> {
         self.retain(Self::binding_bytes(row))
     }
+    /// Give back what [`Self::retain_bindings`] retained for a row dropped early.
+    pub fn release_bindings(&self, row: &Bindings) {
+        let bytes = Self::binding_bytes(row);
+        self.retained.set(self.retained.get().saturating_sub(bytes));
+    }
     fn binding_bytes(row: &Bindings) -> usize {
         size_of::<Bindings>()
             + size_of::<Vec<Bindings>>()

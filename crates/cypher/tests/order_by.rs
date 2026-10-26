@@ -80,3 +80,36 @@ fn order_skip_and_limit_page_a_label() {
         vec![vec![i(3)]]
     );
 }
+
+#[test]
+fn a_sorted_page_of_whole_nodes_projects_only_the_kept_rows() {
+    let (_dir, db) = setup();
+    let params = BTreeMap::from([(
+        "rows".into(),
+        Value::List(
+            (0..2000)
+                .map(|n| {
+                    Value::Map(BTreeMap::from([
+                        ("id".into(), Value::Str(format!("n{n:04}"))),
+                        ("name".into(), Value::Str("x".repeat(200))),
+                    ]))
+                })
+                .collect(),
+        ),
+    )]);
+    execute(
+        &db,
+        "UNWIND $rows AS r MERGE (c:Customer {entity_id: r.id}) SET c.name = r.name",
+        &params,
+    )
+    .unwrap();
+    let out = rows(
+        &db,
+        "MATCH (c:Customer) WHERE c.entity_id > 'n1000' RETURN c.entity_id AS id, c ORDER BY id LIMIT 2",
+    );
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0][0], s("n1001"));
+    assert!(
+        matches!(&out[1][1], Out::Node(n) if n.props["entity_id"] == Value::Str("n1002".into()))
+    );
+}

@@ -304,20 +304,43 @@ fn sort_cmp(a: &Out, b: &Out) -> Ordering {
         _ => rank(a).cmp(&rank(b)),
     }
 }
+fn keys_cmp(a: &[Out], b: &[Out], columns: &[usize], keys: &[(usize, bool)]) -> Ordering {
+    keys.iter()
+        .zip(columns)
+        .map(|(&(_, descending), &column)| {
+            let ord = sort_cmp(&a[column], &b[column]);
+            if descending {
+                ord.reverse()
+            } else {
+                ord
+            }
+        })
+        .find(|ord| ord.is_ne())
+        .unwrap_or(Ordering::Equal)
+}
 pub(super) fn sort_rows(rows: &mut [Vec<Out>], keys: &[(usize, bool)]) {
-    rows.sort_by(|a, b| {
-        keys.iter()
-            .map(|&(column, descending)| {
-                let ord = sort_cmp(&a[column], &b[column]);
-                if descending {
-                    ord.reverse()
-                } else {
-                    ord
-                }
-            })
-            .find(|ord| ord.is_ne())
-            .unwrap_or(Ordering::Equal)
-    });
+    let columns: Vec<usize> = keys.iter().map(|&(column, _)| column).collect();
+    rows.sort_by(|a, b| keys_cmp(a, b, &columns, keys));
+}
+/// A streamed `ORDER BY`: rows ranked by their sort keys alone (key `i` is the
+/// `i`-th `ORDER BY` key), kept to rows `skip..skip + max` of the order. Dropped
+/// rows give back their retained accounting.
+pub(super) fn trim_ranked(
+    ctx: &Context<'_, '_>,
+    ranked: &mut Vec<(Vec<Out>, Bindings)>,
+    keys: &[(usize, bool)],
+    skip: usize,
+    max: usize,
+) {
+    let columns: Vec<usize> = (0..keys.len()).collect();
+    ranked.sort_by(|a, b| keys_cmp(&a.0, &b.0, &columns, keys));
+    let release = |(key, row): (Vec<Out>, Bindings)| {
+        ctx.budget.release_output(&key);
+        ctx.budget.release_bindings(&row);
+    };
+    let kept = skip.saturating_add(max).min(ranked.len());
+    ranked.drain(kept..).for_each(release);
+    ranked.drain(..skip.min(ranked.len())).for_each(release);
 }
 /// `ORDER BY`, then `SKIP`, then `LIMIT`, on projected rows; dropped rows give back
 /// their retained output accounting.

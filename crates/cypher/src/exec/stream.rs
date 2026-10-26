@@ -86,6 +86,9 @@ pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, E
     }
     let counts_only = items.iter().all(|i| aggregate(&i.expr));
     let mut counts = vec![0i64; if counts_only { items.len() } else { 0 }];
+    // ORDER BY: each row's sort keys and bindings (node ids, not decoded nodes); only
+    // the rows that survive the top-k are projected at the end.
+    let mut ranked: Vec<(Vec<Out>, Bindings)> = vec![];
     ctx.budget.retain(counts.len().saturating_mul(8))?;
     let result = walk(
         ctx,
@@ -106,16 +109,21 @@ pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, E
                             .ok_or_else(|| ExecError::Semantic("count overflow".into()))?;
                     }
                 }
-            } else {
+            } else if order.is_empty() {
                 output.rows.push(eval::project_row(ctx, &row, items)?);
-                if order.is_empty() {
-                    if output.rows.len() == keep {
-                        return Err(WalkError::Done);
-                    }
-                } else if keep != usize::MAX && output.rows.len() >= keep.saturating_mul(2).max(64)
-                {
-                    let rows = std::mem::take(&mut output.rows);
-                    output.rows = eval::page(ctx, rows, order, 0, keep);
+                if output.rows.len() == keep {
+                    return Err(WalkError::Done);
+                }
+            } else {
+                let key = order
+                    .iter()
+                    .map(|&(column, _)| eval::out(eval(&items[column].expr, &row, ctx)?, ctx))
+                    .collect::<Result<Vec<_>, _>>()?;
+                ctx.budget.output(&key)?;
+                ctx.budget.retain_bindings(&row)?;
+                ranked.push((key, row));
+                if keep != usize::MAX && ranked.len() >= keep.saturating_mul(2).max(64) {
+                    eval::trim_ranked(ctx, &mut ranked, order, 0, keep);
                 }
             }
             Ok(())
@@ -133,8 +141,17 @@ pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, E
         ctx.budget.output(&row)?;
         output.rows.push(row);
     }
-    let rows = std::mem::take(&mut output.rows);
-    output.rows = eval::page(ctx, rows, order, skip, max);
+    if order.is_empty() {
+        let rows = std::mem::take(&mut output.rows);
+        output.rows = eval::page(ctx, rows, order, skip, max);
+    } else {
+        eval::trim_ranked(ctx, &mut ranked, order, skip, max);
+        for (key, row) in ranked {
+            ctx.budget.release_output(&key);
+            ctx.budget.release_bindings(&row);
+            output.rows.push(eval::project_row(ctx, &row, items)?);
+        }
+    }
     ctx.budget.check_deadline()?;
     Ok(output)
 }
