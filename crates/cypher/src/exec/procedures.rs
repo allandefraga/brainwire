@@ -16,6 +16,15 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
         "db.commitState" => Ok(&["sequence", "tracked", "scope"]),
         "db.checkpoint" => Ok(&["name", "path", "sequence", "tracked"]),
         "db.setNodeAcl" | "db.setNodeAcls" => Ok(&["updated"]),
+        "db.nodeAcls" => Ok(&[
+            "label",
+            "entityId",
+            "allow",
+            "deny",
+            "connectorIds",
+            "sourceTable",
+            "sources",
+        ]),
         "db.indexes" => Ok(&["label", "property", "state"]),
         "db.memory" => Ok(&[
             "poolLimitBytes",
@@ -183,6 +192,8 @@ pub(super) fn validate(
         acl_batch(args, ctx)?;
     } else if name == "db.checkpoint" {
         checkpoint_destination(args, ctx)?;
+    } else if name == "db.nodeAcls" {
+        acl_refs(args, ctx)?;
     } else if matches!(
         name,
         "db.indexes" | "db.memory" | "db.schema" | "db.commitState"
@@ -339,6 +350,86 @@ fn acl_map(
     Ok((label, entity_id, acl))
 }
 
+/// `db.nodeAcls` input: a list of `{label, entityId}` maps, at most
+/// [`MAX_ACL_BATCH`], each naming a declared label.
+fn acl_refs(args: &[Expr], ctx: &Context<'_, '_>) -> Result<Vec<(String, String)>, ExecError> {
+    if args.len() != 1 {
+        return Err(semantic(
+            "db.nodeAcls requires one list of {label, entityId} maps",
+        ));
+    }
+    let Value::List(entries) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+        return Err(semantic(
+            "db.nodeAcls requires a list of {label, entityId} maps",
+        ));
+    };
+    if entries.len() > MAX_ACL_BATCH {
+        return Err(semantic(format!(
+            "db.nodeAcls accepts at most {MAX_ACL_BATCH} entries"
+        )));
+    }
+    entries
+        .into_iter()
+        .map(|entry| {
+            let Value::Map(map) = entry else {
+                return Err(semantic("db.nodeAcls entries must be maps"));
+            };
+            if map.keys().any(|key| key != "label" && key != "entityId") {
+                return Err(semantic("unknown db.nodeAcls option"));
+            }
+            let label = text(&map, "label")?.ok_or_else(|| semantic("label is required"))?;
+            if ctx.catalog.node_type(&label).is_none() {
+                return Err(semantic("unknown node label"));
+            }
+            let entity_id =
+                text(&map, "entityId")?.ok_or_else(|| semantic("entityId is required"))?;
+            Ok((label, entity_id))
+        })
+        .collect()
+}
+
+/// The private ACL of each named node that exists (an unstamped node answers with
+/// empty lists). Trusted administrators only: a read-visibility transaction never
+/// sees this namespace.
+fn node_acls(
+    args: &[Expr],
+    ctx: &Context<'_, '_>,
+    bind: &dyn Fn(Vec<Binding>) -> Result<Bindings, ExecError>,
+) -> Result<Vec<Bindings>, ExecError> {
+    if ctx.visibility.is_some() {
+        return Err(ExecError::Forbidden(
+            "node ACL metadata is unavailable with read visibility",
+        ));
+    }
+    let strings = |values: &[String]| {
+        value(Value::List(
+            values.iter().map(|v| Value::Str(v.clone())).collect(),
+        ))
+    };
+    let mut rows = Vec::new();
+    for (label, entity_id) in acl_refs(args, ctx)? {
+        ctx.budget.check_deadline()?;
+        let ty = ctx.catalog.node_type(&label).expect("validated label");
+        let Some(id) = brainwire_store::graph::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))?
+            .first()
+            .copied()
+        else {
+            continue;
+        };
+        let acl = brainwire_store::graph::get_node_acl(ctx.txn, id)?.unwrap_or_default();
+        rows.push(bind(vec![
+            value(Value::Str(label)),
+            value(Value::Str(entity_id)),
+            strings(&acl.allow),
+            strings(&acl.deny),
+            strings(&acl.connector_ids),
+            value(acl.source_table.map_or(Value::Null, Value::Str)),
+            strings(&acl.sources),
+        ])?);
+    }
+    Ok(rows)
+}
+
 type AclStamp = (NodeId, brainwire_core::acl::NodeAcl);
 
 /// Resolve every entry before any stamp, so a missing node or invalid entry
@@ -427,6 +518,9 @@ pub(super) fn run(
     };
     if name == "db.schema" {
         return Ok(vec![bind(schema::values(ctx, yields.len())?)?]);
+    }
+    if name == "db.nodeAcls" {
+        return node_acls(args, ctx, &bind);
     }
     if name == "db.checkpoint" {
         let (name, path) = checkpoint_destination(args, ctx)?;

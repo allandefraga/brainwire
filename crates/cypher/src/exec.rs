@@ -173,7 +173,7 @@ impl QueryAccess {
                             return Err(ExecError::Forbidden("node ACL updates require graph write and instance administrator access"));
                         }
                     }
-                    "db.memory" | "db.checkpoint" => {
+                    "db.memory" | "db.checkpoint" | "db.nodeAcls" => {
                         if !self.instance_admin {
                             return Err(ExecError::Forbidden(
                                 "instance administrator access required",

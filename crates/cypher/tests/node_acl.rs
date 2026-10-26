@@ -673,3 +673,47 @@ fn batch_stamp_is_atomic_privileged_and_validated() {
     ));
     assert!(restricted(&db, BATCH).is_err());
 }
+
+#[test]
+fn an_administrator_reads_back_node_acls_and_a_restricted_reader_cannot() {
+    let (_dir, db) = setup();
+    execute(&db, BATCH, &acl_rows(&[("hidden", "alice")])).unwrap();
+    let refs = |ids: &[&str]| {
+        BTreeMap::from([(
+            "refs".into(),
+            Value::List(
+                ids.iter()
+                    .map(|id| {
+                        Value::Map(BTreeMap::from([
+                            ("label".into(), Value::Str("Doc".into())),
+                            ("entityId".into(), Value::Str((*id).into())),
+                        ]))
+                    })
+                    .collect(),
+            ),
+        )])
+    };
+    const READ: &str = "CALL db.nodeAcls($refs) YIELD entityId, allow, deny, sourceTable \
+                        RETURN entityId, allow, deny, sourceTable";
+    let rows = execute(&db, READ, &refs(&["hidden", "nope"])).unwrap().rows;
+    assert_eq!(rows.len(), 1, "a node that does not exist answers nothing");
+    assert_eq!(rows[0][0], string("hidden"));
+    assert_eq!(
+        rows[0][1],
+        Out::Value(Value::List(vec![Value::Str("alice".into())]))
+    );
+    assert_eq!(rows[0][2], Out::Value(Value::List(vec![])));
+    let mut tx = QueryTransaction::begin(&db).unwrap();
+    assert!(matches!(
+        tx.run_with_access(
+            READ,
+            &refs(&["hidden"]),
+            QueryAccess {
+                write: true,
+                instance_admin: false
+            }
+        ),
+        Err(ExecError::Forbidden(_))
+    ));
+    assert!(restricted(&db, READ).is_err());
+}
