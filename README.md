@@ -254,6 +254,7 @@ the authority until integration, security, recovery and workload gates pass.
 | Inspect a running graph through the terminal | [Connected workspace](docs/connected-status.md) |
 | Explore the visual demo or inspect local files | [TUI demo and controls](docs/tui-demo.md) · [offline backoffice](docs/multi-graph-backoffice.md) |
 | Resume version-pinned source snapshot differences | [DuckLake incremental ingestion](docs/ducklake-incremental.md) |
+| Load and keep a DuckLake table current with parallel writers | [Parallel writes and DuckLake sync](docs/parallel-ingestion.md) |
 | Configure authentication and network protection | [Auth](docs/bolt-auth.md) · [container auth](docs/protected-containers.md) · [TLS boundary](docs/protected-transport.md) |
 | Evaluate experimental quorum replication | [Quorum operations and limitations](docs/quorum-replication.md) |
 | Review measured performance and comparison status | [Benchmarks](docs/benchmarks/README.md) |

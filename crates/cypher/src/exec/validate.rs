@@ -42,10 +42,6 @@ fn expr_checked(
     evaluate: bool,
 ) -> Result<(), ExecError> {
     match e {
-        Expr::Prop(base, _) if matches!(base.as_ref(), Expr::Var(var) if scope.get(var) == Some(&Kind::Relationship)) =>
-        {
-            return Err(unsupported("relationship property reads are not supported"));
-        }
         Expr::Var(v) if !scope.contains_key(v) => {
             return Err(semantic(format!("unknown variable {v}")))
         }

@@ -1028,6 +1028,22 @@ pub fn merge_edge(
     Ok(())
 }
 
+/// Read one directed relationship's stored property row, if it exists.
+/// `control` receives the decode allocation estimate before decoding.
+pub fn edge_row_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    (source, edge_type, target, id): (NodeId, EdgeTypeId, NodeId, EdgeId),
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<Option<Row>, E> {
+    txn.with_get(Cf::Out, &edge_key(source, edge_type, target, id), |bytes| {
+        let Some(bytes) = bytes else {
+            return Ok(None);
+        };
+        control(estimate_row_allocation(bytes).map_err(StoreError::from)?)?;
+        Ok(Some(decode_row(bytes).map_err(StoreError::from)?))
+    })
+}
+
 /// Stream directional adjacency without copying stored edge property values.
 pub fn visit_edges<E: From<GraphError> + From<StoreError>>(
     txn: &Txn,

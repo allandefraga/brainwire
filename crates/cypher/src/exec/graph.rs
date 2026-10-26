@@ -134,6 +134,35 @@ pub(super) fn node_property(
         .charge(budget::value_bytes(&value).saturating_mul(2))?;
     Ok(value)
 }
+pub(super) fn edge_property(
+    ctx: &Context<'_, '_>,
+    edge: &Relationship,
+    name: &str,
+) -> Result<Value, ExecError> {
+    let value = {
+        let _scope = ctx.budget.scope();
+        let key = (edge.source, edge.edge_type, edge.target, edge.id);
+        let row =
+            brainwire_store::graph::edge_row_with_control::<ExecError>(ctx.txn, key, |bytes| {
+                ctx.budget.charge(bytes)
+            })?;
+        row.and_then(|mut row| {
+            row.extra.remove(name).or_else(|| {
+                let ty = ctx
+                    .catalog
+                    .edge_types
+                    .iter()
+                    .find(|t| t.id == edge.edge_type)?;
+                let column = ty.columns.iter().find(|column| column.name == name)?;
+                row.columns.remove(&column.id)
+            })
+        })
+        .unwrap_or(Value::Null)
+    };
+    ctx.budget
+        .charge(budget::value_bytes(&value).saturating_mul(2))?;
+    Ok(value)
+}
 pub(super) fn bound_node(row: &Bindings, name: &str) -> Result<NodeId, ExecError> {
     match row.get(name) {
         Some(Binding::Node(id)) => Ok(*id),

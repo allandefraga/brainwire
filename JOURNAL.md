@@ -41,6 +41,44 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-26 — parallel writers, DuckLake sync, relationship property reads
+
+- **Requested:** about an hour making the write path ready for an external
+  agent to load data: many simultaneous writers (10 Python processes), inserts,
+  updates and deletes, reading directly from DuckLake, incremental runs, and
+  guidance on batches versus rows and on parallelism.
+- **Done:** `crates/server/tests/concurrent_writers.py` drives 10 processes
+  through disjoint upserts, hot overlapping updates, concurrent edge MERGE,
+  DETACH DELETE and re-upserts, then audits exact final state and `db check`.
+  New `examples/python/ducklake_sync.py` mirrors one DuckLake table into a
+  label or edge type: full load at a pinned snapshot, then
+  `ducklake_table_changes` collapsed per key in DuckDB (last snapshot wins;
+  post-image beats pre-image; key and endpoint changes become delete + upsert),
+  split over N processes by `hash(key) % N`, with an `ImportCheckpoint`
+  snapshot cursor and lease advanced only after every partition commits.
+  `--full --prune` reconciles: it anti-joins the graph's keys against the
+  source snapshot in DuckDB and deletes the stale ones. Cypher now reads relationship properties (`RETURN r.weight`,
+  `WHERE r.weight > x`), charged to the query memory guard, so a writer can
+  verify edges it loaded. New guide `docs/parallel-ingestion.md`; README and
+  related docs link it.
+- **Verified:** 3 new Rust tests (edge property reads, staged reads, memory
+  guard) written first and failing for the right reason; the delete-edges test
+  no longer expects `r.weight` to fail. 8 DuckLake sync unit tests on a real
+  local DuckLake; 69 Python example tests pass in the container. Real server,
+  debug build: concurrent writers 51K rows/s disjoint, 26 transient conflicts
+  all retried, exact state, row-by-row ~90x slower than batches; DuckLake sync
+  of 100K nodes 2.8 s and 100K edges 3.7 s, incremental 20K changes 5.0 s with
+  11 retried conflicts, graph equal to the lake, lease and `--break-lease`
+  checked; `--full --prune` removed exactly the injected stray nodes/edges;
+  `db check` ok. Workspace tests/clippy/fmt: see below.
+- **Decided:** batches of 250–1000 rows, partition by key hash, rely on the
+  driver's transient retry; `--full` never deletes; one run per source through
+  the lease. Not released: no push or tag requested this session.
+- **Next step:** release-build numbers for the DuckLake sync at 1M rows, then
+  stream prune's key listing in pages so it does not depend on `memory.query`.
+- **Blockers:** none. The build container was recreated (rust:1.98.1-bookworm,
+  `CARGO_TARGET_DIR=/target` volume, duckdb + ducklake installed for tests).
+
 ### 2026-10-23 (late) — checkpoint copy to independent storage, beta release
 
 - **Requested:** a scheduled ~45-minute session starting 23:40 CEST on features

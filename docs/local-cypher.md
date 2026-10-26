@@ -116,10 +116,11 @@ materialized and subject to conservative accounting.
   `RETURN`/`LIMIT`. See [sparse analytics](sparse-analytics.md) and
   [explainable knowledge ranking](knowledge-ranking.md) for examples and limits.
 
-Unsupported constructs return an explicit error. Relationship variables are
-supported only to identify relationships for `DELETE r`; returning relationship
-values, reading relationship properties, relationship property filters, and
-relationship `SET`/`CREATE`/`MERGE` bindings are not implemented. `DELETE r`
+Unsupported constructs return an explicit error. Relationship variables can
+read properties (`RETURN r.weight`, `WHERE r.weight > 0.5`; a missing property
+is null) and identify relationships for `DELETE r`. Returning whole
+relationship values and relationship `SET`/`CREATE`/`MERGE` bindings are not
+implemented; set edge properties with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r`
 removes directed edges of the bound type between matched endpoints, preserves
 the endpoint nodes, and respects graph write authorization. The executor streams
 supported read pipelines; writes, grouped aggregates,

@@ -169,7 +169,9 @@ not a published/installable SDK.
 `load_nodes` and `load_edges` do not maintain a persistent source cursor. For
 replay after a lost acknowledgement, use the
 [durable snapshot importer](python-ingestion.md) or
-[version-pinned incremental DuckLake importer](ducklake-incremental.md).
+[version-pinned incremental DuckLake importer](ducklake-incremental.md). To mirror any DuckLake table with
+parallel workers and incremental `table_changes`, see
+[parallel writes and DuckLake sync](parallel-ingestion.md).
 Those batch helpers are idempotent only for the same identities and values; they
 are not a CDC service.
 

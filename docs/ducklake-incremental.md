@@ -5,6 +5,8 @@ local SQLite-backed DuckLake source. It emits authoritative upserts and physical
 deletions using the existing external application ticket/comment mapping and stable scoped
 entity IDs. It reads both complete snapshots; this is a snapshot-difference
 bridge, not native DuckLake CDC or a live source subscription.
+For a generic table-to-label/edge mirror that reads `ducklake_table_changes`
+directly with parallel workers, use [DuckLake sync](parallel-ingestion.md).
 
 The source must retain both catalog versions and their managed data files until
 export finishes. Only cached DuckLake/SQLite extensions are loaded; the example

@@ -46,11 +46,12 @@ pub(super) fn eval(
         }
         Expr::Prop(base, name) => match eval(base, row, ctx)? {
             Binding::Node(id) => graph::node_property(ctx, id, name)?,
+            Binding::Relationship(edge) => graph::edge_property(ctx, &edge, name)?,
             Binding::Value(Value::Map(map)) => map.get(name).cloned().unwrap_or(Value::Null),
             Binding::Value(Value::Null) => Value::Null,
             _ => {
                 return Err(ExecError::Semantic(
-                    "property access needs a node or map".into(),
+                    "property access needs a node, relationship or map".into(),
                 ))
             }
         },

@@ -4,8 +4,8 @@ Python is the client; Brainwire runs the graph engine in Rust. Send parameterize
 Cypher over Bolt using the Neo4j Python driver. The acceptance harness currently
 verifies driver 5.28.6; this is a tested protocol subset, not full Neo4j feature
 compatibility. A [synthetic external application ticket/comment snapshot adapter](source-ingestion.md)
-now reuses the same importer; direct DuckLake reading and a production mapping
-remain separate integration tasks.
+now reuses the same importer. To read a DuckLake table directly with parallel
+workers and incremental changes, see [parallel writes and DuckLake sync](parallel-ingestion.md).
 
 Protected servers use `BRAINWIRE_BOLT_AUTH_FILE` with the shared
 [service-token connection contract](bolt-auth.md); absent credentials retain
