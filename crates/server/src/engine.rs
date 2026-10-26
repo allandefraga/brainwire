@@ -191,20 +191,19 @@ fn graph_access(access: &AccessContext, graph: &str) -> Result<QueryAccess, Engi
     }
 }
 
-/// The visibility a transaction reads under. A principal's static policy; for a
-/// visibility delegate, the one its caller's transaction carries, and deny-all
-/// when it carries none (fail closed). Only a delegate (or an unprotected
-/// development server) may send one.
+/// The visibility a transaction reads under: the principal's static policy, or,
+/// for a visibility delegate that sends one, its caller's (the transaction is
+/// then read-only). A delegate has no static policy, so delegation only ever
+/// narrows what it may already see; a governed read must send the visibility,
+/// and an unsent one leaves the delegate's own access. Only a delegate (or an
+/// unprotected development server) may send one.
 fn transaction_visibility(
     access: &AccessContext,
     delegated: Option<ReadVisibility>,
 ) -> Result<Option<ReadVisibility>, EngineError> {
     match access {
         AccessContext::Authenticated(principal) if principal.visibility_delegate => {
-            Ok(Some(delegated.unwrap_or(ReadVisibility {
-                deny_all: true,
-                ..Default::default()
-            })))
+            Ok(delegated.or_else(|| principal.node_visibility.clone()))
         }
         AccessContext::Authenticated(principal) => match delegated {
             Some(_) => Err(error(
@@ -999,9 +998,9 @@ mod tests {
             "Neo.ClientError.Security.Forbidden"
         );
         engine.abort().unwrap();
-        // No visibility sent: the transaction sees nothing.
+        // No visibility sent: the delegate's own (unrestricted) access.
         engine.begin(None).unwrap();
-        assert!(ids(&mut engine).is_empty());
+        assert_eq!(ids(&mut engine).len(), 2);
         engine.commit().unwrap();
         // A principal that is not a delegate cannot send one.
         engine.set_access(principal(false)).unwrap();

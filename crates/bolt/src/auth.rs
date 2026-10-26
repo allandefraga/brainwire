@@ -154,10 +154,9 @@ impl AuthPolicy {
                     .node_visibility
                     .as_ref()
                     .is_some_and(|policy| policy.validate().is_err())
-                // A delegate's visibility comes from each transaction: it may not also
-                // carry a static policy, nor administer the instance.
-                || (entry.visibility_delegate
-                    && (entry.node_visibility.is_some() || entry.instance_admin))
+                // A delegate's visibility comes from each transaction: a static policy
+                // too would make it ambiguous which one a transaction reads under.
+                || (entry.visibility_delegate && entry.node_visibility.is_some())
             {
                 return Err(AuthError::InvalidPolicy);
             }
@@ -292,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn a_visibility_delegate_carries_no_static_policy_nor_admin() {
+    fn a_visibility_delegate_carries_no_static_policy() {
         let mut value: serde_json::Value = serde_json::from_str(&policy_json()).unwrap();
         value["principals"][0]["visibility_delegate"] = serde_json::json!(true);
         let policy = AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).unwrap();
@@ -303,12 +302,6 @@ mod tests {
                 .visibility_delegate
         );
         value["principals"][0]["node_visibility"] = serde_json::json!({});
-        assert!(AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
-        value["principals"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("node_visibility");
-        value["principals"][0]["instance_admin"] = serde_json::json!(true);
         assert!(AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
     }
 
