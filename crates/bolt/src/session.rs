@@ -6,6 +6,7 @@ use crate::auth::AccessContext;
 pub use crate::auth::AuthMode;
 use crate::message::{Request, Response};
 use crate::packstream::PackValue;
+use brainwire_core::acl::ReadVisibility;
 
 /// The `server` value of the HELLO answer. Driver 5.x refuses a server whose
 /// agent does not start with `Neo4j/`; the rest says what Brainwire is, so it
@@ -59,6 +60,35 @@ fn durable_request_id(extra: &PackValue) -> Result<Option<&str>, Response> {
     }
 }
 
+/// The caller visibility a delegating reader sends for this transaction
+/// (`tx_metadata.brainwire_visibility`), validated like a static policy.
+fn delegated_visibility(extra: &PackValue) -> Result<Option<ReadVisibility>, Response> {
+    let Some(metadata) = extra.get("tx_metadata") else {
+        return Ok(None);
+    };
+    if matches!(metadata, PackValue::Map(fields) if fields.iter().filter(|(key, _)| key == VISIBILITY_KEY).count() > 1)
+    {
+        return Err(invalid("duplicate delegated visibility"));
+    }
+    let Some(value) = metadata.get(VISIBILITY_KEY) else {
+        return Ok(None);
+    };
+    let PackValue::Map(_) = value else {
+        return Err(invalid("brainwire_visibility must be a map"));
+    };
+    let json = value
+        .to_json()
+        .ok_or_else(|| invalid("brainwire_visibility holds a value that is not JSON"))?;
+    let visibility: ReadVisibility = serde_json::from_value(json)
+        .map_err(|_| invalid("brainwire_visibility is not a valid visibility"))?;
+    visibility
+        .validate()
+        .map_err(|_| invalid("brainwire_visibility is not a valid visibility"))?;
+    Ok(Some(visibility))
+}
+
+const VISIBILITY_KEY: &str = "brainwire_visibility";
+
 pub trait QueryEngine {
     /// Engines must explicitly support protected identities; legacy engines fail closed.
     fn set_access(&mut self, access: AccessContext) -> Result<(), EngineError> {
@@ -98,6 +128,20 @@ pub trait QueryEngine {
         } else {
             self.begin(db)
         }
+    }
+    /// Begin a read transaction filtered by a visibility the authenticated principal
+    /// delegates for its caller. Engines without delegation refuse it.
+    fn begin_delegated(
+        &mut self,
+        _db: Option<&str>,
+        _read_only: bool,
+        _request_id: Option<&str>,
+        _visibility: ReadVisibility,
+    ) -> Result<(), EngineError> {
+        Err(EngineError {
+            code: "Neo.ClientError.Security.Forbidden".into(),
+            message: "engine does not support delegated visibility".into(),
+        })
     }
     /// Commit and optionally return an engine-owned bookmark.
     /// Return success only after completion; a failure is followed by `abort`.
@@ -313,11 +357,19 @@ impl<E: QueryEngine> Session<E> {
             _ => return Err(invalid("mode must be r or w")),
         };
         let request_id = durable_request_id(extra)?;
+        let visibility = delegated_visibility(extra)?;
         // A failed begin may still own partially initialized engine state.
         self.pending = true;
-        self.engine
-            .begin_with_request_id(self.db.as_deref(), read_only, request_id)
-            .map_err(Self::engine_failure)
+        match visibility {
+            Some(visibility) => {
+                self.engine
+                    .begin_delegated(self.db.as_deref(), read_only, request_id, visibility)
+            }
+            None => self
+                .engine
+                .begin_with_request_id(self.db.as_deref(), read_only, request_id),
+        }
+        .map_err(Self::engine_failure)
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
@@ -863,6 +915,7 @@ mod tests {
                 graphs: Default::default(),
                 instance_admin: false,
                 node_visibility: None,
+                visibility_delegate: false,
             }))
             .is_err());
     }
@@ -1138,6 +1191,48 @@ mod protected_tests {
         let trace = t.lock().unwrap();
         assert!(trace.events.contains(&"abort"));
         assert!(!trace.events.contains(&"run"));
+    }
+}
+
+#[cfg(test)]
+mod delegated_visibility_tests {
+    use super::*;
+
+    fn extra(value: PackValue) -> PackValue {
+        PackValue::Map(vec![(
+            "tx_metadata".into(),
+            PackValue::Map(vec![("brainwire_visibility".into(), value)]),
+        )])
+    }
+
+    #[test]
+    fn a_delegated_visibility_is_parsed_and_validated() {
+        assert!(delegated_visibility(&PackValue::Map(vec![]))
+            .unwrap()
+            .is_none());
+        let visibility = delegated_visibility(&extra(PackValue::Map(vec![
+            (
+                "principals".into(),
+                PackValue::List(vec![PackValue::String("user:a".into())]),
+            ),
+            ("allowed_connectors".into(), PackValue::List(vec![])),
+            ("entry_strict".into(), PackValue::Bool(true)),
+        ])))
+        .unwrap()
+        .unwrap();
+        assert_eq!(visibility.principals, vec!["user:a".to_string()]);
+        assert_eq!(visibility.allowed_connectors, Some(vec![]));
+        assert!(visibility.entry_strict);
+        for bad in [
+            PackValue::String("all".into()),
+            PackValue::Map(vec![("unknown".into(), PackValue::Bool(true))]),
+            PackValue::Map(vec![(
+                "principals".into(),
+                PackValue::List(vec![PackValue::String(String::new())]),
+            )]),
+        ] {
+            assert!(delegated_visibility(&extra(bad)).is_err());
+        }
     }
 }
 

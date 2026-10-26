@@ -28,6 +28,32 @@ impl PackValue {
             _ => None,
         }
     }
+
+    /// The JSON value of a null, boolean, number, string, list or map; `None` for
+    /// bytes, structures and non-finite floats, which have no JSON form.
+    pub fn to_json(&self) -> Option<serde_json::Value> {
+        use serde_json::Value as Json;
+        Some(match self {
+            PackValue::Null => Json::Null,
+            PackValue::Bool(b) => Json::Bool(*b),
+            PackValue::Int(i) => Json::from(*i),
+            PackValue::Float(f) => Json::from(serde_json::Number::from_f64(*f)?),
+            PackValue::String(s) => Json::String(s.clone()),
+            PackValue::List(items) => Json::Array(
+                items
+                    .iter()
+                    .map(PackValue::to_json)
+                    .collect::<Option<_>>()?,
+            ),
+            PackValue::Map(entries) => Json::Object(
+                entries
+                    .iter()
+                    .map(|(k, v)| Some((k.clone(), v.to_json()?)))
+                    .collect::<Option<_>>()?,
+            ),
+            PackValue::Bytes(_) | PackValue::Struct { .. } => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

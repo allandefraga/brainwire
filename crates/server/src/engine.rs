@@ -7,6 +7,7 @@ use std::thread;
 use brainwire_bolt::auth::{AccessContext, GraphAccess};
 use brainwire_bolt::packstream::PackValue;
 use brainwire_bolt::session::{EngineError, QueryEngine, QueryResult};
+use brainwire_core::acl::ReadVisibility;
 use brainwire_core::value::Value;
 use brainwire_cypher::{ExecError, Out, QueryAccess, QueryOutput, QueryTransaction};
 
@@ -19,6 +20,7 @@ enum Command {
         Option<String>,
         bool,
         Option<String>,
+        Option<ReadVisibility>,
         mpsc::Sender<Result<(), EngineError>>,
     ),
     Run(
@@ -104,11 +106,29 @@ impl QueryEngine for DbEngine {
     }
 
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, None, reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, None, None, reply))
     }
 
     fn begin_read_only(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, None, reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, None, None, reply))
+    }
+
+    fn begin_delegated(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+        visibility: ReadVisibility,
+    ) -> Result<(), EngineError> {
+        self.ask(|reply| {
+            Command::Begin(
+                db.map(str::to_owned),
+                read_only,
+                request_id.map(str::to_owned),
+                Some(visibility),
+                reply,
+            )
+        })
     }
 
     fn begin_with_request_id(
@@ -122,6 +142,7 @@ impl QueryEngine for DbEngine {
                 db.map(str::to_owned),
                 read_only,
                 request_id.map(str::to_owned),
+                None,
                 reply,
             )
         })
@@ -170,6 +191,33 @@ fn graph_access(access: &AccessContext, graph: &str) -> Result<QueryAccess, Engi
     }
 }
 
+/// The visibility a transaction reads under. A principal's static policy; for a
+/// visibility delegate, the one its caller's transaction carries, and deny-all
+/// when it carries none (fail closed). Only a delegate (or an unprotected
+/// development server) may send one.
+fn transaction_visibility(
+    access: &AccessContext,
+    delegated: Option<ReadVisibility>,
+) -> Result<Option<ReadVisibility>, EngineError> {
+    match access {
+        AccessContext::Authenticated(principal) if principal.visibility_delegate => {
+            Ok(Some(delegated.unwrap_or(ReadVisibility {
+                deny_all: true,
+                ..Default::default()
+            })))
+        }
+        AccessContext::Authenticated(principal) => match delegated {
+            Some(_) => Err(error(
+                "Neo.ClientError.Security.Forbidden",
+                "this principal may not delegate visibility",
+            )),
+            None => Ok(principal.node_visibility.clone()),
+        },
+        AccessContext::Unrestricted => Ok(delegated),
+        AccessContext::Unauthenticated => Err(forbidden()),
+    }
+}
+
 fn worker_error() -> EngineError {
     error(
         "Neo.DatabaseError.General.UnknownError",
@@ -190,8 +238,15 @@ fn worker(
                 access = next;
                 let _ = reply.send(Ok(()));
             }
-            Command::Begin(name, read_only, request_id, reply) => {
+            Command::Begin(name, read_only, request_id, delegated, reply) => {
                 let name = name.as_deref().unwrap_or(&default_database);
+                let visibility = match transaction_visibility(&access, delegated) {
+                    Ok(visibility) => visibility,
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
+                };
                 let mut query_access = match graph_access(&access, name) {
                     Ok(access) => access,
                     Err(error) => {
@@ -217,7 +272,7 @@ fn worker(
                 let request_id = replica
                     .as_ref()
                     .map(|replica| replica.request_key(name, caller, &seed));
-                let restricted = matches!(&access, AccessContext::Authenticated(principal) if principal.node_visibility.is_some());
+                let restricted = visibility.is_some();
                 let _writer_permit = if let Some(replica) = &replica {
                     match replica.begin(
                         query_access.write && !restricted,
@@ -263,16 +318,14 @@ fn worker(
                 if replica.is_some() {
                     transaction = transaction.with_replicated_ids();
                 }
-                if let AccessContext::Authenticated(principal) = &access {
-                    if let Some(visibility) = &principal.node_visibility {
-                        transaction = match transaction.with_read_visibility(visibility.clone()) {
-                            Ok(transaction) => transaction,
-                            Err(err) => {
-                                let _ = reply.send(Err(execution_error(err)));
-                                continue;
-                            }
-                        };
-                    }
+                if let Some(visibility) = visibility {
+                    transaction = match transaction.with_read_visibility(visibility) {
+                        Ok(transaction) => transaction,
+                        Err(err) => {
+                            let _ = reply.send(Err(execution_error(err)));
+                            continue;
+                        }
+                    };
                 }
                 let _ = reply.send(Ok(()));
                 while let Ok(command) = receiver.recv() {
@@ -345,7 +398,7 @@ fn worker(
                             let _ = reply.send(Ok(()));
                             break;
                         }
-                        Command::Begin(_, _, _, reply) => {
+                        Command::Begin(_, _, _, _, reply) => {
                             let _ = reply.send(Err(error(
                                 "Neo.ClientError.Transaction.TransactionStartFailed",
                                 "transaction already active",
@@ -732,6 +785,7 @@ mod tests {
                 graphs: BTreeMap::from([("default".into(), GraphAccess::Write)]),
                 instance_admin,
                 node_visibility: None,
+                visibility_delegate: false,
             })
         };
 
@@ -767,6 +821,7 @@ mod tests {
             graphs: BTreeMap::from([(graph.into(), access)]),
             instance_admin: false,
             node_visibility: None,
+            visibility_delegate: false,
         })
     }
 
@@ -803,6 +858,7 @@ mod tests {
                     principals: vec![name.into()],
                     ..Default::default()
                 }),
+                visibility_delegate: false,
             })
         };
         engine.set_access(access("alice")).unwrap();
@@ -864,6 +920,98 @@ mod tests {
             vec![vec![PackValue::Int(3)]]
         );
         engine.abort().unwrap();
+    }
+
+    #[test]
+    fn a_visibility_delegate_reads_under_each_transactions_visibility() {
+        use brainwire_core::acl::{NodeAcl, ReadVisibility};
+        use brainwire_store::graph::{find_by_entity_id, set_node_acl};
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        let empty = PackValue::Map(vec![]);
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "MERGE (a:Customer {entity_id:'alice'}) MERGE (b:Customer {entity_id:'bob'})",
+                &empty,
+            )
+            .unwrap();
+        engine.commit().unwrap();
+        let database = databases.get("default").unwrap();
+        let mut tx = database.begin();
+        for name in ["alice", "bob"] {
+            let id = find_by_entity_id(&tx, name, None).unwrap()[0];
+            set_node_acl(
+                &mut tx,
+                id,
+                &NodeAcl {
+                    allow: vec![name.into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let principal = |delegate| {
+            AccessContext::Authenticated(brainwire_bolt::auth::Principal {
+                id: "reader".into(),
+                graphs: BTreeMap::from([("default".into(), GraphAccess::Write)]),
+                instance_admin: false,
+                node_visibility: None,
+                visibility_delegate: delegate,
+            })
+        };
+        let caller = |name: &str| ReadVisibility {
+            principals: vec![name.into()],
+            ..Default::default()
+        };
+        let ids = |engine: &mut DbEngine| {
+            engine
+                .run(
+                    None,
+                    "MATCH (c:Customer) RETURN c.entity_id",
+                    &PackValue::Map(vec![]),
+                )
+                .unwrap()
+                .rows
+        };
+
+        engine.set_access(principal(true)).unwrap();
+        engine
+            .begin_delegated(None, true, None, caller("bob"))
+            .unwrap();
+        assert_eq!(
+            ids(&mut engine),
+            vec![vec![PackValue::String("bob".into())]]
+        );
+        engine.commit().unwrap();
+        // A delegate's write is refused even with a write grant.
+        engine
+            .begin_delegated(None, false, None, caller("alice"))
+            .unwrap();
+        assert_eq!(
+            engine
+                .run(None, "MERGE (n:Customer {entity_id:'x'})", &empty)
+                .err()
+                .unwrap()
+                .code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        engine.abort().unwrap();
+        // No visibility sent: the transaction sees nothing.
+        engine.begin(None).unwrap();
+        assert!(ids(&mut engine).is_empty());
+        engine.commit().unwrap();
+        // A principal that is not a delegate cannot send one.
+        engine.set_access(principal(false)).unwrap();
+        assert_eq!(
+            engine
+                .begin_delegated(None, true, None, caller("bob"))
+                .unwrap_err()
+                .code,
+            "Neo.ClientError.Security.Forbidden"
+        );
     }
 
     #[test]

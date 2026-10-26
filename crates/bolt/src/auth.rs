@@ -33,6 +33,9 @@ pub struct Principal {
     pub instance_admin: bool,
     /// Trusted static service policy; absence preserves legacy graph-wide access.
     pub node_visibility: Option<ReadVisibility>,
+    /// A trusted reader service that sends each transaction's caller visibility in
+    /// `tx_metadata.brainwire_visibility`; without it the transaction sees nothing.
+    pub visibility_delegate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +77,8 @@ struct PolicyPrincipal {
     instance_admin: bool,
     #[serde(default, deserialize_with = "non_null_visibility")]
     node_visibility: Option<ReadVisibility>,
+    #[serde(default)]
+    visibility_delegate: bool,
 }
 
 fn non_null_visibility<'de, D: Deserializer<'de>>(
@@ -149,6 +154,10 @@ impl AuthPolicy {
                     .node_visibility
                     .as_ref()
                     .is_some_and(|policy| policy.validate().is_err())
+                // A delegate's visibility comes from each transaction: it may not also
+                // carry a static policy, nor administer the instance.
+                || (entry.visibility_delegate
+                    && (entry.node_visibility.is_some() || entry.instance_admin))
             {
                 return Err(AuthError::InvalidPolicy);
             }
@@ -159,6 +168,7 @@ impl AuthPolicy {
                     graphs: entry.graphs,
                     instance_admin: entry.instance_admin,
                     node_visibility: entry.node_visibility,
+                    visibility_delegate: entry.visibility_delegate,
                 },
                 digest,
             });
@@ -279,6 +289,27 @@ mod tests {
         };
         fields.push(("node_visibility".into(), PackValue::Map(vec![])));
         assert!(policy.authenticate(&PackValue::Map(fields)).is_err());
+    }
+
+    #[test]
+    fn a_visibility_delegate_carries_no_static_policy_nor_admin() {
+        let mut value: serde_json::Value = serde_json::from_str(&policy_json()).unwrap();
+        value["principals"][0]["visibility_delegate"] = serde_json::json!(true);
+        let policy = AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(
+            policy
+                .authenticate(&auth(TOKEN))
+                .unwrap()
+                .visibility_delegate
+        );
+        value["principals"][0]["node_visibility"] = serde_json::json!({});
+        assert!(AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+        value["principals"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("node_visibility");
+        value["principals"][0]["instance_admin"] = serde_json::json!(true);
+        assert!(AuthPolicy::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
     }
 
     #[test]
