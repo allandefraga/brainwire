@@ -589,3 +589,87 @@ fn malformed_stored_node_acl_stamp_fails_and_rolls_back_all_prior_metadata_chang
         vec!["alice"]
     );
 }
+
+fn acl_rows(rows: &[(&str, &str)]) -> BTreeMap<String, Value> {
+    let rows = rows
+        .iter()
+        .map(|(id, principal)| {
+            Value::Map(BTreeMap::from([
+                ("label".into(), Value::Str("Doc".into())),
+                ("entityId".into(), Value::Str((*id).into())),
+                (
+                    "allow".into(),
+                    Value::List(vec![Value::Str((*principal).into())]),
+                ),
+                (
+                    "connectorIds".into(),
+                    Value::List(vec![Value::Str("c1".into())]),
+                ),
+            ]))
+        })
+        .collect();
+    BTreeMap::from([("rows".into(), Value::List(rows))])
+}
+
+const BATCH: &str = "CALL db.setNodeAcls($rows) YIELD updated RETURN updated";
+
+#[test]
+fn batch_stamp_replaces_many_acls_in_one_call() {
+    let (_dir, db) = setup();
+    let output = execute(
+        &db,
+        BATCH,
+        &acl_rows(&[("hidden", "alice"), ("missing", "alice"), ("a", "bob")]),
+    )
+    .unwrap();
+    assert_eq!(output.rows, vec![vec![Out::Value(Value::Int(3))]]);
+    let visible = restricted(&db, "MATCH (n:Doc) RETURN n.entity_id").unwrap();
+    let mut ids: Vec<_> = visible
+        .rows
+        .into_iter()
+        .map(|row| format!("{:?}", row[0]))
+        .collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        ["b", "document", "hidden", "missing"]
+            .map(|id| format!("{:?}", Out::Value(Value::Str(id.into()))))
+    );
+    assert_eq!(
+        execute(&db, BATCH, &acl_rows(&[])).unwrap().rows,
+        vec![vec![Out::Value(Value::Int(0))]]
+    );
+}
+
+#[test]
+fn batch_stamp_is_atomic_privileged_and_validated() {
+    let (_dir, db) = setup();
+    // One missing node or invalid entry rolls back every stamp in the call.
+    for rows in [
+        acl_rows(&[("hidden", "alice"), ("nope", "alice")]),
+        acl_rows(&[("hidden", "alice"), ("a", "")]),
+    ] {
+        assert!(execute(&db, BATCH, &rows).is_err());
+    }
+    let visible = restricted(&db, "MATCH (n:Doc {entity_id:'hidden'}) RETURN count(*)").unwrap();
+    assert_eq!(visible.rows, vec![vec![Out::Value(Value::Int(0))]]);
+    for bad in [
+        BTreeMap::from([("rows".into(), Value::Str("x".into()))]),
+        BTreeMap::from([("rows".into(), Value::List(vec![Value::Int(1)]))]),
+    ] {
+        assert!(execute(&db, BATCH, &bad).is_err());
+    }
+    let mut tx = QueryTransaction::begin(&db).unwrap();
+    assert!(matches!(
+        tx.run_with_access(
+            BATCH,
+            &acl_rows(&[("hidden", "alice")]),
+            QueryAccess {
+                write: true,
+                instance_admin: false
+            }
+        ),
+        Err(ExecError::Forbidden(_))
+    ));
+    assert!(restricted(&db, BATCH).is_err());
+}

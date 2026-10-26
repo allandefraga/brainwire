@@ -15,7 +15,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
         "db.schema" => Ok(&["version", "nodes", "relationships", "indexesReady"]),
         "db.commitState" => Ok(&["sequence", "tracked", "scope"]),
         "db.checkpoint" => Ok(&["name", "path", "sequence", "tracked"]),
-        "db.setNodeAcl" => Ok(&["updated"]),
+        "db.setNodeAcl" | "db.setNodeAcls" => Ok(&["updated"]),
         "db.indexes" => Ok(&["label", "property", "state"]),
         "db.memory" => Ok(&[
             "poolLimitBytes",
@@ -179,6 +179,8 @@ pub(super) fn validate(
     }
     if name == "db.setNodeAcl" {
         acl_options(args, ctx)?;
+    } else if name == "db.setNodeAcls" {
+        acl_batch(args, ctx)?;
     } else if name == "db.checkpoint" {
         checkpoint_destination(args, ctx)?;
     } else if matches!(
@@ -250,6 +252,40 @@ fn acl_options(
     let Value::Map(map) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
         return Err(semantic("db.setNodeAcl options must be a map"));
     };
+    acl_map(map, ctx)
+}
+
+/// Most entries one `db.setNodeAcls` call accepts; larger loads use several calls.
+const MAX_ACL_BATCH: usize = 10_000;
+
+fn acl_batch(
+    args: &[Expr],
+    ctx: &Context<'_, '_>,
+) -> Result<Vec<(String, String, brainwire_core::acl::NodeAcl)>, ExecError> {
+    if args.len() != 1 {
+        return Err(semantic("db.setNodeAcls requires one list of options maps"));
+    }
+    let Value::List(entries) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+        return Err(semantic("db.setNodeAcls requires a list of options maps"));
+    };
+    if entries.len() > MAX_ACL_BATCH {
+        return Err(semantic(format!(
+            "db.setNodeAcls accepts at most {MAX_ACL_BATCH} entries"
+        )));
+    }
+    entries
+        .into_iter()
+        .map(|entry| match entry {
+            Value::Map(map) => acl_map(map, ctx),
+            _ => Err(semantic("db.setNodeAcls entries must be maps")),
+        })
+        .collect()
+}
+
+fn acl_map(
+    map: BTreeMap<String, Value>,
+    ctx: &Context<'_, '_>,
+) -> Result<(String, String, brainwire_core::acl::NodeAcl), ExecError> {
     if map.keys().any(|key| {
         ![
             "label",
@@ -301,6 +337,32 @@ fn acl_options(
     acl.validate()
         .map_err(|error| semantic(error.to_string()))?;
     Ok((label, entity_id, acl))
+}
+
+type AclStamp = (NodeId, brainwire_core::acl::NodeAcl);
+
+/// Resolve every entry before any stamp, so a missing node or invalid entry
+/// fails the whole call.
+pub(super) fn prepare_node_acls(
+    args: &[Expr],
+    yields: &[YieldItem],
+    ctx: &Context<'_, '_>,
+) -> Result<(Vec<AclStamp>, Vec<Bindings>), ExecError> {
+    let mut stamps = Vec::new();
+    for (label, entity_id, acl) in acl_batch(args, ctx)? {
+        let ty = ctx.catalog.node_type(&label).expect("validated label");
+        let id = brainwire_store::graph::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))?
+            .first()
+            .copied()
+            .ok_or_else(|| semantic(format!("node not found: {label} {entity_id:?}")))?;
+        stamps.push((id, acl));
+    }
+    let row: Bindings = yields
+        .iter()
+        .map(|item| (item.alias.clone(), int(stamps.len())))
+        .collect();
+    ctx.budget.bindings(&row)?;
+    Ok((stamps, vec![row]))
 }
 
 pub(super) fn prepare_node_acl(

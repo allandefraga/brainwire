@@ -207,8 +207,14 @@ class GraphClient:
     def upsert_node(self, label, entity_id, properties=None):
         return self.load_nodes(label, [{"entity_id": _entity(entity_id), **_properties({} if properties is None else properties)}])
 
-    def load_nodes(self, label, rows, *, on_batch=None):
+    def load_nodes(self, label, rows, *, on_batch=None, with_acl=False):
         """Consume an iterable of flat dicts containing entity_id and supplied properties.
+
+        ``with_acl=True`` requires an ``acl`` dict per row (``allow``, ``deny``,
+        ``connectorIds``, ``sourceTable``, ``sources``) and replaces each node's
+        private ACL metadata in the same transaction as its properties, with one
+        ``db.setNodeAcls`` call per batch. That needs graph-write and
+        instance-admin access on the server.
 
         Bounds count compact UTF-8 JSON input bytes, not Bolt wire bytes/RSS.
         For restartable immutable files use the durable-checkpoint importer instead.
@@ -228,6 +234,12 @@ class GraphClient:
                 query = f"UNWIND $rows AS row MERGE (n:{label} {{entity_id:row.entity_id}})"
                 query += _set("n", names, "row") + " RETURN count(*) AS processed"
                 written += tx.run(query, rows=records).single()["processed"]
+            if with_acl:
+                acls = [row["acl"] for row in items]
+                stamped = tx.run("CALL db.setNodeAcls($rows) YIELD updated RETURN updated",
+                                 rows=acls).single()["updated"]
+                if stamped != len(acls):
+                    raise ValueError("ACL batch was not fully acknowledged")
             return written
 
         def write_batch(items):
@@ -241,8 +253,12 @@ class GraphClient:
         for row in _input_rows(rows, self.batch_size):
             if not isinstance(row, dict) or "entity_id" not in row:
                 raise ValueError("each node row must be a dict containing entity_id")
-            props = _properties({key: value for key, value in row.items() if key != "entity_id"})
+            if ("acl" in row) != with_acl:
+                raise ValueError("rows carry an acl dict exactly when with_acl=True")
+            props = _properties({key: value for key, value in row.items() if key not in ("entity_id", "acl")})
             normalized = {"entity_id": _entity(row["entity_id"]), "properties": props}
+            if with_acl:
+                normalized["acl"] = _acl_options(label, row["entity_id"], row["acl"])
             encoded = json.dumps(normalized, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
             if len(encoded) > self.batch_bytes:
                 raise ValueError("one node exceeds the batch byte limit")
@@ -342,11 +358,14 @@ class GraphClient:
             total += self._write(lambda tx, items=batch: apply(tx, items))
         return total
 
-    def load_edges(self, source_label, relationship, target_label, rows, *, on_batch=None):
+    def load_edges(self, source_label, relationship, target_label, rows, *, on_batch=None,
+                   require_endpoints=True):
         """Merge endpoint/type-identified edges from bounded flat dictionaries.
 
         Each row contains ``source_id`` and ``target_id`` plus edge properties.
         Each batch is atomic; every endpoint must exist or that batch rolls back.
+        ``require_endpoints=False`` instead skips rows whose endpoint is missing;
+        the return value then counts only the edges actually merged.
         Omitted edge properties are preserved and supplied nulls remove properties.
         ``on_batch(batch_number, total_rows)`` runs after each successful commit.
         """
@@ -369,7 +388,7 @@ class GraphClient:
                 query = (f"UNWIND $rows AS row MATCH (a:{source_label} {{entity_id:row.source_id}}), "
                          f"(b:{target_label} {{entity_id:row.target_id}}) {edge} RETURN count(*) AS processed")
                 count = tx.run(query, rows=records).single()["processed"]
-                if count != len(records):
+                if require_endpoints and count != len(records):
                     raise ValueError("both endpoints of every edge row must already exist")
                 written += count
             return written

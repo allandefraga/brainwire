@@ -7,7 +7,7 @@ class Result:
         self.count = count
 
     def single(self):
-        return {"processed": self.count, "deleted": self.count}
+        return {"processed": self.count, "deleted": self.count, "updated": self.count}
 
 
 class QueryResult:
@@ -147,6 +147,30 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(progress, [(1, 2), (2, 3)])
         self.assertEqual(driver.write_count, 2)
 
+    def test_load_nodes_with_acl_stamps_each_batch_in_the_same_transaction(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets", batch_size=2)
+        rows = [{"entity_id": f"t{i}", "subject": "s",
+                 "acl": {"allow": ["user:a"], "connectorIds": ["c1"]}} for i in range(3)]
+        self.assertEqual(graph.load_nodes("Ticket", rows, with_acl=True), 3)
+        self.assertEqual(len(driver.committed), 2)
+        upsert, stamp = driver.committed[0]
+        self.assertNotIn("acl", upsert[1]["rows"][0])
+        self.assertIn("CALL db.setNodeAcls($rows)", stamp[0])
+        self.assertEqual(stamp[1]["rows"][0], {"label": "Ticket", "entityId": "t0",
+                                               "allow": ["user:a"], "connectorIds": ["c1"]})
+
+    def test_load_nodes_with_acl_rejects_missing_or_invalid_acl_before_writing(self):
+        driver = Driver()
+        graph = GraphClient(driver, "tickets")
+        for row in [{"entity_id": "a"}, {"entity_id": "a", "acl": {"owner": ["x"]}},
+                    {"entity_id": "a", "acl": ["user:a"]}]:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                graph.load_nodes("Ticket", [row], with_acl=True)
+        with self.assertRaises(ValueError):
+            graph.load_nodes("Ticket", [{"entity_id": "a", "acl": {"allow": []}}])
+        self.assertEqual(driver.write_count, 0)
+
     def test_load_nodes_consumes_arrow_record_batch_reader_incrementally(self):
         first = ArrowBatch([{"entity_id": "a"}, {"entity_id": "b"}, {"entity_id": "c"}])
         driver = Driver()
@@ -171,6 +195,14 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(table.max_chunksize, graph.batch_size)
         self.assertTrue(table_batch.converted)
         self.assertTrue(record_batch.converted)
+
+    def test_load_edges_can_skip_rows_with_missing_endpoints(self):
+        driver = Driver(counts=[1, 1])
+        graph = GraphClient(driver, "tickets")
+        rows = [{"source_id": "a", "target_id": "b"}, {"source_id": "a", "target_id": "missing"}]
+        with self.assertRaises(ValueError):
+            graph.load_edges("Person", "OPENED", "Ticket", rows)
+        self.assertEqual(graph.load_edges("Person", "OPENED", "Ticket", rows, require_endpoints=False), 1)
 
     def test_load_edges_does_not_report_a_batch_that_failed_to_commit(self):
         driver = Driver()

@@ -41,6 +41,31 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-26 (cont.) — batch ACL stamping and a multi-source lake workload
+
+- **Requested:** keep working; simulate how a platform client would insert data.
+- **Done:** read the shape of a real platform write path (mapped entity tables
+  with external IDs and ACL columns, FK edges, physical deletes, concurrent
+  sources, tenant-restricted readers) and reproduced it synthetically in
+  `crates/server/tests/lake_workload.py`. New `db.setNodeAcls($rows)` stamps up
+  to 10,000 node ACLs in one call, validating and resolving every entry before
+  writing. `GraphClient.load_nodes(..., with_acl=True)` merges properties and
+  stamps the batch's ACLs in one transaction; `load_edges(...,
+  require_endpoints=False)` skips edges with missing endpoints. DuckLake sync
+  maps `acl_*` columns through an `acl` block and has
+  `--allow-missing-endpoints`. Review fixes: JSON-lines spool for prune keys
+  (empty strings stay distinct from NULL), reserved change-feed column names,
+  a failed lease release no longer hides the original error, no cursor
+  regression, spawn-based worker pool, no DuckDB progress bar on stdout.
+- **Verified:** 2 new Rust ACL tests and 4 new Python tests written first.
+  Workload at scale 10,000 (debug, container): 100K nodes with ACL in 4.7 s,
+  90K edges in 2.0 s, 3 change cycles of ~12K node and ~10K edge changes in
+  ~2.5 s each, 420 restricted reads during writes with 0 errors and 0
+  cross-tenant rows, graph equal to the lake, per-tenant visibility exact,
+  `db check` ok. Python example suite 74 tests ok.
+- **Next step:** release-build numbers at 1M rows; stream prune's key listing.
+- **Blockers:** none. No push or release requested.
+
 ### 2026-10-26 — parallel writers, DuckLake sync, relationship property reads
 
 - **Requested:** about an hour making the write path ready for an external

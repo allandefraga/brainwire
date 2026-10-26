@@ -78,6 +78,23 @@ ontology must declare the label/type and properties, plus a cursor label:
 {"label": "ImportCheckpoint", "properties": ["snapshot", "lease"], "indexed_fields": []}
 ```
 
+Rows that carry access control map their columns to the node's private ACL
+with an `acl` block (node mappings only). The values are stamped with
+`db.setNodeAcls` in the same transaction as the properties, so a node never
+commits without its ACL; this needs a writer principal with graph-write and
+instance-admin grants and no `node_visibility` policy ([node ACL](node-acl.md)):
+
+```json
+{"table": "clean.people", "label": "Person", "id": "external_id",
+ "properties": ["name", "email", "company_id", "updated_at"],
+ "acl": {"allow": "acl_allow", "connectorIds": "acl_connector_ids",
+         "sourceTable": "acl_source_table"}}
+```
+
+The `acl` options are `allow`, `deny`, `connectorIds`, `sourceTable` and
+`sources`; list options take `VARCHAR[]` columns, and a `NULL` leaves that
+option empty. The ACL is replaced on every upsert of the row.
+
 Before the first run, create the graph with that ontology and start the
 server; the ontology changes offline, so declare every mapped property up
 front:
@@ -151,6 +168,12 @@ a synchronous commit per row; see the measurement below.
   graph. If a later snapshot brings that key back while its edge rows did not
   change, the incremental edge run does not see them; run the edge table with
   `--full --prune` after node deletions you expect to be undone.
+- **Missing endpoints.** An edge row whose source or target node does not
+  exist fails its batch, the run stops and the cursor stays put, so a dangling
+  foreign key in the lake blocks that table until it is fixed. Pass
+  `--allow-missing-endpoints` to skip and count such rows (`skipped` in the
+  summary) instead; a skipped edge is not retried when its node arrives later
+  unless its row changes again, so follow up with `--full --prune`.
 - **Reserved columns.** `snapshot_id`, `rowid`, `change_type` and
   `brainwire_rank` cannot be mapped; they come from the change feed.
 - **One run per source.** The lease enforces it. Different tables or graphs run
@@ -198,6 +221,30 @@ matched the lake at the target snapshot, the lease was enforced and
 directly in the graph; `--full --prune` removed exactly those and the graph
 matched the lake again. `db check` was clean.
 
+**Multi-source workload** (`lake_workload.py`, scale 10,000). The lake has a
+`clean` schema with 10K companies, 30K people and 60K tickets, every row
+carrying tenant ACL columns, plus two foreign-key edge types (person
+`WORKS_AT` company, person `OPENED` ticket). The server is protected: a loader
+principal with write and instance-admin grants, and one restricted reader per
+tenant. The three node tables sync at the same time, then the two edge types,
+each with 4 worker processes (12 processes writing at once):
+
+| Step | Changes | Seconds |
+| --- | --- | --- |
+| First load, 3 node tables with ACL | 100,000 upserts | 4.7 |
+| First load, 2 edge types | 90,000 upserts | 2.0 |
+| Each of 3 change cycles, nodes | ~10,000 upserts, ~2,000 deletes | ~1.5 |
+| Each of 3 change cycles, edges | ~9,000 upserts, ~900 deletes | ~1.0 |
+
+A cycle renames companies, moves 3% of people to another company, shares 1%
+of one tenant's people with the other tenant (ACL change only), closes 10% of
+open tickets, deletes 1% of people with their tickets and 2% of other tickets,
+and inserts new people and tickets. During the cycles the two tenant readers
+ran 420 queries over traversals and indexed filters: no errors, no row from
+the other tenant (p50 30 ms, p95 88 ms). Afterwards every node, property and
+edge matched the lake, each tenant saw exactly the people its group is granted
+(including the shared ones), and `db check` was clean.
+
 ## Reproduce
 
 ```sh
@@ -205,6 +252,7 @@ uv run --no-project --python 3.12 --with duckdb==1.5.5 \
   python -m unittest examples.python.test_ducklake_sync -v
 python3 crates/server/tests/ducklake_sync.py --binary target/debug/brainwire --rows 100000
 python3 crates/server/tests/concurrent_writers.py --binary target/debug/brainwire
+python3 crates/server/tests/lake_workload.py --binary target/debug/brainwire --scale 10000
 ```
 
 The acceptance scripts create only temporary synthetic data, start their own

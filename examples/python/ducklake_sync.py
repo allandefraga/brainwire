@@ -25,6 +25,7 @@ import contextlib
 import datetime
 import decimal
 import json
+import multiprocessing
 import os
 import re
 import sys
@@ -35,6 +36,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 NAME = r"[A-Za-z_][A-Za-z0-9_]{0,127}"
+ACL_OPTIONS = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
 RESERVED_COLUMNS = {"snapshot_id", "rowid", "change_type", "brainwire_rank"}  # added by the change feed
 PRESENT = "change_type IN ('insert', 'update_postimage')"
 
@@ -52,6 +54,7 @@ class Mapping:
     keys: tuple          # source columns forming the identity, in output order
     key_names: tuple     # graph names for those columns (entity_id or source_id/target_id)
     properties: tuple    # (graph property, source column) pairs
+    acl: tuple = ()      # (db.setNodeAcl option, source column) pairs; nodes only
     label: str = None
     type: str = None
     source_label: str = None
@@ -65,6 +68,11 @@ class Mapping:
         props = value.get("properties", [])
         columns = [value.get("id")] + [value.get(end, {}).get("column") for end in ("source", "target")]
         columns += list(props.values()) if isinstance(props, dict) else list(props)
+        acl = value.get("acl", {})
+        if not isinstance(acl, dict) or not set(acl) <= ACL_OPTIONS:
+            raise ValueError(f"acl maps options {sorted(ACL_OPTIONS)} to columns")
+        acl = tuple((option, _name(column, "acl column")) for option, column in sorted(acl.items()))
+        columns += [column for _, column in acl]
         if RESERVED_COLUMNS.intersection(columns):
             raise ValueError(f"columns named {sorted(RESERVED_COLUMNS)} clash with the DuckLake change feed")
         pairs = tuple(props.items()) if isinstance(props, dict) else tuple((p, p) for p in props)
@@ -76,8 +84,10 @@ class Mapping:
         if ("label" in value) == ("type" in value):
             raise ValueError("a mapping has either label (nodes) or type (edges)")
         if "label" in value:
-            return cls(schema, table, (_name(value["id"], "id column"),), ("entity_id",), pairs,
+            return cls(schema, table, (_name(value["id"], "id column"),), ("entity_id",), pairs, acl,
                        label=_name(value["label"], "label"))
+        if acl:
+            raise ValueError("acl applies to node mappings only")
         source, target = value["source"], value["target"]
         return cls(schema, table, (_name(source["column"], "source column"), _name(target["column"], "target column")),
                    ("source_id", "target_id"), pairs, type=_name(value["type"], "type"),
@@ -85,7 +95,7 @@ class Mapping:
 
     def columns(self):
         keys = [f'CAST("{column}" AS VARCHAR)' for column in self.keys]
-        return ", ".join(keys + [f'"{column}"' for _, column in self.properties])
+        return ", ".join(keys + [f'"{column}"' for _, column in self.properties + self.acl])
 
     def key_expr(self):
         return ", ".join(f'"{column}"' for column in self.keys)
@@ -101,6 +111,7 @@ def lake(target, *, load=("ducklake", "sqlite"), init_sql=None):
     import duckdb
     con = duckdb.connect()
     try:
+        con.execute("SET enable_progress_bar = false")
         for extension in load:
             con.execute(f"LOAD {_name(extension, 'extension')}")
         if init_sql:
@@ -148,7 +159,11 @@ def read_partition(con, mapping, start, end, workers, worker, fetch=1000):
                 yield key, None
                 continue
             row = dict(zip(mapping.key_names, key))
-            row.update((prop, plain(value)) for (prop, _), value in zip(mapping.properties, values[width:]))
+            values = values[width:]
+            row.update((prop, plain(value)) for (prop, _), value in zip(mapping.properties, values))
+            if mapping.acl:
+                acl = zip(mapping.acl, values[len(mapping.properties):])
+                row["acl"] = {option: plain(value) for (option, _), value in acl if value is not None}
             yield key, row
 
 
@@ -213,13 +228,13 @@ def _driver(uri):
     return GraphDatabase.driver(uri, auth=auth_from_env())
 
 
-def _apply(client, mapping, upserts, deletes):
+def _apply(client, mapping, upserts, deletes, require_endpoints=True):
     if mapping.label:
-        return (client.load_nodes(mapping.label, upserts) if upserts else 0,
+        return (client.load_nodes(mapping.label, upserts, with_acl=bool(mapping.acl)) if upserts else 0,
                 client.delete_nodes(mapping.label, [key for (key,) in deletes]) if deletes else 0)
     args = (mapping.source_label, mapping.type, mapping.target_label)
     deletes = [{"source_id": s, "target_id": t} for s, t in deletes]
-    return (client.load_edges(*args, upserts) if upserts else 0,
+    return (client.load_edges(*args, upserts, require_endpoints=require_endpoints) if upserts else 0,
             client.delete_edges(*args, deletes) if deletes else 0)
 
 
@@ -227,17 +242,20 @@ def sync_partition(job):
     """Worker entry point: stream one hash partition into the graph."""
     from examples.python.client import GraphClient
     mapping, start, end = job["mapping"], job["start"], job["end"]
-    upserted = deleted = 0
+    upserted = deleted = skipped = 0
+    strict = job.get("require_endpoints", True)
     with lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con, _driver(job["uri"]) as driver:
         client = GraphClient(driver, job["database"], batch_size=job["batch_size"])
         upserts, deletes = [], []
         for key, row in read_partition(con, mapping, start, end, job["workers"], job["worker"]):
             (deletes if row is None else upserts).append(key if row is None else row)
             if len(upserts) + len(deletes) >= job["batch_size"] * 8:
-                u, d = _apply(client, mapping, upserts, deletes)
-                upserted, deleted, upserts, deletes = upserted + u, deleted + d, [], []
-        u, d = _apply(client, mapping, upserts, deletes)
-    return {"worker": job["worker"], "upserted": upserted + u, "deleted": deleted + d}
+                u, d = _apply(client, mapping, upserts, deletes, strict)
+                upserted, deleted, skipped = upserted + u, deleted + d, skipped + len(upserts) - u
+                upserts, deletes = [], []
+        u, d = _apply(client, mapping, upserts, deletes, strict)
+    return {"worker": job["worker"], "upserted": upserted + u, "deleted": deleted + d,
+            "skipped": skipped + len(upserts) - u}
 
 
 def _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size):
@@ -283,13 +301,14 @@ def release(session, source_id, run_id, start, end=None):
 
 def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_size=500,
          to_snapshot=None, full=False, prune=False, break_lease=False, load=("ducklake", "sqlite"),
-         init_sql=None):
+         init_sql=None, require_endpoints=True):
     """Synchronize one mapped table; return a summary dict.
 
     ``prune`` (only with ``full``) then deletes graph keys of this label/type
     that the source snapshot no longer has, for a reconciliation when change
     history is unavailable. It lists every graph key in one query, bounded by
-    the server's ``memory.query``.
+    the server's ``memory.query``. ``require_endpoints=False`` skips (and
+    counts) edge rows whose endpoint node is absent instead of failing the run.
     """
     if type(workers) is not int or not 1 <= workers <= 64:
         raise ValueError("workers must be 1..64")
@@ -311,8 +330,10 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
                 validate(con, mapping, start, end)
             jobs = [{"mapping": mapping, "start": start, "end": end, "workers": workers, "worker": k,
                      "lake": lake_target, "load": tuple(load), "init_sql": init_sql, "uri": uri,
-                     "database": database, "batch_size": batch_size} for k in range(workers)]
-            with ProcessPoolExecutor(workers) as pool:
+                     "database": database, "batch_size": batch_size,
+                     "require_endpoints": require_endpoints} for k in range(workers)]
+            # spawn, not fork: callers may run several syncs from threads with live drivers.
+            with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn")) as pool:
                 parts = list(pool.map(sync_partition, jobs))
             pruned = _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size) if prune else 0
         except BaseException as error:
@@ -326,7 +347,8 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
             release(s, source_id, run_id, stored, end)
     return {"source_id": source_id, "from": start, "to": end, "mode": "full" if start is None else "changes",
             "workers": workers, "upserted": sum(p["upserted"] for p in parts),
-            "deleted": sum(p["deleted"] for p in parts), "pruned": pruned, "seconds": round(time.monotonic() - started, 3)}
+            "deleted": sum(p["deleted"] for p in parts), "skipped": sum(p["skipped"] for p in parts),
+            "pruned": pruned, "seconds": round(time.monotonic() - started, 3)}
 
 
 def main(argv=None):
@@ -341,6 +363,8 @@ def main(argv=None):
     parser.add_argument("--to-snapshot", type=int, help="default: latest source snapshot")
     parser.add_argument("--full", action="store_true", help="reload the whole table (does not delete absent keys)")
     parser.add_argument("--prune", action="store_true", help="with --full: delete graph keys absent from the source")
+    parser.add_argument("--allow-missing-endpoints", action="store_true",
+                        help="skip and count edge rows whose endpoint node does not exist")
     parser.add_argument("--break-lease", action="store_true", help="take over a lease left by a dead run")
     parser.add_argument("--load", default="ducklake,sqlite", help="DuckDB extensions to LOAD (already installed)")
     parser.add_argument("--init-sql", help="SQL file run before ATTACH, e.g. CREATE SECRET for object storage")
@@ -350,7 +374,7 @@ def main(argv=None):
     init_sql = open(args.init_sql).read() if args.init_sql else None
     summary = sync(mapping, lake_target=args.lake, uri=args.uri, database=args.database,
                    source_id=args.source_id, workers=args.workers, batch_size=args.batch_size,
-                   to_snapshot=args.to_snapshot, full=args.full, prune=args.prune, break_lease=args.break_lease,
+                   to_snapshot=args.to_snapshot, full=args.full, prune=args.prune, require_endpoints=not args.allow_missing_endpoints, break_lease=args.break_lease,
                    load=tuple(filter(None, args.load.split(","))), init_sql=init_sql)
     print(json.dumps(summary))
     return 0

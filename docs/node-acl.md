@@ -78,7 +78,18 @@ YIELD updated RETURN updated
 ```
 
 It replaces complete metadata; omitted fields become empty. Validation precedes
-mutation, and failure discards the transaction. Bolt `mode:'r'` transactions deny
+mutation, and failure discards the transaction.
+
+Bulk loads stamp a whole batch in one call with `db.setNodeAcls`, which takes a
+list of the same option maps (at most 10,000) and yields the number stamped.
+Every entry is validated and every node resolved before anything is written, so
+one missing node or invalid entry fails the whole call:
+
+```cypher
+CALL db.setNodeAcls($rows) YIELD updated RETURN updated
+```
+
+It has the same privilege requirements as `db.setNodeAcl`. Bolt `mode:'r'` transactions deny
 mutations even for an unrestricted writer/admin, including this procedure.
 Legacy protocol engines without READ-mode support fail closed.
 

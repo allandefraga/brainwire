@@ -107,6 +107,19 @@ class DuckLakeSyncTest(unittest.TestCase):
         })
         self.assertEqual(deletes, {("b", "c")})
 
+    def test_acl_columns_become_a_private_acl_dict(self):
+        self.sql("CREATE TABLE w.docs(id VARCHAR, title VARCHAR, acl_allow VARCHAR[], acl_connector_ids VARCHAR[], "
+                 "acl_source_table VARCHAR)")
+        self.sql("INSERT INTO w.docs VALUES ('d1','One',['group:a'],['c1'],'clean/docs'), ('d2','Two',NULL,['c1'],NULL)")
+        docs = Mapping.from_json({"table": "main.docs", "label": "Doc", "id": "id", "properties": ["title"],
+                                  "acl": {"allow": "acl_allow", "connectorIds": "acl_connector_ids",
+                                          "sourceTable": "acl_source_table"}})
+        with lake(self.target) as con:
+            upserts, _ = collect(con, docs, None, self.latest())
+        self.assertEqual(upserts[("d1",)], {"entity_id": "d1", "title": "One", "acl": {
+            "allow": ["group:a"], "connectorIds": ["c1"], "sourceTable": "clean/docs"}})
+        self.assertEqual(upserts[("d2",)]["acl"], {"connectorIds": ["c1"]})
+
     def test_validate_rejects_duplicate_null_keys_and_a_cursor_ahead(self):
         with lake(self.target) as con:
             validate(con, NODES, None, self.base)
@@ -132,7 +145,7 @@ class DuckLakeSyncTest(unittest.TestCase):
 
 class Recorder:
     def __getattr__(self, name):
-        return lambda *args: setattr(self, name, args) or len(args[-1])
+        return lambda *args, **_: setattr(self, name, args) or len(args[-1])
 
 
 class ApplyTest(unittest.TestCase):
@@ -160,7 +173,10 @@ class PlainValueTest(unittest.TestCase):
                     {"table": "main.x", "label": "A b", "id": "id"},
                     {"table": "main.x", "label": "A", "id": "id", "type": "R"},
                     {"table": "main.x", "label": "A", "id": "id", "properties": ["change_type"]},
-                    {"table": "main.x", "label": "A", "id": "rowid"}]:
+                    {"table": "main.x", "label": "A", "id": "rowid"},
+                    {"table": "main.x", "label": "A", "id": "id", "acl": {"owner": "o"}},
+                    {"table": "main.x", "type": "R", "source": {"label": "A", "column": "s"},
+                     "target": {"label": "A", "column": "t"}, "acl": {"allow": "a"}}]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 Mapping.from_json(bad)
 

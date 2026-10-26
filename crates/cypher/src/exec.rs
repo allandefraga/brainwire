@@ -168,7 +168,7 @@ impl QueryAccess {
                     "db.schema" | "db.indexes" | "db.commitState" | "graph.project"
                     | "graph.degree" | "graph.reachable" | "graph.shortestPath"
                     | "graph.pagerank" | "graph.wcc" | "graph.scc" | "knowledge.rank" => {}
-                    "db.setNodeAcl" => {
+                    "db.setNodeAcl" | "db.setNodeAcls" => {
                         if !self.write || !self.instance_admin {
                             return Err(ExecError::Forbidden("node ACL updates require graph write and instance administrator access"));
                         }
@@ -576,7 +576,7 @@ fn execute_clauses(
                     | Clause::Set(_)
                     | Clause::DetachDelete(_)
                     | Clause::Delete(_)
-            ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl")
+            ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls")
         })
     {
         return Err(ExecError::Forbidden(
@@ -639,6 +639,16 @@ fn execute_clauses(
                     let (id, acl, prepared_rows) =
                         procedures::prepare_node_acl(args, yields, &ctx)?;
                     brainwire_store::graph::set_node_acl(txn, id, &acl)?;
+                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
+                    overlay_bytes = txn.estimated_memory_bytes();
+                    wrote = true;
+                    rows = prepared_rows;
+                } else if name == "db.setNodeAcls" {
+                    let (stamps, prepared_rows) =
+                        procedures::prepare_node_acls(args, yields, &ctx)?;
+                    for (id, acl) in &stamps {
+                        brainwire_store::graph::set_node_acl(txn, *id, acl)?;
+                    }
                     budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
                     overlay_bytes = txn.estimated_memory_bytes();
                     wrote = true;

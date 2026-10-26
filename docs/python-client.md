@@ -169,7 +169,8 @@ not a published/installable SDK.
 `load_nodes` and `load_edges` do not maintain a persistent source cursor. For
 replay after a lost acknowledgement, use the
 [durable snapshot importer](python-ingestion.md) or
-[version-pinned incremental DuckLake importer](ducklake-incremental.md). To mirror any DuckLake table with
+[version-pinned incremental DuckLake importer](ducklake-incremental.md). `load_edges(..., require_endpoints=False)` skips rows
+whose endpoint node is missing instead of rolling the batch back. To mirror any DuckLake table with
 parallel workers and incremental `table_changes`, see
 [parallel writes and DuckLake sync](parallel-ingestion.md).
 Those batch helpers are idempotent only for the same identities and values; they
@@ -221,14 +222,24 @@ graph.upsert_node_with_acl("Ticket", "t-42", {"status":"open"}, {
 }, request_id="ticket-t42-source-revision-8")
 ```
 
+For bulk loads, pass `with_acl=True` to `load_nodes` and give each row an
+`acl` dict. Each batch merges its properties and stamps all its ACLs with one
+`db.setNodeAcls` call in the same transaction:
+
+```python
+graph.load_nodes("Ticket", [
+    {"entity_id": "t-42", "status": "open",
+     "acl": {"allow": ["group:tenant-a"], "connectorIds": ["crm-a"]}},
+], with_acl=True)
+```
+
 The provided request seed uses the explicit quorum transaction path. Omit it for
 standalone managed transactions. Node mutation and ACL replacement commit together;
 ACL authorization/validation failure rolls both back. This API requires an
 unrestricted trusted principal with graph-write and instance-administration grants.
 It does not infer permissions from ordinary properties or make an untrusted caller
-an administrator. The snapshot/diff importer still does not automatically supply
-or stamp authoritative ACLs: real external application mapping and importer integration remain
-open. See [node ACL](node-acl.md).
+an administrator. The [DuckLake sync](parallel-ingestion.md) stamps ACLs from
+mapped `acl_*` columns; the older snapshot/diff importer does not stamp ACLs. See [node ACL](node-acl.md).
 
 ## Explicit quorum transaction identity
 
