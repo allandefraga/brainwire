@@ -308,6 +308,22 @@ the other tenant (p50 30 ms, p95 88 ms). Afterwards every node, property and
 edge matched the lake, each tenant saw exactly the people its group is granted
 (including the shared ones), and `db check` was clean.
 
+**Same workload at scale 100,000, release build** (one local run in a Linux
+container with 10 CPUs, 4 processes per table, 2 cycles):
+
+| Step | Changes | Seconds |
+| --- | --- | --- |
+| First load, 3 node tables with ACL | 1,000,000 upserts | 12.9 |
+| First load, 2 edge types | 900,000 upserts | 6.1 |
+| Change cycle, nodes | ~100,000 upserts, ~21,000 deletes | 4.4–4.7 |
+| Change cycle, edges | ~95,000 upserts, ~9,000 deletes | 1.9–2.1 |
+
+Tenant readers ran 2,464 queries during the cycles with no errors and no
+foreign rows (p50 7 ms, p95 30 ms). The final graph (314K people, 604K
+tickets, 918K edges) matched the lake, per-tenant visibility was exact and
+`db check` was clean. The lake was a local SQLite-catalog DuckLake; a network
+catalog or object store adds its own read time.
+
 ## Reproduce
 
 ```sh

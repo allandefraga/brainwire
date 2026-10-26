@@ -68,7 +68,12 @@ No line of code before the end of phase 2.
   written): graph equal to the lake, 441 restricted reads, 0 leaks.
   `create_service_tokens --acl-writer` makes the writer an instance admin for
   ACL stamping; `docs/parallel-ingestion.md` has a step-by-step test run.
-- **Next step:** release-build numbers at 1M rows; stream prune's key listing.
+  Release build, scale 100,000: 1M nodes with ACL in 12.9 s, 900K edges in
+  6.1 s, change cycles of ~120K node and ~100K edge changes in ~4.5 s and
+  ~2 s, 2,464 restricted reads (p95 30 ms) with 0 errors and 0 leaks, graph
+  equal to the lake, `db check` ok.
+- **Next step:** release the new write path (needs Allan's go-ahead) so a test
+  agent can use the published image; then stream prune's key listing.
 - **Blockers:** none. No push or release requested.
 
 ### 2026-10-26 — parallel writers, DuckLake sync, relationship property reads
