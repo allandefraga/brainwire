@@ -388,7 +388,27 @@ impl<'a> Parser<'a> {
             self.advance();
             items.push(self.parse_return_item()?);
         }
-        self.reject_order_or_skip()?;
+        let mut order = Vec::new();
+        if self.check_keyword("ORDER") {
+            self.advance();
+            if !self.check_keyword("BY") {
+                return Err(self.error_here("expected BY after ORDER"));
+            }
+            self.advance();
+            loop {
+                order.push(self.parse_sort_item(&items)?);
+                if !self.check(&Tok::Comma) {
+                    break;
+                }
+                self.advance();
+            }
+        }
+        let skip = if self.check_keyword("SKIP") {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let limit = if self.check_keyword("LIMIT") {
             self.advance();
             Some(self.parse_expr()?)
@@ -396,15 +416,48 @@ impl<'a> Parser<'a> {
             None
         };
         self.reject_order_or_skip()?;
-        Ok(Clause::Return { items, limit })
+        Ok(Clause::Return {
+            items,
+            order,
+            skip,
+            limit,
+        })
+    }
+
+    /// One `ORDER BY` key. It names a returned column, by alias or by the item's own
+    /// text: sorting happens on the projected rows.
+    fn parse_sort_item(&mut self, items: &[ReturnItem]) -> Result<(usize, bool), ParseError> {
+        let start = self.current_span().0;
+        let expr = self.parse_expr()?;
+        let text = self.src[start..self.prev_span_end()].trim();
+        let column = items.iter().position(|item| {
+            matches!(&expr, Expr::Var(name) if item.alias.as_deref() == Some(name.as_str()))
+                || (item.alias.is_none() && item.text == text)
+        });
+        let Some(column) = column else {
+            return Err(self.error_at(
+                start,
+                "not supported yet: ORDER BY an expression that is not returned",
+            ));
+        };
+        let descending = if self.check_keyword("DESC") || self.check_keyword("DESCENDING") {
+            self.advance();
+            true
+        } else {
+            if self.check_keyword("ASC") || self.check_keyword("ASCENDING") {
+                self.advance();
+            }
+            false
+        };
+        Ok((column, descending))
     }
 
     fn reject_order_or_skip(&self) -> Result<(), ParseError> {
         if self.check_keyword("ORDER") {
-            return Err(self.error_here("not supported yet: ORDER BY"));
+            return Err(self.error_here("not supported yet: ORDER BY after SKIP or LIMIT"));
         }
         if self.check_keyword("SKIP") {
-            return Err(self.error_here("not supported yet: SKIP"));
+            return Err(self.error_here("not supported yet: SKIP after LIMIT"));
         }
         Ok(())
     }
@@ -612,6 +665,33 @@ impl<'a> Parser<'a> {
 
     fn parse_cmp(&mut self) -> Result<ParsedExpr, ParseError> {
         let left = self.parse_primary()?;
+        if self.check_keyword("IS") {
+            let offset = self.current_span().0;
+            self.advance();
+            let negated = self.check_keyword("NOT");
+            if negated {
+                self.advance();
+            }
+            if !self.check_keyword("NULL") {
+                return Err(self.error_here("expected NULL after IS"));
+            }
+            self.advance();
+            let depth = self.checked_depth(left.depth, offset)?;
+            return Ok(ParsedExpr {
+                expr: Expr::IsNull(Box::new(left.expr), negated),
+                depth,
+            });
+        }
+        if self.check_keyword("IN") {
+            let offset = self.current_span().0;
+            self.advance();
+            let right = self.parse_primary()?;
+            let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
+            return Ok(ParsedExpr {
+                expr: Expr::In(Box::new(left.expr), Box::new(right.expr)),
+                depth,
+            });
+        }
         let op = match self.peek() {
             Tok::Eq => CmpOp::Eq,
             Tok::Ne => CmpOp::Ne,
@@ -895,7 +975,7 @@ mod tests {
         assert_eq!(rel.direction, Direction::Out);
         assert_eq!(end.label.as_deref(), Some("Company"));
         assert!(matches!(where_, Some(Expr::And(_, _))));
-        let Clause::Return { items, limit } = &q.clauses[1] else {
+        let Clause::Return { items, limit, .. } = &q.clauses[1] else {
             panic!()
         };
         assert_eq!(items[0].text, "c.name");
@@ -1004,8 +1084,17 @@ mod tests {
     }
 
     #[test]
-    fn order_by_is_unsupported() {
-        let e = parse("RETURN 1 ORDER BY 1").unwrap_err();
+    fn order_by_names_a_returned_column() {
+        let q = parse("MATCH (c:Customer) RETURN c.name AS n, c.entity_id ORDER BY n DESC, c.entity_id SKIP 2 LIMIT 3").unwrap();
+        let Clause::Return {
+            order, skip, limit, ..
+        } = &q.clauses[1]
+        else {
+            panic!()
+        };
+        assert_eq!(order, &vec![(0, true), (1, false)]);
+        assert!(skip.is_some() && limit.is_some());
+        let e = parse("MATCH (c:Customer) RETURN c.name ORDER BY c.segment").unwrap_err();
         assert!(
             e.message.starts_with("not supported yet: ORDER BY"),
             "{}",
@@ -1014,8 +1103,8 @@ mod tests {
     }
 
     #[test]
-    fn skip_is_unsupported() {
-        let e = parse("RETURN 1 SKIP 1").unwrap_err();
+    fn skip_after_limit_is_unsupported() {
+        let e = parse("RETURN 1 LIMIT 1 SKIP 1").unwrap_err();
         assert!(
             e.message.starts_with("not supported yet: SKIP"),
             "{}",

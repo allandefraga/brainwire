@@ -814,8 +814,13 @@ fn execute_clauses(
                     wrote = true;
                 }
             }
-            Clause::Return { items, limit } => {
-                output = eval::project(&ctx, &rows, items, limit.as_ref())?;
+            Clause::Return {
+                items,
+                order,
+                skip,
+                limit,
+            } => {
+                output = eval::project(&ctx, &rows, items, order, skip.as_ref(), limit.as_ref())?;
             }
         }
     }

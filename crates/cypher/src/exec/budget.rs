@@ -196,17 +196,23 @@ impl<'a> Budget<'a> {
             })
     }
     pub fn output(&self, row: &[Out]) -> Result<(), ExecError> {
-        self.retain(
-            size_of::<Vec<Out>>()
-                + row.iter().fold(0usize, |sum, out| {
-                    sum.saturating_add(match out {
-                        Out::Value(v) => size_of::<Out>().saturating_add(value_bytes(v)),
-                        Out::Node(n) => size_of::<Out>()
-                            .saturating_add(n.label.len())
-                            .saturating_add(map_bytes(&n.props)),
-                    })
-                }),
-        )
+        self.retain(Self::output_bytes(row))
+    }
+    /// Give back what [`Self::output`] retained for a row dropped before the result.
+    pub fn release_output(&self, row: &[Out]) {
+        let bytes = Self::output_bytes(row);
+        self.retained.set(self.retained.get().saturating_sub(bytes));
+    }
+    fn output_bytes(row: &[Out]) -> usize {
+        size_of::<Vec<Out>>()
+            + row.iter().fold(0usize, |sum, out| {
+                sum.saturating_add(match out {
+                    Out::Value(v) => size_of::<Out>().saturating_add(value_bytes(v)),
+                    Out::Node(n) => size_of::<Out>()
+                        .saturating_add(n.label.len())
+                        .saturating_add(map_bytes(&n.props)),
+                })
+            })
     }
 }
 pub(super) struct Scope<'a> {

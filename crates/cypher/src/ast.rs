@@ -32,6 +32,10 @@ pub enum Clause {
     },
     Return {
         items: Vec<ReturnItem>,
+        /// `ORDER BY` keys: the index of the returned column each names, and whether
+        /// it sorts descending.
+        order: Vec<(usize, bool)>,
+        skip: Option<Expr>,
         limit: Option<Expr>,
     },
 }
@@ -99,6 +103,10 @@ pub enum Expr {
     List(Vec<Expr>),
     Map(Vec<(String, Expr)>),
     Cmp(Box<Expr>, CmpOp, Box<Expr>),
+    /// `expr IS NULL` (`false`) or `expr IS NOT NULL` (`true`); never null itself.
+    IsNull(Box<Expr>, bool),
+    /// `value IN list`: three-valued list membership.
+    In(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),

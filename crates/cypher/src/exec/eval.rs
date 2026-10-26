@@ -138,6 +138,11 @@ pub(super) fn eval(
             }));
         }
         Expr::Not(a) => return Ok(truth(boolean(eval(a, row, ctx)?)?.map(|v| !v))),
+        Expr::IsNull(a, negated) => {
+            let null = eval(a, row, ctx)? == Binding::Value(Value::Null);
+            return Ok(truth(Some(null != *negated)));
+        }
+        Expr::In(a, b) => return membership(eval(a, row, ctx)?, eval(b, row, ctx)?),
         Expr::Count(_) | Expr::CountStar => {
             return Err(ExecError::Unsupported(
                 "aggregate is only supported as a top-level RETURN item".into(),
@@ -171,7 +176,7 @@ fn int_float(i: i64, f: f64) -> Option<Ordering> {
         }
     }))
 }
-fn order(a: &Binding, b: &Binding) -> Option<Ordering> {
+pub(super) fn order(a: &Binding, b: &Binding) -> Option<Ordering> {
     match (a, b) {
         (Binding::Node(a), Binding::Node(b)) => Some(a.cmp(b)),
         (Binding::Relationship(a), Binding::Relationship(b)) => Some(a.cmp(b)),
@@ -186,6 +191,24 @@ fn order(a: &Binding, b: &Binding) -> Option<Ordering> {
         },
         _ => None,
     }
+}
+/// Cypher list membership: true on an equal element; otherwise null when the value
+/// or any element is null (the answer is unknown), else false. A null list is null.
+fn membership(value: Binding, list: Binding) -> Result<Binding, ExecError> {
+    let items = match list {
+        Binding::Value(Value::Null) => return Ok(truth(None)),
+        Binding::Value(Value::List(items)) => items,
+        _ => return Err(ExecError::Semantic("IN expects a list or null".into())),
+    };
+    let mut unknown = false;
+    for item in items {
+        match compare(value.clone(), &CmpOp::Eq, Binding::Value(item)) {
+            Binding::Value(Value::Bool(true)) => return Ok(truth(Some(true))),
+            Binding::Value(Value::Null) => unknown = true,
+            _ => {}
+        }
+    }
+    Ok(truth(if unknown { None } else { Some(false) }))
 }
 fn compare(a: Binding, op: &CmpOp, b: Binding) -> Binding {
     if a == Binding::Value(Value::Null) || b == Binding::Value(Value::Null) {
@@ -257,16 +280,94 @@ pub(super) fn limit(expr: &Expr, ctx: &Context<'_, '_>) -> Result<usize, ExecErr
         )),
     }
 }
+/// Cypher's `ORDER BY` order of two returned values: numbers, strings and booleans
+/// by value; across types map < node < list < string < boolean < number, and null
+/// last ascending.
+fn rank(out: &Out) -> u8 {
+    match out {
+        Out::Value(Value::Map(_)) => 0,
+        Out::Node(_) => 1,
+        Out::Value(Value::List(_)) => 2,
+        Out::Value(Value::Str(_)) => 3,
+        Out::Value(Value::Bool(_)) => 4,
+        Out::Value(Value::Int(_) | Value::Float(_)) => 5,
+        Out::Value(Value::Null) => 6,
+    }
+}
+fn sort_cmp(a: &Out, b: &Out) -> Ordering {
+    match (a, b) {
+        (Out::Value(x), Out::Value(y)) => {
+            order(&Binding::Value(x.clone()), &Binding::Value(y.clone()))
+                .unwrap_or_else(|| rank(a).cmp(&rank(b)))
+        }
+        (Out::Node(x), Out::Node(y)) => x.id.cmp(&y.id),
+        _ => rank(a).cmp(&rank(b)),
+    }
+}
+pub(super) fn sort_rows(rows: &mut [Vec<Out>], keys: &[(usize, bool)]) {
+    rows.sort_by(|a, b| {
+        keys.iter()
+            .map(|&(column, descending)| {
+                let ord = sort_cmp(&a[column], &b[column]);
+                if descending {
+                    ord.reverse()
+                } else {
+                    ord
+                }
+            })
+            .find(|ord| ord.is_ne())
+            .unwrap_or(Ordering::Equal)
+    });
+}
+/// `ORDER BY`, then `SKIP`, then `LIMIT`, on projected rows; dropped rows give back
+/// their retained output accounting.
+pub(super) fn page(
+    ctx: &Context<'_, '_>,
+    mut rows: Vec<Vec<Out>>,
+    keys: &[(usize, bool)],
+    skip: usize,
+    max: usize,
+) -> Vec<Vec<Out>> {
+    if !keys.is_empty() {
+        sort_rows(&mut rows, keys);
+    }
+    let kept = skip.saturating_add(max).min(rows.len());
+    for row in rows.drain(kept..) {
+        ctx.budget.release_output(&row);
+    }
+    for row in rows.drain(..skip.min(rows.len())) {
+        ctx.budget.release_output(&row);
+    }
+    rows
+}
 pub(super) fn project(
     ctx: &Context<'_, '_>,
     rows: &[Bindings],
     items: &[ReturnItem],
+    keys: &[(usize, bool)],
+    skip_expr: Option<&Expr>,
     limit_expr: Option<&Expr>,
 ) -> Result<QueryOutput, ExecError> {
-    let max = limit_expr
-        .map(|e| limit(e, ctx))
-        .transpose()?
-        .unwrap_or(usize::MAX);
+    let paged = |ctx: &Context<'_, '_>, out: QueryOutput| -> Result<QueryOutput, ExecError> {
+        let skip = skip_expr.map(|e| limit(e, ctx)).transpose()?.unwrap_or(0);
+        let max = limit_expr
+            .map(|e| limit(e, ctx))
+            .transpose()?
+            .unwrap_or(usize::MAX);
+        Ok(QueryOutput {
+            fields: out.fields,
+            rows: page(ctx, out.rows, keys, skip, max),
+        })
+    };
+    let out = project_all(ctx, rows, items)?;
+    paged(ctx, out)
+}
+fn project_all(
+    ctx: &Context<'_, '_>,
+    rows: &[Bindings],
+    items: &[ReturnItem],
+) -> Result<QueryOutput, ExecError> {
+    let max = usize::MAX;
     let fields = items
         .iter()
         .map(|item| item.alias.clone().unwrap_or_else(|| item.text.clone()))

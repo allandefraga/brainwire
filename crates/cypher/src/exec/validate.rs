@@ -20,8 +20,9 @@ fn children(e: &Expr) -> Vec<&Expr> {
         | Expr::Size(e)
         | Expr::ToLower(e)
         | Expr::ToUpper(e)
-        | Expr::Not(e) => vec![e],
-        Expr::Cmp(a, _, b) | Expr::And(a, b) | Expr::Or(a, b) => vec![a, b],
+        | Expr::Not(e)
+        | Expr::IsNull(e, _) => vec![e],
+        Expr::Cmp(a, _, b) | Expr::And(a, b) | Expr::Or(a, b) | Expr::In(a, b) => vec![a, b],
         Expr::List(es) | Expr::Coalesce(es) => es.iter().collect(),
         Expr::Map(es) => es.iter().map(|(_, e)| e).collect(),
         _ => vec![],
@@ -287,7 +288,9 @@ pub(super) fn query(query: &Query, ctx: &Context<'_, '_>) -> Result<(), ExecErro
                 }
                 scope.insert(var.clone(), Kind::Value);
             }
-            Clause::Return { items, limit } => {
+            Clause::Return {
+                items, skip, limit, ..
+            } => {
                 if idx + 1 != query.clauses.len() {
                     return Err(unsupported("RETURN must be final"));
                 }
@@ -298,10 +301,11 @@ pub(super) fn query(query: &Query, ctx: &Context<'_, '_>) -> Result<(), ExecErro
                     }
                     expr(&item.expr, &scope, ctx, true)?;
                 }
-                if let Some(e) = limit {
+                for (e, what) in [(skip, "SKIP"), (limit, "LIMIT")] {
+                    let Some(e) = e else { continue };
                     expr(e, &scope, ctx, false)?;
                     if mentions(e, None) {
-                        return Err(semantic("LIMIT must be row-independent"));
+                        return Err(semantic(format!("{what} must be row-independent")));
                     }
                     eval::limit(e, ctx)?;
                 }

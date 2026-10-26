@@ -52,7 +52,13 @@ pub(super) fn supports(query: &Query) -> bool {
 }
 
 pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, ExecError> {
-    let Clause::Return { items, limit } = query.clauses.last().expect("return") else {
+    let Clause::Return {
+        items,
+        order,
+        skip,
+        limit,
+    } = query.clauses.last().expect("return")
+    else {
         unreachable!()
     };
     let max = limit
@@ -60,6 +66,14 @@ pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, E
         .map(|e| eval::limit(e, ctx))
         .transpose()?
         .unwrap_or(usize::MAX);
+    let skip = skip
+        .as_ref()
+        .map(|e| eval::limit(e, ctx))
+        .transpose()?
+        .unwrap_or(0);
+    // Rows kept while walking: all of them to sort, else the first SKIP + LIMIT. A
+    // sorted top-k keeps twice that and trims, so a page of a large label stays small.
+    let keep = skip.saturating_add(max);
     let mut output = QueryOutput {
         fields: items
             .iter()
@@ -94,8 +108,14 @@ pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, E
                 }
             } else {
                 output.rows.push(eval::project_row(ctx, &row, items)?);
-                if output.rows.len() == max {
-                    return Err(WalkError::Done);
+                if order.is_empty() {
+                    if output.rows.len() == keep {
+                        return Err(WalkError::Done);
+                    }
+                } else if keep != usize::MAX && output.rows.len() >= keep.saturating_mul(2).max(64)
+                {
+                    let rows = std::mem::take(&mut output.rows);
+                    output.rows = eval::page(ctx, rows, order, 0, keep);
                 }
             }
             Ok(())
@@ -113,6 +133,8 @@ pub(super) fn run(ctx: &Context<'_, '_>, query: &Query) -> Result<QueryOutput, E
         ctx.budget.output(&row)?;
         output.rows.push(row);
     }
+    let rows = std::mem::take(&mut output.rows);
+    output.rows = eval::page(ctx, rows, order, skip, max);
     ctx.budget.check_deadline()?;
     Ok(output)
 }
