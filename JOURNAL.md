@@ -62,7 +62,12 @@ No line of code before the end of phase 2.
   90K edges in 2.0 s, 3 change cycles of ~12K node and ~10K edge changes in
   ~2.5 s each, 420 restricted reads during writes with 0 errors and 0
   cross-tenant rows, graph equal to the lake, per-tenant visibility exact,
-  `db check` ok. Python example suite 74 tests ok.
+  `db check` ok. Python example suite 75 tests ok. The same workload (scale
+  1,000) passed against a DuckLake with a Postgres 16 catalog and Parquet in a
+  MinIO bucket (throwaway containers, credentials only in env vars; 31 objects
+  written): graph equal to the lake, 441 restricted reads, 0 leaks.
+  `create_service_tokens --acl-writer` makes the writer an instance admin for
+  ACL stamping; `docs/parallel-ingestion.md` has a step-by-step test run.
 - **Next step:** release-build numbers at 1M rows; stream prune's key listing.
 - **Blockers:** none. No push or release requested.
 

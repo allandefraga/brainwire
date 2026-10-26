@@ -192,17 +192,20 @@ class Readers:
                     self.leaks.extend(i for i in ids if not i.startswith(own))
 
 
-def run(binary, scale, workers, cycles):
+def run(binary, scale, workers, cycles, lake_target=None, data_path=None, load=("ducklake", "sqlite"),
+        init_sql=None):
     rng = random.Random(11)
     report = {"scale": scale, "workers_per_table": workers}
     with tempfile.TemporaryDirectory(prefix="brainwire-lake-workload-") as temporary:
         root = Path(temporary)
-        target = f"ducklake:sqlite:{root / 'catalog.sqlite'}"
+        target = lake_target or f"ducklake:sqlite:{root / 'catalog.sqlite'}"
         writer = duckdb.connect()
         writer.execute("SET enable_progress_bar = false")
-        writer.execute("LOAD ducklake")
-        writer.execute("LOAD sqlite")
-        writer.execute(f"ATTACH '{target}' AS w (DATA_PATH '{root / 'lake'}/')")
+        for extension in load:
+            writer.execute(f"LOAD {extension}")
+        if init_sql:
+            writer.execute(init_sql)
+        writer.execute(f"ATTACH '{target}' AS w (DATA_PATH '{data_path or str(root / 'lake') + '/'}')")
         build_lake(writer, scale)
 
         loader, loader_auth = principal("loader", {"lake": "write"}, admin=True)
@@ -249,7 +252,8 @@ def run(binary, scale, workers, cycles):
                 with ThreadPoolExecutor(len(group)) as pool:
                     results = list(pool.map(lambda item: sync(
                         item[1], lake_target=target, uri=uri, database="lake", source_id=item[0],
-                        workers=workers, batch_size=500, full=full), group.items()))
+                        workers=workers, batch_size=500, full=full, load=load, init_sql=init_sql),
+                        group.items()))
                 return {"seconds": round(time.monotonic() - started, 3),
                         "upserted": sum(r["upserted"] for r in results),
                         "deleted": sum(r["deleted"] for r in results)}
@@ -308,5 +312,11 @@ if __name__ == "__main__":
     parser.add_argument("--scale", type=int, default=2000, help="companies; people = 3x, tickets = 6x")
     parser.add_argument("--workers", type=int, default=4, help="processes per table sync")
     parser.add_argument("--cycles", type=int, default=3)
+    parser.add_argument("--lake", help="empty DuckLake ATTACH target to use instead of a temporary SQLite one")
+    parser.add_argument("--data-path", help="DATA_PATH for --lake, e.g. s3://bucket/prefix/")
+    parser.add_argument("--load", default="ducklake,sqlite", help="installed DuckDB extensions to LOAD")
+    parser.add_argument("--init-sql", help="SQL file run before ATTACH (e.g. CREATE SECRET from env)")
     args = parser.parse_args()
-    print(json.dumps(run(args.binary.resolve(), args.scale, args.workers, args.cycles), indent=1))
+    init_sql = Path(args.init_sql).read_text() if args.init_sql else None
+    print(json.dumps(run(args.binary.resolve(), args.scale, args.workers, args.cycles, args.lake, args.data_path,
+                         tuple(filter(None, args.load.split(","))), init_sql), indent=1))

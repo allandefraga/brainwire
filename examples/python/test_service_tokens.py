@@ -23,6 +23,16 @@ class TokenFilesTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(token.encode()).hexdigest(), entry['token_sha256'])
                 self.assertEqual(stat.S_IMODE(file.stat().st_mode) & 0o077, 0)
 
+    def test_acl_writer_is_explicit_and_only_the_writer_gains_instance_admin(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)/'auth'
+            create(directory, 'tickets', acl_writer=True)
+            entries = json.loads((directory/'policy.json').read_text())['principals']
+            self.assertEqual({entry['id']: entry['instance_admin'] for entry in entries},
+                             {'writer': True, 'reader': False, 'health': False})
+            self.assertTrue(all('node_visibility' not in entry for entry in entries))
+            with self.assertRaises(ValueError): create(Path(folder)/'x', 'tickets', acl_writer='yes')
+
     def test_private_unique_tokens_match_policy_and_existing_directory_is_preserved(self):
         with tempfile.TemporaryDirectory() as folder:
             directory = Path(folder)/'auth'

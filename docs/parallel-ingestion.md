@@ -26,6 +26,67 @@ is missing rolls back as a whole. Read back what you wrote, including edge
 properties: `MATCH (a:Customer)-[r:FOLLOWS]->(b:Customer) WHERE r.weight > 0.5
 RETURN a.entity_id, b.entity_id, r.weight`.
 
+## Test run against an existing lake
+
+A complete first run, from a source checkout, with a protected server. Keep
+the credential directory outside the repository.
+
+1. Build and start the server. The published beta image predates batch ACL
+   stamping and relationship property reads, so build from this checkout:
+
+   ```sh
+   docker build -t brainwire:local .
+   python3 -m examples.python.create_service_tokens ~/brainwire-auth --graph lake --acl-writer
+   docker volume create brainwire-data
+   docker run --rm --mount type=volume,src=brainwire-data,dst=/data \
+     --mount type=bind,src="$PWD/ontology.json",dst=/ontology.json,readonly \
+     brainwire:local db create lake --ontology /ontology.json
+   docker run --detach --name brainwire-local --init -p 127.0.0.1:7687:7687 \
+     --mount type=volume,src=brainwire-data,dst=/data \
+     --mount type=bind,src="$HOME/brainwire-auth/policy.json",dst=/auth/policy.json,readonly \
+     --env BRAINWIRE_SERVER_AUTH_FILE=/auth/policy.json \
+     --env BRAINWIRE_SERVER_DEFAULT_DATABASE=lake \
+     --env BRAINWIRE_MEMORY_CACHE=1GiB --env BRAINWIRE_MEMORY_QUERY=512MiB \
+     brainwire:local
+   docker exec brainwire-local brainwire probe --mode ready
+   ```
+
+   `--acl-writer` makes `writer` an instance admin so it can stamp ACLs; omit
+   it when no mapping has an `acl` block. `reader` is a plain graph reader;
+   add a `node_visibility` policy to a reader to test tenant isolation
+   ([node ACL](node-acl.md)).
+
+2. Write one mapping file per table (see below) and declare every mapped label,
+   property and edge type, plus `ImportCheckpoint`, in `ontology.json`. The
+   ontology changes offline only, so get it right before loading.
+
+3. Point the sync at the lake. A Postgres catalog with data in S3-compatible
+   storage needs the `postgres`, `httpfs` and `aws` extensions installed in
+   DuckDB. Credentials come from the environment (`PGPASSWORD`,
+   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), never from files:
+
+   ```sql
+   -- lake-init.sql: endpoint settings only, no secrets
+   CREATE SECRET lake_s3 (TYPE s3, PROVIDER credential_chain, CHAIN 'env',
+                          ENDPOINT 'minio.internal:9000', URL_STYLE 'path', USE_SSL false);
+   ```
+
+   ```sh
+   export BRAINWIRE_BOLT_AUTH_FILE=~/brainwire-auth/writer.json
+   uv run --no-project --python 3.12 --with duckdb==1.5.5 --with neo4j==5.28.6 \
+     python -m examples.python.ducklake_sync people.json \
+     --lake 'ducklake:postgres:dbname=lake_catalog host=pg.internal user=lake_reader' \
+     --load ducklake,postgres,httpfs,aws --init-sql lake-init.sql \
+     --database lake --source-id clean-people --workers 8
+   ```
+
+   Run node tables first (they may run at the same time), then edge tables.
+   Each command prints a JSON summary. Rerun the same commands to apply only
+   what changed since the stored snapshot.
+
+4. Check the result with Cypher as `reader`, for example
+   `MATCH (p:Person)-[:WORKS_AT]->(c:Company) RETURN c.segment, count(*)`.
+
 ## Many writers at once
 
 The server accepts concurrent sessions: each connection has its own worker and
@@ -184,8 +245,10 @@ a synchronous commit per row; see the measurement below.
   become strings; blobs are refused. Identity columns are cast to strings.
 - **Object storage.** Pass `--init-sql` with a `CREATE SECRET` that reads
   credentials from the environment or a provider chain; extensions must
-  already be installed (`--load`). Postgres catalogs work through DuckDB's
-  `postgres` extension but are not part of the tests here.
+  already be installed (`--load`). A Postgres catalog with Parquet data in a
+  MinIO bucket was qualified with the workload below (throwaway containers,
+  credentials only in environment variables); other object stores and
+  managed Postgres services were not.
 
 This is a bridge for keeping a graph current from DuckLake, not native CDC:
 readers can see partial progress between committed batches during a run.
@@ -253,6 +316,11 @@ uv run --no-project --python 3.12 --with duckdb==1.5.5 \
 python3 crates/server/tests/ducklake_sync.py --binary target/debug/brainwire --rows 100000
 python3 crates/server/tests/concurrent_writers.py --binary target/debug/brainwire
 python3 crates/server/tests/lake_workload.py --binary target/debug/brainwire --scale 10000
+# Same workload on an empty Postgres-catalog DuckLake with data in S3-compatible storage:
+PGPASSWORD=... AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1 \
+python3 crates/server/tests/lake_workload.py --binary target/debug/brainwire --scale 1000 \
+  --lake 'ducklake:postgres:dbname=lake_catalog host=pg user=postgres' --data-path s3://lake/data/ \
+  --load ducklake,postgres,httpfs,aws --init-sql lake-init.sql
 ```
 
 The acceptance scripts create only temporary synthetic data, start their own
