@@ -60,6 +60,9 @@ fn node(label: &str, id: u16) -> NodeType {
         indexed: vec![],
         identifiers: vec![],
         display_color: None,
+        index_names: Default::default(),
+        populating: vec![],
+        retired_columns: vec![],
     }
 }
 fn catalog() -> Catalog {

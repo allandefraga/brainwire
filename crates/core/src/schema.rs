@@ -70,11 +70,35 @@ pub struct NodeType {
     pub indexed: Vec<String>,
     pub identifiers: Vec<(String, String)>,
     pub display_color: Option<String>,
+    /// Names given through `CREATE INDEX`, by property. These indexes survive
+    /// a later ontology re-apply; ontology-only ones use `index_name`'s default.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub index_names: BTreeMap<String, String>,
+    /// Indexed properties still being backfilled online. Writers maintain
+    /// their entries, but queries must not use them until they leave this list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub populating: Vec<String>,
+    /// Column ids of dropped properties. They are never reused, so values
+    /// still stored under them can never resurface under a new property.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired_columns: Vec<u16>,
 }
 
 impl NodeType {
     pub fn column(&self, name: &str) -> Option<u16> {
         self.columns.iter().find(|c| c.name == name).map(|c| c.id)
+    }
+
+    pub fn index_name(&self, field: &str) -> String {
+        self.index_names
+            .get(field)
+            .cloned()
+            .unwrap_or_else(|| format!("index_{}_{field}", self.label))
+    }
+
+    /// Declared and fully built: a query may answer from this index.
+    pub fn index_online(&self, field: &str) -> bool {
+        self.indexed.iter().any(|f| f == field) && !self.populating.iter().any(|f| f == field)
     }
 }
 
@@ -124,13 +148,19 @@ fn is_reserved(name: &str) -> bool {
 /// (e.g. "Customer", "WORKS_AT", "interaction").
 fn merge_columns(
     previous: &[Column],
+    retired: &[u16],
     names: &[String],
     owner: &str,
 ) -> Result<Vec<Column>, SchemaError> {
     let mut cols = previous.to_vec();
     for name in names.iter().filter(|n| !is_reserved(n)) {
         if !cols.iter().any(|c| &c.name == name) {
-            let id = match cols.iter().map(|c| c.id).max() {
+            let id = match cols
+                .iter()
+                .map(|c| c.id)
+                .chain(retired.iter().copied())
+                .max()
+            {
                 Some(max_id) => max_id
                     .checked_add(1)
                     .ok_or_else(|| SchemaError::IdSpaceExhausted(format!("columns of {owner}")))?,
@@ -219,7 +249,15 @@ impl Catalog {
 
             match node_types.iter_mut().find(|t| t.label == *label) {
                 Some(t) => {
-                    t.columns = merge_columns(&t.columns, &properties, label)?;
+                    t.columns = merge_columns(&t.columns, &t.retired_columns, &properties, label)?;
+                    // Indexes created online are not in the ontology file;
+                    // re-applying it must not silently drop them.
+                    for field in t.index_names.keys() {
+                        if !indexed.contains(field) {
+                            indexed.push(field.clone());
+                        }
+                    }
+                    t.populating.retain(|field| indexed.contains(field));
                     t.indexed = indexed;
                     t.identifiers = identifiers;
                     t.display_color = display_color;
@@ -232,10 +270,13 @@ impl Catalog {
                     node_types.push(NodeType {
                         id: TypeId(next),
                         label: label.clone(),
-                        columns: merge_columns(&[], &properties, label)?,
+                        columns: merge_columns(&[], &[], &properties, label)?,
                         indexed,
                         identifiers,
                         display_color,
+                        index_names: BTreeMap::new(),
+                        populating: vec![],
+                        retired_columns: vec![],
                     });
                 }
             }
@@ -256,7 +297,7 @@ impl Catalog {
                     if !t.signatures.contains(&sig) {
                         t.signatures.push(sig);
                     }
-                    t.columns = merge_columns(&t.columns, &spec.properties, &spec.name)?;
+                    t.columns = merge_columns(&t.columns, &[], &spec.properties, &spec.name)?;
                 }
                 None => {
                     let next = match edge_types.iter().map(|t| t.id.0).max() {
@@ -269,7 +310,7 @@ impl Catalog {
                         id: EdgeTypeId(next),
                         name: spec.name.clone(),
                         signatures: vec![sig],
-                        columns: merge_columns(&[], &spec.properties, &spec.name)?,
+                        columns: merge_columns(&[], &[], &spec.properties, &spec.name)?,
                     });
                 }
             }
@@ -283,7 +324,7 @@ impl Catalog {
                 .find(|s| s.event_type == spec.event_type && s.owner == owner)
             {
                 Some(s) => {
-                    s.columns = merge_columns(&s.columns, &spec.properties, &spec.event_type)?
+                    s.columns = merge_columns(&s.columns, &[], &spec.properties, &spec.event_type)?
                 }
                 None => {
                     let next = match streams.iter().map(|s| s.id).max() {
@@ -297,7 +338,7 @@ impl Catalog {
                         event_type: spec.event_type.clone(),
                         owner,
                         timestamp_field: spec.timestamp_field.clone(),
-                        columns: merge_columns(&[], &spec.properties, &spec.event_type)?,
+                        columns: merge_columns(&[], &[], &spec.properties, &spec.event_type)?,
                     });
                 }
             }
@@ -455,6 +496,9 @@ mod tests {
                 indexed: vec![],
                 identifiers: vec![],
                 display_color: None,
+                index_names: BTreeMap::new(),
+                populating: vec![],
+                retired_columns: vec![],
             }],
             edge_types: vec![],
             streams: vec![],
@@ -490,6 +534,9 @@ mod tests {
                     indexed: vec![],
                     identifiers: vec![],
                     display_color: None,
+                    index_names: BTreeMap::new(),
+                    populating: vec![],
+                    retired_columns: vec![],
                 },
                 NodeType {
                     id: TypeId(2),
@@ -498,6 +545,9 @@ mod tests {
                     indexed: vec![],
                     identifiers: vec![],
                     display_color: None,
+                    index_names: BTreeMap::new(),
+                    populating: vec![],
+                    retired_columns: vec![],
                 },
             ],
             edge_types: vec![EdgeType {
@@ -662,5 +712,42 @@ mod tests {
             cat.edge_type("WORKS_AT").unwrap().signatures,
             vec![(customer_id, company_id)]
         );
+    }
+
+    #[test]
+    fn reapplying_the_ontology_keeps_online_indexes_and_their_state() {
+        let mut first = Catalog::apply(&fixture(), None).unwrap();
+        let customer = first
+            .node_types
+            .iter_mut()
+            .find(|t| t.label == "Customer")
+            .unwrap();
+        customer.indexed.push("name".into());
+        customer.populating.push("name".into());
+        customer
+            .index_names
+            .insert("name".into(), "customer_name".into());
+        let second = Catalog::apply(&fixture(), Some(&first)).unwrap();
+        let customer = second.node_type("Customer").unwrap();
+        assert_eq!(customer.indexed, vec!["email", "phone", "segment", "name"]);
+        assert!(!customer.index_online("name"));
+        assert!(customer.index_online("email"));
+        assert_eq!(customer.index_name("name"), "customer_name");
+        assert_eq!(customer.index_name("email"), "index_Customer_email");
+    }
+
+    #[test]
+    fn retired_column_ids_are_never_reused() {
+        let mut first = Catalog::apply(&fixture(), None).unwrap();
+        let customer = first
+            .node_types
+            .iter_mut()
+            .find(|t| t.label == "Customer")
+            .unwrap();
+        let last = customer.columns.pop().unwrap();
+        customer.retired_columns.push(last.id);
+        let second = Catalog::apply(&fixture(), Some(&first)).unwrap();
+        let readded = second.node_type("Customer").unwrap().column(&last.name);
+        assert_eq!(readded, Some(last.id + 1));
     }
 }
