@@ -126,6 +126,11 @@ fn family_options(res: &Resources) -> Options {
     opts.set_block_based_table_factory(&block);
     opts.set_compression_type(DBCompressionType::Lz4);
     opts.set_bottommost_compression_type(DBCompressionType::Zstd);
+    // Bulk ingestion fills memtables faster than the defaults flush and
+    // compact them; more memtables and a later L0 slowdown avoid write stalls.
+    opts.set_max_write_buffer_number(4);
+    opts.set_level_zero_slowdown_writes_trigger(40);
+    opts.set_level_zero_stop_writes_trigger(64);
     opts
 }
 
@@ -135,6 +140,11 @@ impl Database {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         opts.set_write_buffer_manager(&res.write_buffers);
+        // Flushes and compactions run in parallel with ingestion.
+        let cpus = std::thread::available_parallelism().map_or(4, |n| n.get()) as i32;
+        opts.increase_parallelism(cpus.max(2));
+        opts.set_max_background_jobs(cpus.clamp(4, 16));
+        opts.set_max_subcompactions(4);
         let families = COLUMN_FAMILIES
             .iter()
             .map(|name| ColumnFamilyDescriptor::new(*name, family_options(res)));
