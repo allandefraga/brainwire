@@ -7,6 +7,7 @@ use super::eval::{eval, predicate};
 use super::plan::*;
 use super::val::{Key, Val};
 use super::*;
+use brainwire_core::ids::TypeId;
 use brainwire_store::graph::{self as store, EdgeRef};
 use std::collections::{HashMap, HashSet};
 
@@ -49,6 +50,8 @@ pub(super) struct Env<'a> {
     pub visibility: Option<&'a ReadVisibility>,
     pub checkpoint_dir: Option<&'a std::path::Path>,
     pub vars: &'a Vars,
+    pub cache: NodeCache,
+    pub param_vals: &'a BTreeMap<String, Val>,
 }
 
 impl<'a> Env<'a> {
@@ -61,6 +64,8 @@ impl<'a> Env<'a> {
             visibility: self.visibility,
             checkpoint_dir: self.checkpoint_dir,
             vars: self.vars,
+            cache: Some(&self.cache),
+            param_vals: Some(self.param_vals),
         }
     }
 }
@@ -122,6 +127,8 @@ fn run_part(
     let mut input: Vec<Row> = vec![vec![Val::Null; env.vars.len()]];
     let mut start = 0;
     loop {
+        // Writes between segments may change any cached node.
+        *env.cache.0.borrow_mut() = None;
         let barrier = (start..ops.len()).find(|&i| ops[i].blocking());
         let end = barrier.unwrap_or(ops.len());
         let segment = &ops[start..end];
@@ -181,7 +188,7 @@ fn stream(ctx: &Context<'_, '_>, ops: &[Op], row: Row, emit: &mut Emit<'_>) -> R
     let Some((op, rest)) = ops.split_first() else {
         return emit(row);
     };
-    ctx.budget.check_deadline()?;
+    ctx.budget.tick()?;
     match op {
         Op::Match(plan) => run_match(ctx, plan, row, &mut |row| stream(ctx, rest, row, emit)),
         Op::Unwind { expr, slot } => {
@@ -252,12 +259,20 @@ fn stream(ctx: &Context<'_, '_>, ops: &[Op], row: Row, emit: &mut Emit<'_>) -> R
 
 enum AggState {
     Count(i64),
-    Sum { int: i64, float: f64, floats: bool },
-    Avg { sum: f64, n: i64 },
+    Sum {
+        int: i64,
+        float: f64,
+        floats: bool,
+    },
+    Avg {
+        sum: f64,
+        n: i64,
+    },
     Min(Option<Val>),
     Max(Option<Val>),
     Collect(Vec<Val>),
-    Stdev(Vec<f64>),
+    /// Numbers for stdev and percentiles; whether every input was an integer.
+    Stdev(Vec<f64>, bool),
 }
 
 struct Group {
@@ -396,7 +411,7 @@ impl<'p> Accumulator<'p> {
         ctx.budget.retain_row(&order)?;
         self.rows.push((order, next));
         let keep = self.keep();
-        if self.plan.order.is_empty() {
+        if self.plan.order.is_empty() || self.plan.presorted {
             if self.rows.len() >= keep {
                 return Err(Flow::Stop);
             }
@@ -430,7 +445,7 @@ impl<'p> Accumulator<'p> {
                     row[self.plan.items[index].1] = value;
                 }
                 for (spec, state) in agg.aggs.iter().zip(group.states) {
-                    row[spec.slot] = result(state);
+                    row[spec.slot] = result(state, spec, ctx)?;
                 }
                 let values = self
                     .plan
@@ -458,7 +473,7 @@ impl<'p> Accumulator<'p> {
                 self.rows.push((order, row));
             }
         }
-        if !self.plan.order.is_empty() {
+        if !self.plan.order.is_empty() && !self.plan.presorted {
             eval::order_rows(&mut self.rows, &self.descending);
         }
         let keep = self.keep().min(self.rows.len());
@@ -485,7 +500,7 @@ fn initial(func: &str) -> AggState {
         "min" => AggState::Min(None),
         "max" => AggState::Max(None),
         "collect" => AggState::Collect(vec![]),
-        _ => AggState::Stdev(vec![]),
+        _ => AggState::Stdev(vec![], true),
     }
 }
 
@@ -537,16 +552,17 @@ fn update(state: &mut AggState, value: Val, ctx: &Context<'_, '_>) -> Result<(),
             ctx.budget.retain(value.bytes())?;
             items.push(value);
         }
-        AggState::Stdev(items) => {
+        AggState::Stdev(items, ints) => {
             ctx.budget.retain(8)?;
+            *ints &= matches!(value, Val::Int(_));
             items.push(number(&value)?);
         }
     }
     Ok(())
 }
 
-fn result(state: AggState) -> Val {
-    match state {
+fn result(state: AggState, spec: &AggSpec, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
+    Ok(match state {
         AggState::Count(n) => Val::Int(n),
         AggState::Sum { int, float, floats } => {
             if floats {
@@ -564,16 +580,55 @@ fn result(state: AggState) -> Val {
         }
         AggState::Min(v) | AggState::Max(v) => v.unwrap_or(Val::Null),
         AggState::Collect(items) => Val::List(items),
-        AggState::Stdev(items) => {
-            if items.len() < 2 {
-                return Val::Float(0.0);
+        AggState::Stdev(mut items, ints) => match spec.func.as_str() {
+            "percentilecont" | "percentiledisc" => {
+                let fraction = match spec
+                    .fraction
+                    .as_ref()
+                    .map(|e| eval::constant(e, ctx))
+                    .transpose()?
+                {
+                    Some(Value::Int(i)) => i as f64,
+                    Some(Value::Float(f)) => f,
+                    _ => return Err(ExecError::Semantic("percentile needs a number".into())),
+                };
+                if !(0.0..=1.0).contains(&fraction) {
+                    return Err(ExecError::Semantic(
+                        "percentile must be between 0.0 and 1.0".into(),
+                    ));
+                }
+                if items.is_empty() {
+                    return Ok(Val::Null);
+                }
+                items.sort_by(f64::total_cmp);
+                let last = (items.len() - 1) as f64;
+                if spec.func == "percentiledisc" {
+                    let index = ((fraction * items.len() as f64).ceil() as usize).saturating_sub(1);
+                    let value = items[index.min(items.len() - 1)];
+                    // percentileDisc returns one of its inputs, keeping integers.
+                    if ints {
+                        Val::Int(value as i64)
+                    } else {
+                        Val::Float(value)
+                    }
+                } else {
+                    let position = fraction * last;
+                    let (low, high) = (position.floor() as usize, position.ceil() as usize);
+                    Val::Float(items[low] + (items[high] - items[low]) * (position - low as f64))
+                }
             }
-            let n = items.len() as f64;
-            let mean = items.iter().sum::<f64>() / n;
-            let squares = items.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
-            Val::Float((squares / (n - 1.0)).sqrt())
-        }
-    }
+            func => {
+                let sample = func == "stdev";
+                if items.len() < usize::from(sample) + 1 {
+                    return Ok(Val::Float(0.0));
+                }
+                let n = items.len() as f64;
+                let mean = items.iter().sum::<f64>() / n;
+                let squares = items.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+                Val::Float((squares / if sample { n - 1.0 } else { n }).sqrt())
+            }
+        },
+    })
 }
 
 // -- matching ------------------------------------------------------------------
@@ -771,15 +826,27 @@ fn anchor(
         .first()
         .map(|label| ctx.catalog.node_type(label).expect("validated label"));
     let scan = |candidate: &mut dyn FnMut(NodeId) -> Result<(), Flow>| -> Result<(), Flow> {
-        match ty {
-            Some(ty) => store::visit_nodes_of_type::<Flow>(ctx.txn, ty.id, &mut *candidate),
-            None => {
-                for ty in &ctx.catalog.node_types {
-                    store::visit_nodes_of_type::<Flow>(ctx.txn, ty.id, &mut *candidate)?;
+        let types: Vec<TypeId> = match ty {
+            Some(ty) => vec![ty.id],
+            None => ctx.catalog.node_types.iter().map(|t| t.id).collect(),
+        };
+        for ty in types {
+            store::visit_nodes_of_type_with_values::<Flow>(ctx.txn, ty, |id, bytes| {
+                if let Some(cache) = ctx.cache {
+                    let mut slot = cache.0.borrow_mut();
+                    match slot.as_mut() {
+                        Some((cached, buffer)) => {
+                            *cached = id;
+                            buffer.clear();
+                            buffer.extend_from_slice(bytes);
+                        }
+                        None => *slot = Some((id, bytes.to_vec())),
+                    }
                 }
-                Ok(())
-            }
+                candidate(id)
+            })?;
         }
+        Ok(())
     };
     match &node.access {
         Access::Bound => match &row[node.slot] {

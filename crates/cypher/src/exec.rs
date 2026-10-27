@@ -160,7 +160,15 @@ struct Context<'a, 'db> {
     visibility: Option<&'a ReadVisibility>,
     checkpoint_dir: Option<&'a std::path::Path>,
     vars: &'a plan::Vars,
+    /// The node a scan is positioned on, with its stored bytes.
+    cache: Option<&'a NodeCache>,
+    /// Parameters converted once per query.
+    param_vals: Option<&'a BTreeMap<String, val::Val>>,
 }
+
+/// Lets property reads reuse the value a label scan already holds.
+#[derive(Default)]
+struct NodeCache(std::cell::RefCell<Option<(NodeId, Vec<u8>)>>);
 
 /// Trusted prepared bytes; the caller must obtain quorum and apply before acknowledgement.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,7 +237,10 @@ impl QueryAccess {
                             ));
                         }
                     }
-                    "db.labels" | "db.relationshipTypes" | "db.propertyKeys" => {}
+                    "db.labels"
+                    | "db.relationshipTypes"
+                    | "db.propertyKeys"
+                    | "dbms.components" => {}
                     "db.memory" | "db.checkpoint" | "db.nodeAcls" => {
                         if !self.instance_admin {
                             return Err(ExecError::Forbidden(
@@ -285,9 +296,10 @@ impl<'db> QueryTransaction<'db> {
                 "query allocation limit must be positive".into(),
             ));
         }
-        let mut txn = db.begin();
-        // This dependency also rejects a concurrent catalog migration when writing.
-        let catalog = match txn.get_for_update(Cf::Meta, b"catalog")? {
+        let txn = db.begin();
+        // A plain read: read-only transactions must not join the committer's
+        // writer set. Writers add the catalog dependency before commit.
+        let catalog = match txn.get(Cf::Meta, b"catalog")? {
             Some(bytes) => {
                 serde_json::from_slice(&bytes).map_err(|e| StoreError::Catalog(e.to_string()))?
             }
@@ -502,8 +514,10 @@ impl<'db> QueryTransaction<'db> {
     /// preserving the standalone executor's read-only behavior.
     pub fn commit(&mut self) -> Result<Option<u64>, ExecError> {
         self.require_active()?;
-        let txn = self.txn.take().expect("active transaction");
+        let mut txn = self.txn.take().expect("active transaction");
         let result = if self.wrote {
+            // Rejects a catalog migration committed since this snapshot.
+            txn.depend(Cf::Meta, b"catalog");
             txn.commit().map(Some).map_err(ExecError::from)
         } else {
             drop(txn);
@@ -548,7 +562,10 @@ impl<'db> QueryTransaction<'db> {
                 return Err(error);
             }
         }
-        let txn = self.txn.take().expect("active transaction");
+        let mut txn = self.txn.take().expect("active transaction");
+        if self.wrote {
+            txn.depend(Cf::Meta, b"catalog");
+        }
         let result = txn
             .prepare_replication(brainwire_store::replicated_apply::ApplyLimits::default())
             .and_then(|batch| {
@@ -661,8 +678,14 @@ fn execute_clauses(
             visibility,
             checkpoint_dir,
             vars: &empty,
+            cache: None,
+            param_vals: None,
         },
     )?;
+    let param_vals = params
+        .iter()
+        .map(|(k, v)| (k.clone(), val::Val::from(v)))
+        .collect();
     let env = run::Env {
         catalog,
         params,
@@ -670,6 +693,8 @@ fn execute_clauses(
         visibility,
         checkpoint_dir,
         vars: &plan.vars,
+        cache: NodeCache::default(),
+        param_vals: &param_vals,
     };
     run::execute(txn, &env, &plan)
 }

@@ -73,6 +73,10 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             Val::from(v)
         }
         Expr::Param(name) => {
+            if let Some(value) = ctx.param_vals.and_then(|vals| vals.get(name)) {
+                ctx.budget.charge(value.bytes())?;
+                return Ok(value.clone());
+            }
             let value = ctx
                 .params
                 .get(name)
@@ -85,7 +89,17 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             ctx.budget.charge(value.bytes())?;
             return Ok(value.clone());
         }
-        Expr::Prop(base, name) => property(eval(base, row, ctx)?, name, ctx)?,
+        Expr::Prop(base, name) => match base.as_ref() {
+            // Read through a variable without copying the whole map or row value.
+            Expr::Var(variable) => match var(variable, row, ctx)? {
+                Val::Map(map) => map.get(name).cloned().unwrap_or(Val::Null),
+                Val::Node(id) => Val::from(graph::node_property(ctx, *id, name)?),
+                Val::Rel(edge) => Val::from(graph::edge_property(ctx, edge, name)?),
+                Val::Null => Val::Null,
+                other => property(other.clone(), name, ctx)?,
+            },
+            base => property(eval(base, row, ctx)?, name, ctx)?,
+        },
         Expr::Call {
             name,
             distinct: _,
@@ -134,7 +148,16 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             let null = eval(a, row, ctx)?.is_null();
             Val::Bool(null != *negated)
         }
-        Expr::In(a, b) => membership(eval(a, row, ctx)?, eval(b, row, ctx)?)?,
+        Expr::In(a, b) => {
+            let value = eval(a, row, ctx)?;
+            // A parameter list is borrowed, not copied, for every row.
+            if let Expr::Param(name) = b.as_ref() {
+                if let Some(list) = ctx.param_vals.and_then(|vals| vals.get(name)) {
+                    return membership(&value, list);
+                }
+            }
+            membership(&value, &eval(b, row, ctx)?)?
+        }
         Expr::And(a, b) | Expr::Or(a, b) | Expr::Xor(a, b) => {
             // Evaluate both operands: invalid operand types must not be hidden by short circuiting.
             let a = boolean(eval(a, row, ctx)?)?;
@@ -345,15 +368,15 @@ pub(super) fn cmp(a: &Val, op: CmpOp, b: &Val) -> Option<bool> {
 
 /// Cypher list membership: true on an equal element; otherwise null when the value
 /// or any element is null (the answer is unknown), else false. A null list is null.
-fn membership(value: Val, list: Val) -> Result<Val, ExecError> {
+fn membership(value: &Val, list: &Val) -> Result<Val, ExecError> {
     let items = match list {
         Val::Null => return Ok(Val::Null),
         Val::List(items) => items,
-        other => return Err(type_error("IN", &other)),
+        other => return Err(type_error("IN", other)),
     };
     let mut unknown = false;
-    for item in &items {
-        match equals(&value, item) {
+    for item in items {
+        match equals(value, item) {
             Some(true) => return Ok(Val::Bool(true)),
             None => unknown = true,
             Some(false) => {}
@@ -890,6 +913,18 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                 current += step as i128;
             }
             Val::List(out)
+        }
+        "pi" => Val::Float(std::f64::consts::PI),
+        "e" => Val::Float(std::f64::consts::E),
+        "rand" => {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos());
+            let mut x = u64::from(nanos) ^ 0x9E37_79B9_7F4A_7C15;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            Val::Float((x >> 11) as f64 / (1u64 << 53) as f64)
         }
         "timestamp" => {
             arity(name, &args, 0, 0)?;

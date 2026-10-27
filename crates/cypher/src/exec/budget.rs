@@ -116,6 +116,7 @@ pub(super) struct Budget<'a> {
     retained: Cell<usize>,
     reservation: Option<&'a Reservation>,
     deadline: Option<Instant>,
+    ticks: Cell<u32>,
 }
 impl<'a> Budget<'a> {
     pub fn new(limits: ExecutionLimits, reservation: Option<&'a Reservation>) -> Self {
@@ -127,10 +128,11 @@ impl<'a> Budget<'a> {
             deadline: limits
                 .timeout
                 .and_then(|timeout| Instant::now().checked_add(timeout)),
+            ticks: Cell::new(0),
         }
     }
     pub fn charge(&self, bytes: usize) -> Result<(), ExecError> {
-        self.check_deadline()?;
+        self.tick()?;
         let used = self.used.get().saturating_add(bytes);
         let attempted = used.saturating_add(self.retained.get());
         if attempted > self.limit {
@@ -143,6 +145,18 @@ impl<'a> Budget<'a> {
             reservation.grow_to(attempted)?;
         }
         self.used.set(used);
+        Ok(())
+    }
+    /// Deadline check for hot paths: reads the clock on every 32nd call.
+    pub fn tick(&self) -> Result<(), ExecError> {
+        if self.deadline.is_none() {
+            return Ok(());
+        }
+        let ticks = self.ticks.get().wrapping_add(1);
+        self.ticks.set(ticks);
+        if ticks % 32 == 1 {
+            self.check_deadline()?;
+        }
         Ok(())
     }
     pub fn check_deadline(&self) -> Result<(), ExecError> {

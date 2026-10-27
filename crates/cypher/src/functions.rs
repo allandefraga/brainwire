@@ -61,7 +61,8 @@ pub fn known(name: &str) -> bool {
 pub fn arity(name: &str) -> (usize, usize) {
     match name {
         "coalesce" => (1, usize::MAX),
-        "timestamp" => (0, 0),
+        "timestamp" | "rand" | "pi" | "e" => (0, 0),
+        "percentilecont" | "percentiledisc" => (2, 2),
         "replace" => (3, 3),
         "substring" | "range" => (2, 3),
         "left" | "right" | "split" => (2, 2),

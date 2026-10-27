@@ -39,7 +39,7 @@ pub(super) fn apply(
             let mut out = vec![];
             for mut row in rows {
                 for pattern in patterns {
-                    write_pattern(txn, env, pattern, &mut row, true, &mut overlay)?;
+                    write_pattern(txn, env, pattern, &mut row, true, true, &mut overlay)?;
                     *wrote = true;
                 }
                 out.push(row);
@@ -53,7 +53,9 @@ pub(super) fn apply(
         } => {
             let mut out = vec![];
             for mut row in rows {
-                let created = write_pattern(txn, env, pattern, &mut row, false, &mut overlay)?;
+                let track = !on_create.is_empty() || !on_match.is_empty();
+                let created =
+                    write_pattern(txn, env, pattern, &mut row, false, track, &mut overlay)?;
                 *wrote = true;
                 let items = if created { on_create } else { on_match };
                 if !items.is_empty() {
@@ -124,6 +126,8 @@ fn env_ctx<'t, 'db>(env: &'t Env<'_>, txn: &'t Txn<'db>) -> Context<'t, 'db> {
         visibility: env.visibility,
         checkpoint_dir: env.checkpoint_dir,
         vars: env.vars,
+        cache: None,
+        param_vals: Some(env.param_vals),
     }
 }
 
@@ -181,6 +185,7 @@ fn write_pattern(
     pattern: &WritePattern,
     row: &mut Row,
     create: bool,
+    track_created: bool,
     overlay: &mut Overlay,
 ) -> Result<bool, ExecError> {
     let mut created = false;
@@ -210,7 +215,9 @@ fn write_pattern(
             None if create => generated_entity_id(),
             None => derived_entity_id(&values)?,
         };
-        let exists = !store::find_by_entity_id(txn, &entity_id, Some(ty.id))?.is_empty();
+        // A plain MERGE needs no existence probe: merge_node upserts.
+        let exists =
+            track_created && !store::find_by_entity_id(txn, &entity_id, Some(ty.id))?.is_empty();
         if create && exists {
             return Err(ExecError::ConstraintViolation(format!(
                 "{label} entity_id {entity_id} already exists"

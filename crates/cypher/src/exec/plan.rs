@@ -202,6 +202,9 @@ pub(super) struct ProjectPlan {
     pub skip: Option<Expr>,
     pub limit: Option<Expr>,
     pub where_: Option<Expr>,
+    /// Rows arrive already in ORDER BY order (an entity id ordered scan),
+    /// so LIMIT can stop the scan early.
+    pub presorted: bool,
 }
 
 impl ProjectPlan {
@@ -225,6 +228,8 @@ pub(super) struct AggSpec {
     pub distinct: bool,
     /// `None` for `count(*)`.
     pub arg: Option<Expr>,
+    /// The constant percentile of `percentileCont` / `percentileDisc`.
+    pub fraction: Option<Expr>,
     pub slot: usize,
 }
 
@@ -563,7 +568,10 @@ impl Planner<'_, '_, '_> {
                     }
                     let introspection = matches!(
                         name.as_str(),
-                        "db.labels" | "db.relationshipTypes" | "db.propertyKeys"
+                        "db.labels"
+                            | "db.relationshipTypes"
+                            | "db.propertyKeys"
+                            | "dbms.components"
                     );
                     if !introspection && !is_admin_call(name) && index != 0 {
                         return Err(unsupported(format!(
@@ -682,7 +690,9 @@ impl Planner<'_, '_, '_> {
                 }
                 Clause::Set(items) | Clause::Remove(items) => {
                     let items = self.set_items(items, &scope)?;
-                    ops.push(Op::Set(items));
+                    if !fuse_set_into_merge(&mut ops, &items, &self.vars) {
+                        ops.push(Op::Set(items));
+                    }
                 }
                 Clause::Delete { detach, targets } => {
                     for target in targets {
@@ -695,6 +705,7 @@ impl Planner<'_, '_, '_> {
                 }
             }
         }
+        self.presort(&mut ops);
         let returns = matches!(clauses.last(), Some(Clause::Return(_)));
         let writes = ops.iter().any(Op::is_write);
         if !returns && !writes && !call_only {
@@ -710,6 +721,52 @@ impl Planner<'_, '_, '_> {
             columns,
             outputs,
         })
+    }
+
+    /// `MATCH (n:L) [WHERE ...] RETURN ... ORDER BY n.entity_id LIMIT k`: scan
+    /// the primary key in entity id order and stop after `k` rows, so cursor
+    /// pagination costs one page instead of one label scan.
+    fn presort(&self, ops: &mut [Op]) {
+        let [Op::Match(matched), Op::Project(projection), ..] = ops else {
+            return;
+        };
+        if matched.optional
+            || matched.steps.len() != 1
+            || projection.aggregate.is_some()
+            || projection.distinct
+            || projection.limit.is_none()
+            || projection.order.len() != 1
+            || projection.order[0].1
+        {
+            return;
+        }
+        let StepKind::Anchor(anchor) = &mut matched.steps[0].kind else {
+            return;
+        };
+        if anchor.bound
+            || anchor.labels.len() != 1
+            || !matches!(anchor.access, Access::Scan | Access::EntityRange { .. })
+        {
+            return;
+        }
+        let is_entity = |e: &Expr| {
+            matches!(e, Expr::Prop(base, key) if key == "entity_id"
+                && matches!(base.as_ref(), Expr::Var(v) if self.vars.slot(v) == Some(anchor.slot)))
+        };
+        let order = &projection.order[0].0;
+        let sorted = is_entity(order)
+            || matches!(order, Expr::Var(name) if projection.items.iter().any(|(e, slot)| Some(*slot) == self.vars.slot(name) && is_entity(e)));
+        if !sorted {
+            return;
+        }
+        if matches!(anchor.access, Access::Scan) {
+            anchor.access = Access::EntityRange {
+                lower: None,
+                upper: None,
+                prefix: None,
+            };
+        }
+        projection.presorted = true;
     }
 
     fn set_items(&mut self, items: &[SetItem], scope: &Scope) -> Result<Vec<SetPlan>, ExecError> {
@@ -1013,6 +1070,7 @@ impl Planner<'_, '_, '_> {
                 skip: projection.skip.clone(),
                 limit: projection.limit.clone(),
                 where_: projection.where_.clone(),
+                presorted: false,
             },
             next,
             columns,
@@ -1034,6 +1092,7 @@ impl Planner<'_, '_, '_> {
                     func: "count".into(),
                     distinct: false,
                     arg: None,
+                    fraction: None,
                     slot,
                 });
                 Expr::Var(self.slot_name(slot))
@@ -1043,9 +1102,17 @@ impl Planner<'_, '_, '_> {
                 distinct,
                 mut args,
             } if crate::ast::AGGREGATES.contains(&name.as_str()) => {
-                if args.len() != 1 {
-                    return Err(semantic(format!("{name} takes one argument")));
+                let percentile = name.starts_with("percentile");
+                if args.len() != 1 + usize::from(percentile) {
+                    return Err(semantic(format!("wrong number of arguments for {name}")));
                 }
+                let fraction = if percentile {
+                    let p = args.pop().expect("checked arity");
+                    self.expr(&p, &Scope::new(), false)?;
+                    Some(p)
+                } else {
+                    None
+                };
                 let arg = args.remove(0);
                 if arg.has_aggregate() {
                     return Err(semantic("aggregates cannot be nested"));
@@ -1056,6 +1123,7 @@ impl Planner<'_, '_, '_> {
                     func: name,
                     distinct,
                     arg: Some(arg),
+                    fraction,
                     slot,
                 });
                 Expr::Var(self.slot_name(slot))
@@ -1513,6 +1581,38 @@ impl Planner<'_, '_, '_> {
 
 /// Lower and upper bound expressions (and whether each is inclusive).
 type RangeBounds = (Option<(Expr, bool)>, Option<(Expr, bool)>);
+
+/// `MERGE (n:L {entity_id: ..}) SET n.a = x, ...` where no value reads `n`:
+/// fold the assignments into the MERGE so each row is one node write.
+fn fuse_set_into_merge(ops: &mut [Op], items: &[SetPlan], vars: &Vars) -> bool {
+    let Some(Op::Merge { pattern, .. }) = ops.last_mut() else {
+        return false;
+    };
+    let [node] = pattern.nodes.as_mut_slice() else {
+        return false;
+    };
+    if node.bound || !pattern.rels.is_empty() || !node.props.iter().any(|(k, _)| k == "entity_id") {
+        return false;
+    }
+    let reads_node = |e: &Expr| {
+        let mut free = BTreeSet::new();
+        free_vars(e, &mut free);
+        free.iter().any(|v| vars.slot(v) == Some(node.slot)) || matches!(e, Expr::Exists(_))
+    };
+    let fusible = items.iter().all(|item| {
+        matches!(item, SetPlan::Prop { slot, prop, value } if *slot == node.slot && prop != "entity_id" && !reads_node(value))
+    });
+    if !fusible {
+        return false;
+    }
+    for item in items {
+        if let SetPlan::Prop { prop, value, .. } = item {
+            node.props.retain(|(k, _)| k != prop);
+            node.props.push((prop.clone(), value.clone()));
+        }
+    }
+    true
+}
 
 fn flip(op: CmpOp) -> CmpOp {
     match op {

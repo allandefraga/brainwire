@@ -244,8 +244,17 @@ pub enum TextOp {
 }
 
 /// Aggregate function names recognized in projections.
-pub const AGGREGATES: [&str; 8] = [
-    "count", "sum", "avg", "min", "max", "collect", "stdev", "stdevp",
+pub const AGGREGATES: [&str; 10] = [
+    "count",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "collect",
+    "stdev",
+    "stdevp",
+    "percentilecont",
+    "percentiledisc",
 ];
 
 impl Expr {

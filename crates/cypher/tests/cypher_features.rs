@@ -457,3 +457,74 @@ fn merge_hooks_remove_map_set_and_delete() {
         vec![vec![v(1)]]
     );
 }
+
+#[test]
+fn cursor_pages_follow_entity_id_order_and_stop_early() {
+    let (_dir, db) = setup();
+    let mut after = String::new();
+    let mut seen = vec![];
+    loop {
+        let page = run(&db, &format!("MATCH (p:Person) WHERE p.entity_id > '{after}' AND p.age < 40 RETURN p.entity_id AS id ORDER BY id LIMIT 2"));
+        if page.is_empty() {
+            break;
+        }
+        for row in &page {
+            let Out::Value(Value::Str(id)) = &row[0] else {
+                panic!()
+            };
+            seen.push(id.clone());
+            after = id.clone();
+        }
+    }
+    assert_eq!(seen, ["ana", "bia", "dani"]);
+    assert_eq!(
+        run(
+            &db,
+            "MATCH (n:Car) RETURN n.entity_id ORDER BY n.entity_id SKIP 1 LIMIT 1"
+        ),
+        vec![vec![v("c2")]]
+    );
+    assert_eq!(
+        run(
+            &db,
+            "MATCH (n:Car) RETURN n.entity_id ORDER BY n.entity_id DESC LIMIT 1"
+        ),
+        vec![vec![v("c3")]]
+    );
+}
+
+#[test]
+fn unwind_merge_set_upserts_in_one_write_and_keeps_set_semantics() {
+    let (_dir, db) = setup();
+    let params = BTreeMap::from([(
+        "rows".to_string(),
+        Value::List(vec![
+            Value::Map(BTreeMap::from([
+                ("id".into(), Value::Str("ana".into())),
+                ("age".into(), Value::Int(50)),
+                ("city".into(), Value::Null),
+            ])),
+            Value::Map(BTreeMap::from([
+                ("id".into(), Value::Str("zoe".into())),
+                ("age".into(), Value::Int(9)),
+                ("city".into(), Value::Str("BH".into())),
+            ])),
+        ]),
+    )]);
+    let query =
+        "UNWIND $rows AS r MERGE (n:Person {entity_id: r.id}) SET n.age = r.age, n.city = r.city";
+    execute(&db, query, &params).unwrap();
+    assert_eq!(
+        run(&db, "MATCH (n:Person) WHERE n.entity_id IN ['ana', 'zoe'] RETURN n.entity_id, n.name, n.age, n.city ORDER BY n.entity_id"),
+        vec![vec![v("ana"), v("Ana"), v(50), v(())], vec![v("zoe"), v(()), v(9), v("BH")]]
+    );
+    // A SET that reads the merged node still runs after the MERGE.
+    run(
+        &db,
+        "MERGE (n:Person {entity_id: 'zoe'}) SET n.age = n.age + 1",
+    );
+    assert_eq!(
+        run(&db, "MATCH (n:Person {entity_id: 'zoe'}) RETURN n.age"),
+        vec![vec![v(10)]]
+    );
+}

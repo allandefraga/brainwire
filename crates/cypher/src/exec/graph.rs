@@ -108,6 +108,16 @@ pub(super) fn node_property(
         return Err(ExecError::Forbidden("node is not readable"));
     }
     let column = node_type(ctx, id)?.column(name);
+    if let Some(cache) = ctx.cache {
+        if let Some((cached, bytes)) = cache.0.borrow().as_ref() {
+            if *cached == id {
+                let value = decode_node_field(bytes, column, name)?;
+                ctx.budget
+                    .charge(budget::value_bytes(&value).saturating_mul(2))?;
+                return Ok(value);
+            }
+        }
+    }
     let value = {
         let _scope = ctx.budget.scope();
         node_field_with_control::<ExecError>(ctx.txn, id, column, name, |bytes| {

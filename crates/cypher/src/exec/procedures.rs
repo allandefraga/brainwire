@@ -26,6 +26,10 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "sources",
         ]),
         "db.indexes" => Ok(&["label", "property", "state"]),
+        "db.labels" => Ok(&["label"]),
+        "db.relationshipTypes" => Ok(&["relationshipType"]),
+        "db.propertyKeys" => Ok(&["propertyKey"]),
+        "dbms.components" => Ok(&["name", "versions", "edition"]),
         "db.memory" => Ok(&[
             "poolLimitBytes",
             "poolReservedBytes",
@@ -196,7 +200,14 @@ pub(super) fn validate(
         acl_refs(args, ctx)?;
     } else if matches!(
         name,
-        "db.indexes" | "db.memory" | "db.schema" | "db.commitState"
+        "db.indexes"
+            | "db.memory"
+            | "db.schema"
+            | "db.commitState"
+            | "db.labels"
+            | "db.relationshipTypes"
+            | "db.propertyKeys"
+            | "dbms.components"
     ) {
         if !args.is_empty() {
             return Err(semantic(format!("{name} takes no arguments")));
@@ -518,6 +529,41 @@ pub(super) fn run(
     };
     if name == "db.schema" {
         return Ok(vec![bind(schema::values(ctx, yields.len())?)?]);
+    }
+    if name == "dbms.components" {
+        return Ok(vec![bind(vec![
+            value(Value::Str("Brainwire".into())),
+            value(Value::List(vec![Value::Str(
+                env!("CARGO_PKG_VERSION").into(),
+            )])),
+            value(Value::Str("community".into())),
+        ])?]);
+    }
+    if matches!(
+        name,
+        "db.labels" | "db.relationshipTypes" | "db.propertyKeys"
+    ) {
+        let mut names = BTreeSet::new();
+        match name {
+            "db.labels" => names.extend(ctx.catalog.node_types.iter().map(|t| t.label.clone())),
+            "db.relationshipTypes" => {
+                names.extend(ctx.catalog.edge_types.iter().map(|t| t.name.clone()))
+            }
+            _ => {
+                names.insert("entity_id".to_string());
+                for ty in &ctx.catalog.node_types {
+                    names.extend(ty.columns.iter().map(|c| c.name.clone()));
+                }
+                for ty in &ctx.catalog.edge_types {
+                    names.extend(ty.columns.iter().map(|c| c.name.clone()));
+                }
+                names.retain(|n| !graph::acl_property(n));
+            }
+        }
+        return names
+            .into_iter()
+            .map(|n| bind(vec![value(Value::Str(n))]))
+            .collect();
     }
     if name == "db.nodeAcls" {
         return node_acls(args, ctx, &bind);

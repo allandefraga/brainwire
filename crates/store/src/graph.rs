@@ -1027,6 +1027,36 @@ pub fn node_field_with_control<E: From<GraphError> + From<StoreError>>(
     })
 }
 
+/// Decode one property from a stored node value (as streamed by
+/// [`visit_nodes_of_type_with_values`]); `Value::Null` when absent.
+pub fn decode_node_field(
+    bytes: &[u8],
+    column: Option<u16>,
+    name: &str,
+) -> Result<Value, StoreError> {
+    let (entity_id, row) = split_node(bytes)?;
+    if name == "entity_id" {
+        return Ok(Value::Str(entity_id.to_string()));
+    }
+    Ok(decode_row_field(row, column, name)?.unwrap_or(Value::Null))
+}
+
+/// Stream a label's nodes together with their stored values, in id order.
+pub fn visit_nodes_of_type_with_values<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    ty: TypeId,
+    mut visit: impl FnMut(NodeId, &[u8]) -> Result<(), E>,
+) -> Result<(), E> {
+    let (lo, inclusive_hi) = NodeId::type_range(0, ty).map_err(GraphError::from)?;
+    let hi = inclusive_hi.0 + 1;
+    txn.visit_range::<E>(
+        Cf::Node,
+        &lo.0.to_be_bytes(),
+        &hi.to_be_bytes(),
+        |key, value| visit(node_id_value(key).map_err(GraphError::from)?, value),
+    )
+}
+
 pub fn node_exists(txn: &Txn, id: NodeId) -> Result<bool, StoreError> {
     txn.with_get(Cf::Node, &id.0.to_be_bytes(), |bytes| Ok(bytes.is_some()))
 }
