@@ -40,7 +40,7 @@ class FakeTx:
         policy = self.metadata.get("brainwire_visibility")
         if policy is not None:
             mode = "allow_all" if policy.get("allow_all") else "restricted"
-            expected = fixture.expected_results(n)[mode]
+            expected = fixture.expected_results(n, self.state.get("acl_mode", "balanced"))[mode]
             if "group_value" in query: return Result(expected["top_n"])
             count = expected["cursor_rows"] if "MATCH (n:Usuario)" in query else expected["count_pairs"]
             return Result([{"count": count}])
@@ -97,7 +97,8 @@ class FixtureTests(unittest.TestCase):
         binary.write_text("#!/bin/sh\nexit 0\n")
         binary.chmod(0o700)
         return argparse.Namespace(source_receipt=receipt, confirm_source_synthetic=True,
-                                  binary=binary, source_revision="a"*40, output=root/"output", batch_size=4)
+                                  binary=binary, source_revision="a"*40, output=root/"output", batch_size=4,
+                                  acl_mode="balanced")
     def test_exact_expected_results_cover_small_and_million_row_boundaries(self):
         for count in [1, 4, 8, 9, 1_000_000]:
             result = fixture.expected_results(count)
@@ -105,6 +106,39 @@ class FixtureTests(unittest.TestCase):
             visible = sum(i % 8 < 4 for i in range(count))
             self.assertEqual(result["restricted"]["cursor_rows"], visible)
             self.assertEqual(sum(row["count"] for row in result["restricted"]["top_n"]), visible)
+    def test_full_cursor_mode_has_a_million_visible_sources_and_half_visible_pairs(self):
+        result=fixture.expected_results(1_000_000,"full-cursor")
+        self.assertEqual(result["restricted"]["cursor_rows"],1_000_000)
+        self.assertEqual(result["restricted"]["count_pairs"],500_000)
+        self.assertEqual(result["restricted"]["top_n"],
+                         [{"group_value":brand,"count":125_000} for brand in fixture.BRANDS])
+
+    def test_full_cursor_preparation_stamps_all_sources_but_only_half_targets_visible(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary); receipt,_=self.source(root); args=self.args(root,receipt)
+            args.acl_mode="full-cursor"
+            state={"rows":9,"batches":[],"metadata":[],"commits":0,"acl_mode":"full-cursor"}
+            with redirect_stdout(io.StringIO()):
+                fixture.prepare(args,lambda *a,**k:FakeDriver(state),lambda *a:FakeServer(state,*a),
+                                lambda *a:{"status":"ok"},lambda:"127.0.0.1:19087")
+            rows=[row for batch in state["batches"] for row in batch]
+            users=[row for row in rows if row["label"]=="Usuario"]
+            cars=[row for row in rows if row["label"]=="Carro"]
+            self.assertTrue(all(row["allow"]==[fixture.READER] for row in users))
+            self.assertEqual(sum(row["allow"]==[fixture.READER] for row in cars),5)
+            manifest=json.loads((args.output/"manifest.json").read_text())
+            prepared=json.loads((args.output/"prepared.json").read_text())
+            self.assertEqual(manifest["fixture_acl_mode"],"full-cursor")
+            self.assertEqual(prepared["acl_mode"],"full-cursor")
+            self.assertEqual(manifest["expected"]["restricted"]["cursor_rows"],9)
+            self.assertEqual(manifest["expected"]["restricted"]["count_pairs"],5)
+
+    def test_unknown_acl_mode_is_refused(self):
+        with self.assertRaises(ValueError): fixture.expected_results(8,"unknown")
+        state={"rows":8,"batches":[],"metadata":[],"commits":0}
+        with self.assertRaises(ValueError): fixture.stamp(FakeDriver(state),"bench",8,4,"unknown")
+        self.assertEqual(state["batches"],[])
+
     def test_prepare_copies_only_to_new_graph_and_freezes_reader_after_verified_stamps(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); receipt, source = self.source(root)

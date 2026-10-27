@@ -12,7 +12,7 @@ or process-memory target is claimed as met.
 | Restricted-ACL `count` via client | 16.7 s | ≤ 0.5 s | — | 1.369 s (Bolt; target not met) |
 | Top-N aggregation with ACL | 20.5 s | ≤ 1 s | — | 1.788 s (Bolt; target not met) |
 | Bolt cursor, 1M nodes | 16 s | ≤ 5 s | — | — |
-| ACL cursor, 1M nodes, pages of 200 | exceeded 30 min | ≤ 60 s | — | 11.30 s for 500k visible rows; 1M unmeasured |
+| ACL cursor, 1M nodes, pages of 200 | exceeded 30 min | ≤ 60 s | 23.33 s for 1M visible rows (Bolt) | 26.74 s for 1M visible rows (Bolt) |
 | Unlabelled `MATCH (n)` with limit | 3.6 s | ≤ 1 s | — | — |
 | Batch writes, eight sessions | 13.7–22k rows/s | ≥ 60k rows/s | — | — |
 
@@ -128,13 +128,50 @@ and 11.15 s respectively. The post-benchmark offline check returned `ok`.
 Restricted count and top-N miss the stated targets; the 1M-visible-row ACL
 cursor target is not yet measured. Raw receipts and the private fixture are local.
 
+## Full-visible cursor fixture before ACL metadata fast path
+
+A second frozen fixture granted access to all 1M Usuario nodes and half the
+Carro nodes, leaving 500,000 visible pairs. The same read-only delegated reader
+used separate 200-row transactions. The restricted cursor returned all 1M nodes
+in 23.33 s wall time (22.91 s summed query time; 5,001 pages including the empty
+last page). This single synthetic run met the 60 s duration target but does not
+prove O(k) page cost or behavior under sparse ACLs. Restricted pair count median
+was 3.023 s and top-N median 2.543 s; both missed their targets. Server sampled
+peak RSS was 707,592,192 B. The host load averages were 23.68 / 24.97 / 22.29.
+The post-benchmark offline check reported `ok`. This measurement used the
+pre-metadata-optimization binary, SHA-256
+`4e9a539aaefe7b61ae60e55cb331a3f9ceecec221629f32117afe6214ecda2bd`.
+
+## ACL metadata fast path: full-visible fixture comparison
+
+The previously checked frozen fixture was copied under an exclusive lock and
+measured with the new binary and the same visibility policy. The second host
+load was 8.39 / 11.33 / 15.67, versus 23.68 / 24.97 / 22.29 before; these
+single runs do not isolate the optimization from host noise. Both offline
+checks reported `ok`. The tested source commit was
+`bc1ae8209bb6da04ee49ab12548782a0ff40d111`; only its message was subsequently
+amended. The after binary SHA-256 was
+`7c0960342ca3bd9e7eccde71711cbe760c5f0c12d65e9a4dd9c71e555e2ea740`.
+
+| Bolt measurement | Before | After | Target |
+| --- | ---: | ---: | ---: |
+| Restricted count, 500k visible pairs, median | 3.023 s | 2.383 s | ≤ 0.5 s |
+| Restricted top-N, median | 2.543 s | 2.552 s | ≤ 1 s |
+| Restricted cursor, 1M visible nodes, 200-row pages | 23.33 s | 26.74 s | ≤ 60 s |
+| Sampled server peak RSS during reads | 707,592,192 B | 686,227,456 B | Not a global cap |
+
+The count and aggregation targets remain unmet. The cursor duration meets the
+stated threshold in this fixture, but does not prove O(k) scanning or sparse-ACL
+behavior. The server RSS values are sampled during read-only diagnostics, not
+concurrent writes and reads or cgroup-enforced limits.
+
 ## Outstanding
 
 - Reproduce the complete workload, record binary provenance and host load, and
   run `db check`; measure before and after each implementation item.
-- Measure a pre-change Bolt baseline and optimize restricted count and top-N;
-  retest a cursor with 1M visible rows. Implementation tests cover write denial,
-  edge visibility and procedure guards.
+- Optimize restricted count and top-N, then repeat the same ACL distributions.
+  Measure page scanning cost under sparse visibility; one full-visible cursor
+  duration does not establish O(k).
 - Profile the slower post-memory diagnostic and repeat under comparable host load.
   Parallel worker, cache and selected-field accounting now have tests, but a global
   memory budget and hard 4 GiB RSS target remain unimplemented.

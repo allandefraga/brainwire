@@ -98,14 +98,17 @@ def locked_copy(source, destination):
         yield
 
 
-def expected_results(count):
+def expected_results(count, acl_mode="balanced"):
+    if acl_mode not in ("balanced", "full-cursor"):
+        raise ValueError("unknown ACL mode")
     visible = sum(count // 8 + int(count % 8 > residue) for residue in range(4))
     def top(restricted):
         rows = [{"group_value": brand, "count": (count // 8 + int(count % 8 > i)) if restricted
                  else (count // 4 + int(count % 4 > i))} for i, brand in enumerate(BRANDS)]
         return sorted([row for row in rows if row["count"]], key=lambda row: (-row["count"], row["group_value"]))
     return {"allow_all": {"count_pairs": count, "cursor_rows": count, "top_n": top(False)},
-            "restricted": {"count_pairs": visible, "cursor_rows": visible, "top_n": top(True)}}
+            "restricted": {"count_pairs": visible, "cursor_rows": count if acl_mode == "full-cursor" else visible,
+                           "top_n": top(True)}}
 
 
 def credentials(database):
@@ -126,12 +129,14 @@ def query(driver, database, cypher, params=None, policy=None, write=False, timeo
     return rows
 
 
-def stamp(driver, database, count, batch_size):
+def stamp(driver, database, count, batch_size, acl_mode="balanced"):
+    if acl_mode not in ("balanced", "full-cursor"):
+        raise ValueError("unknown ACL mode")
     total = 0
     for label in ("Usuario", "Carro"):
         for offset in range(0, count, batch_size):
             entries = [{"label": label, "entityId": f"{LABELS[label]}-{i:08}",
-                        "allow": [READER if i % 8 < 4 else HIDDEN], "deny": [],
+                        "allow": [READER if (i % 8 < 4 or (label == "Usuario" and acl_mode == "full-cursor")) else HIDDEN], "deny": [],
                         "connectorIds": [], "sources": ["synthetic-v07"]}
                        for i in range(offset, min(offset + batch_size, count))]
             rows = query(driver, database, "CALL db.setNodeAcls($rows) YIELD updated RETURN updated",
@@ -248,10 +253,12 @@ def prepare(args, driver_factory=None, server_factory=Server, checker=offline_ch
         raise ValueError("output must be separate from source graph")
     if not 1 <= args.batch_size <= 10000:
         raise ValueError("batch size must be between 1 and 10000")
+    if args.acl_mode not in ("balanced", "full-cursor"):
+        raise ValueError("unknown ACL mode")
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     (output / "data").mkdir(mode=0o700)
     receipt = {"kind": "synthetic Bolt ACL fixture preparation", "status": "running",
-               "source_receipt_sha256": receipt_hash, "rows_per_label": count,
+               "source_receipt_sha256": receipt_hash, "rows_per_label": count, "acl_mode": args.acl_mode,
                "source_revision": args.source_revision, "server_binary_sha256": sha256(binary),
                "qualification_gaps": ["Caller confirms source synthetic/disposable; receipt identity is not a cryptographic data provenance guarantee.",
                     "Additional Pessoa write-fixture nodes are retained and counted explicitly.",
@@ -283,8 +290,8 @@ def prepare(args, driver_factory=None, server_factory=Server, checker=offline_ch
             wait_ready(driver, "bench", server)
             version, additional = validate_base(driver, "bench", count)
             receipt["additional_nodes_outside_four_label_fixture"] = additional
-            receipt["stamped_acl_nodes"] = stamp(driver, "bench", count, args.batch_size)
-        expected = expected_results(count)
+            receipt["stamped_acl_nodes"] = stamp(driver, "bench", count, args.batch_size, args.acl_mode)
+        expected = expected_results(count, args.acl_mode)
         with driver_factory("bolt://" + address, auth=("fixture-reader", tokens["fixture-reader"]),
                             max_transaction_retry_time=0, connection_timeout=1, max_connection_pool_size=1) as driver:
             validate_visibility(driver, "bench", expected)
@@ -300,7 +307,7 @@ def prepare(args, driver_factory=None, server_factory=Server, checker=offline_ch
                     "server_binary_sha256": receipt["server_binary_sha256"],
                     "schema": {"source_label": "Usuario", "target_label": "Carro", "relationship_type": "TEM_CARRO",
                                "group_property": "marca_teste", "cursor_label": "Usuario"},
-                    "top_n": 5, "expected": expected}
+                    "top_n": 5, "fixture_acl_mode": args.acl_mode, "expected": expected}
         private_json(output / "manifest.json", manifest)
         private_json(output / "server.json", {"binary": str(binary), "environment": settings})
         private_json(output / "client-env.json", {"BRAINWIRE_BENCH_URI": "bolt://" + address,
@@ -379,6 +386,8 @@ def parser():
     prep.add_argument("--source-revision", required=True)
     prep.add_argument("--output", type=Path, required=True, help="new private output directory")
     prep.add_argument("--batch-size", type=int, default=2000)
+    prep.add_argument("--acl-mode", choices=("balanced", "full-cursor"), default="balanced",
+                      help="balanced hides half of both labels; full-cursor keeps every Usuario visible")
     run = commands.add_parser("serve", help="run only the prepared read-only server until interrupted")
     run.add_argument("--fixture", type=Path, required=True)
     verify = commands.add_parser("check", help="check only the prepared graph after stopping its server")

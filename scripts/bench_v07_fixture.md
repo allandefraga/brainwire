@@ -34,7 +34,7 @@ included in the four-label count or queried by this diagnostic. No exact 4M-tota
 claim is made when these extra nodes exist.
 
 ACL stamping is sequential preparation in batches of at most 10,000 (default
-2,000), not a write-throughput measurement. For every Usuario/Carro identity,
+2,000), not a write-throughput measurement. In the default balanced mode, for every Usuario/Carro identity,
 indices `i % 8 < 4` allow the synthetic reader and the rest allow a separate
 synthetic principal. The one-to-one Usuario→Carro pair is visible only when both
 endpoints are visible. The helper checks actual unrestricted label/edge counts,
@@ -42,6 +42,14 @@ then delegated allow-all and restricted count/top-N results against computed
 expectations before freezing. At 1M rows, the restricted slice has 500,000 users,
 500,000 visible pairs and four brands with 125,000 pairs each. It stamps ACLs for
 Usuario and Carro only; other labels are outside the restricted workload.
+
+Use `--acl-mode full-cursor` when qualifying the requested walk over one million
+**visible** users: this mode makes every Usuario visible and keeps the same
+half-visible Carro pattern. At one million rows it expects a 1M-row restricted
+cursor, 500,000 visible pairs, and four brands at 125,000 pairs each. The default
+`--acl-mode balanced` keeps the original half-visible pattern on both labels and
+therefore has a 500,000-row restricted cursor. The selected mode is recorded in
+both `prepared.json` and `manifest.json`; compare benchmarks using the same mode.
 
 The output directory is mode `0700`; policy, client environment, manifest and
 receipt files are mode `0600`. Tokens are random, appear only in private memory
