@@ -164,7 +164,7 @@ fn rollback_reset_drop_and_late_query_failure_leave_no_graph_writes() {
                 assert!(matches!(
                     run(
                         &mut s,
-                        "CREATE (c:Customer {entity_id: 'late'}) UNWIND 42 AS x RETURN x"
+                        "CREATE (c:Customer {entity_id: 'late'}) UNWIND [0] AS x RETURN 1 / x"
                     )[0],
                     Response::Failure { .. }
                 ));

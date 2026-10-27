@@ -159,18 +159,14 @@ fn static_errors_survive_empty_input() {
             "{q}"
         );
     }
+    // Unlabeled scans, relationship property filters and nodes without an
+    // explicit entity_id are supported.
     for q in [
         "MATCH (c) RETURN c",
         "MATCH (c:Customer)-[:WORKS_AT {role: 'x'}]->(k:Company) RETURN c",
         "CREATE (c:Customer)",
     ] {
-        assert!(
-            matches!(
-                execute(&db, q, &BTreeMap::new()),
-                Err(ExecError::Unsupported(_))
-            ),
-            "{q}"
-        );
+        assert!(execute(&db, q, &BTreeMap::new()).is_ok(), "{q}");
     }
     assert!(matches!(
         execute(&db, "RETURN (", &BTreeMap::new()),
@@ -182,7 +178,7 @@ fn static_errors_survive_empty_input() {
 fn rollback_late_runtime_errors_and_conflict_mapping() {
     let (_dir, db) = db();
     for suffix in [
-        "UNWIND 42 AS x RETURN x",
+        "UNWIND [1, 0] AS x RETURN 1 / x",
         "RETURN 1 AND true",
         "RETURN 1 LIMIT -1",
         "CREATE (d:Customer {entity_id: 'c1'})",
@@ -236,7 +232,7 @@ fn mixed_comparisons_and_empty_boolean_operand_validation() {
     assert_eq!(
         values(&db, "RETURN 1 <> '1', 1 = '1', 1 < '1'"),
         vec![vec![
-            Out::Value(Value::Null),
+            Out::Value(Value::Bool(true)),
             Out::Value(Value::Bool(false)),
             Out::Value(Value::Null)
         ]]

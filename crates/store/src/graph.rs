@@ -5,7 +5,9 @@
 use std::collections::{BTreeMap, HashSet};
 
 use brainwire_core::acl::{AclError, NodeAcl, ReadVisibility, MAX_ACL_BYTES};
-use brainwire_core::codec::{decode_row, encode_row, estimate_row_allocation, Row};
+use brainwire_core::codec::{
+    decode_row, decode_row_field, encode_row, estimate_row_allocation, Row,
+};
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
 use brainwire_core::schema::{Catalog, Column, GraphMapping, NodeType};
@@ -985,6 +987,227 @@ pub fn visit_by_indexed_property<E: From<GraphError> + From<StoreError>>(
         visit(node_id_value(&key[prefix.len()..]).map_err(GraphError::from)?)
     })?;
     Ok(true)
+}
+
+/// Split a stored node value into its entity id and encoded row.
+fn split_node(bytes: &[u8]) -> Result<(&str, &[u8]), StoreError> {
+    let corrupt = || StoreError::Corrupt("node value".into());
+    let header: [u8; 4] = bytes
+        .get(..4)
+        .ok_or_else(corrupt)?
+        .try_into()
+        .map_err(|_| corrupt())?;
+    let len = u32::from_be_bytes(header) as usize;
+    let raw = bytes[4..].get(..len).ok_or_else(corrupt)?;
+    let entity_id = std::str::from_utf8(raw).map_err(|_| corrupt())?;
+    Ok((entity_id, &bytes[4 + len..]))
+}
+
+/// Read one node property without decoding the rest of the row: `None` when
+/// the node does not exist, `Some(Value::Null)` when it lacks the property.
+/// `column` is the catalog column id of `name`, if it has one.
+pub fn node_field_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    id: NodeId,
+    column: Option<u16>,
+    name: &str,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<Option<Value>, E> {
+    txn.with_get(Cf::Node, &id.0.to_be_bytes(), |bytes| {
+        let Some(bytes) = bytes else {
+            return Ok(None);
+        };
+        let (entity_id, row) = split_node(bytes)?;
+        if name == "entity_id" {
+            control(entity_id.len())?;
+            return Ok(Some(Value::Str(entity_id.to_string())));
+        }
+        let value = decode_row_field(row, column, name).map_err(StoreError::from)?;
+        Ok(Some(value.unwrap_or(Value::Null)))
+    })
+}
+
+pub fn node_exists(txn: &Txn, id: NodeId) -> Result<bool, StoreError> {
+    txn.with_get(Cf::Node, &id.0.to_be_bytes(), |bytes| Ok(bytes.is_some()))
+}
+
+enum Halt<E> {
+    Done,
+    Error(E),
+}
+impl<E: From<StoreError>> From<StoreError> for Halt<E> {
+    fn from(error: StoreError) -> Self {
+        Halt::Error(error.into())
+    }
+}
+
+/// Visit primary keys in entity id order from `from` (inclusive), across all
+/// labels. `visit` returns `false` to stop.
+pub fn visit_entities_from<E: From<StoreError>>(
+    txn: &Txn,
+    from: &str,
+    mut visit: impl FnMut(&str, TypeId, NodeId) -> Result<bool, E>,
+) -> Result<(), E> {
+    let lo = pk_prefix(from);
+    let result = txn.visit_range::<Halt<E>>(Cf::Pk, &lo, &[0xFF], |key, value| {
+        let mut input = key;
+        let raw = get_bytes(&mut input).map_err(StoreError::from)?;
+        let ty = TypeId(get_u16(&mut input).map_err(StoreError::from)?);
+        let entity_id =
+            std::str::from_utf8(&raw).map_err(|_| StoreError::Corrupt("pk entity id".into()))?;
+        let id = node_id_value(value)?;
+        match visit(entity_id, ty, id) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Halt::Done),
+            Err(error) => Err(Halt::Error(error)),
+        }
+    });
+    match result {
+        Ok(()) | Err(Halt::Done) => Ok(()),
+        Err(Halt::Error(error)) => Err(error),
+    }
+}
+
+/// Scan a ready scalar index between two bounds (inclusive; callers re-check
+/// strict bounds) or by string prefix. Returns `false`, visiting nothing,
+/// when no ready index can answer; mixed-type bounds visit nothing.
+pub fn visit_index_range<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn<'_>,
+    ty: &NodeType,
+    field: &str,
+    lower: Option<&Value>,
+    upper: Option<&Value>,
+    prefix: Option<&str>,
+    mut visit: impl FnMut(NodeId) -> Result<(), E>,
+) -> Result<bool, E> {
+    if !ty.indexed.iter().any(|name| name == field) || !scalar_indexes_ready(txn)? {
+        return Ok(false);
+    }
+    let field_prefix = index_field_prefix(ty.id, field);
+    let mut ranges: Vec<(Vec<u8>, Vec<u8>)> = vec![];
+    let key = |tag: u8, tail: &[u8]| {
+        let mut key = field_prefix.clone();
+        key.push(tag);
+        key.extend_from_slice(tail);
+        key
+    };
+    let upper_end = |mut key: Vec<u8>| {
+        key.extend_from_slice(&[0xFF; 9]);
+        key
+    };
+    let number = |v: Option<&Value>| match v {
+        None => Some(None),
+        Some(Value::Int(i)) => Some(Some(*i as f64)),
+        Some(Value::Float(f)) => Some(Some(*f)),
+        _ => None,
+    };
+    if let Some(prefix) = prefix {
+        let mut escaped = Vec::new();
+        put_bytes(&mut escaped, prefix.as_bytes());
+        escaped.truncate(escaped.len() - 2);
+        let lo = key(b's', &escaped);
+        let mut hi = lo.clone();
+        hi.push(0xFF);
+        hi.extend_from_slice(&[0xFF; 9]);
+        ranges.push((lo, hi));
+    } else if [lower, upper].into_iter().flatten().count() > 0
+        && [lower, upper]
+            .into_iter()
+            .flatten()
+            .all(|v| matches!(v, Value::Str(_)))
+    {
+        let lo = match lower {
+            Some(value) => key(b's', &index_value(value).expect("string")[1..]),
+            None => key(b's', &[]),
+        };
+        let hi = match upper {
+            Some(value) => upper_end(key(b's', &index_value(value).expect("string")[1..])),
+            None => key(b't', &[]),
+        };
+        ranges.push((lo, hi));
+    } else if let (Some(lo), Some(hi)) = (number(lower), number(upper)) {
+        let lo = lo.unwrap_or(f64::NEG_INFINITY);
+        let hi = hi.unwrap_or(f64::INFINITY);
+        if lo.is_nan() || hi.is_nan() {
+            return Ok(true);
+        }
+        // Integral values live in the `i` space as big-endian two's complement:
+        // nonnegative and negative halves are each ordered.
+        let (li, ui) = (
+            lo.ceil().max(-9.223372036854776e18),
+            hi.floor().min(9.223372036854775e18),
+        );
+        if li <= ui {
+            let (li, ui) = (li as i64, ui as i64);
+            if ui >= 0 {
+                ranges.push((
+                    key(b'i', &li.max(0).to_be_bytes()),
+                    upper_end(key(b'i', &ui.to_be_bytes())),
+                ));
+            }
+            if li < 0 {
+                ranges.push((
+                    key(b'i', &li.to_be_bytes()),
+                    upper_end(key(b'i', &ui.min(-1).to_be_bytes())),
+                ));
+            }
+        }
+        // Non-integral floats: scan the whole `f` space; callers filter.
+        ranges.push((key(b'f', &[]), key(b'g', &[])));
+    } else {
+        return Ok(lower.is_some() || upper.is_some());
+    }
+    for (lo, hi) in ranges {
+        txn.visit_range::<E>(Cf::Idx, &lo, &hi, |key, _| {
+            let tail = key
+                .get(key.len().saturating_sub(8)..)
+                .ok_or_else(|| StoreError::Corrupt("scalar index key length".into()))?;
+            visit(node_id_value(tail).map_err(GraphError::from)?)
+        })?;
+    }
+    Ok(true)
+}
+
+/// Stream every relationship whose owner node (source in `out`, target in
+/// `in`) has type `ty`, in key order, optionally keeping only `edge_types`.
+pub fn visit_edges_of_label<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    cf: Cf,
+    ty: TypeId,
+    edge_types: &[EdgeTypeId],
+    mut visit: impl FnMut(NodeId, EdgeRef) -> Result<(), E>,
+) -> Result<(), E> {
+    if !matches!(cf, Cf::Out | Cf::In) {
+        return Err(
+            StoreError::Corrupt("adjacency requires out or in column family".into()).into(),
+        );
+    }
+    let (lo, inclusive_hi) = NodeId::type_range(0, ty).map_err(GraphError::from)?;
+    let hi = (inclusive_hi.0 + 1).to_be_bytes();
+    txn.visit_range::<E>(cf, &lo.0.to_be_bytes(), &hi, |key, _| {
+        let (owner, edge_type, other, id) = decode_edge_key(key).map_err(GraphError::from)?;
+        if edge_types.is_empty() || edge_types.contains(&edge_type) {
+            visit(
+                owner,
+                EdgeRef {
+                    edge_type,
+                    other,
+                    id,
+                },
+            )?;
+        }
+        Ok(())
+    })
+}
+
+/// Whether one directed relationship exists.
+pub fn edge_exists(
+    txn: &Txn,
+    (source, edge_type, target, id): (NodeId, EdgeTypeId, NodeId, EdgeId),
+) -> Result<bool, StoreError> {
+    txn.with_get(Cf::Out, &edge_key(source, edge_type, target, id), |bytes| {
+        Ok(bytes.is_some())
+    })
 }
 
 pub fn merge_edge(

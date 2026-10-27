@@ -166,6 +166,22 @@ fn out_json(v: &Out) -> Result<Json, String> {
         Out::Node(n) => Ok(
             json!({"type": "node", "id": n.id.0, "label": n.label, "properties": value_json(&Value::Map(n.props.clone()))?}),
         ),
+        Out::Relationship(r) => Ok(
+            json!({"type": "relationship", "id": r.element_id, "relType": r.rel_type, "start": r.start.0, "end": r.end.0, "properties": value_json(&Value::Map(r.props.clone()))?}),
+        ),
+        Out::Path(p) => Ok(json!({
+            "type": "path",
+            "nodes": p.nodes.iter().map(|n| out_json(&Out::Node(n.clone()))).collect::<Result<Vec<_>, _>>()?,
+            "relationships": p.rels.iter().map(|r| out_json(&Out::Relationship(r.clone()))).collect::<Result<Vec<_>, _>>()?,
+        })),
+        Out::List(items) => Ok(Json::Array(
+            items.iter().map(out_json).collect::<Result<_, _>>()?,
+        )),
+        Out::Map(map) => Ok(Json::Object(
+            map.iter()
+                .map(|(k, v)| out_json(v).map(|v| (k.clone(), v)))
+                .collect::<Result<_, _>>()?,
+        )),
     }
 }
 #[cfg(test)]

@@ -1,44 +1,33 @@
-//! Recursive descent parser for the Cypher subset (spec 3.1). Turns a token
-//! stream from `lexer::tokenize` into the AST in `ast`. Grammar (keywords
-//! case-insensitive):
+//! Recursive descent parser for the supported Cypher (spec 3.1). Turns a
+//! token stream from `lexer::tokenize` into the AST in `ast`. Keywords are
+//! case-insensitive.
 //!
 //! ```text
-//! query     := clause+ [';']
-//! clause    := MATCH pattern (',' pattern)* [WHERE expr]
-//!            | MERGE pattern
+//! query     := part (UNION [ALL] part)* [';']
+//! part      := clause+
+//! clause    := [OPTIONAL] MATCH pattern (',' pattern)* [WHERE expr]
+//!            | MERGE pattern (ON (CREATE | MATCH) SET item (',' item)*)*
 //!            | CREATE pattern (',' pattern)*
-//!            | SET var '.' key '=' expr (',' var '.' key '=' expr)*
-//!            | DELETE var (',' var)*
-//!            | DETACH DELETE var (',' var)*
+//!            | SET item (',' item)*       item := var '.' key '=' expr | var ['+']= expr | var labels
+//!            | REMOVE var '.' key | var labels (',' ...)*
+//!            | [DETACH] DELETE expr (',' expr)*
 //!            | UNWIND expr AS var
-//!            | CALL name ('.' name)* '(' [expr (',' expr)*] ')'
-//!              YIELD name [AS name] (',' name [AS name])* [WHERE expr]
-//!            | RETURN item (',' item)* [LIMIT expr]
-//! item      := expr [AS name]
-//! pattern   := node [rel node]
-//! node      := '(' [var] [':' label] [map] ')'
-//! rel       := '-' '[' [var] ':' type [map] ']' '->'
-//!            | '<-' '[' [var] ':' type [map] ']' '-'
-//! map       := '{' key ':' expr (',' key ':' expr)* '}'
-//! expr      := or;  or := and (OR and)*;  and := not (AND not)*;  not := [NOT] cmp
-//! cmp       := primary [('=' | '<>' | '<' | '<=' | '>' | '>=') primary]
-//! primary   := literal | '$' name | var ['.' key] | count '(' ('*' | expr) ')'
-//!            | size '(' expr ')' | coalesce '(' expr (',' expr)* ')'
-//!            | toLower '(' expr ')' | toUpper '(' expr ')'
-//!            | '[' [expr (',' expr)*] ']' | map | '(' expr ')'
-//! literal   := integer | float | string | TRUE | FALSE | NULL | '-' number
+//!            | WITH projection [WHERE expr] | RETURN projection
+//!            | CALL name ('.' name)* '(' [expr (',' expr)*] ')' [YIELD name [AS name] (',' ...)* [WHERE expr]]
+//!            | CREATE INDEX [name] [IF NOT EXISTS] FOR (v:Label) ON (v.key)
+//!            | DROP INDEX name [IF EXISTS] | DROP INDEX ON :Label(key)
+//! projection:= [DISTINCT] ('*' | item) (',' item)* [ORDER BY expr [ASC|DESC] (',' ...)*] [SKIP expr] [LIMIT expr]
+//! pattern   := [var '='] node (rel node)*
+//! node      := '(' [var] (':' label)* [map] ')'
+//! rel       := ('-' | '<-') ['[' [var] [':' type ('|' [':'] type)*] ['*' [n] ['..' [m]]] [map] ']'] ('-' | '->')
+//! expr      := OR > XOR > AND > NOT > comparison > + - > * / % > ^ > unary > postfix > atom
 //! ```
 //!
-//! Anything else (`OPTIONAL MATCH`, `WITH`, `ORDER BY`, `SKIP`,
-//! variable-length relationships, several labels, several hops, functions
-//! other than `count`, `size`, `coalesce`, `toLower` and `toUpper`) is rejected with a
-//! `ParseError` whose message starts with `not supported yet: `.
-//!
-//! Nesting through parentheses, lists and maps (including function
-//! arguments) is capped at [`MAX_NESTING`] levels so a malicious, deeply
-//! nested query cannot recurse the parser into a stack overflow; the
-//! tokenizer itself never recurses regardless of input length (see
-//! `lexer`).
+//! Nesting through parentheses, lists, maps and function arguments is capped
+//! at [`MAX_NESTING`] levels and every completed expression subtree at
+//! [`MAX_EXPR_DEPTH`], so a malicious query cannot recurse the parser (or the
+//! derived `Drop`) into a stack overflow; the tokenizer itself never recurses
+//! regardless of input length (see `lexer`).
 
 use brainwire_core::value::Value;
 
@@ -53,6 +42,9 @@ const MAX_NESTING: usize = 64;
 /// one; each operator, wrapper and parenthesized group adds one level.
 /// This also bounds recursion when the derived `Drop` traverses the AST.
 pub const MAX_EXPR_DEPTH: usize = 1024;
+
+/// Upper bound accepted for a variable-length relationship.
+pub const MAX_VAR_LENGTH: u32 = 64;
 
 struct ParsedExpr {
     expr: Expr,
@@ -72,10 +64,8 @@ pub struct ParseError {
     pub offset: usize,
 }
 
-/// Parses one Cypher query (the exact subset described in the module docs)
-/// into a [`Query`]. Never panics: any input that is not valid in the
-/// subset, including truncated or non-ASCII text, comes back as `Err` with
-/// the byte offset where parsing stopped.
+/// Parses one Cypher query into a [`Query`]. Never panics: any input that is
+/// not valid comes back as `Err` with the byte offset where parsing stopped.
 pub fn parse(query: &str) -> Result<Query, ParseError> {
     let toks = tokenize(query)?;
     let mut p = Parser {
@@ -84,32 +74,30 @@ pub fn parse(query: &str) -> Result<Query, ParseError> {
         pos: 0,
         depth: 0,
     };
-
-    let mut clauses = Vec::new();
-    loop {
-        if p.is_eof() {
-            break;
-        }
-        if p.check(&Tok::Semicolon) {
+    let clauses = p.parse_part()?;
+    let mut unions = Vec::new();
+    while p.check_keyword("UNION") {
+        p.advance();
+        let all = p.check_keyword("ALL");
+        if all {
             p.advance();
-            break;
         }
-        clauses.push(p.parse_clause()?);
+        unions.push((all, p.parse_part()?));
+    }
+    if p.check(&Tok::Semicolon) {
+        p.advance();
     }
     if !p.is_eof() {
         return Err(p.error_here("unexpected token after the query"));
     }
-    if clauses.is_empty() {
-        return Err(p.error_here("empty query"));
-    }
-    Ok(Query { clauses })
+    Ok(Query { clauses, unions })
 }
 
 struct Parser<'a> {
     src: &'a str,
     toks: Vec<Spanned>,
     pos: usize,
-    /// Bracket-only nesting depth (parens/list/map/count-arg), capped at
+    /// Bracket-only nesting depth (parens/list/map/function args), capped at
     /// `MAX_NESTING`. Bounds the parser's own recursion.
     depth: usize,
 }
@@ -156,6 +144,26 @@ impl<'a> Parser<'a> {
 
     fn check_keyword(&self, kw: &str) -> bool {
         matches!(self.peek(), Tok::Ident(s) if s.eq_ignore_ascii_case(kw))
+    }
+
+    fn keyword_at(&self, ahead: usize, kw: &str) -> bool {
+        matches!(self.peek_at(ahead), Some(Tok::Ident(s)) if s.eq_ignore_ascii_case(kw))
+    }
+
+    fn eat_keyword(&mut self, kw: &str) -> bool {
+        let found = self.check_keyword(kw);
+        if found {
+            self.advance();
+        }
+        found
+    }
+
+    fn expect_keyword(&mut self, kw: &str) -> Result<(), ParseError> {
+        if self.eat_keyword(kw) {
+            Ok(())
+        } else {
+            Err(self.error_here(format!("expected {kw}")))
+        }
     }
 
     fn error_here(&self, message: impl Into<String>) -> ParseError {
@@ -221,7 +229,28 @@ impl<'a> Parser<'a> {
         Ok(child_depth + 1)
     }
 
+    fn wrap(
+        &self,
+        children: &[usize],
+        offset: usize,
+        expr: Expr,
+    ) -> Result<ParsedExpr, ParseError> {
+        let depth = self.checked_depth(children.iter().copied().max().unwrap_or(0), offset)?;
+        Ok(ParsedExpr { expr, depth })
+    }
+
     // -- clauses ------------------------------------------------------------
+
+    fn parse_part(&mut self) -> Result<Vec<Clause>, ParseError> {
+        let mut clauses = Vec::new();
+        while !self.is_eof() && !self.check(&Tok::Semicolon) && !self.check_keyword("UNION") {
+            clauses.push(self.parse_clause()?);
+        }
+        if clauses.is_empty() {
+            return Err(self.error_here("empty query"));
+        }
+        Ok(clauses)
+    }
 
     fn parse_clause(&mut self) -> Result<Clause, ParseError> {
         let kw = match self.peek() {
@@ -229,81 +258,116 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error_here(EXPECTED_CLAUSE)),
         };
         match kw.to_ascii_uppercase().as_str() {
-            "MATCH" => self.parse_match(),
+            "MATCH" => self.parse_match(false),
+            "OPTIONAL" => {
+                self.advance();
+                if !self.check_keyword("MATCH") {
+                    return Err(self.error_here("expected MATCH after OPTIONAL"));
+                }
+                self.parse_match(true)
+            }
             "MERGE" => self.parse_merge(),
+            "CREATE" if self.keyword_at(1, "INDEX") => self.parse_create_index(),
             "CREATE" => self.parse_create(),
-            "SET" => self.parse_set(),
-            "DETACH" => self.parse_detach_delete(),
+            "DROP" => self.parse_drop_index(),
+            "SET" => {
+                self.advance();
+                Ok(Clause::Set(self.parse_set_items()?))
+            }
+            "REMOVE" => self.parse_remove(),
+            "DETACH" => {
+                self.advance();
+                if !self.check_keyword("DELETE") {
+                    return Err(self.error_here("expected DELETE after DETACH"));
+                }
+                self.parse_delete(true)
+            }
+            "DELETE" => self.parse_delete(false),
             "UNWIND" => self.parse_unwind(),
-            "RETURN" => self.parse_return(),
-            "OPTIONAL" => Err(self.error_here("not supported yet: OPTIONAL MATCH")),
-            "WITH" => Err(self.error_here("not supported yet: WITH")),
+            "WITH" => {
+                self.advance();
+                Ok(Clause::With(self.parse_projection(true)?))
+            }
+            "RETURN" => {
+                self.advance();
+                Ok(Clause::Return(self.parse_projection(false)?))
+            }
             "CALL" => self.parse_call(),
-            "DELETE" => self.parse_delete(),
+            "FOREACH" | "LOAD" | "USE" | "EXPLAIN" | "PROFILE" => {
+                Err(self.error_here(format!("not supported yet: {}", kw.to_ascii_uppercase())))
+            }
             _ => Err(self.error_here(EXPECTED_CLAUSE)),
         }
     }
 
-    fn parse_match(&mut self) -> Result<Clause, ParseError> {
+    fn parse_match(&mut self, optional: bool) -> Result<Clause, ParseError> {
         self.advance(); // MATCH
+        let patterns = self.parse_patterns()?;
+        let where_ = if self.eat_keyword("WHERE") {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        Ok(Clause::Match {
+            optional,
+            patterns,
+            where_,
+        })
+    }
+
+    fn parse_patterns(&mut self) -> Result<Vec<Pattern>, ParseError> {
         let mut patterns = vec![self.parse_pattern()?];
         while self.check(&Tok::Comma) {
             self.advance();
             patterns.push(self.parse_pattern()?);
         }
-        let where_ = if self.check_keyword("WHERE") {
-            self.advance();
-            Some(self.parse_expr()?)
-        } else {
-            None
-        };
-        Ok(Clause::Match { patterns, where_ })
+        Ok(patterns)
     }
 
     fn parse_call(&mut self) -> Result<Clause, ParseError> {
         self.advance();
+        if self.check(&Tok::LBrace) {
+            return Err(self.error_here("not supported yet: CALL subqueries"));
+        }
         let mut parts = vec![self.expect_ident("a procedure name")?];
         while self.check(&Tok::Dot) {
             self.advance();
             parts.push(self.expect_ident("a procedure name segment")?);
         }
-        self.expect(Tok::LParen, "'('")?;
         let mut args = vec![];
-        if !self.check(&Tok::RParen) {
+        if self.check(&Tok::LParen) {
+            self.advance();
+            if !self.check(&Tok::RParen) {
+                loop {
+                    args.push(self.parse_expr()?);
+                    if !self.check(&Tok::Comma) {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            self.expect(Tok::RParen, "')'")?;
+        }
+        let mut yields = vec![];
+        let mut where_ = None;
+        if self.eat_keyword("YIELD") {
             loop {
-                args.push(self.parse_expr()?);
+                let field = self.expect_ident("a YIELD field")?;
+                let alias = if self.eat_keyword("AS") {
+                    self.expect_ident("a YIELD alias")?
+                } else {
+                    field.clone()
+                };
+                yields.push(YieldItem { field, alias });
                 if !self.check(&Tok::Comma) {
                     break;
                 }
                 self.advance();
             }
-        }
-        self.expect(Tok::RParen, "')'")?;
-        if !self.check_keyword("YIELD") {
-            return Err(self.error_here("expected YIELD with explicit procedure fields"));
-        }
-        self.advance();
-        let mut yields = vec![];
-        loop {
-            let field = self.expect_ident("a YIELD field")?;
-            let alias = if self.check_keyword("AS") {
-                self.advance();
-                self.expect_ident("a YIELD alias")?
-            } else {
-                field.clone()
-            };
-            yields.push(YieldItem { field, alias });
-            if !self.check(&Tok::Comma) {
-                break;
+            if self.eat_keyword("WHERE") {
+                where_ = Some(self.parse_expr()?);
             }
-            self.advance();
         }
-        let where_ = if self.check_keyword("WHERE") {
-            self.advance();
-            Some(self.parse_expr()?)
-        } else {
-            None
-        };
         Ok(Clause::Call {
             name: parts.join("."),
             args,
@@ -314,160 +378,295 @@ impl<'a> Parser<'a> {
 
     fn parse_merge(&mut self) -> Result<Clause, ParseError> {
         self.advance(); // MERGE
-        Ok(Clause::Merge(self.parse_pattern()?))
+        let pattern = self.parse_pattern()?;
+        let (mut on_create, mut on_match) = (vec![], vec![]);
+        while self.check_keyword("ON") {
+            self.advance();
+            let create = if self.eat_keyword("CREATE") {
+                true
+            } else if self.eat_keyword("MATCH") {
+                false
+            } else {
+                return Err(self.error_here("expected CREATE or MATCH after ON"));
+            };
+            self.expect_keyword("SET")?;
+            let items = self.parse_set_items()?;
+            if create {
+                on_create.extend(items);
+            } else {
+                on_match.extend(items);
+            }
+        }
+        Ok(Clause::Merge {
+            pattern,
+            on_create,
+            on_match,
+        })
     }
 
     fn parse_create(&mut self) -> Result<Clause, ParseError> {
         self.advance(); // CREATE
-        let mut patterns = vec![self.parse_pattern()?];
-        while self.check(&Tok::Comma) {
-            self.advance();
-            patterns.push(self.parse_pattern()?);
-        }
-        Ok(Clause::Create(patterns))
+        Ok(Clause::Create(self.parse_patterns()?))
     }
 
-    fn parse_set(&mut self) -> Result<Clause, ParseError> {
-        self.advance(); // SET
+    /// `CREATE INDEX [name] [IF NOT EXISTS] FOR (v:Label) ON (v.key)` or the
+    /// legacy `CREATE INDEX ON :Label(key)`, as `CALL db.createIndex(label, key, name)`.
+    fn parse_create_index(&mut self) -> Result<Clause, ParseError> {
+        self.advance(); // CREATE
+        self.advance(); // INDEX
+        let (label, key, name) = if self.eat_keyword("ON") {
+            let (label, key) = self.parse_legacy_index_target()?;
+            (label, key, None)
+        } else {
+            let name = if !self.check_keyword("FOR") && !self.check_keyword("IF") {
+                Some(self.expect_ident("an index name")?)
+            } else {
+                None
+            };
+            if self.eat_keyword("IF") {
+                self.expect_keyword("NOT")?;
+                self.expect_keyword("EXISTS")?;
+            }
+            self.expect_keyword("FOR")?;
+            self.expect(Tok::LParen, "'('")?;
+            let var = self.expect_ident("a variable")?;
+            self.expect(Tok::Colon, "':'")?;
+            let label = self.expect_ident("a label")?;
+            self.expect(Tok::RParen, "')'")?;
+            self.expect_keyword("ON")?;
+            self.expect(Tok::LParen, "'('")?;
+            let owner = self.expect_ident("a variable")?;
+            if owner != var {
+                return Err(self.error_here("index property must belong to the pattern variable"));
+            }
+            self.expect(Tok::Dot, "'.'")?;
+            let key = self.expect_ident("a property key")?;
+            if self.check(&Tok::Comma) {
+                return Err(self.error_here("not supported yet: composite indexes"));
+            }
+            self.expect(Tok::RParen, "')'")?;
+            (label, key, name)
+        };
+        if self.check_keyword("OPTIONS") {
+            return Err(self.error_here("not supported yet: index OPTIONS"));
+        }
+        let text = |value: String| Expr::Literal(Value::Str(value));
+        Ok(Clause::Call {
+            name: "db.createIndex".into(),
+            args: vec![
+                text(label),
+                text(key),
+                name.map(text).unwrap_or(Expr::Literal(Value::Null)),
+            ],
+            yields: vec![],
+            where_: None,
+        })
+    }
+
+    fn parse_legacy_index_target(&mut self) -> Result<(String, String), ParseError> {
+        self.expect(Tok::Colon, "':'")?;
+        let label = self.expect_ident("a label")?;
+        self.expect(Tok::LParen, "'('")?;
+        let key = self.expect_ident("a property key")?;
+        self.expect(Tok::RParen, "')'")?;
+        Ok((label, key))
+    }
+
+    /// `DROP INDEX name [IF EXISTS]` or `DROP INDEX ON :Label(key)`, as `CALL db.dropIndex`.
+    fn parse_drop_index(&mut self) -> Result<Clause, ParseError> {
+        self.advance(); // DROP
+        if !self.eat_keyword("INDEX") {
+            return Err(self.error_here("not supported yet: DROP other than DROP INDEX"));
+        }
+        let text = |value: String| Expr::Literal(Value::Str(value));
+        let args = if self.eat_keyword("ON") {
+            let (label, key) = self.parse_legacy_index_target()?;
+            vec![text(label), text(key)]
+        } else {
+            let name = self.expect_ident("an index name")?;
+            if self.eat_keyword("IF") {
+                self.expect_keyword("EXISTS")?;
+            }
+            vec![text(name)]
+        };
+        Ok(Clause::Call {
+            name: "db.dropIndex".into(),
+            args,
+            yields: vec![],
+            where_: None,
+        })
+    }
+
+    fn parse_set_items(&mut self) -> Result<Vec<SetItem>, ParseError> {
         let mut items = vec![self.parse_set_item()?];
         while self.check(&Tok::Comma) {
             self.advance();
             items.push(self.parse_set_item()?);
         }
-        Ok(Clause::Set(items))
+        Ok(items)
     }
 
     fn parse_set_item(&mut self) -> Result<SetItem, ParseError> {
         let var = self.expect_ident("a variable")?;
-        self.expect(Tok::Dot, "'.'")?;
-        let prop = self.expect_ident("a property key")?;
-        self.expect(Tok::Eq, "'='")?;
-        let value = self.parse_expr()?;
-        Ok(SetItem { var, prop, value })
+        match self.peek() {
+            Tok::Dot => {
+                self.advance();
+                let prop = self.expect_ident("a property key")?;
+                self.expect(Tok::Eq, "'='")?;
+                let value = self.parse_expr()?;
+                Ok(SetItem::Prop { var, prop, value })
+            }
+            Tok::Eq => {
+                self.advance();
+                Ok(SetItem::Replace {
+                    var,
+                    value: self.parse_expr()?,
+                })
+            }
+            Tok::PlusEq => {
+                self.advance();
+                Ok(SetItem::Merge {
+                    var,
+                    value: self.parse_expr()?,
+                })
+            }
+            Tok::Colon => Ok(SetItem::Labels {
+                var,
+                labels: self.parse_labels()?,
+            }),
+            other => {
+                let found = tok_desc(other);
+                Err(self.error_here(format!("expected '.', '=', '+=' or a label, found {found}")))
+            }
+        }
     }
 
-    fn parse_delete(&mut self) -> Result<Clause, ParseError> {
-        self.advance(); // DELETE
-        let mut vars = vec![self.expect_ident("a relationship variable")?];
-        while self.check(&Tok::Comma) {
+    fn parse_labels(&mut self) -> Result<Vec<String>, ParseError> {
+        let mut labels = vec![];
+        while self.check(&Tok::Colon) {
             self.advance();
-            vars.push(self.expect_ident("a relationship variable")?);
+            labels.push(self.expect_ident("a label")?);
         }
-        Ok(Clause::Delete(vars))
+        Ok(labels)
     }
 
-    fn parse_detach_delete(&mut self) -> Result<Clause, ParseError> {
-        self.advance(); // DETACH
-        if !self.check_keyword("DELETE") {
-            return Err(self.error_here("expected DELETE after DETACH"));
+    fn parse_remove(&mut self) -> Result<Clause, ParseError> {
+        self.advance(); // REMOVE
+        let mut items = vec![];
+        loop {
+            let var = self.expect_ident("a variable")?;
+            if self.check(&Tok::Colon) {
+                items.push(SetItem::Labels {
+                    var,
+                    labels: self.parse_labels()?,
+                });
+            } else {
+                self.expect(Tok::Dot, "'.'")?;
+                let prop = self.expect_ident("a property key")?;
+                items.push(SetItem::Prop {
+                    var,
+                    prop,
+                    value: Expr::Literal(Value::Null),
+                });
+            }
+            if !self.check(&Tok::Comma) {
+                break;
+            }
+            self.advance();
         }
+        Ok(Clause::Remove(items))
+    }
+
+    fn parse_delete(&mut self, detach: bool) -> Result<Clause, ParseError> {
         self.advance(); // DELETE
-        let mut vars = vec![self.expect_ident("a variable")?];
+        let mut targets = vec![self.parse_expr()?];
         while self.check(&Tok::Comma) {
             self.advance();
-            vars.push(self.expect_ident("a variable")?);
+            targets.push(self.parse_expr()?);
         }
-        Ok(Clause::DetachDelete(vars))
+        Ok(Clause::Delete { detach, targets })
     }
 
     fn parse_unwind(&mut self) -> Result<Clause, ParseError> {
         self.advance(); // UNWIND
         let expr = self.parse_expr()?;
-        if !self.check_keyword("AS") {
+        if !self.eat_keyword("AS") {
             return Err(self.error_here("expected AS"));
         }
-        self.advance(); // AS
         let var = self.expect_ident("a variable")?;
         Ok(Clause::Unwind { expr, var })
     }
 
-    fn parse_return(&mut self) -> Result<Clause, ParseError> {
-        self.advance(); // RETURN
-        let mut items = vec![self.parse_return_item()?];
-        while self.check(&Tok::Comma) {
+    fn parse_projection(&mut self, with: bool) -> Result<Projection, ParseError> {
+        let distinct = self.eat_keyword("DISTINCT");
+        let mut star = false;
+        let mut items = vec![];
+        if self.check(&Tok::Star) {
             self.advance();
+            star = true;
+            while self.check(&Tok::Comma) {
+                self.advance();
+                items.push(self.parse_return_item()?);
+            }
+        } else {
             items.push(self.parse_return_item()?);
+            while self.check(&Tok::Comma) {
+                self.advance();
+                items.push(self.parse_return_item()?);
+            }
         }
         let mut order = Vec::new();
-        if self.check_keyword("ORDER") {
-            self.advance();
-            if !self.check_keyword("BY") {
-                return Err(self.error_here("expected BY after ORDER"));
-            }
-            self.advance();
+        if self.eat_keyword("ORDER") {
+            self.expect_keyword("BY")?;
             loop {
-                order.push(self.parse_sort_item(&items)?);
+                let expr = self.parse_expr()?;
+                let descending = if self.eat_keyword("DESC") || self.eat_keyword("DESCENDING") {
+                    true
+                } else {
+                    let _ = self.eat_keyword("ASC") || self.eat_keyword("ASCENDING");
+                    false
+                };
+                order.push(SortItem { expr, descending });
                 if !self.check(&Tok::Comma) {
                     break;
                 }
                 self.advance();
             }
         }
-        let skip = if self.check_keyword("SKIP") {
-            self.advance();
+        let skip = if self.eat_keyword("SKIP") || self.eat_keyword("OFFSET") {
             Some(self.parse_expr()?)
         } else {
             None
         };
-        let limit = if self.check_keyword("LIMIT") {
-            self.advance();
+        let limit = if self.eat_keyword("LIMIT") {
             Some(self.parse_expr()?)
         } else {
             None
         };
-        self.reject_order_or_skip()?;
-        Ok(Clause::Return {
+        if self.check_keyword("ORDER") || self.check_keyword("SKIP") {
+            return Err(self.error_here("ORDER BY and SKIP must come before LIMIT"));
+        }
+        let where_ = if with && self.eat_keyword("WHERE") {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        Ok(Projection {
+            distinct,
+            star,
             items,
             order,
             skip,
             limit,
+            where_,
         })
-    }
-
-    /// One `ORDER BY` key. It names a returned column, by alias or by the item's own
-    /// text: sorting happens on the projected rows.
-    fn parse_sort_item(&mut self, items: &[ReturnItem]) -> Result<(usize, bool), ParseError> {
-        let start = self.current_span().0;
-        let expr = self.parse_expr()?;
-        let text = self.src[start..self.prev_span_end()].trim();
-        let column = items.iter().position(|item| {
-            matches!(&expr, Expr::Var(name) if item.alias.as_deref() == Some(name.as_str()))
-                || (item.alias.is_none() && item.text == text)
-        });
-        let Some(column) = column else {
-            return Err(self.error_at(
-                start,
-                "not supported yet: ORDER BY an expression that is not returned",
-            ));
-        };
-        let descending = if self.check_keyword("DESC") || self.check_keyword("DESCENDING") {
-            self.advance();
-            true
-        } else {
-            if self.check_keyword("ASC") || self.check_keyword("ASCENDING") {
-                self.advance();
-            }
-            false
-        };
-        Ok((column, descending))
-    }
-
-    fn reject_order_or_skip(&self) -> Result<(), ParseError> {
-        if self.check_keyword("ORDER") {
-            return Err(self.error_here("not supported yet: ORDER BY after SKIP or LIMIT"));
-        }
-        if self.check_keyword("SKIP") {
-            return Err(self.error_here("not supported yet: SKIP after LIMIT"));
-        }
-        Ok(())
     }
 
     fn parse_return_item(&mut self) -> Result<ReturnItem, ParseError> {
         let start = self.current_span().0;
         let expr = self.parse_expr()?;
         let end = self.prev_span_end();
-        let alias = if self.check_keyword("AS") {
-            self.advance();
+        let alias = if self.eat_keyword("AS") {
             Some(self.expect_ident("an alias")?)
         } else {
             None
@@ -479,18 +678,28 @@ impl<'a> Parser<'a> {
     // -- patterns -------------------------------------------------------
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
-        let start = self.parse_node()?;
-        let hop = if self.at_rel_start() {
-            let rel = self.parse_rel()?;
-            let end = self.parse_node()?;
-            Some((rel, end))
+        let path = if matches!(self.peek(), Tok::Ident(_) | Tok::QuotedIdent(_))
+            && self.peek_at(1) == Some(&Tok::Eq)
+        {
+            let name = self.expect_ident("a path variable")?;
+            self.advance(); // '='
+            Some(name)
         } else {
             None
         };
-        if hop.is_some() && self.at_rel_start() {
-            return Err(self.error_here("not supported yet: multiple hops in a pattern"));
+        if self.check_keyword("shortestPath") || self.check_keyword("allShortestPaths") {
+            return Err(self.error_here(
+                "not supported yet: shortestPath patterns; use CALL graph.shortestPath",
+            ));
         }
-        Ok(Pattern { start, hop })
+        let start = self.parse_node()?;
+        let mut hops = vec![];
+        while self.at_rel_start() {
+            let rel = self.parse_rel()?;
+            let end = self.parse_node()?;
+            hops.push((rel, end));
+        }
+        Ok(Pattern { path, start, hops })
     }
 
     fn at_rel_start(&self) -> bool {
@@ -498,50 +707,100 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_node(&mut self) -> Result<NodePat, ParseError> {
-        self.expect(Tok::LParen, "'('")?;
-        let var = self.try_var();
-        let label = if self.check(&Tok::Colon) {
-            self.advance();
-            let name = self.expect_ident("a label")?;
-            if self.check(&Tok::Colon) {
-                return Err(self.error_here("not supported yet: multiple labels on a node"));
-            }
-            Some(name)
-        } else {
-            None
-        };
-        let props = self.parse_optional_map()?;
-        self.expect(Tok::RParen, "')'")?;
-        Ok(NodePat { var, label, props })
+        self.with_nesting(|p| {
+            p.expect(Tok::LParen, "'('")?;
+            let var = p.try_var();
+            let labels = p.parse_labels()?;
+            let props = p.parse_optional_map()?;
+            p.expect(Tok::RParen, "')'")?;
+            Ok(NodePat { var, labels, props })
+        })
     }
 
     fn parse_rel(&mut self) -> Result<RelPat, ParseError> {
-        let direction = if self.check(&Tok::Minus) {
-            self.advance();
-            Direction::Out
-        } else {
-            self.advance(); // LArrow, guaranteed by at_rel_start
-            Direction::In
+        let incoming = self.check(&Tok::LArrow);
+        self.advance(); // '-' or '<-'
+        let mut rel = RelPat {
+            var: None,
+            types: vec![],
+            direction: Direction::Both,
+            props: vec![],
+            length: None,
         };
-        self.expect(Tok::LBracket, "'['")?;
-        let var = self.try_var();
-        self.expect(Tok::Colon, "':'")?;
-        let rel_type = self.expect_ident("a relationship type")?;
-        if self.check(&Tok::Star) {
-            return Err(self.error_here("not supported yet: variable-length relationship"));
+        if self.check(&Tok::LBracket) {
+            self.with_nesting(|p| {
+                p.advance();
+                rel.var = p.try_var();
+                if p.check(&Tok::Colon) {
+                    p.advance();
+                    rel.types.push(p.expect_ident("a relationship type")?);
+                    while p.check(&Tok::Pipe) {
+                        p.advance();
+                        if p.check(&Tok::Colon) {
+                            p.advance();
+                        }
+                        rel.types.push(p.expect_ident("a relationship type")?);
+                    }
+                }
+                if p.check(&Tok::Star) {
+                    p.advance();
+                    rel.length = Some(p.parse_length()?);
+                }
+                rel.props = p.parse_optional_map()?;
+                p.expect(Tok::RBracket, "']'")
+            })?;
         }
-        let props = self.parse_optional_map()?;
-        self.expect(Tok::RBracket, "']'")?;
-        match direction {
-            Direction::Out => self.expect(Tok::Arrow, "'->'")?,
-            Direction::In => self.expect(Tok::Minus, "'-'")?,
+        // `->` closes an outgoing pattern; `-` an incoming or undirected one.
+        let outgoing = match self.peek() {
+            Tok::Arrow => true,
+            Tok::Minus => false,
+            other => {
+                let found = tok_desc(other);
+                return Err(self.error_here(format!("expected '-' or '->', found {found}")));
+            }
+        };
+        self.advance();
+        rel.direction = match (incoming, outgoing) {
+            (false, true) => Direction::Out,
+            (true, false) => Direction::In,
+            _ => Direction::Both,
+        };
+        Ok(rel)
+    }
+
+    fn parse_length(&mut self) -> Result<(u32, Option<u32>), ParseError> {
+        let bound = |p: &mut Self| -> Result<Option<u32>, ParseError> {
+            match p.peek().clone() {
+                Tok::Int(n) => {
+                    p.advance();
+                    u32::try_from(n)
+                        .ok()
+                        .filter(|n| *n <= MAX_VAR_LENGTH)
+                        .map(Some)
+                        .ok_or_else(|| {
+                            p.error_here(format!(
+                                "variable-length bounds must be between 0 and {MAX_VAR_LENGTH}"
+                            ))
+                        })
+                }
+                _ => Ok(None),
+            }
+        };
+        let min = bound(self)?;
+        if self.check(&Tok::DotDot) {
+            self.advance();
+            let max = bound(self)?;
+            let min = min.unwrap_or(1);
+            if max.is_some_and(|max| max < min) {
+                return Err(self.error_here("variable-length maximum is below the minimum"));
+            }
+            Ok((min, max))
+        } else {
+            match min {
+                Some(n) => Ok((n, Some(n))),
+                None => Ok((1, None)),
+            }
         }
-        Ok(RelPat {
-            var,
-            rel_type,
-            direction,
-            props,
-        })
     }
 
     fn try_var(&mut self) -> Option<String> {
@@ -557,6 +816,10 @@ impl<'a> Parser<'a> {
     fn parse_optional_map(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
         if self.check(&Tok::LBrace) {
             Ok(self.parse_map()?.0)
+        } else if self.check(&Tok::Dollar) {
+            Err(self.error_here(
+                "not supported yet: a parameter map in a pattern; use {key: $param.key}",
+            ))
         } else {
             Ok(Vec::new())
         }
@@ -569,7 +832,7 @@ impl<'a> Parser<'a> {
             let mut max_depth = 0;
             if !p.check(&Tok::RBrace) {
                 loop {
-                    let key = p.expect_ident("a property key")?;
+                    let key = p.expect_key()?;
                     p.expect(Tok::Colon, "':'")?;
                     let value = p.parse_expr_depth()?;
                     max_depth = max_depth.max(value.depth);
@@ -586,26 +849,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_list(&mut self) -> Result<(Vec<Expr>, usize), ParseError> {
-        self.with_nesting(|p| {
-            p.expect(Tok::LBracket, "'['")?;
-            let mut items = Vec::new();
-            let mut max_depth = 0;
-            if !p.check(&Tok::RBracket) {
-                loop {
-                    let value = p.parse_expr_depth()?;
-                    max_depth = max_depth.max(value.depth);
-                    items.push(value.expr);
-                    if p.check(&Tok::Comma) {
-                        p.advance();
-                        continue;
-                    }
-                    break;
-                }
-            }
-            p.expect(Tok::RBracket, "']'")?;
-            Ok((items, max_depth))
-        })
+    /// Map keys may also be quoted strings.
+    fn expect_key(&mut self) -> Result<String, ParseError> {
+        if let Tok::Str(key) = self.peek().clone() {
+            self.advance();
+            return Ok(key);
+        }
+        self.expect_ident("a property key")
     }
 
     // -- expressions ------------------------------------------------------
@@ -619,16 +869,31 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_or(&mut self) -> Result<ParsedExpr, ParseError> {
-        let mut left = self.parse_and()?;
+        let mut left = self.parse_xor()?;
         while self.check_keyword("OR") {
             let offset = self.current_span().0;
             self.advance();
+            let right = self.parse_xor()?;
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::Or(Box::new(left.expr), Box::new(right.expr)),
+            )?;
+        }
+        Ok(left)
+    }
+
+    fn parse_xor(&mut self) -> Result<ParsedExpr, ParseError> {
+        let mut left = self.parse_and()?;
+        while self.check_keyword("XOR") {
+            let offset = self.current_span().0;
+            self.advance();
             let right = self.parse_and()?;
-            let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
-            left = ParsedExpr {
-                expr: Expr::Or(Box::new(left.expr), Box::new(right.expr)),
-                depth,
-            };
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::Xor(Box::new(left.expr), Box::new(right.expr)),
+            )?;
         }
         Ok(left)
     }
@@ -639,11 +904,11 @@ impl<'a> Parser<'a> {
             let offset = self.current_span().0;
             self.advance();
             let right = self.parse_not()?;
-            let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
-            left = ParsedExpr {
-                expr: Expr::And(Box::new(left.expr), Box::new(right.expr)),
-                depth,
-            };
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::And(Box::new(left.expr), Box::new(right.expr)),
+            )?;
         }
         Ok(left)
     }
@@ -652,66 +917,139 @@ impl<'a> Parser<'a> {
         if self.check_keyword("NOT") {
             let offset = self.current_span().0;
             self.advance();
-            let inner = self.parse_cmp()?;
-            let depth = self.checked_depth(inner.depth, offset)?;
-            Ok(ParsedExpr {
-                expr: Expr::Not(Box::new(inner.expr)),
-                depth,
-            })
+            let inner = self.parse_not()?;
+            self.wrap(&[inner.depth], offset, Expr::Not(Box::new(inner.expr)))
         } else {
             self.parse_cmp()
         }
     }
 
     fn parse_cmp(&mut self) -> Result<ParsedExpr, ParseError> {
-        let left = self.parse_primary()?;
-        if self.check_keyword("IS") {
+        let mut left = self.parse_additive()?;
+        loop {
             let offset = self.current_span().0;
-            self.advance();
-            let negated = self.check_keyword("NOT");
-            if negated {
+            if self.check_keyword("IS") {
                 self.advance();
+                let negated = self.eat_keyword("NOT");
+                if !self.eat_keyword("NULL") {
+                    return Err(self.error_here("expected NULL after IS"));
+                }
+                left = self.wrap(
+                    &[left.depth],
+                    offset,
+                    Expr::IsNull(Box::new(left.expr), negated),
+                )?;
+                continue;
             }
-            if !self.check_keyword("NULL") {
-                return Err(self.error_here("expected NULL after IS"));
+            if self.check_keyword("IN") {
+                self.advance();
+                let right = self.parse_additive()?;
+                left = self.wrap(
+                    &[left.depth, right.depth],
+                    offset,
+                    Expr::In(Box::new(left.expr), Box::new(right.expr)),
+                )?;
+                continue;
             }
+            let text = if self.check_keyword("STARTS") && self.keyword_at(1, "WITH") {
+                Some(TextOp::StartsWith)
+            } else if self.check_keyword("ENDS") && self.keyword_at(1, "WITH") {
+                Some(TextOp::EndsWith)
+            } else if self.check_keyword("CONTAINS") {
+                Some(TextOp::Contains)
+            } else {
+                None
+            };
+            if let Some(op) = text {
+                self.advance();
+                if op != TextOp::Contains {
+                    self.advance(); // WITH
+                }
+                let right = self.parse_additive()?;
+                left = self.wrap(
+                    &[left.depth, right.depth],
+                    offset,
+                    Expr::Text(Box::new(left.expr), op, Box::new(right.expr)),
+                )?;
+                continue;
+            }
+            if self.check(&Tok::RegexMatch) {
+                return Err(self.error_here("not supported yet: regular expressions (=~)"));
+            }
+            let op = match self.peek() {
+                Tok::Eq => CmpOp::Eq,
+                Tok::Ne => CmpOp::Ne,
+                Tok::Lt => CmpOp::Lt,
+                Tok::Le => CmpOp::Le,
+                Tok::Gt => CmpOp::Gt,
+                Tok::Ge => CmpOp::Ge,
+                _ => return Ok(left),
+            };
             self.advance();
-            let depth = self.checked_depth(left.depth, offset)?;
-            return Ok(ParsedExpr {
-                expr: Expr::IsNull(Box::new(left.expr), negated),
-                depth,
-            });
+            let right = self.parse_additive()?;
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::Cmp(Box::new(left.expr), op, Box::new(right.expr)),
+            )?;
         }
-        if self.check_keyword("IN") {
-            let offset = self.current_span().0;
-            self.advance();
-            let right = self.parse_primary()?;
-            let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
-            return Ok(ParsedExpr {
-                expr: Expr::In(Box::new(left.expr), Box::new(right.expr)),
-                depth,
-            });
-        }
-        let op = match self.peek() {
-            Tok::Eq => CmpOp::Eq,
-            Tok::Ne => CmpOp::Ne,
-            Tok::Lt => CmpOp::Lt,
-            Tok::Le => CmpOp::Le,
-            Tok::Gt => CmpOp::Gt,
-            Tok::Ge => CmpOp::Ge,
-            _ => return Ok(left),
-        };
-        let offset = self.current_span().0;
-        self.advance();
-        let right = self.parse_primary()?;
-        let depth = self.checked_depth(left.depth.max(right.depth), offset)?;
-        Ok(ParsedExpr {
-            expr: Expr::Cmp(Box::new(left.expr), op, Box::new(right.expr)),
-            depth,
-        })
     }
 
-    fn parse_primary(&mut self) -> Result<ParsedExpr, ParseError> {
+    fn parse_additive(&mut self) -> Result<ParsedExpr, ParseError> {
+        let mut left = self.parse_multiplicative()?;
+        loop {
+            let op = match self.peek() {
+                Tok::Plus => ArithOp::Add,
+                Tok::Minus => ArithOp::Sub,
+                _ => return Ok(left),
+            };
+            let offset = self.current_span().0;
+            self.advance();
+            let right = self.parse_multiplicative()?;
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::Arith(Box::new(left.expr), op, Box::new(right.expr)),
+            )?;
+        }
+    }
+
+    fn parse_multiplicative(&mut self) -> Result<ParsedExpr, ParseError> {
+        let mut left = self.parse_power()?;
+        loop {
+            let op = match self.peek() {
+                Tok::Star => ArithOp::Mul,
+                Tok::Slash => ArithOp::Div,
+                Tok::Percent => ArithOp::Mod,
+                _ => return Ok(left),
+            };
+            let offset = self.current_span().0;
+            self.advance();
+            let right = self.parse_power()?;
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::Arith(Box::new(left.expr), op, Box::new(right.expr)),
+            )?;
+        }
+    }
+
+    fn parse_power(&mut self) -> Result<ParsedExpr, ParseError> {
+        let mut left = self.parse_unary()?;
+        while self.check(&Tok::Caret) {
+            let offset = self.current_span().0;
+            self.advance();
+            let right = self.parse_unary()?;
+            left = self.wrap(
+                &[left.depth, right.depth],
+                offset,
+                Expr::Arith(Box::new(left.expr), ArithOp::Pow, Box::new(right.expr)),
+            )?;
+        }
+        Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<ParsedExpr, ParseError> {
         let start = self.current_span().0;
         match self.peek().clone() {
             Tok::Minus => {
@@ -719,22 +1057,103 @@ impl<'a> Parser<'a> {
                 match self.peek().clone() {
                     Tok::MinIntMagnitude => {
                         self.advance();
-                        Ok(ParsedExpr::leaf(Expr::Literal(Value::Int(i64::MIN))))
+                        self.parse_postfix(ParsedExpr::leaf(Expr::Literal(Value::Int(i64::MIN))))
                     }
                     Tok::Int(n) => {
                         self.advance();
                         let neg = n
                             .checked_neg()
                             .ok_or_else(|| self.error_at(start, "integer literal out of range"))?;
-                        Ok(ParsedExpr::leaf(Expr::Literal(Value::Int(neg))))
+                        self.parse_postfix(ParsedExpr::leaf(Expr::Literal(Value::Int(neg))))
                     }
                     Tok::Float(f) => {
                         self.advance();
-                        Ok(ParsedExpr::leaf(Expr::Literal(Value::Float(-f))))
+                        self.parse_postfix(ParsedExpr::leaf(Expr::Literal(Value::Float(-f))))
                     }
-                    _ => Err(self.error_at(start, "expected a number after '-'")),
+                    _ => {
+                        let inner = self.parse_unary()?;
+                        self.wrap(&[inner.depth], start, Expr::Neg(Box::new(inner.expr)))
+                    }
                 }
             }
+            Tok::Plus => {
+                self.advance();
+                self.parse_unary()
+            }
+            _ => {
+                let atom = self.parse_atom()?;
+                self.parse_postfix(atom)
+            }
+        }
+    }
+
+    fn parse_postfix(&mut self, mut base: ParsedExpr) -> Result<ParsedExpr, ParseError> {
+        loop {
+            let offset = self.current_span().0;
+            match self.peek() {
+                Tok::Dot => {
+                    self.advance();
+                    let key = self.expect_ident("a property key")?;
+                    base =
+                        self.wrap(&[base.depth], offset, Expr::Prop(Box::new(base.expr), key))?;
+                }
+                Tok::LBracket => {
+                    base = self.with_nesting(|p| {
+                        p.advance();
+                        let start = if p.check(&Tok::DotDot) {
+                            None
+                        } else {
+                            Some(p.parse_expr_depth()?)
+                        };
+                        if p.check(&Tok::DotDot) {
+                            p.advance();
+                            let end = if p.check(&Tok::RBracket) {
+                                None
+                            } else {
+                                Some(p.parse_expr_depth()?)
+                            };
+                            p.expect(Tok::RBracket, "']'")?;
+                            let depths = [
+                                base.depth,
+                                start.as_ref().map_or(0, |e| e.depth),
+                                end.as_ref().map_or(0, |e| e.depth),
+                            ];
+                            p.wrap(
+                                &depths,
+                                offset,
+                                Expr::Slice(
+                                    Box::new(base.expr),
+                                    start.map(|e| Box::new(e.expr)),
+                                    end.map(|e| Box::new(e.expr)),
+                                ),
+                            )
+                        } else {
+                            let index = start.ok_or_else(|| p.error_here("expected an index"))?;
+                            p.expect(Tok::RBracket, "']'")?;
+                            p.wrap(
+                                &[base.depth, index.depth],
+                                offset,
+                                Expr::Index(Box::new(base.expr), Box::new(index.expr)),
+                            )
+                        }
+                    })?;
+                }
+                Tok::Colon if matches!(base.expr, Expr::Var(_)) => {
+                    let labels = self.parse_labels()?;
+                    base = self.wrap(
+                        &[base.depth],
+                        offset,
+                        Expr::HasLabels(Box::new(base.expr), labels),
+                    )?;
+                }
+                _ => return Ok(base),
+            }
+        }
+    }
+
+    fn parse_atom(&mut self) -> Result<ParsedExpr, ParseError> {
+        let start = self.current_span().0;
+        match self.peek().clone() {
             Tok::MinIntMagnitude => Err(self.error_at(start, "integer literal out of range")),
             Tok::Int(n) => {
                 self.advance();
@@ -750,39 +1169,35 @@ impl<'a> Parser<'a> {
             }
             Tok::Dollar => {
                 self.advance();
-                let name = self.expect_ident("a parameter name")?;
+                let name = match self.peek().clone() {
+                    Tok::Int(n) => {
+                        self.advance();
+                        n.to_string()
+                    }
+                    _ => self.expect_ident("a parameter name")?,
+                };
                 Ok(ParsedExpr::leaf(Expr::Param(name)))
             }
-            Tok::LBracket => {
-                let (items, child_depth) = self.parse_list()?;
-                let depth = self.checked_depth(child_depth, start)?;
-                Ok(ParsedExpr {
-                    expr: Expr::List(items),
-                    depth,
-                })
-            }
+            Tok::LBracket => self.parse_list_or_comprehension(start),
             Tok::LBrace => {
                 let (items, child_depth) = self.parse_map()?;
-                let depth = self.checked_depth(child_depth, start)?;
-                Ok(ParsedExpr {
-                    expr: Expr::Map(items),
-                    depth,
+                self.wrap(&[child_depth], start, Expr::Map(items))
+            }
+            Tok::LParen => {
+                if let Some(pattern) = self.try_pattern_predicate()? {
+                    return Ok(ParsedExpr::leaf(Expr::Exists(Box::new(pattern))));
+                }
+                self.with_nesting(|p| {
+                    p.expect(Tok::LParen, "'('")?;
+                    let inner = p.parse_expr_depth()?;
+                    p.expect(Tok::RParen, "')'")?;
+                    p.wrap(&[inner.depth], start, inner.expr)
                 })
             }
-            Tok::LParen => self.with_nesting(|p| {
-                p.expect(Tok::LParen, "'('")?;
-                let inner = p.parse_expr_depth()?;
-                p.expect(Tok::RParen, "')'")?;
-                let depth = p.checked_depth(inner.depth, start)?;
-                Ok(ParsedExpr {
-                    expr: inner.expr,
-                    depth,
-                })
-            }),
-            Tok::Ident(name) => self.parse_ident_primary(start, name),
+            Tok::Ident(name) => self.parse_ident_atom(start, name),
             Tok::QuotedIdent(name) => {
                 self.advance();
-                self.parse_optional_prop(ParsedExpr::leaf(Expr::Var(name)))
+                Ok(ParsedExpr::leaf(Expr::Var(name)))
             }
             other => Err(self.error_at(
                 start,
@@ -791,96 +1206,306 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_ident_primary(
+    /// A parenthesized node followed by a relationship is a pattern predicate.
+    fn try_pattern_predicate(&mut self) -> Result<Option<Pattern>, ParseError> {
+        let saved = (self.pos, self.depth);
+        let is_pattern = self.parse_node().is_ok() && self.at_rel_start();
+        (self.pos, self.depth) = saved;
+        if !is_pattern {
+            return Ok(None);
+        }
+        match self.parse_pattern() {
+            Ok(pattern) => Ok(Some(pattern)),
+            // `(x) - 1` is arithmetic, not a relationship.
+            Err(_) => {
+                (self.pos, self.depth) = saved;
+                Ok(None)
+            }
+        }
+    }
+
+    fn parse_list_or_comprehension(&mut self, start: usize) -> Result<ParsedExpr, ParseError> {
+        let comprehension = matches!(self.peek_at(1), Some(Tok::Ident(_) | Tok::QuotedIdent(_)))
+            && matches!(self.peek_at(2), Some(Tok::Ident(kw)) if kw.eq_ignore_ascii_case("IN"));
+        self.with_nesting(|p| {
+            p.expect(Tok::LBracket, "'['")?;
+            if comprehension {
+                let var = p.expect_ident("a variable")?;
+                p.advance(); // IN
+                let list = p.parse_expr_depth()?;
+                let filter = if p.eat_keyword("WHERE") {
+                    Some(p.parse_expr_depth()?)
+                } else {
+                    None
+                };
+                let map = if p.check(&Tok::Pipe) {
+                    p.advance();
+                    Some(p.parse_expr_depth()?)
+                } else {
+                    None
+                };
+                p.expect(Tok::RBracket, "']'")?;
+                let depths = [
+                    list.depth,
+                    filter.as_ref().map_or(0, |e| e.depth),
+                    map.as_ref().map_or(0, |e| e.depth),
+                ];
+                return p.wrap(
+                    &depths,
+                    start,
+                    Expr::ListComp {
+                        var,
+                        list: Box::new(list.expr),
+                        filter: filter.map(|e| Box::new(e.expr)),
+                        map: map.map(|e| Box::new(e.expr)),
+                    },
+                );
+            }
+            let mut items = Vec::new();
+            let mut max_depth = 0;
+            if !p.check(&Tok::RBracket) {
+                loop {
+                    let value = p.parse_expr_depth()?;
+                    max_depth = max_depth.max(value.depth);
+                    items.push(value.expr);
+                    if p.check(&Tok::Comma) {
+                        p.advance();
+                        continue;
+                    }
+                    break;
+                }
+            }
+            p.expect(Tok::RBracket, "']'")?;
+            p.wrap(&[max_depth], start, Expr::List(items))
+        })
+    }
+
+    fn parse_ident_atom(&mut self, start: usize, name: String) -> Result<ParsedExpr, ParseError> {
+        let upper = name.to_ascii_uppercase();
+        match upper.as_str() {
+            "TRUE" => {
+                self.advance();
+                return Ok(ParsedExpr::leaf(Expr::Literal(Value::Bool(true))));
+            }
+            "FALSE" => {
+                self.advance();
+                return Ok(ParsedExpr::leaf(Expr::Literal(Value::Bool(false))));
+            }
+            "NULL" => {
+                self.advance();
+                return Ok(ParsedExpr::leaf(Expr::Literal(Value::Null)));
+            }
+            "CASE" => return self.parse_case(start),
+            _ => {}
+        }
+        // Namespaced function names: `a.b(...)`.
+        let mut ahead = 1;
+        let mut qualified = name.clone();
+        while self.peek_at(ahead) == Some(&Tok::Dot)
+            && matches!(self.peek_at(ahead + 1), Some(Tok::Ident(_)))
+            && matches!(self.peek_at(ahead + 2), Some(Tok::Dot | Tok::LParen))
+        {
+            if let Some(Tok::Ident(part)) = self.peek_at(ahead + 1) {
+                qualified.push('.');
+                qualified.push_str(part);
+            }
+            ahead += 2;
+        }
+        if self.peek_at(ahead) == Some(&Tok::LParen) {
+            for _ in 0..ahead {
+                self.advance();
+            }
+            return self.parse_function(start, qualified.to_ascii_lowercase());
+        }
+        self.advance();
+        if self.check(&Tok::LBrace) {
+            return self.parse_map_projection(start, name);
+        }
+        Ok(ParsedExpr::leaf(Expr::Var(name)))
+    }
+
+    fn parse_case(&mut self, start: usize) -> Result<ParsedExpr, ParseError> {
+        self.advance(); // CASE
+        self.with_nesting(|p| {
+            let operand = if p.check_keyword("WHEN") {
+                None
+            } else {
+                Some(p.parse_expr_depth()?)
+            };
+            let mut depths = vec![operand.as_ref().map_or(0, |e| e.depth)];
+            let mut whens = vec![];
+            while p.eat_keyword("WHEN") {
+                let when = p.parse_expr_depth()?;
+                p.expect_keyword("THEN")?;
+                let then = p.parse_expr_depth()?;
+                depths.extend([when.depth, then.depth]);
+                whens.push((when.expr, then.expr));
+            }
+            if whens.is_empty() {
+                return Err(p.error_here("CASE needs at least one WHEN"));
+            }
+            let otherwise = if p.eat_keyword("ELSE") {
+                let value = p.parse_expr_depth()?;
+                depths.push(value.depth);
+                Some(Box::new(value.expr))
+            } else {
+                None
+            };
+            p.expect_keyword("END")?;
+            p.wrap(
+                &depths,
+                start,
+                Expr::Case {
+                    operand: operand.map(|e| Box::new(e.expr)),
+                    whens,
+                    otherwise,
+                },
+            )
+        })
+    }
+
+    fn parse_map_projection(
         &mut self,
         start: usize,
-        name: String,
+        var: String,
     ) -> Result<ParsedExpr, ParseError> {
-        if name.eq_ignore_ascii_case("true") {
-            self.advance();
-            return Ok(ParsedExpr::leaf(Expr::Literal(Value::Bool(true))));
-        }
-        if name.eq_ignore_ascii_case("false") {
-            self.advance();
-            return Ok(ParsedExpr::leaf(Expr::Literal(Value::Bool(false))));
-        }
-        if name.eq_ignore_ascii_case("null") {
-            self.advance();
-            return Ok(ParsedExpr::leaf(Expr::Literal(Value::Null)));
-        }
-        if self.peek_at(1) == Some(&Tok::LParen) {
-            let size = name.eq_ignore_ascii_case("size");
-            let coalesce = name.eq_ignore_ascii_case("coalesce");
-            let lower = name.eq_ignore_ascii_case("toLower");
-            let upper = name.eq_ignore_ascii_case("toUpper");
-            if !size && !coalesce && !lower && !upper && !name.eq_ignore_ascii_case("count") {
-                return Err(self.error_at(start, format!("not supported yet: function {name}")));
-            }
-            self.advance(); // function name
-            return self.with_nesting(|p| {
-                p.expect(Tok::LParen, "'('")?;
-                if coalesce {
-                    let mut args = Vec::new();
-                    let mut max_depth = 0;
-                    loop {
-                        let argument = p.parse_expr_depth()?;
-                        max_depth = max_depth.max(argument.depth);
-                        args.push(argument.expr);
-                        if !p.check(&Tok::Comma) {
-                            break;
-                        }
+        self.with_nesting(|p| {
+            p.expect(Tok::LBrace, "'{'")?;
+            let mut items = vec![];
+            let mut depth = 0;
+            if !p.check(&Tok::RBrace) {
+                loop {
+                    if p.check(&Tok::Dot) {
                         p.advance();
+                        if p.check(&Tok::Star) {
+                            p.advance();
+                            items.push(MapItem::AllProps);
+                        } else {
+                            items.push(MapItem::Prop(p.expect_ident("a property key")?));
+                        }
+                    } else {
+                        let key = p.expect_key()?;
+                        if p.check(&Tok::Colon) {
+                            p.advance();
+                            let value = p.parse_expr_depth()?;
+                            depth = depth.max(value.depth);
+                            items.push(MapItem::Entry(key, value.expr));
+                        } else {
+                            items.push(MapItem::Entry(key.clone(), Expr::Var(key)));
+                        }
                     }
-                    p.expect(Tok::RParen, "')'")?;
-                    return Ok(ParsedExpr {
-                        expr: Expr::Coalesce(args),
-                        depth: p.checked_depth(max_depth, start)?,
-                    });
+                    if !p.check(&Tok::Comma) {
+                        break;
+                    }
+                    p.advance();
                 }
-                if !size && !lower && !upper && p.check(&Tok::Star) {
+            }
+            p.expect(Tok::RBrace, "'}'")?;
+            p.wrap(&[depth], start, Expr::MapProjection { var, items })
+        })
+    }
+
+    fn parse_function(&mut self, start: usize, name: String) -> Result<ParsedExpr, ParseError> {
+        self.with_nesting(|p| {
+            p.expect(Tok::LParen, "'('")?;
+            match name.as_str() {
+                "count" if p.check(&Tok::Star) => {
                     p.advance();
                     p.expect(Tok::RParen, "')'")?;
                     return Ok(ParsedExpr::leaf(Expr::CountStar));
                 }
-                let inner = p.parse_expr_depth()?;
-                p.expect(Tok::RParen, "')'")?;
-                let depth = p.checked_depth(inner.depth, start)?;
-                Ok(ParsedExpr {
-                    expr: if size {
-                        Expr::Size(Box::new(inner.expr))
-                    } else if lower {
-                        Expr::ToLower(Box::new(inner.expr))
-                    } else if upper {
-                        Expr::ToUpper(Box::new(inner.expr))
-                    } else {
-                        Expr::Count(Box::new(inner.expr))
-                    },
-                    depth,
-                })
-            });
-        }
-        self.advance();
-        self.parse_optional_prop(ParsedExpr::leaf(Expr::Var(name)))
-    }
-
-    fn parse_optional_prop(&mut self, base: ParsedExpr) -> Result<ParsedExpr, ParseError> {
-        if self.check(&Tok::Dot) {
-            let offset = self.current_span().0;
-            self.advance();
-            let key = self.expect_ident("a property key")?;
-            let depth = self.checked_depth(base.depth, offset)?;
-            Ok(ParsedExpr {
-                expr: Expr::Prop(Box::new(base.expr), key),
-                depth,
-            })
-        } else {
-            Ok(base)
-        }
+                "exists" if p.check(&Tok::LParen) => {
+                    if let Some(pattern) = p.try_pattern_predicate()? {
+                        p.expect(Tok::RParen, "')'")?;
+                        return Ok(ParsedExpr::leaf(Expr::Exists(Box::new(pattern))));
+                    }
+                }
+                "all" | "any" | "none" | "single" => {
+                    let kind = match name.as_str() {
+                        "all" => Quantifier::All,
+                        "any" => Quantifier::Any,
+                        "none" => Quantifier::None,
+                        _ => Quantifier::Single,
+                    };
+                    let var = p.expect_ident("a variable")?;
+                    p.expect_keyword("IN")?;
+                    let list = p.parse_expr_depth()?;
+                    p.expect_keyword("WHERE")?;
+                    let predicate = p.parse_expr_depth()?;
+                    p.expect(Tok::RParen, "')'")?;
+                    return p.wrap(
+                        &[list.depth, predicate.depth],
+                        start,
+                        Expr::Quantifier {
+                            kind,
+                            var,
+                            list: Box::new(list.expr),
+                            predicate: Box::new(predicate.expr),
+                        },
+                    );
+                }
+                "reduce" => {
+                    let acc = p.expect_ident("an accumulator")?;
+                    p.expect(Tok::Eq, "'='")?;
+                    let init = p.parse_expr_depth()?;
+                    p.expect(Tok::Comma, "','")?;
+                    let var = p.expect_ident("a variable")?;
+                    p.expect_keyword("IN")?;
+                    let list = p.parse_expr_depth()?;
+                    p.expect(Tok::Pipe, "'|'")?;
+                    let expr = p.parse_expr_depth()?;
+                    p.expect(Tok::RParen, "')'")?;
+                    return p.wrap(
+                        &[init.depth, list.depth, expr.depth],
+                        start,
+                        Expr::Reduce {
+                            acc,
+                            init: Box::new(init.expr),
+                            var,
+                            list: Box::new(list.expr),
+                            expr: Box::new(expr.expr),
+                        },
+                    );
+                }
+                _ => {}
+            }
+            let distinct = p.eat_keyword("DISTINCT");
+            let mut args = Vec::new();
+            let mut max_depth = 0;
+            if !p.check(&Tok::RParen) {
+                loop {
+                    let argument = p.parse_expr_depth()?;
+                    max_depth = max_depth.max(argument.depth);
+                    args.push(argument.expr);
+                    if !p.check(&Tok::Comma) {
+                        break;
+                    }
+                    p.advance();
+                }
+            }
+            p.expect(Tok::RParen, "')'")?;
+            if !crate::functions::known(&name) {
+                return Err(p.error_at(start, format!("not supported yet: function {name}")));
+            }
+            let (min, max) = crate::functions::arity(&name);
+            if args.len() < min || args.len() > max {
+                return Err(p.error_at(start, format!("wrong number of arguments for {name}")));
+            }
+            p.wrap(
+                &[max_depth],
+                start,
+                Expr::Call {
+                    name,
+                    distinct,
+                    args,
+                },
+            )
+        })
     }
 }
 
 const EXPECTED_CLAUSE: &str =
-    "expected a clause (MATCH, MERGE, CREATE, SET, DETACH DELETE, UNWIND, CALL or RETURN)";
+    "expected a clause (MATCH, OPTIONAL MATCH, MERGE, CREATE, SET, REMOVE, DELETE, UNWIND, WITH, CALL or RETURN)";
 
 fn tok_desc(t: &Tok) -> String {
     match t {
@@ -897,6 +1522,14 @@ fn tok_desc(t: &Tok) -> String {
         Tok::Semicolon => "';'".to_string(),
         Tok::Star => "'*'".to_string(),
         Tok::Minus => "'-'".to_string(),
+        Tok::Plus => "'+'".to_string(),
+        Tok::PlusEq => "'+='".to_string(),
+        Tok::Slash => "'/'".to_string(),
+        Tok::Percent => "'%'".to_string(),
+        Tok::Caret => "'^'".to_string(),
+        Tok::Pipe => "'|'".to_string(),
+        Tok::DotDot => "'..'".to_string(),
+        Tok::RegexMatch => "'=~'".to_string(),
         Tok::Eq => "'='".to_string(),
         Tok::Ne => "'<>'".to_string(),
         Tok::Lt => "'<'".to_string(),
@@ -924,266 +1557,303 @@ mod tests {
         Expr::Literal(Value::Str(v.into()))
     }
 
+    fn only_return(q: &Query) -> &Projection {
+        match q.clauses.last() {
+            Some(Clause::Return(p)) => p,
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[test]
     fn create_with_properties() {
         let q = parse("CREATE (c:Customer {entity_id: 'c1', name: \"Ana\"})").unwrap();
         assert_eq!(
             q.clauses,
             vec![Clause::Create(vec![Pattern {
+                path: None,
                 start: NodePat {
                     var: Some("c".into()),
-                    label: Some("Customer".into()),
+                    labels: vec!["Customer".into()],
                     props: vec![("entity_id".into(), s("c1")), ("name".into(), s("Ana"))]
                 },
-                hop: None,
+                hops: vec![],
             }])]
         );
     }
 
     #[test]
-    fn merge_then_set_with_parameters() {
-        let q =
-            parse("merge (c:Customer {entity_id: $id}) set c.name = $name, c.age = 30").unwrap();
+    fn merge_with_on_create_on_match_set_and_remove() {
+        let q = parse(
+            "merge (c:Customer {entity_id: $id}) on create set c.name = $name on match set c += $m, c.age = 30 remove c.old",
+        )
+        .unwrap();
+        let Clause::Merge {
+            on_create,
+            on_match,
+            ..
+        } = &q.clauses[0]
+        else {
+            panic!()
+        };
+        assert_eq!(on_create.len(), 1);
         assert_eq!(
-            q.clauses[1],
-            Clause::Set(vec![
-                SetItem {
+            on_match,
+            &vec![
+                SetItem::Merge {
                     var: "c".into(),
-                    prop: "name".into(),
-                    value: Expr::Param("name".into())
+                    value: Expr::Param("m".into())
                 },
-                SetItem {
+                SetItem::Prop {
                     var: "c".into(),
                     prop: "age".into(),
                     value: Expr::Literal(Value::Int(30))
                 },
-            ])
+            ]
         );
-    }
-
-    #[test]
-    fn one_hop_match_with_where_and_return_names() {
-        let q = parse(
-            "MATCH (c:Customer)-[:WORKS_AT]->(e:Company) WHERE c.name = 'Ana' AND e.name <> 'X' RETURN c.name, e.name AS company LIMIT 5",
-        )
-        .unwrap();
-        let Clause::Match { patterns, where_ } = &q.clauses[0] else {
-            panic!()
-        };
-        let (rel, end) = patterns[0].hop.clone().unwrap();
-        assert_eq!(rel.rel_type, "WORKS_AT");
-        assert_eq!(rel.direction, Direction::Out);
-        assert_eq!(end.label.as_deref(), Some("Company"));
-        assert!(matches!(where_, Some(Expr::And(_, _))));
-        let Clause::Return { items, limit, .. } = &q.clauses[1] else {
-            panic!()
-        };
-        assert_eq!(items[0].text, "c.name");
-        assert_eq!(items[1].alias.as_deref(), Some("company"));
-        assert_eq!(limit, &Some(Expr::Literal(Value::Int(5))));
-    }
-
-    #[test]
-    fn incoming_relationship_and_count() {
-        let q = parse("MATCH (e:Company)<-[r:WORKS_AT]-(c:Customer) RETURN count(*)").unwrap();
-        let Clause::Match { patterns, .. } = &q.clauses[0] else {
-            panic!()
-        };
-        assert_eq!(patterns[0].hop.as_ref().unwrap().0.direction, Direction::In);
-        let Clause::Return { items, .. } = &q.clauses[1] else {
-            panic!()
-        };
-        assert_eq!(items[0].expr, Expr::CountStar);
-        assert_eq!(items[0].text, "count(*)");
-    }
-
-    #[test]
-    fn unwind_rows_merge() {
-        let q = parse(
-            "UNWIND $rows AS row MERGE (c:Customer {entity_id: row.id}) SET c.name = row.name",
-        )
-        .unwrap();
-        assert_eq!(
-            q.clauses[0],
-            Clause::Unwind {
-                expr: Expr::Param("rows".into()),
-                var: "row".into()
-            }
-        );
-    }
-
-    #[test]
-    fn detach_delete_and_literals() {
-        let q = parse("MATCH (c:Customer {entity_id: 'c1'}) DETACH DELETE c").unwrap();
-        assert_eq!(q.clauses[1], Clause::DetachDelete(vec!["c".into()]));
-        let q = parse("RETURN -1.5, true, null, [1, 'a'], {k: 2}").unwrap();
-        let Clause::Return { items, .. } = &q.clauses[0] else {
-            panic!()
-        };
-        assert_eq!(items[0].expr, Expr::Literal(Value::Float(-1.5)));
-        assert_eq!(items[2].expr, Expr::Literal(Value::Null));
-    }
-
-    #[test]
-    fn match_with_multiple_comma_separated_patterns() {
-        let q = parse("MATCH (a:A), (b:B)-[:T]->(c:C) RETURN a, b, c").unwrap();
-        let Clause::Match { patterns, .. } = &q.clauses[0] else {
-            panic!()
-        };
-        assert_eq!(patterns.len(), 2);
-        assert!(patterns[0].hop.is_none());
-        assert!(patterns[1].hop.is_some());
-    }
-
-    #[test]
-    fn create_with_multiple_comma_separated_patterns() {
-        let q = parse("CREATE (a:A {entity_id: '1'}), (b:B {entity_id: '2'})").unwrap();
-        let Clause::Create(patterns) = &q.clauses[0] else {
-            panic!()
-        };
-        assert_eq!(patterns.len(), 2);
-    }
-
-    #[test]
-    fn detach_delete_multiple_variables() {
-        let q = parse("MATCH (a), (b) DETACH DELETE a, b, c").unwrap();
         assert_eq!(
             q.clauses[1],
-            Clause::DetachDelete(vec!["a".into(), "b".into(), "c".into()])
+            Clause::Remove(vec![SetItem::Prop {
+                var: "c".into(),
+                prop: "old".into(),
+                value: Expr::Literal(Value::Null)
+            }])
         );
     }
 
     #[test]
-    fn errors_have_offsets_and_unsupported_is_named() {
-        let e = parse("MATCH (c:Customer RETURN c").unwrap_err();
-        assert!(e.offset > 0);
-        let e = parse("MATCH (c:Customer) WITH c RETURN c").unwrap_err();
+    fn multi_hop_variable_length_untyped_and_undirected_patterns() {
+        let q =
+            parse("MATCH p = (a:A)-[:X|:Y]->(b)<-[r*1..3]-(c)-[*]-(d)--(e)-->(f)<--(g) RETURN p")
+                .unwrap();
+        let Clause::Match { patterns, .. } = &q.clauses[0] else {
+            panic!()
+        };
+        let pattern = &patterns[0];
+        assert_eq!(pattern.path.as_deref(), Some("p"));
+        let hops: Vec<_> = pattern
+            .hops
+            .iter()
+            .map(|(r, _)| (r.types.clone(), r.direction, r.length))
+            .collect();
+        assert_eq!(
+            hops,
+            vec![
+                (vec!["X".to_string(), "Y".to_string()], Direction::Out, None),
+                (vec![], Direction::In, Some((1, Some(3)))),
+                (vec![], Direction::Both, Some((1, None))),
+                (vec![], Direction::Both, None),
+                (vec![], Direction::Out, None),
+                (vec![], Direction::In, None),
+            ]
+        );
+        for (source, length) in [
+            ("*2", (2, Some(2))),
+            ("*..4", (1, Some(4))),
+            ("*0..", (0, None)),
+        ] {
+            let q = parse(&format!("MATCH (a)-[{source}]->(b) RETURN b")).unwrap();
+            let Clause::Match { patterns, .. } = &q.clauses[0] else {
+                panic!()
+            };
+            assert_eq!(patterns[0].hops[0].0.length, Some(length), "{source}");
+        }
+        assert!(parse("MATCH (a)-[*3..1]->(b) RETURN b").is_err());
+        assert!(parse("MATCH (a)-[*1..65]->(b) RETURN b").is_err());
+    }
+
+    #[test]
+    fn optional_match_with_and_projection_clauses() {
+        let q = parse(
+            "MATCH (c:Customer) OPTIONAL MATCH (c)-[:BUYS]->(p) WITH DISTINCT c, count(p) AS n WHERE n > 1 RETURN c.name AS name, n ORDER BY n DESC, name SKIP 1 LIMIT 5",
+        )
+        .unwrap();
+        assert!(matches!(q.clauses[1], Clause::Match { optional: true, .. }));
+        let Clause::With(with) = &q.clauses[2] else {
+            panic!()
+        };
+        assert!(with.distinct && with.where_.is_some());
+        let ret = only_return(&q);
+        assert_eq!(ret.order.len(), 2);
+        assert!(ret.order[0].descending && !ret.order[1].descending);
+        assert_eq!(ret.skip, Some(Expr::Literal(Value::Int(1))));
+        assert!(parse("RETURN 1 LIMIT 1 SKIP 1").is_err());
+        assert!(parse("RETURN 1 LIMIT 5 ORDER BY 1").is_err());
+    }
+
+    #[test]
+    fn expressions_follow_cypher_precedence() {
+        let q = parse("RETURN 1 + 2 * 3 ^ 2 - -4 % 3 AS x").unwrap();
+        let Expr::Arith(_, ArithOp::Sub, right) = &only_return(&q).items[0].expr else {
+            panic!()
+        };
+        assert!(matches!(right.as_ref(), Expr::Arith(_, ArithOp::Mod, _)));
+        let q = parse("RETURN NOT a.x STARTS WITH 'b' OR c XOR d AND e IS NOT NULL").unwrap();
+        assert!(matches!(only_return(&q).items[0].expr, Expr::Or(_, _)));
+        let q = parse("RETURN n:Person, xs[0], xs[1..], xs[..-1], m['k'], 'a' + 1 <> 'b'").unwrap();
+        let items: Vec<_> = only_return(&q).items.iter().map(|i| &i.expr).collect();
         assert!(
-            e.message.starts_with("not supported yet: WITH"),
-            "{}",
-            e.message
+            matches!(items[0], Expr::HasLabels(_, labels) if labels == &vec!["Person".to_string()])
         );
-        let e = parse("MATCH (a)-[:T*1..3]->(b) RETURN a").unwrap_err();
-        assert!(e.message.starts_with("not supported yet:"), "{}", e.message);
-        assert!(parse("").is_err());
-    }
-
-    // -- additional coverage: every named unsupported construct ------------
-    // The brief's grammar names ten constructs that must fail with a message
-    // starting "not supported yet: "; the brief's own tests exercise WITH and
-    // variable-length relationships. These tests cover the rest.
-
-    #[test]
-    fn optional_match_is_unsupported() {
-        let e = parse("OPTIONAL MATCH (c:Customer) RETURN c").unwrap_err();
-        assert!(
-            e.message.starts_with("not supported yet: OPTIONAL MATCH"),
-            "{}",
-            e.message
-        );
+        assert!(matches!(items[1], Expr::Index(_, _)));
+        assert!(matches!(items[2], Expr::Slice(_, Some(_), None)));
+        assert!(matches!(items[3], Expr::Slice(_, None, Some(_))));
+        assert!(matches!(items[5], Expr::Cmp(_, CmpOp::Ne, _)));
     }
 
     #[test]
-    fn order_by_names_a_returned_column() {
-        let q = parse("MATCH (c:Customer) RETURN c.name AS n, c.entity_id ORDER BY n DESC, c.entity_id SKIP 2 LIMIT 3").unwrap();
-        let Clause::Return {
-            order, skip, limit, ..
-        } = &q.clauses[1]
+    fn case_comprehensions_quantifiers_reduce_and_map_projection() {
+        let q = parse(
+            "RETURN CASE x WHEN 1 THEN 'a' ELSE 'b' END, CASE WHEN x > 1 THEN 1 END, [y IN xs WHERE y > 1 | y * 2], [y IN xs], any(y IN xs WHERE y = 1), reduce(s = 0, y IN xs | s + y), n {.name, .*, total: 1, x}",
+        )
+        .unwrap();
+        let items: Vec<_> = only_return(&q).items.iter().map(|i| &i.expr).collect();
+        assert!(matches!(
+            items[0],
+            Expr::Case {
+                operand: Some(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            items[1],
+            Expr::Case {
+                operand: None,
+                otherwise: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            items[2],
+            Expr::ListComp {
+                filter: Some(_),
+                map: Some(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            items[3],
+            Expr::ListComp {
+                filter: None,
+                map: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            items[4],
+            Expr::Quantifier {
+                kind: Quantifier::Any,
+                ..
+            }
+        ));
+        assert!(matches!(items[5], Expr::Reduce { .. }));
+        let Expr::MapProjection {
+            var,
+            items: entries,
+        } = items[6]
         else {
             panic!()
         };
-        assert_eq!(order, &vec![(0, true), (1, false)]);
-        assert!(skip.is_some() && limit.is_some());
-        let e = parse("MATCH (c:Customer) RETURN c.name ORDER BY c.segment").unwrap_err();
+        assert_eq!(var, "n");
+        assert_eq!(entries.len(), 4);
+    }
+
+    #[test]
+    fn functions_aggregates_and_pattern_predicates() {
+        let q = parse("MATCH (n) WHERE (n)-[:KNOWS]->(:Person) AND exists((n)<--()) RETURN count(DISTINCT n.x), labels(n), toLower(n.name)").unwrap();
+        let Clause::Match {
+            where_: Some(Expr::And(a, b)),
+            ..
+        } = &q.clauses[0]
+        else {
+            panic!()
+        };
+        assert!(matches!(a.as_ref(), Expr::Exists(_)));
+        assert!(matches!(b.as_ref(), Expr::Exists(_)));
+        let items = &only_return(&q).items;
         assert!(
-            e.message.starts_with("not supported yet: ORDER BY"),
-            "{}",
-            e.message
+            matches!(&items[0].expr, Expr::Call { name, distinct: true, .. } if name == "count")
         );
-    }
-
-    #[test]
-    fn skip_after_limit_is_unsupported() {
-        let e = parse("RETURN 1 LIMIT 1 SKIP 1").unwrap_err();
-        assert!(
-            e.message.starts_with("not supported yet: SKIP"),
-            "{}",
-            e.message
-        );
-    }
-
-    #[test]
-    fn order_by_after_limit_is_also_unsupported() {
-        let e = parse("RETURN 1 LIMIT 5 ORDER BY 1").unwrap_err();
-        assert!(
-            e.message.starts_with("not supported yet: ORDER BY"),
-            "{}",
-            e.message
-        );
-    }
-
-    #[test]
-    fn multiple_labels_is_unsupported() {
-        let e = parse("MATCH (c:Customer:Person) RETURN c").unwrap_err();
-        assert!(e.message.starts_with("not supported yet:"), "{}", e.message);
-    }
-
-    #[test]
-    fn multiple_hops_is_unsupported() {
-        let e = parse("MATCH (a)-[:T]->(b)-[:U]->(c) RETURN a").unwrap_err();
-        assert!(e.message.starts_with("not supported yet:"), "{}", e.message);
-    }
-
-    #[test]
-    fn function_other_than_count_is_unsupported() {
+        assert!(matches!(&items[2].expr, Expr::Call { name, .. } if name == "tolower"));
         let e = parse("RETURN foo(1)").unwrap_err();
         assert!(
             e.message.starts_with("not supported yet: function foo"),
             "{}",
             e.message
         );
+        assert!(parse("RETURN (1) - 1").is_ok());
     }
 
     #[test]
-    fn call_requires_explicit_yield() {
-        let e = parse("CALL db.labels()").unwrap_err();
-        assert!(e.message.starts_with("expected YIELD"), "{}", e.message);
+    fn ddl_maps_to_catalog_procedures() {
+        for (source, args) in [
+            ("CREATE INDEX FOR (n:L) ON (n.p)", 3),
+            ("CREATE INDEX idx IF NOT EXISTS FOR (n:L) ON (n.p)", 3),
+            ("CREATE INDEX ON :L(p)", 3),
+        ] {
+            let q = parse(source).unwrap();
+            let Clause::Call {
+                name, args: given, ..
+            } = &q.clauses[0]
+            else {
+                panic!()
+            };
+            assert_eq!(
+                (name.as_str(), given.len()),
+                ("db.createIndex", args),
+                "{source}"
+            );
+        }
+        let q = parse("DROP INDEX idx IF EXISTS").unwrap();
+        assert!(matches!(&q.clauses[0], Clause::Call { name, .. } if name == "db.dropIndex"));
+        assert!(parse("CREATE INDEX FOR (n:L) ON (m.p)").is_err());
     }
 
     #[test]
-    fn call_parses_names_parameters_aliases_filters_and_utf8() {
-        let query = parse("call graph.pagerank($config) yield node AS `nó`, score where score > 0 return `nó`, score limit 10;").unwrap();
+    fn union_call_and_unwind() {
+        let q = parse(
+            "MATCH (a:A) RETURN a.x AS x UNION ALL MATCH (b:B) RETURN b.x AS x UNION RETURN 1 AS x",
+        )
+        .unwrap();
+        assert_eq!(
+            q.unions.iter().map(|(all, _)| *all).collect::<Vec<_>>(),
+            vec![true, false]
+        );
+        let q = parse("call graph.pagerank($config) yield node AS `nó`, score where score > 0 return `nó`, score limit 10;").unwrap();
         let Clause::Call {
             name,
-            args,
             yields,
             where_,
-        } = &query.clauses[0]
+            ..
+        } = &q.clauses[0]
         else {
-            panic!("expected call")
+            panic!()
         };
         assert_eq!(name, "graph.pagerank");
-        assert_eq!(args, &[Expr::Param("config".into())]);
         assert_eq!(yields[0].alias, "nó");
         assert!(where_.is_some());
-        for invalid in [
-            "CALL",
-            "CALL graph.",
-            "CALL graph.project(",
-            "CALL graph.project({})",
-            "CALL graph.project() YIELD",
-            "CALL graph.project() YIELD *",
-            "CALL graph.project() YIELD node AS",
-        ] {
-            assert!(parse(invalid).is_err(), "{invalid}");
-        }
+        assert!(parse("CALL db.labels()").is_ok());
+        let q = parse(
+            "UNWIND $rows AS row MERGE (c:Customer {entity_id: row.id}) SET c.name = row.name",
+        )
+        .unwrap();
+        assert!(matches!(&q.clauses[0], Clause::Unwind { var, .. } if var == "row"));
     }
 
     #[test]
-    fn relationship_delete_parses_multiple_variables() {
-        let q = parse("MATCH (a:Page)-[r:LINK]->(b:Page) DELETE r, s").unwrap();
-        assert_eq!(q.clauses[1], Clause::Delete(vec!["r".into(), "s".into()]));
+    fn delete_forms_and_errors_have_offsets() {
+        let q = parse("MATCH (a)-[r:LINK]->(b) DELETE r, a DETACH DELETE b").unwrap();
+        assert!(
+            matches!(&q.clauses[1], Clause::Delete { detach: false, targets } if targets.len() == 2)
+        );
+        assert!(matches!(&q.clauses[2], Clause::Delete { detach: true, .. }));
         assert!(parse("DELETE").is_err());
+        let e = parse("MATCH (c:Customer RETURN c").unwrap_err();
+        assert!(e.offset > 0);
+        assert!(parse("").is_err());
+        assert!(parse("MATCH (a) WHERE a.x =~ 'x' RETURN a")
+            .unwrap_err()
+            .message
+            .contains("regular"));
     }
 
     // -- nesting limit -------------------------------------------------------
@@ -1367,7 +2037,7 @@ mod tests {
             assert!(parse(source).is_err(), "{source}");
         }
         let query = parse("RETURN 1e308, -1e308, 0.0, 1e-308").unwrap();
-        let Clause::Return { items, .. } = &query.clauses[0] else {
+        let Clause::Return(Projection { items, .. }) = &query.clauses[0] else {
             panic!()
         };
         for item in items {
@@ -1385,7 +2055,7 @@ mod tests {
             "RETURN -0009223372036854775808",
         ] {
             let query = parse(source).unwrap();
-            let Clause::Return { items, .. } = &query.clauses[0] else {
+            let Clause::Return(Projection { items, .. }) = &query.clauses[0] else {
                 panic!()
             };
             assert_eq!(items[0].expr, Expr::Literal(Value::Int(i64::MIN)));
@@ -1399,7 +2069,7 @@ mod tests {
             assert!(parse(source).is_err(), "{source}");
         }
         let query = parse("RETURN 9223372036854775807").unwrap();
-        let Clause::Return { items, .. } = &query.clauses[0] else {
+        let Clause::Return(Projection { items, .. }) = &query.clauses[0] else {
             panic!()
         };
         assert_eq!(items[0].expr, Expr::Literal(Value::Int(i64::MAX)));
@@ -1449,18 +2119,17 @@ mod tests {
 
     #[test]
     fn empty_and_labelless_node_patterns_parse_structurally() {
-        // The parser only enforces the grammar; "needs a label" etc. is the
-        // executor's job (Task 4), so these are valid syntax here.
         let q = parse("CREATE ()").unwrap();
         assert_eq!(
             q.clauses,
             vec![Clause::Create(vec![Pattern {
+                path: None,
                 start: NodePat {
                     var: None,
-                    label: None,
+                    labels: vec![],
                     props: vec![]
                 },
-                hop: None,
+                hops: vec![],
             }])]
         );
         assert!(parse("MATCH (c) RETURN c").is_ok());
@@ -1484,6 +2153,10 @@ mod tests {
             "RETURN 'unterminated",
             "RETURN `unterminated",
             "RETURN 'bad \\escape'",
+            "MATCH p = (a:A)-[r:X|Y*1..3]-(b) WHERE a.x STARTS WITH 'q' WITH a, count(*) AS n ORDER BY n DESC LIMIT 3 RETURN a {.name, n: n}",
+            "RETURN CASE WHEN 1 < 2 THEN [x IN range(1, 3) WHERE x > 1 | x * 2] ELSE reduce(s = 0, y IN [1] | s + y) END",
+            "MERGE (n:L {entity_id: 'x'}) ON CREATE SET n.a = 1 ON MATCH SET n += {b: 2} REMOVE n.c",
+            "CREATE INDEX idx IF NOT EXISTS FOR (n:L) ON (n.p)",
         ];
         for q in queries {
             let mut boundaries: Vec<usize> = q.char_indices().map(|(i, _)| i).collect();

@@ -269,8 +269,10 @@ impl<'db> Txn<'db> {
         key: &[u8],
         visit: impl FnOnce(Option<&[u8]>) -> Result<R, E>,
     ) -> Result<R, E> {
-        if let Some(value) = self.writes.get(&(cf, key.to_vec())) {
-            return visit(value.as_deref());
+        if !self.writes.is_empty() {
+            if let Some(value) = self.writes.get(&(cf, key.to_vec())) {
+                return visit(value.as_deref());
+            }
         }
         let value = self
             .snapshot

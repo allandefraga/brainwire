@@ -1,0 +1,71 @@
+//! Names of the supported Cypher functions (lowercased).
+
+pub const SCALAR: &[&str] = &[
+    "id",
+    "elementid",
+    "labels",
+    "type",
+    "properties",
+    "keys",
+    "startnode",
+    "endnode",
+    "nodes",
+    "relationships",
+    "length",
+    "size",
+    "coalesce",
+    "tolower",
+    "toupper",
+    "tostring",
+    "tointeger",
+    "tofloat",
+    "toboolean",
+    "tostringornull",
+    "tointegerornull",
+    "tofloatornull",
+    "trim",
+    "ltrim",
+    "rtrim",
+    "replace",
+    "substring",
+    "split",
+    "left",
+    "right",
+    "reverse",
+    "abs",
+    "ceil",
+    "floor",
+    "round",
+    "sqrt",
+    "sign",
+    "exp",
+    "log",
+    "log10",
+    "head",
+    "last",
+    "tail",
+    "range",
+    "timestamp",
+    "exists",
+    "isempty",
+    "valuetype",
+    "lower",
+    "upper",
+];
+
+pub fn known(name: &str) -> bool {
+    SCALAR.contains(&name) || crate::ast::AGGREGATES.contains(&name)
+}
+
+/// Accepted argument counts `(min, max)` for a known function.
+pub fn arity(name: &str) -> (usize, usize) {
+    match name {
+        "coalesce" => (1, usize::MAX),
+        "timestamp" => (0, 0),
+        "replace" => (3, 3),
+        "substring" | "range" => (2, 3),
+        "left" | "right" | "split" => (2, 2),
+        "round" => (1, 2),
+        _ => (1, 1),
+    }
+}

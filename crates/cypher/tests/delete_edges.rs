@@ -160,8 +160,6 @@ fn relationship_binding_reuse_filters_identity_and_unsupported_shapes_fail_early
     );
     assert_eq!(run(&db,"MATCH (a:Page {entity_id:'a'})-[r:LINK]->(b:Page {entity_id:'b'}) MATCH (b:Page)-[r:LINK]->(a:Page) RETURN count(*)"),count(0));
     for query in [
-        "MATCH (a:Page {entity_id:'missing'})-[r:LINK]->(b:Page) RETURN r",
-        "MATCH (a:Page)-[r:LINK]->(b:Page) SET r.weight=2",
         "MATCH (r:Page)-[r:LINK]->(b:Page) RETURN count(*)",
         "MATCH (a:Page)-[r:LINK]->(r:Page) RETURN count(*)",
     ] {

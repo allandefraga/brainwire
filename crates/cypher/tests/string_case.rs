@@ -71,17 +71,12 @@ fn arity_types_names_and_zero_rows_are_validated() {
             "{query}"
         );
     }
+    // toLower(count(*)) is a type error; nested aggregates are rejected.
     for query in [
         "RETURN toLower(count(*))",
         "RETURN count(toUpper(count(*)))",
     ] {
-        assert!(
-            matches!(
-                execute(&db, query, &BTreeMap::new()),
-                Err(ExecError::Unsupported(_))
-            ),
-            "{query}"
-        );
+        assert!(execute(&db, query, &BTreeMap::new()).is_err(), "{query}");
     }
 }
 

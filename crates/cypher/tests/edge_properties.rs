@@ -76,7 +76,7 @@ fn relationship_properties_can_be_returned_and_filtered_in_both_directions() {
 }
 
 #[test]
-fn relationship_property_reads_see_staged_changes_and_writes_stay_unsupported() {
+fn relationship_property_reads_see_staged_changes_and_relationships_are_values() {
     let (_dir, db) = setup();
     let params = BTreeMap::new();
     let mut tx = QueryTransaction::begin(&db).unwrap();
@@ -91,12 +91,19 @@ fn relationship_property_reads_see_staged_changes_and_writes_stay_unsupported() 
         vec![vec![f(0.1), s("x")]]
     );
     tx.rollback();
-    for query in [
-        "MATCH (a:Customer)-[r:FOLLOWS]->(b:Customer) RETURN r",
-        "MATCH (a:Customer)-[r:FOLLOWS]->(b:Customer) SET r.weight = 2",
-    ] {
-        assert!(execute(&db, query, &params).is_err(), "{query}");
-    }
+    let rows = run(&db, "MATCH (a:Customer {entity_id:'a'})-[r:FOLLOWS]->(b:Customer {entity_id:'b'}) RETURN r, type(r), startNode(r).entity_id, endNode(r).entity_id");
+    let [Out::Relationship(rel), kind, start, end] = rows[0].as_slice() else {
+        panic!("{rows:?}")
+    };
+    assert_eq!(rel.rel_type, "FOLLOWS");
+    assert_eq!(rel.props.get("note"), Some(&Value::Str("x".into())));
+    assert_eq!((kind, start, end), (&s("FOLLOWS"), &s("a"), &s("b")));
+    run(&db, "MATCH (a:Customer {entity_id:'a'})-[r:FOLLOWS]->(b:Customer {entity_id:'c'}) SET r.weight = 2, r.note = 'set'");
+    assert_eq!(
+        run(&db, "MATCH (:Customer {entity_id:'a'})-[r:FOLLOWS]->(:Customer {entity_id:'c'}) RETURN r.weight, r.note"),
+        vec![vec![Out::Value(Value::Int(2)), s("set")]]
+    );
+    let _ = params;
 }
 
 #[test]

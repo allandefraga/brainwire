@@ -11,9 +11,11 @@ mod eval;
 use budget::Budget;
 pub use budget::{ExecutionLimits, QueryMemoryPool, QueryMemoryUsage};
 mod graph;
+mod plan;
 mod procedures;
-mod stream;
-mod validate;
+mod run;
+mod val;
+mod write;
 
 use crate::{ast::*, parse, ParseError};
 use brainwire_core::{acl::ReadVisibility, ids::NodeId, schema::Catalog, value::Value};
@@ -22,7 +24,6 @@ use brainwire_store::{
     graph::GraphError,
     txn::{Cf, Txn, TxnError},
 };
-use eval::{eval, scalar};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +35,27 @@ pub struct QueryOutput {
 pub enum Out {
     Value(Value),
     Node(NodeOut),
+    Relationship(RelationshipOut),
+    Path(PathOut),
+    /// A list or map holding nodes, relationships or paths.
+    List(Vec<Out>),
+    Map(BTreeMap<String, Out>),
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelationshipOut {
+    /// Stable 63-bit id derived from the relationship's identity.
+    pub id: i64,
+    pub element_id: String,
+    pub start: NodeId,
+    pub end: NodeId,
+    pub rel_type: String,
+    pub props: BTreeMap<String, Value>,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathOut {
+    pub nodes: Vec<NodeOut>,
+    /// `rels[i]` joins `nodes[i]` and `nodes[i + 1]`.
+    pub rels: Vec<RelationshipOut>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeOut {
@@ -98,20 +120,38 @@ impl From<StoreError> for ExecError {
         Self::Graph(GraphError::Store(e))
     }
 }
-#[derive(Debug, Clone, PartialEq)]
-enum Binding {
-    Node(NodeId),
-    Relationship(Relationship),
-    Value(Value),
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Procedure rows by YIELD alias.
+type Binding = val::Val;
+type Bindings = BTreeMap<String, Binding>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Relationship {
     source: NodeId,
     edge_type: brainwire_core::ids::EdgeTypeId,
     target: NodeId,
     id: brainwire_core::ids::EdgeId,
 }
-type Bindings = BTreeMap<String, Binding>;
+impl Relationship {
+    fn element_id(&self) -> String {
+        brainwire_core::ids::edge_element_id(self.source, self.edge_type, self.target, self.id)
+    }
+    /// A stable nonnegative integer id (FNV-1a over the identity).
+    fn legacy_id(&self) -> i64 {
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for byte in self
+            .source
+            .0
+            .to_be_bytes()
+            .into_iter()
+            .chain(self.edge_type.0.to_be_bytes())
+            .chain(self.target.0.to_be_bytes())
+            .chain(self.id.0.to_be_bytes())
+        {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        (hash >> 1) as i64
+    }
+}
 struct Context<'a, 'db> {
     txn: &'a Txn<'db>,
     catalog: &'a Catalog,
@@ -119,6 +159,7 @@ struct Context<'a, 'db> {
     budget: &'a Budget<'a>,
     visibility: Option<&'a ReadVisibility>,
     checkpoint_dir: Option<&'a std::path::Path>,
+    vars: &'a plan::Vars,
 }
 
 /// Trusted prepared bytes; the caller must obtain quorum and apply before acknowledgement.
@@ -153,13 +194,17 @@ impl QueryAccess {
     };
 
     fn authorize(self, query: &Query) -> Result<(), ExecError> {
-        for clause in &query.clauses {
+        for clause in query
+            .clauses
+            .iter()
+            .chain(query.unions.iter().flat_map(|(_, part)| part))
+        {
             match clause {
                 Clause::Create(_)
-                | Clause::Merge(_)
+                | Clause::Merge { .. }
                 | Clause::Set(_)
-                | Clause::DetachDelete(_)
-                | Clause::Delete(_) => {
+                | Clause::Remove(_)
+                | Clause::Delete { .. } => {
                     if !self.write {
                         return Err(ExecError::Forbidden("graph write access required"));
                     }
@@ -173,6 +218,18 @@ impl QueryAccess {
                             return Err(ExecError::Forbidden("node ACL updates require graph write and instance administrator access"));
                         }
                     }
+                    "db.createIndex"
+                    | "db.dropIndex"
+                    | "db.createLabel"
+                    | "db.createRelationshipType"
+                    | "db.dropProperty" => {
+                        if !self.write || !self.instance_admin {
+                            return Err(ExecError::Forbidden(
+                                "catalog changes require graph write and instance administrator access",
+                            ));
+                        }
+                    }
+                    "db.labels" | "db.relationshipTypes" | "db.propertyKeys" => {}
                     "db.memory" | "db.checkpoint" | "db.nodeAcls" => {
                         if !self.instance_admin {
                             return Err(ExecError::Forbidden(
@@ -182,7 +239,10 @@ impl QueryAccess {
                     }
                     _ => return Err(ExecError::Forbidden("procedure is not authorized")),
                 },
-                Clause::Match { .. } | Clause::Unwind { .. } | Clause::Return { .. } => {}
+                Clause::Match { .. }
+                | Clause::Unwind { .. }
+                | Clause::With(_)
+                | Clause::Return(_) => {}
             }
         }
         Ok(())
@@ -381,10 +441,10 @@ impl<'db> QueryTransaction<'db> {
                 matches!(
                     clause,
                     Clause::Create(_)
-                        | Clause::Merge(_)
+                        | Clause::Merge { .. }
                         | Clause::Set(_)
-                        | Clause::DetachDelete(_)
-                        | Clause::Delete(_)
+                        | Clause::Remove(_)
+                        | Clause::Delete { .. }
                         | Clause::Call { .. }
                 ) && !matches!(clause, Clause::Call { name, .. } if name == "db.checkpoint")
             })
@@ -567,18 +627,21 @@ fn execute_clauses(
     visibility: Option<&ReadVisibility>,
     checkpoint_dir: Option<&std::path::Path>,
 ) -> Result<(QueryOutput, bool), ExecError> {
-    if visibility.is_some()
-        && query.clauses.iter().any(|clause| {
-            matches!(
-                clause,
-                Clause::Create(_)
-                    | Clause::Merge(_)
-                    | Clause::Set(_)
-                    | Clause::DetachDelete(_)
-                    | Clause::Delete(_)
-            ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls")
-        })
-    {
+    let clauses = query
+        .clauses
+        .iter()
+        .chain(query.unions.iter().flat_map(|(_, part)| part));
+    let mutates = |clause: &Clause| {
+        matches!(
+            clause,
+            Clause::Create(_)
+                | Clause::Merge { .. }
+                | Clause::Set(_)
+                | Clause::Remove(_)
+                | Clause::Delete { .. }
+        ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls" || plan::is_admin_call(name))
+    };
+    if visibility.is_some() && clauses.clone().any(mutates) {
         return Err(ExecError::Forbidden(
             "read visibility transactions cannot mutate the graph or ACL metadata",
         ));
@@ -587,7 +650,8 @@ fn execute_clauses(
     budget.charge(source_bytes)?;
     budget.charge(budget::map_bytes(params))?;
     budget.charge(txn.estimated_memory_bytes())?;
-    validate::query(
+    let empty = plan::Vars::default();
+    let plan = plan::plan(
         query,
         &Context {
             txn,
@@ -596,234 +660,16 @@ fn execute_clauses(
             budget: &budget,
             visibility,
             checkpoint_dir,
+            vars: &empty,
         },
     )?;
-    if stream::supports(query) {
-        return stream::run(
-            &Context {
-                txn,
-                catalog,
-                params,
-                budget: &budget,
-                visibility,
-                checkpoint_dir,
-            },
-            query,
-        )
-        .map(|output| (output, false));
-    }
-    let mut rows = vec![Bindings::new()];
-    let mut output = QueryOutput {
-        fields: vec![],
-        rows: vec![],
+    let env = run::Env {
+        catalog,
+        params,
+        budget: &budget,
+        visibility,
+        checkpoint_dir,
+        vars: &plan.vars,
     };
-    let mut wrote = false;
-    let mut overlay_bytes = txn.estimated_memory_bytes();
-    for clause in &query.clauses {
-        let ctx = Context {
-            txn,
-            catalog,
-            params,
-            budget: &budget,
-            visibility,
-            checkpoint_dir,
-        };
-        match clause {
-            Clause::Call {
-                name,
-                args,
-                yields,
-                where_,
-            } => {
-                if name == "db.setNodeAcl" {
-                    let (id, acl, prepared_rows) =
-                        procedures::prepare_node_acl(args, yields, &ctx)?;
-                    brainwire_store::graph::set_node_acl(txn, id, &acl)?;
-                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                    overlay_bytes = txn.estimated_memory_bytes();
-                    wrote = true;
-                    rows = prepared_rows;
-                } else if name == "db.setNodeAcls" {
-                    let (stamps, prepared_rows) =
-                        procedures::prepare_node_acls(args, yields, &ctx)?;
-                    for (id, acl) in &stamps {
-                        brainwire_store::graph::set_node_acl(txn, *id, acl)?;
-                    }
-                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                    overlay_bytes = txn.estimated_memory_bytes();
-                    wrote = true;
-                    rows = prepared_rows;
-                } else {
-                    rows = procedures::run(name, args, yields, &ctx)?;
-                }
-                if let Some(predicate) = where_ {
-                    let ctx = Context {
-                        txn,
-                        catalog,
-                        params,
-                        budget: &budget,
-                        visibility,
-                        checkpoint_dir,
-                    };
-                    let mut filtered = Vec::new();
-                    for row in rows {
-                        if eval::boolean(eval(predicate, &row, &ctx)?)? == Some(true) {
-                            filtered.push(row);
-                        }
-                    }
-                    rows = filtered;
-                }
-            }
-            Clause::Unwind { expr, var } => {
-                let mut next = vec![];
-                for row in rows {
-                    match scalar(eval(expr, &row, &ctx)?)? {
-                        Value::Null => {}
-                        Value::List(values) => {
-                            for value in values {
-                                let mut row = row.clone();
-                                row.insert(var.clone(), Binding::Value(value));
-                                budget.bindings(&row)?;
-                                next.push(row);
-                            }
-                        }
-                        _ => return Err(ExecError::Semantic("UNWIND needs a list or null".into())),
-                    }
-                }
-                rows = next;
-            }
-            Clause::Match { patterns, where_ } => {
-                for pattern in patterns {
-                    rows = graph::match_pattern(&ctx, rows, pattern, where_.as_ref())?;
-                }
-                if let Some(expr) = where_ {
-                    let mut next = vec![];
-                    for row in rows {
-                        if eval::boolean(eval(expr, &row, &ctx)?)? == Some(true) {
-                            next.push(row);
-                        }
-                    }
-                    rows = next;
-                }
-            }
-            Clause::Merge(pattern) => {
-                for row in &mut rows {
-                    graph::write_pattern(txn, catalog, params, row, pattern, false, &budget)?;
-                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                    overlay_bytes = txn.estimated_memory_bytes();
-                    wrote = true;
-                }
-            }
-            Clause::Create(patterns) => {
-                for row in &mut rows {
-                    for pattern in patterns {
-                        graph::write_pattern(txn, catalog, params, row, pattern, true, &budget)?;
-                        budget
-                            .charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                        overlay_bytes = txn.estimated_memory_bytes();
-                        wrote = true;
-                    }
-                }
-            }
-            Clause::Set(items) => {
-                // Evaluate one row's assignments together, then update each node once.
-                for row in &rows {
-                    let ctx = Context {
-                        txn,
-                        catalog,
-                        params,
-                        budget: &budget,
-                        visibility,
-                        checkpoint_dir,
-                    };
-                    let mut changes: BTreeMap<NodeId, BTreeMap<String, Value>> = BTreeMap::new();
-                    for item in items {
-                        let id = graph::bound_node(row, &item.var)?;
-                        changes
-                            .entry(id)
-                            .or_default()
-                            .insert(item.prop.clone(), scalar(eval(&item.value, row, &ctx)?)?);
-                    }
-                    for (id, props) in changes {
-                        let node = graph::node_out(
-                            &Context {
-                                txn,
-                                catalog,
-                                params,
-                                budget: &budget,
-                                visibility,
-                                checkpoint_dir,
-                            },
-                            id,
-                        )?;
-                        let Value::Str(entity_id) = &node.props["entity_id"] else {
-                            unreachable!()
-                        };
-                        brainwire_store::graph::merge_node(
-                            txn,
-                            catalog,
-                            &node.label,
-                            entity_id,
-                            &props,
-                        )?;
-                        budget
-                            .charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                        overlay_bytes = txn.estimated_memory_bytes();
-                        wrote = true;
-                    }
-                }
-            }
-            Clause::Delete(vars) => {
-                let mut relationships = BTreeSet::new();
-                for row in &rows {
-                    for var in vars {
-                        budget.check_deadline()?;
-                        let Some(Binding::Relationship(edge)) = row.get(var) else {
-                            return Err(ExecError::Semantic(format!(
-                                "{var} is not a bound relationship"
-                            )));
-                        };
-                        if relationships.insert(*edge) {
-                            budget.charge(std::mem::size_of::<Relationship>() + 64)?;
-                        }
-                    }
-                }
-                for edge in relationships {
-                    wrote |= brainwire_store::graph::delete_edge(
-                        txn,
-                        edge.source,
-                        edge.edge_type,
-                        edge.target,
-                        edge.id,
-                    )?;
-                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                    overlay_bytes = txn.estimated_memory_bytes();
-                }
-            }
-            Clause::DetachDelete(vars) => {
-                let mut ids = BTreeSet::new();
-                for row in &rows {
-                    for var in vars {
-                        ids.insert(graph::bound_node(row, var)?);
-                    }
-                }
-                for id in ids {
-                    brainwire_store::graph::detach_delete(txn, id)?;
-                    budget.charge(txn.estimated_memory_bytes().saturating_sub(overlay_bytes))?;
-                    overlay_bytes = txn.estimated_memory_bytes();
-                    wrote = true;
-                }
-            }
-            Clause::Return {
-                items,
-                order,
-                skip,
-                limit,
-            } => {
-                output = eval::project(&ctx, &rows, items, order, skip.as_ref(), limit.as_ref())?;
-            }
-        }
-    }
-    budget.check_deadline()?;
-    Ok((output, wrote))
+    run::execute(txn, &env, &plan)
 }

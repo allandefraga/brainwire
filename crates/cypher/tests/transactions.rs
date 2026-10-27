@@ -89,10 +89,10 @@ fn every_query_error_poisons_all_prior_work() {
     for query in [
         "RETURN (",
         "RETURN unknown",
-        "CREATE (c:Customer {entity_id: 'late'}) UNWIND 42 AS x RETURN x",
+        "CREATE (c:Customer {entity_id: 'late'}) UNWIND [0] AS x RETURN 1 / x",
         "RETURN $missing",
         "CREATE (c:Customer {entity_id: 'one'})",
-        "CREATE (c:Customer)",
+        "CREATE (c:Customer {entity_id: 1})",
     ] {
         let mut tx = QueryTransaction::begin(&db).unwrap();
         create(&mut tx, "one");

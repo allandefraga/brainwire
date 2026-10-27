@@ -95,7 +95,7 @@ fn options(name: &str, args: &[Expr], ctx: &Context<'_, '_>) -> Result<Options, 
     }
     let map = match args.first() {
         None => BTreeMap::new(),
-        Some(arg) => match scalar(eval(arg, &Bindings::new(), ctx)?)? {
+        Some(arg) => match eval::constant(arg, ctx)? {
             Value::Map(map) => map,
             _ => return Err(semantic("analytics options must be a map")),
         },
@@ -232,7 +232,7 @@ fn checkpoint_destination(
     if args.len() != 1 {
         return Err(semantic("db.checkpoint requires one checkpoint name"));
     }
-    let Value::Str(name) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+    let Value::Str(name) = eval::constant(&args[0], ctx)? else {
         return Err(semantic("checkpoint name must be a string"));
     };
     let valid = (1..=128).contains(&name.len())
@@ -260,7 +260,7 @@ fn acl_options(
     if args.len() != 1 {
         return Err(semantic("db.setNodeAcl requires one options map"));
     }
-    let Value::Map(map) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+    let Value::Map(map) = eval::constant(&args[0], ctx)? else {
         return Err(semantic("db.setNodeAcl options must be a map"));
     };
     acl_map(map, ctx)
@@ -276,7 +276,7 @@ fn acl_batch(
     if args.len() != 1 {
         return Err(semantic("db.setNodeAcls requires one list of options maps"));
     }
-    let Value::List(entries) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+    let Value::List(entries) = eval::constant(&args[0], ctx)? else {
         return Err(semantic("db.setNodeAcls requires a list of options maps"));
     };
     if entries.len() > MAX_ACL_BATCH {
@@ -358,7 +358,7 @@ fn acl_refs(args: &[Expr], ctx: &Context<'_, '_>) -> Result<Vec<(String, String)
             "db.nodeAcls requires one list of {label, entityId} maps",
         ));
     }
-    let Value::List(entries) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+    let Value::List(entries) = eval::constant(&args[0], ctx)? else {
         return Err(semantic(
             "db.nodeAcls requires a list of {label, entityId} maps",
         ));
@@ -469,7 +469,7 @@ pub(super) fn prepare_node_acl(
         .ok_or_else(|| semantic("node not found"))?;
     let row: Bindings = yields
         .iter()
-        .map(|item| (item.alias.clone(), Binding::Value(Value::Bool(true))))
+        .map(|item| (item.alias.clone(), Binding::Bool(true)))
         .collect();
     ctx.budget.bindings(&row)?;
     Ok((id, acl, vec![row]))
@@ -489,10 +489,10 @@ fn projection_error(error: ProjectionError) -> ExecError {
     }
 }
 fn value(value: Value) -> Binding {
-    Binding::Value(value)
+    Binding::from(value)
 }
 fn int(value: usize) -> Binding {
-    Binding::Value(Value::Int(value as i64))
+    Binding::Int(value as i64)
 }
 
 pub(super) fn run(
@@ -736,4 +736,14 @@ pub(super) fn run(
         }
         _ => unreachable!("validated procedure"),
     }
+}
+
+/// Catalog changes made while the server runs (see `brainwire_store::catalog`).
+pub(super) fn admin(
+    _txn: &mut Txn<'_>,
+    _env: &super::run::Env<'_>,
+    name: &str,
+    _args: &[Expr],
+) -> Result<(), ExecError> {
+    Err(ExecError::Unsupported(format!("procedure {name}")))
 }

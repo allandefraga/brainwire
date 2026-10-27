@@ -42,6 +42,17 @@ pub(crate) enum Tok {
     Arrow,
     /// `<-`
     LArrow,
+    Plus,
+    /// `+=`
+    PlusEq,
+    Slash,
+    Percent,
+    Caret,
+    Pipe,
+    /// `..`
+    DotDot,
+    /// `=~`
+    RegexMatch,
     /// A bare identifier: letters/digits/`_`, starting with a letter or `_`.
     Ident(String),
     /// A backtick-quoted identifier; its text is never treated as a keyword.
@@ -184,7 +195,60 @@ impl<'a> Lexer<'a> {
             }
             '.' => {
                 self.bump();
+                if let Some((i, '.')) = self.peek() {
+                    self.bump();
+                    return Ok(Spanned {
+                        tok: Tok::DotDot,
+                        start,
+                        end: i + 1,
+                    });
+                }
                 Ok(one(Tok::Dot))
+            }
+            '+' => {
+                self.bump();
+                if let Some((i, '=')) = self.peek() {
+                    self.bump();
+                    return Ok(Spanned {
+                        tok: Tok::PlusEq,
+                        start,
+                        end: i + 1,
+                    });
+                }
+                Ok(one(Tok::Plus))
+            }
+            '/' => {
+                self.bump();
+                Ok(one(Tok::Slash))
+            }
+            '%' => {
+                self.bump();
+                Ok(one(Tok::Percent))
+            }
+            '^' => {
+                self.bump();
+                Ok(one(Tok::Caret))
+            }
+            '|' => {
+                self.bump();
+                Ok(one(Tok::Pipe))
+            }
+            '!' => {
+                self.bump();
+                match self.peek() {
+                    Some((i, '=')) => {
+                        self.bump();
+                        Ok(Spanned {
+                            tok: Tok::Ne,
+                            start,
+                            end: i + 1,
+                        })
+                    }
+                    _ => Err(ParseError {
+                        message: "unexpected character '!'".into(),
+                        offset: start,
+                    }),
+                }
             }
             '$' => {
                 self.bump();
@@ -200,6 +264,14 @@ impl<'a> Lexer<'a> {
             }
             '=' => {
                 self.bump();
+                if let Some((i, '~')) = self.peek() {
+                    self.bump();
+                    return Ok(Spanned {
+                        tok: Tok::RegexMatch,
+                        start,
+                        end: i + 1,
+                    });
+                }
                 Ok(one(Tok::Eq))
             }
             '-' => {
@@ -299,6 +371,27 @@ impl<'a> Lexer<'a> {
                     Some((_, '\'')) => value.push('\''),
                     Some((_, '"')) => value.push('"'),
                     Some((_, 'n')) => value.push('\n'),
+                    Some((_, 't')) => value.push('\t'),
+                    Some((_, 'r')) => value.push('\r'),
+                    Some((_, 'b')) => value.push('\u{8}'),
+                    Some((_, 'f')) => value.push('\u{c}'),
+                    Some((_, 'u')) => {
+                        let mut code = 0u32;
+                        for _ in 0..4 {
+                            let digit =
+                                self.bump()
+                                    .and_then(|(_, c)| c.to_digit(16))
+                                    .ok_or_else(|| ParseError {
+                                        message: "invalid \\u escape".into(),
+                                        offset: bs,
+                                    })?;
+                            code = code * 16 + digit;
+                        }
+                        value.push(char::from_u32(code).ok_or_else(|| ParseError {
+                            message: "invalid \\u escape".into(),
+                            offset: bs,
+                        })?);
+                    }
                     Some((_, other)) => {
                         return Err(ParseError {
                             message: format!("invalid escape sequence \\{other}"),

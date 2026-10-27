@@ -177,6 +177,82 @@ pub fn encode_row(row: &Row) -> Vec<u8> {
     out
 }
 
+/// Skip one encoded value without allocating.
+fn skip_value(input: &mut &[u8], depth: usize) -> Result<(), CodecError> {
+    if depth > MAX_DEPTH {
+        return Err(CodecError::TooDeep);
+    }
+    let (&tag, rest) = input.split_first().ok_or(CodecError::Truncated)?;
+    *input = rest;
+    let skip = |n: usize, input: &mut &[u8]| -> Result<(), CodecError> {
+        if input.len() < n {
+            return Err(CodecError::Truncated);
+        }
+        *input = &input[n..];
+        Ok(())
+    };
+    match tag {
+        T_NULL | T_FALSE | T_TRUE => {}
+        T_INT => {
+            get_varint(input)?;
+        }
+        T_FLOAT => skip(8, input)?,
+        T_STR => {
+            let len = get_varint(input)? as usize;
+            skip(len, input)?;
+        }
+        T_LIST => {
+            for _ in 0..get_varint(input)? {
+                skip_value(input, depth + 1)?;
+            }
+        }
+        T_MAP => {
+            for _ in 0..get_varint(input)? {
+                let len = get_varint(input)? as usize;
+                skip(len, input)?;
+                skip_value(input, depth + 1)?;
+            }
+        }
+        other => return Err(CodecError::UnknownTag(other)),
+    }
+    Ok(())
+}
+
+/// Decode one property of an encoded row: the `extra` entry named `name`
+/// wins over column `column`, matching the full decode's precedence.
+/// Returns `None` when the row holds neither.
+pub fn decode_row_field(
+    bytes: &[u8],
+    column: Option<u16>,
+    name: &str,
+) -> Result<Option<Value>, CodecError> {
+    let mut input = bytes;
+    get_varint(&mut input)?;
+    get_varint(&mut input)?;
+    let mut found = None;
+    for _ in 0..get_varint(&mut input)? {
+        let id = get_varint(&mut input)? as u16;
+        if Some(id) == column {
+            found = Some(get_value(&mut input)?);
+        } else {
+            skip_value(&mut input, 0)?;
+        }
+    }
+    for _ in 0..get_varint(&mut input)? {
+        let len = get_varint(&mut input)? as usize;
+        if input.len() < len {
+            return Err(CodecError::Truncated);
+        }
+        let (key, rest) = input.split_at(len);
+        input = rest;
+        if key == name.as_bytes() {
+            return Ok(Some(get_value(&mut input)?));
+        }
+        skip_value(&mut input, 0)?;
+    }
+    Ok(found)
+}
+
 pub fn decode_row(bytes: &[u8]) -> Result<Row, CodecError> {
     let mut input = bytes;
     let schema_version = get_varint(&mut input)? as u32;
@@ -312,6 +388,37 @@ pub fn estimate_row_allocation(bytes: &[u8]) -> Result<usize, CodecError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn single_field_decode_matches_the_full_decode() {
+        let mut row = super::Row::default();
+        row.columns.insert(
+            3,
+            Value::List(vec![Value::Str("x".into()), Value::Map(Default::default())]),
+        );
+        row.columns.insert(7, Value::Int(-9));
+        row.extra
+            .insert("name".into(), Value::Str("extra wins".into()));
+        row.extra.insert("f".into(), Value::Float(1.5));
+        let bytes = super::encode_row(&row);
+        assert_eq!(
+            super::decode_row_field(&bytes, Some(7), "seven").unwrap(),
+            Some(Value::Int(-9))
+        );
+        assert_eq!(
+            super::decode_row_field(&bytes, Some(3), "name").unwrap(),
+            Some(Value::Str("extra wins".into()))
+        );
+        assert_eq!(
+            super::decode_row_field(&bytes, None, "f").unwrap(),
+            Some(Value::Float(1.5))
+        );
+        assert_eq!(
+            super::decode_row_field(&bytes, Some(9), "missing").unwrap(),
+            None
+        );
+        assert!(super::decode_row_field(&bytes[..bytes.len() - 3], None, "name").is_err());
+    }
+
     use super::*;
     use proptest::prelude::*;
 

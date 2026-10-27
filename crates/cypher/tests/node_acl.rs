@@ -449,11 +449,19 @@ fn null_heavy_hidden_and_visible_lists_use_decoded_estimates_before_allocation()
         .unwrap();
         stamp(&db, id, vec![principal], vec![]);
     }
-    for (id, restricted_policy) in [
-        ("null-visible", false),
-        ("null-visible", true),
-        ("null-hidden", true),
-    ] {
+    // Without a policy only the requested property is decoded, so the large
+    // payload never reaches the guard.
+    let unrestricted = brainwire_cypher::execute_with_limits(
+        &db,
+        "MATCH (n:Doc {entity_id:'null-visible'}) RETURN n.entity_id",
+        &BTreeMap::new(),
+        ExecutionLimits {
+            memory_bytes: 48 * 1024,
+            timeout: None,
+        },
+    );
+    assert!(unrestricted.is_ok(), "{unrestricted:?}");
+    for (id, restricted_policy) in [("null-visible", true), ("null-hidden", true)] {
         let query = format!("MATCH (n:Doc {{entity_id:'{id}'}}) RETURN n.entity_id");
         let mut transaction = QueryTransaction::begin_with_limits(
             &db,

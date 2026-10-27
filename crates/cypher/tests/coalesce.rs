@@ -63,18 +63,12 @@ fn names_and_aggregate_shapes_are_validated_even_in_skipped_arguments() {
             "{query}"
         );
     }
-    for query in [
-        "RETURN coalesce(1, count(*))",
-        "RETURN count(coalesce(1, count(*)))",
-    ] {
-        assert!(
-            matches!(
-                execute(&db, query, &BTreeMap::new()),
-                Err(ExecError::Unsupported(_))
-            ),
-            "{query}"
-        );
-    }
+    // An aggregate may sit inside an expression, but not inside another aggregate.
+    assert_eq!(
+        rows(&db, "RETURN coalesce(1, count(*))"),
+        vec![vec![int(1)]]
+    );
+    assert!(execute(&db, "RETURN count(coalesce(1, count(*)))", &BTreeMap::new()).is_err());
     for query in [
         "RETURN coalesce()",
         "RETURN coalesce(*)",

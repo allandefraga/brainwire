@@ -132,15 +132,14 @@ fn rejects_invalid_types_names_arity_and_nested_aggregates() {
     ] {
         assert!(parse(query).is_err(), "{query}");
     }
-    for query in ["RETURN size(count(*))", "RETURN count(size(count(*)))"] {
-        assert!(
-            matches!(
-                execute(&db, query, &BTreeMap::new()),
-                Err(ExecError::Unsupported(_))
-            ),
-            "{query}"
-        );
-    }
+    // An aggregate may sit inside a function, but aggregates cannot nest.
+    assert_eq!(
+        execute(&db, "RETURN size(collect(1))", &BTreeMap::new())
+            .unwrap()
+            .rows,
+        vec![vec![Out::Value(Value::Int(1))]]
+    );
+    assert!(execute(&db, "RETURN count(size(count(*)))", &BTreeMap::new()).is_err());
     let deep = format!("RETURN {}null{}", "size(".repeat(100), ")".repeat(100));
     assert!(parse(&deep).is_err());
 }

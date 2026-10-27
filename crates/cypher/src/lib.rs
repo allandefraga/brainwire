@@ -8,6 +8,7 @@
 //! that AST against one atomic store transaction.
 
 pub mod ast;
+pub mod functions;
 pub mod lexer;
 pub mod parser;
 
@@ -16,7 +17,7 @@ pub use parser::{parse, ParseError};
 
 pub mod exec;
 pub use exec::{
-    execute, execute_with_limits, ExecError, ExecutionLimits, NodeOut, Out, PreparedReplication,
-    QueryAccess, QueryMemoryPool, QueryMemoryUsage, QueryOutput, QueryTransaction,
-    QueryTransactionState,
+    execute, execute_with_limits, ExecError, ExecutionLimits, NodeOut, Out, PathOut,
+    PreparedReplication, QueryAccess, QueryMemoryPool, QueryMemoryUsage, QueryOutput,
+    QueryTransaction, QueryTransactionState, RelationshipOut,
 };

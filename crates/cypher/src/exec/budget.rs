@@ -177,47 +177,71 @@ impl<'a> Budget<'a> {
             .saturating_sub(self.retained.get())
     }
     pub fn bindings(&self, row: &Bindings) -> Result<(), ExecError> {
-        self.charge(Self::binding_bytes(row))
+        self.charge(row.iter().fold(size_of::<Bindings>(), |sum, (key, value)| {
+            sum.saturating_add(128)
+                .saturating_add(key.len())
+                .saturating_add(value.bytes())
+        }))
     }
-    pub fn retain_bindings(&self, row: &Bindings) -> Result<(), ExecError> {
-        self.retain(Self::binding_bytes(row))
+    /// Transient charge for one slot row.
+    pub fn row(&self, row: &[super::val::Val]) -> Result<(), ExecError> {
+        self.charge(Self::row_bytes(row))
     }
-    /// Give back what [`Self::retain_bindings`] retained for a row dropped early.
-    pub fn release_bindings(&self, row: &Bindings) {
-        let bytes = Self::binding_bytes(row);
+    pub fn retain_row(&self, row: &[super::val::Val]) -> Result<(), ExecError> {
+        self.retain(Self::row_bytes(row))
+    }
+    /// Give back what [`Self::retain_row`] retained for a row dropped early.
+    pub fn release_row(&self, row: &[super::val::Val]) {
+        let bytes = Self::row_bytes(row);
         self.retained.set(self.retained.get().saturating_sub(bytes));
     }
-    fn binding_bytes(row: &Bindings) -> usize {
-        size_of::<Bindings>()
-            + size_of::<Vec<Bindings>>()
-            + row.iter().fold(0usize, |sum, (key, binding)| {
-                sum.saturating_add(128)
-                    .saturating_add(key.len())
-                    .saturating_add(match binding {
-                        Binding::Node(_) => size_of::<NodeId>(),
-                        Binding::Relationship(_) => size_of::<Relationship>(),
-                        Binding::Value(v) => value_bytes(v),
-                    })
+    fn row_bytes(row: &[super::val::Val]) -> usize {
+        row.iter()
+            .fold(size_of::<Vec<super::val::Val>>() + 32, |sum, value| {
+                sum.saturating_add(value.bytes())
             })
     }
     pub fn output(&self, row: &[Out]) -> Result<(), ExecError> {
         self.retain(Self::output_bytes(row))
     }
-    /// Give back what [`Self::output`] retained for a row dropped before the result.
-    pub fn release_output(&self, row: &[Out]) {
-        let bytes = Self::output_bytes(row);
-        self.retained.set(self.retained.get().saturating_sub(bytes));
-    }
     fn output_bytes(row: &[Out]) -> usize {
         size_of::<Vec<Out>>()
-            + row.iter().fold(0usize, |sum, out| {
-                sum.saturating_add(match out {
-                    Out::Value(v) => size_of::<Out>().saturating_add(value_bytes(v)),
-                    Out::Node(n) => size_of::<Out>()
-                        .saturating_add(n.label.len())
-                        .saturating_add(map_bytes(&n.props)),
+            + row
+                .iter()
+                .fold(0usize, |sum, out| sum.saturating_add(Self::out_bytes(out)))
+    }
+    fn out_bytes(out: &Out) -> usize {
+        size_of::<Out>().saturating_add(match out {
+            Out::Value(v) => value_bytes(v),
+            Out::Node(n) => n.label.len().saturating_add(map_bytes(&n.props)),
+            Out::Relationship(r) => r
+                .rel_type
+                .len()
+                .saturating_add(r.element_id.len())
+                .saturating_add(map_bytes(&r.props)),
+            Out::Path(p) => p
+                .nodes
+                .iter()
+                .map(|n| Self::out_bytes(&Out::Node(n.clone())))
+                .chain(
+                    p.rels
+                        .iter()
+                        .map(|r| Self::out_bytes(&Out::Relationship(r.clone()))),
+                )
+                .fold(0usize, usize::saturating_add),
+            Out::List(items) => items
+                .iter()
+                .map(Self::out_bytes)
+                .fold(0usize, usize::saturating_add),
+            Out::Map(map) => map
+                .iter()
+                .map(|(k, v)| {
+                    k.len()
+                        .saturating_add(64)
+                        .saturating_add(Self::out_bytes(v))
                 })
-            })
+                .fold(0usize, usize::saturating_add),
+        })
     }
 }
 pub(super) struct Scope<'a> {

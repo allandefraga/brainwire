@@ -10,6 +10,11 @@ brainwire-core = { path = "../core" }
 thiserror.workspace = true
 brainwire-store = { path = "../store" }
 serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[bench]]
+name = "baseline"
+harness = false

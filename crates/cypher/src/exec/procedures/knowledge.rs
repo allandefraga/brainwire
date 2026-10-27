@@ -66,7 +66,7 @@ pub(super) fn options(args: &[Expr], ctx: &Context<'_, '_>) -> Result<RankOption
     if args.len() != 1 {
         return Err(semantic("knowledge.rank requires one options map"));
     }
-    let Value::Map(map) = scalar(eval(&args[0], &Bindings::new(), ctx)?)? else {
+    let Value::Map(map) = eval::constant(&args[0], ctx)? else {
         return Err(semantic("knowledge.rank options must be a map"));
     };
     for key in map.keys() {

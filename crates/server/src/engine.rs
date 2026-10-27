@@ -503,27 +503,100 @@ fn value_to_pack(value: Value, depth: usize) -> Result<PackValue, EngineError> {
     })
 }
 
+fn props_to_pack(
+    props: std::collections::BTreeMap<String, Value>,
+) -> Result<PackValue, EngineError> {
+    Ok(PackValue::Map(
+        props
+            .into_iter()
+            .map(|(key, value)| value_to_pack(value, 0).map(|value| (key, value)))
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
+}
+
+fn bolt_id(raw: u64) -> Result<i64, EngineError> {
+    i64::try_from(raw).map_err(|_| type_error("node id exceeds Bolt integer range"))
+}
+
+fn node_to_pack(node: brainwire_cypher::NodeOut) -> Result<PackValue, EngineError> {
+    Ok(PackValue::Struct {
+        tag: 0x4e,
+        fields: vec![
+            PackValue::Int(bolt_id(node.id.0)?),
+            PackValue::List(vec![PackValue::String(node.label)]),
+            props_to_pack(node.props)?,
+            PackValue::String(node.id.element_id()),
+        ],
+    })
+}
+
 fn out_to_pack(output: Out) -> Result<PackValue, EngineError> {
     match output {
         Out::Value(value) => value_to_pack(value, 0),
-        Out::Node(node) => {
-            let id = i64::try_from(node.id.0)
-                .map_err(|_| type_error("node id exceeds Bolt integer range"))?;
-            let props = node
-                .props
+        Out::Node(node) => node_to_pack(node),
+        Out::Relationship(rel) => Ok(PackValue::Struct {
+            tag: 0x52,
+            fields: vec![
+                PackValue::Int(rel.id),
+                PackValue::Int(bolt_id(rel.start.0)?),
+                PackValue::Int(bolt_id(rel.end.0)?),
+                PackValue::String(rel.rel_type),
+                props_to_pack(rel.props)?,
+                PackValue::String(rel.element_id),
+                PackValue::String(rel.start.element_id()),
+                PackValue::String(rel.end.element_id()),
+            ],
+        }),
+        Out::Path(path) => {
+            // Bolt paths list nodes, unbound relationships, then alternating
+            // (signed 1-based relationship index, node index) per step.
+            let mut indices = vec![];
+            for (step, rel) in path.rels.iter().enumerate() {
+                let forward = rel.start == path.nodes[step].id;
+                let index = step as i64 + 1;
+                indices.push(PackValue::Int(if forward { index } else { -index }));
+                indices.push(PackValue::Int(index));
+            }
+            let nodes = path
+                .nodes
                 .into_iter()
-                .map(|(key, value)| value_to_pack(value, 0).map(|value| (key, value)))
+                .map(node_to_pack)
                 .collect::<Result<Vec<_>, _>>()?;
+            let rels = path
+                .rels
+                .into_iter()
+                .map(|rel| {
+                    Ok(PackValue::Struct {
+                        tag: 0x72,
+                        fields: vec![
+                            PackValue::Int(rel.id),
+                            PackValue::String(rel.rel_type),
+                            props_to_pack(rel.props)?,
+                            PackValue::String(rel.element_id),
+                        ],
+                    })
+                })
+                .collect::<Result<Vec<_>, EngineError>>()?;
             Ok(PackValue::Struct {
-                tag: 0x4e,
+                tag: 0x50,
                 fields: vec![
-                    PackValue::Int(id),
-                    PackValue::List(vec![PackValue::String(node.label)]),
-                    PackValue::Map(props),
-                    PackValue::String(node.id.element_id()),
+                    PackValue::List(nodes),
+                    PackValue::List(rels),
+                    PackValue::List(indices),
                 ],
             })
         }
+        Out::List(items) => Ok(PackValue::List(
+            items
+                .into_iter()
+                .map(out_to_pack)
+                .collect::<Result<_, _>>()?,
+        )),
+        Out::Map(map) => Ok(PackValue::Map(
+            map.into_iter()
+                .map(|(key, item)| out_to_pack(item).map(|item| (key, item)))
+                .collect::<Result<_, _>>()?,
+        )),
     }
 }
 
