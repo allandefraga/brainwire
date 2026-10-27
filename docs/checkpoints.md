@@ -109,7 +109,8 @@ files; it exits 1 on any problem. The manifest file
 directory without it, when restoring into `server.data_dir`.
 
 The ontology version is read in the same session just before the checkpoint.
-A standalone server only changes ontology offline, so the two agree. The
+An online catalog change that commits between the two reads can leave the
+recorded version one behind the checkpoint's catalog. The
 manifest is a local file inventory, not an object-storage upload, encryption
 or retention policy.
 

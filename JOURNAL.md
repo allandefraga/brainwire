@@ -41,6 +41,30 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-27 — online catalog changes (branch `codex/online-catalog`)
+
+- **Requested:** make catalog changes work while the server runs, through
+  Cypher, instead of the offline `db apply-ontology` path with its downtime.
+- **Done:** `CREATE INDEX` / `DROP INDEX` (named, legacy, `IF [NOT] EXISTS`),
+  `db.createLabel`, `db.createRelationshipType` and `db.dropProperty`, in the
+  new `brainwire_store::catalog` module. A node type now records index names,
+  a `populating` list and retired column ids. Writers maintain a populating
+  index at once; `Database::index_step` backfills 1,024 nodes per transaction
+  with its cursor in an `index-build/` meta key (resumable, never rewrites the
+  catalog until the final batch flips the index online). Drops remove the
+  declaration at once and delete keys through `index-drop/` jobs. Queries,
+  `db check` and the planner only use online indexes. A standalone server runs
+  one weak-referenced worker thread per database. `db.indexes()` gains
+  `populating` and a `name` column. Dropped property values stay hidden under
+  a retired column id that is never reused and are purged on the next write.
+  Replicated transactions refuse catalog changes. Docs:
+  `docs/online-catalog.md`.
+- **Verified:** core 2, store 6, Cypher 7 and one Bolt server test written for
+  the new behavior; a mutation check confirmed the readiness gate is covered.
+  Workspace 686 tests, clippy and fmt clean (container, debug).
+- **Next step:** replicated DDL (the backfill would need to go through the
+  log), and `SHOW INDEXES` if clients ask for it.
+
 ### 2026-10-26 (cont.) — batch ACL stamping and a multi-source lake workload
 
 - **Requested:** keep working; simulate how a platform client would insert data.

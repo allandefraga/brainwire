@@ -41,7 +41,9 @@ CALL db.indexes() YIELD label, property, state
 RETURN label, property, state
 ```
 
-`state` is `scalar_equality_ready` or `declared_only`. This reads metadata rather
+`state` is `scalar_equality_ready`, `populating` or `declared_only`; `name` is
+also available. Indexes can be created and dropped on a running server; see
+[online catalog changes](online-catalog.md). This reads metadata rather
 than scanning entries. Readiness does not imply support for every property
 type: list/vector/map and nonfinite numeric values still scan. The built-in primary lookup
 is not listed. `db check NAME` separately audits full graph/index invariants.
