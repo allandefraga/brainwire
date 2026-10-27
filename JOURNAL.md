@@ -41,6 +41,18 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-27 — v0.7.0-beta.1 local candidate
+
+- **Done:** prepared a local beta version for the TUI, ACL read-path, query
+  memory accounting and benchmark improvements recorded below.
+- **Measured:** the 1M-visible-node Bolt ACL cursor took 26.74 s in one
+  synthetic run; restricted count and top-N missed their targets. Both before
+  and after fixtures passed offline checks; see `PERF-v0.7.md`.
+- **Limits:** a hard 4 GiB process RSS ceiling, the full concurrent acceptance
+  workload, additional Cypher features, server batch procedures and an
+  independent Python client remain open. This is not a production release.
+- **Next step:** finish those items and repeat qualification before publishing.
+
 ### 2026-10-27 — v0.7 read and memory work
 
 - **Done:** created local `perf/v0.7-reads`; integrated delegated read fast

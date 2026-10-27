@@ -1,16 +1,17 @@
 # Brainwire v0.7 read and memory qualification
 
 Status: **work in progress; not production-qualified**. The full acceptance workload
-has not been reproduced in this branch. Values below are the supplied reference
-measurements, not new results. Dashes mean unmeasured, not zero. No performance
-or process-memory target is claimed as met.
+has not been reproduced in this branch. The reference column contains supplied
+historical values; the other columns identify measurements on this branch. Dashes
+mean unmeasured, not zero. A single synthetic cursor run met its duration target;
+full performance and process-memory qualification remain open.
 
 | Workload | Supplied Brainwire reference | Target | Before (this branch) | After (this branch) |
 | --- | ---: | ---: | ---: | ---: |
 | 4M nodes + 4M edges, concurrent writes/reads, server peak RSS | OOM at 4 GiB; >5.9 GiB at 8 GiB | ≤ 4 GiB, no OOM | — | — |
 | `count` with delegated `allow_all` | ~20 s; unrestricted ~0.08 s | ≤ 2× unrestricted | — | 0.0775 s (Bolt; unrestricted comparison pending) |
-| Restricted-ACL `count` via client | 16.7 s | ≤ 0.5 s | — | 1.369 s (Bolt; target not met) |
-| Top-N aggregation with ACL | 20.5 s | ≤ 1 s | — | 1.788 s (Bolt; target not met) |
+| Restricted-ACL `count` via client | 16.7 s | ≤ 0.5 s | 3.023 s (full-visible fixture) | 2.383 s (same fixture; target not met) |
+| Top-N aggregation with ACL | 20.5 s | ≤ 1 s | 2.543 s (full-visible fixture) | 2.552 s (same fixture; target not met) |
 | Bolt cursor, 1M nodes | 16 s | ≤ 5 s | — | — |
 | ACL cursor, 1M nodes, pages of 200 | exceeded 30 min | ≤ 60 s | 23.33 s for 1M visible rows (Bolt) | 26.74 s for 1M visible rows (Bolt) |
 | Unlabelled `MATCH (n)` with limit | 3.6 s | ≤ 1 s | — | — |
@@ -125,8 +126,9 @@ The server's sampled peak RSS during the diagnostic was 710,459,392 bytes;
 this is not a hard RSS limit or a concurrent write/read workload. The driver
 journal adds some overhead to cursor wall time; summed query times were 14.65 s
 and 11.15 s respectively. The post-benchmark offline check returned `ok`.
-Restricted count and top-N miss the stated targets; the 1M-visible-row ACL
-cursor target is not yet measured. Raw receipts and the private fixture are local.
+Restricted count and top-N miss the stated targets. This fixture exposes only
+500k cursor rows; the separate full-visible fixture below measures 1M. Raw
+receipts and the private fixture are local.
 
 ## Full-visible cursor fixture before ACL metadata fast path
 
