@@ -99,8 +99,11 @@ for the green palette; the application deliberately honors that preference.
 
 ## Toward the connected MVP
 
-The atomic Cypher executor and durable Bolt server are implemented. The
-read-only multi-graph overview is connected to local storage. A connected
-graph explorer still needs bounded neighborhood results, and live memory/file
-views need server telemetry and storage-inspection contracts. The
-The green and cyan visual system is shared with the Brainwire logo and docs site.
+The Cypher executor and Bolt server are implemented. The read-only multi-graph
+overview inspects local storage with the server stopped. The connected workspace
+can show a bounded sample of real outgoing relationships for one configured
+source and relationship signature. It does not yet support interactive graph
+expansion, arbitrary Cypher editing or node/edge properties in that view. Its
+memory pane reports server query reservations, not total process memory; live
+file inspection still needs a server-side storage contract. The green and cyan
+visual system is shared with the Brainwire logo and docs site.

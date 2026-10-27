@@ -41,6 +41,50 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-27 — v0.7 read and memory work
+
+- **Done:** created local `perf/v0.7-reads`; integrated delegated read fast
+  paths while preserving procedure-level visibility restrictions. Improved
+  parallel worker accounting, optional cache admission and property preflight.
+- **Verified:** ACL tests, the full Rust workspace, Clippy and Rustfmt passed
+  after integration. The connected TUI integration test was updated and passed.
+  Benchmark tools passed synthetic unit tests and a live 16-node Bolt smoke.
+- **Measured:** embedded 4M-node/4M-edge before/after diagnostics and a frozen
+  Bolt ACL fixture; both offline checks returned `ok`. See `PERF-v0.7.md` for
+  exact numbers, host conditions and missing targets. Restricted count and
+  top-N remain above their targets; a 1M-visible-row ACL cursor is unmeasured.
+- **Limits:** memory accounting remains an estimate, not a 4 GiB RSS ceiling;
+  full concurrent qualification, requested Cypher, batch and Python client
+  work remain open. No new tag, push or public release has been made.
+- **Next step:** safely optimize restricted ACL metadata reads, repeat Bolt
+  measurements and implement the remaining v0.7 priorities before tagging.
+
+### 2026-10-27 — README and documentation refresh
+
+- **Done:** replaced the schema hero with a synthetic entity graph illustration;
+  updated the README and documentation site to describe current capabilities,
+  TUI limits, Python batch commits, security, benchmarks and release status.
+  Corrected stale connected-graph wording in the TUI guide.
+- **Verified:** docs-site link/asset check, Markdown local links, SVG parsing and
+  eight release-script unit tests. The v0.6.0-beta.2 GitHub CI and release runs
+  failed on Rust formatting; no GitHub release exists for that tag. The formatting
+  correction is part of the local connected-graph changes.
+- **Next step:** commit the local changes and run CI on the resulting commit;
+  publish a new tag only after the release gates succeed.
+
+### 2026-10-27 — Connected graph visualization
+
+- **Done:** redesigned the connected Graph view around actual sampled source and
+  target IDs, directed edges, selected relationship details, bounded target
+  navigation, duplicate multiplicity and self-links. The workspace gives Graph
+  more space on 120-column terminals. Added a synthetic renderer preview.
+- **Verified:** 58 TUI tests and TUI Clippy passed; reviewed by Astra. The
+  rendering uses the existing read-only server contract, which was not changed.
+- **Limits:** one configured source and outgoing relationship type, up to 20
+  rows; no interactive expansion, arbitrary Cypher or node/edge properties.
+- **Next step:** add a bounded, ACL-aware graph exploration contract before
+  implementing interactive expansion and richer properties.
+
 ### 2026-10-27 — Public readiness, security and TUI (v0.6.0-beta.2)
 
 - **Done:** simplified TUI navigation, refreshed the logo and ontology diagram,
