@@ -41,6 +41,36 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-27 — Brainwire as a primary read/write backend (v0.6.0-beta.1)
+
+- **Requested (Allan):** turn the evaluation of Brainwire as a platform's
+  primary graph backend into engine work: read speed, the Cypher agents
+  write, online catalog, false conflicts, write throughput, ACL size, error
+  classes and the protected healthcheck; then cut a new version. Work stays
+  local on `client-integration`; nothing pushed, `main` untouched.
+- **Done:** reproducible benchmark (`crates/cypher/benches/baseline.rs`);
+  new planner and streaming executor (multi-hop, variable length, OPTIONAL
+  MATCH, WITH, UNION, CASE, comprehensions, functions, aggregates, RETURN of
+  relationships and paths); index and primary-key access for `=`/`IN`/ranges/
+  `STARTS WITH`; ordered cursor pages; scan-local property reads; parallel
+  label scans; exact conflict history for active writers; bounded snapshot
+  iterators (the collapse beyond 4 writers); MERGE+SET fusion; online
+  catalog, ACL lists up to 5000, client error classes and the handshake
+  healthcheck (the last three items and the catalog were done by delegated
+  agents on separate branches and cherry-picked). `PERF.md` has the
+  before/after table; `crates/server/tests/differential.py` compares 92 read
+  queries with Neo4j 5 (all identical); `bolt_read_bench.py` measures both
+  servers over Bolt.
+- **Verified:** workspace 694 tests, clippy and fmt clean; differential 92/92
+  with `db check` ok; benchmark load + reads + writes with `db check` ok and 0
+  conflict retries from 1 to 16 sessions.
+- **Decided:** a release tag is created locally on this branch (the release
+  script only applies on `main`, which this work must not touch); publishing
+  and merging into `main` wait for Allan.
+- **Next step:** with Allan's approval, fast-forward `main`, push and publish
+  the image; then label counters for `count(n)`, group commit, and
+  `CALL {}`/`EXISTS {}` subqueries if agents need them.
+
 ### 2026-10-27 — online catalog changes (branch `codex/online-catalog`)
 
 - **Requested:** make catalog changes work while the server runs, through
