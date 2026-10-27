@@ -49,6 +49,9 @@ enum Commands {
         /// Config file; otherwise uses ./brainwire.toml. Environment overrides it.
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Allow unauthenticated non-loopback serving on isolated development networks only.
+        #[arg(long)]
+        allow_unauthenticated_remote: bool,
     },
     /// Administer an authenticated private consensus endpoint.
     Cluster {
@@ -318,7 +321,12 @@ fn main() {
         Commands::Serve {
             config,
             cluster_config,
-        } => serve::run(config.as_deref(), cluster_config.as_deref()),
+            allow_unauthenticated_remote,
+        } => serve::run(
+            config.as_deref(),
+            cluster_config.as_deref(),
+            allow_unauthenticated_remote,
+        ),
         Commands::Cluster {
             cluster_config,
             command,

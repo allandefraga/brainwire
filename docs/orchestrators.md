@@ -3,10 +3,10 @@
 The templates run one durable server with multiple named graphs. These
 templates do not enable replication: increasing replicas creates independent stores.
 The [experimental quorum profile](quorum-replication.md) has a separate deployment
-path. Keep one writer per RocksDB directory. Use a trusted isolated test network because the
-development server is unprotected unless the optional
-[service-token policy](bolt-auth.md) is configured. Native TLS remains pending;
-see [protected overlays](protected-containers.md).
+path. Keep one writer per RocksDB directory. Non-loopback listeners now require
+a valid auth policy. Use the protected [Compose, Kubernetes or Swarm profile](protected-containers.md)
+for real data and shared access. The unauthenticated opt-in is only for isolated
+synthetic development. Native TLS remains unavailable; see [transport guidance](protected-transport.md).
 
 The proposed [distributed deployment and routing design](design/2026-10-12-distributed-deployment.md)
 explains future member identities, separate peer/client endpoints, host placement,
@@ -17,11 +17,15 @@ templates or provide a runnable replicated cluster.
 
 Run these commands from the repository root with Docker Engine running. For a
 ready-to-query synthetic ontology, use the [demo quickstart](container.md#fastest-local-start).
-The base template below creates an empty `default` graph:
+For a protected `default` graph, first create a server policy and health
+credential as described in [service-token setup](bolt-auth.md), then set their
+file paths and start both Compose files:
 
 ```sh
-docker compose -p brainwire-test -f deploy/compose.yaml up --build --wait --wait-timeout 900
-docker compose -p brainwire-test -f deploy/compose.yaml exec brainwire brainwire probe --mode ready
+export BRAINWIRE_AUTH_POLICY_FILE=/secure/path/policy.json
+export BRAINWIRE_HEALTH_AUTH_FILE=/secure/path/health.json
+docker compose -p brainwire-test -f deploy/compose.yaml -f deploy/compose.auth.yaml up --build --wait --wait-timeout 900
+docker compose -p brainwire-test -f deploy/compose.yaml -f deploy/compose.auth.yaml exec brainwire brainwire probe --mode ready
 ```
 
 Bolt binds to localhost; `BRAINWIRE_BIND_PORT` changes the host port. The named
@@ -35,10 +39,10 @@ the server; this avoids PID 1's default signal behavior delaying local stops.
 offline using the same volume:
 
 ```sh
-docker compose -p brainwire-test -f deploy/compose.yaml stop
-docker compose -p brainwire-test -f deploy/compose.yaml run --rm --no-deps brainwire \
+docker compose -p brainwire-test -f deploy/compose.yaml -f deploy/compose.auth.yaml stop
+docker compose -p brainwire-test -f deploy/compose.yaml -f deploy/compose.auth.yaml run --rm --no-deps brainwire \
   db apply-ontology default /opt/brainwire/example-schema.json
-docker compose -p brainwire-test -f deploy/compose.yaml start
+docker compose -p brainwire-test -f deploy/compose.yaml -f deploy/compose.auth.yaml start
 ```
 
 Use `db create NAME --ontology ...` offline for additional graphs. The bundled
@@ -52,7 +56,9 @@ Install Docker, `kubectl` and `kind` first, and run from the repository root.
 This creates a dedicated single-node cluster named `brainwire-demo` and a private
 kubeconfig, so commands do not use your existing cluster context. Choose another
 cluster name if `brainwire-demo` already exists; do not delete an existing cluster
-to reuse its name. The local image is loaded directly, without a registry:
+to reuse its name. This local example uses an auth-enabled server and reads the
+policy/health JSON files created in [service-token setup](bolt-auth.md). The
+local image is loaded directly, without a registry:
 
 ```sh
 docker build -t brainwire:local .
@@ -61,7 +67,9 @@ BRAINWIRE_KUBECONFIG="$BRAINWIRE_KUBE_DIR/config"
 kind create cluster --name brainwire-demo --kubeconfig "$BRAINWIRE_KUBECONFIG" --wait 120s
 kind load docker-image brainwire:local --name brainwire-demo
 kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo create namespace brainwire-demo
-kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo apply -k deploy/kubernetes
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo create secret generic brainwire-auth \
+  --from-file=policy.json=/secure/path/policy.json --from-file=health.json=/secure/path/health.json
+kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo apply -k deploy/kubernetes-auth
 kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo rollout status statefulset/brainwire --timeout=900s
 kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo exec brainwire-0 -- brainwire probe --mode ready
 kubectl --kubeconfig "$BRAINWIRE_KUBECONFIG" --context kind-brainwire-demo -n brainwire-demo port-forward service/brainwire 17687:7687
@@ -94,20 +102,24 @@ rmdir -- "$BRAINWIRE_KUBE_DIR"
 
 ### Existing isolated cluster
 
-Render locally without contacting a cluster:
+Render locally without contacting a cluster. The base manifest is a building
+block without authentication; use an auth-enabled overlay to serve it:
 
 ```sh
 kubectl kustomize deploy/kubernetes
 ```
 
-The base manifest uses `brainwire:local` for local image builds. Published
-releases use a separate overlay pinned to the release tag. For a private GHCR
-package, create a namespace-scoped Kubernetes pull secret with a GitHub token
+The base manifest uses `brainwire:local` for local image builds. Create the
+`brainwire-auth` server/health secret described in [protected Kubernetes setup](protected-containers.md).
+For a private GHCR package, also create a namespace-scoped image pull secret with a GitHub token
 that has `read:packages` access. This prompt keeps the token out of shell
 history, command arguments, and repository files:
 
 ```sh
 kubectl create namespace YOUR_TEST_NAMESPACE
+kubectl create secret generic brainwire-auth -n YOUR_TEST_NAMESPACE \
+  --from-file=policy.json=/secure/path/policy.json \
+  --from-file=health.json=/secure/path/health.json
 python3 - YOUR_TEST_NAMESPACE <<'PY'
 import base64
 import getpass
@@ -131,14 +143,17 @@ subprocess.run(
     input=json.dumps(secret), text=True, check=True,
 )
 PY
+kubectl kustomize deploy/kubernetes-public-release
+kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-public-release
+# For a private GHCR package, use the overlay that also references ghcr-pull:
 kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-The current overlay pins `ghcr.io/allandefraga/brainwire:v0.6.0-beta.1`. <!-- brainwire-release-version --> The local
-release helper updates `newTag` with the Cargo workspace version. It
-references the `ghcr-pull` secret for kubelet image pulls; logging in on your
-workstation alone does not authenticate cluster nodes. For
+Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.6.0-beta.2`. <!-- brainwire-release-version --> The local
+release helper updates both tags with the Cargo workspace version. The private
+overlay references `ghcr-pull`; logging in on your workstation alone does not
+authenticate cluster nodes. The public overlay needs no image-pull secret. For
 immutable deployments, replace the tag with the published image digest. Applying
 the manifest starts a service in the cluster; it does not create or qualify a
 cluster for you.
@@ -185,12 +200,16 @@ records the actual runtime result separately from manifest validation.
 Supply `BRAINWIRE_SWARM_NODE_ID` to pin the writer to the machine owning the
 retained volume. Create `brainwire-swarm-data` on that machine and provide the
 image there. Equal local volume names on different machines are different data.
+Create the external auth secrets from the server policy and health credential
+described in [protected Swarm setup](protected-containers.md):
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.6.0-beta.1 # brainwire-release-version
-docker stack config --compose-file deploy/swarm.yaml
-docker stack deploy --with-registry-auth --compose-file deploy/swarm.yaml brainwire-test
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.6.0-beta.2 # brainwire-release-version
+docker secret create brainwire-auth-policy /secure/path/policy.json
+docker secret create brainwire-health-auth /secure/path/health.json
+docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml
+docker stack deploy --with-registry-auth -c deploy/swarm.yaml -c deploy/swarm.auth.yaml brainwire-test
 ```
 
 Log in to GHCR on the manager first. `--with-registry-auth` forwards those
@@ -207,9 +226,12 @@ quorum does not replicate Brainwire's graph.
 ## Checks
 
 ```sh
-docker compose -f deploy/compose.yaml config --quiet
-BRAINWIRE_SWARM_NODE_ID=validation-only docker stack config -c deploy/swarm.yaml
+docker compose -f deploy/compose.yaml -f deploy/compose.auth.yaml config --quiet
+BRAINWIRE_SWARM_NODE_ID=validation-only docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml
 kubectl kustomize deploy/kubernetes
+kubectl kustomize deploy/kubernetes-auth
+kubectl kustomize deploy/kubernetes-release
+kubectl kustomize deploy/kubernetes-public-release
 python crates/server/tests/container_restart.py --image brainwire:local --rows 10000 --cycles 5
 python crates/server/tests/compose_restart.py --image brainwire:local
 python crates/server/tests/kubernetes_restart.py --image brainwire:local --rows 10000

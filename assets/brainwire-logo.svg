@@ -1,14 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 160" role="img" aria-labelledby="title desc">
   <title id="title">Brainwire</title>
-  <desc id="desc">A bright green graph mark connected to the Brainwire wordmark.</desc>
-  <g fill="none" stroke="#46ff61" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M44 36h35l25 28-25 28H44M44 36v56M52 64h28" stroke-width="9"/>
-    <path d="M44 36 18 18M44 36 18 110M79 36l31-18M104 64l24 0M79 92l31 18" stroke-width="5" opacity=".86"/>
+  <desc id="desc">A green and cyan connected graph mark beside the Brainwire wordmark.</desc>
+  <defs>
+    <linearGradient id="wire" x1="20" y1="24" x2="150" y2="136" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#57FF48"/>
+      <stop offset="1" stop-color="#67D9D2"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#wire)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 28 78 80 26 132M78 80l52-52M78 80l52 52M130 28l23 52-23 52M78 80h75" stroke-width="7"/>
+    <path d="M26 28v104" stroke-width="3" opacity=".6"/>
   </g>
-  <g fill="#46ff61">
-    <circle cx="18" cy="18" r="9"/><circle cx="44" cy="36" r="10"/>
-    <circle cx="128" cy="64" r="9"/><circle cx="18" cy="110" r="9"/>
-    <circle cx="110" cy="18" r="7" opacity=".82"/><circle cx="110" cy="110" r="7" opacity=".82"/>
+  <g fill="#57FF48">
+    <circle cx="26" cy="28" r="10"/><circle cx="26" cy="132" r="10"/>
+    <circle cx="130" cy="28" r="9"/><circle cx="130" cy="132" r="9"/>
   </g>
-  <text x="158" y="99" fill="#f4f7f4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="68" font-weight="700" letter-spacing="2">BRAINWIRE</text>
+  <circle cx="78" cy="80" r="13" fill="#57FF48"/>
+  <circle cx="153" cy="80" r="11" fill="#67D9D2"/>
+  <text x="198" y="91" fill="#E9F2EC" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="61" font-weight="750" letter-spacing="2">BRAIN</text>
+  <text x="402" y="91" fill="#57FF48" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="61" font-weight="750" letter-spacing="2">WIRE</text>
+  <text x="201" y="124" fill="#8BA497" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="5">GRAPH DATABASE</text>
 </svg>

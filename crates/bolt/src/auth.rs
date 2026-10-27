@@ -33,8 +33,8 @@ pub struct Principal {
     pub instance_admin: bool,
     /// Trusted static service policy; absence preserves legacy graph-wide access.
     pub node_visibility: Option<ReadVisibility>,
-    /// A trusted reader service that sends each transaction's caller visibility in
-    /// `tx_metadata.brainwire_visibility`; without it the transaction sees nothing.
+    /// A trusted reader service that must send each transaction's caller visibility in
+    /// `tx_metadata.brainwire_visibility`; omitting it rejects the transaction.
     pub visibility_delegate: bool,
 }
 

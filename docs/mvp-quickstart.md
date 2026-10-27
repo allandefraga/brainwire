@@ -156,7 +156,7 @@ restart verifies resume against the same source digest/mapping.
 
 For a disposable automated rehearsal, including forced termination and exact
 audits, run the [MVP acceptance harness](benchmarks/2026-10-12-mvp.md). The
-[October beta roadmap](2026-10-pilot-roadmap.md) separates implemented capabilities
+[beta operator checklist](beta-operator-checklist.md) separates implemented capabilities
 from the source, workload and deployment gates still required for a production pilot.
 
 Build a local Linux image for the current checkout with

@@ -41,6 +41,21 @@ No line of code before the end of phase 2.
 
 ## Entries
 
+### 2026-10-27 — Public readiness, security and TUI (v0.6.0-beta.2)
+
+- **Done:** simplified TUI navigation, refreshed the logo and ontology diagram,
+  tightened remote listener defaults and delegated visibility, documented
+  temporal data limits, and prepared authenticated deployment profiles.
+- **Verified:** 54 TUI tests, release unit tests, documentation and deployment
+  profile checks passed. The full workspace test did not finish: the Linux
+  build ran out of memory and a serial rebuild was interrupted. The Bolt ACL
+  acceptance script was syntax checked but not run end to end.
+- **Decided:** this beta is a candidate pending CI, not a production qualification.
+  The existing repository remains private while the publication path is decided.
+- **Next step:** inspect CI for this exact tag, run Bolt ACL acceptance and
+  complete the full workspace checks. Preserve private history and local data
+  when preparing a public repository.
+
 ### 2026-10-27 — Brainwire as a primary read/write backend (v0.6.0-beta.1)
 
 - **Requested (Allan):** turn the evaluation of Brainwire as a platform's

@@ -24,6 +24,8 @@ services:
     depends_on:
       initialize-demo:
         condition: service_completed_successfully
+    # This synthetic demo is published to host loopback only.
+    command: ["serve", "--allow-unauthenticated-remote"]
     restart: unless-stopped
     init: true
     ports:

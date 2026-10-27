@@ -6,7 +6,8 @@ single-writer templates and their local validation commands.
 The image packages the **single-node** Bolt server and its administration CLI.
 It runs independently of any application repository. Each application connects
 over Bolt and chooses a named graph. These commands use synthetic data on
-localhost. The default container profile has no replication or native TLS;
+localhost. The server requires an auth policy on non-loopback listeners and
+fails closed without one. The container profile has no replication or native TLS;
 [experimental quorum replication](quorum-replication.md) is a separate profile. The [optional TLS proxy](protected-transport.md)
 provides the qualified single-host encrypted Python entry path. Its base profile
 is unprotected; optional
@@ -51,13 +52,13 @@ these commands to consume a versioned image from a private registry without
 building it locally:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.6.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.6.0-beta.2 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --wait --wait-timeout 900
 ```
 
 Log in to the registry first with `docker login ghcr.io`. Release images are
-tagged with the exact Git release tag (for example `v0.6.0-beta.1`). <!-- brainwire-release-version --> The
+tagged with the exact Git release tag (for example `v0.6.0-beta.2`). <!-- brainwire-release-version --> The
 Kubernetes release overlay pins the same tag. For a deployment requiring
 immutable provenance, resolve the published image to its digest and pin that
 digest in your environment's deployment configuration. `up` can be repeated safely;
@@ -85,8 +86,13 @@ docker run --detach --name brainwire-local --init --restart unless-stopped \
   --env BRAINWIRE_MEMORY_CACHE=256MiB \
   --env BRAINWIRE_MEMORY_MEMTABLES=32MiB \
   --env BRAINWIRE_MEMORY_QUERY=256MiB \
-  brainwire:local
+  brainwire:local serve --allow-unauthenticated-remote
 ```
+
+This explicit development override is only for synthetic data on an isolated
+machine; the host port is loopback-bound. For real data or shared access, use
+the [authenticated container profile](protected-containers.md), not this
+unauthenticated command.
 
 Check readiness before connecting. Repeat the probe until it exits successfully;
 `docker logs brainwire-local` shows startup errors:
@@ -250,7 +256,7 @@ ontology for real graphs.
 Before Kubernetes or Docker Swarm deployment, configure explicit startup,
 readiness and liveness probes using these modes. Package stable member
 identities and durable per-member volumes; run the failure matrix in the
-[data and recovery design](design/2026-09-27-brainwire-data-and-recovery.md).
+[data recovery guide](termination-recovery.md).
 On Docker Swarm, service placement must keep each member bound to the correct
 storage, or use a storage system that can reattach that member's volume. On
 Kubernetes, a StatefulSet and persistent volume claims are the intended first

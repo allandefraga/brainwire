@@ -1,6 +1,6 @@
 # Temporal graph, weights and maintenance contract
 
-This design extends the [data and recovery design](2026-09-27-brainwire-data-and-recovery.md)
+This design extends the [temporal data guide](../temporal-data.md)
 without claiming that the features are implemented. The current catalog has
 versioned ontology definitions and timeline stream metadata, but graph writes
 store only the latest node and edge rows. There is no queryable entity revision

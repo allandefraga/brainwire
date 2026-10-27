@@ -409,13 +409,13 @@ fn render_overview(
             lang.choose(" • esquema offline", " • offline schema")
         } else if graphs.first().is_some_and(|g| g.estimated) {
             lang.choose(
-                "/ grafos locais • estimativas RocksDB • somente leitura",
-                "/ local graphs • RocksDB estimates • read only",
+                "/ OFFLINE • estimativas RocksDB • somente leitura",
+                "/ OFFLINE • RocksDB estimates • read only",
             )
         } else {
             lang.choose(
-                "/ grafos locais • dados reais • somente leitura",
-                "/ local graphs • real data • read only",
+                "/ OFFLINE • dados reais • somente leitura",
+                "/ OFFLINE • real data • read only",
             )
         }),
     ];
@@ -445,11 +445,12 @@ fn render_overview(
     let nav = Line::from(
         pages
             .iter()
-            .flat_map(|(page, label)| {
+            .enumerate()
+            .flat_map(|(index, (page, label))| {
                 let selected = *page == view;
                 [
                     Span::styled(
-                        format!(" {} ", label),
+                        format!(" {} {} ", index + 1, label),
                         if selected {
                             text_style(GREEN, no_color)
                                 .add_modifier(Modifier::REVERSED | Modifier::BOLD)
@@ -463,7 +464,11 @@ fn render_overview(
             .collect::<Vec<_>>(),
     );
     frame.render_widget(
-        Paragraph::new(vec![header, nav]).block(panel("", GREEN, no_color)),
+        Paragraph::new(vec![header, nav]).block(panel(
+            lang.choose("TELAS · 1-5 ou Tab", "VIEWS · 1-5 or Tab"),
+            GREEN,
+            no_color,
+        )),
         sections[0],
     );
 
@@ -493,13 +498,18 @@ fn render_overview(
         frame.render_widget(
             Paragraph::new(if state.all_connections {
                 lang.choose(
-                    " ←→ grafo • ↑↓ tipo • a tipos • ? ajuda • PgUp/Dn rola catálogo • Tab páginas • q sai",
-                    " ←→ graph • ↑↓ type • a selected type • ? help • PgUp/Dn browse catalog • Tab pages • q quit",
+                    " PgUp/Dn catálogo · a tipos · 1-5 telas · ? ajuda · q sai",
+                    " PgUp/Dn catalog · a types · 1-5 views · ? help · q quit",
+                )
+            } else if state.explain {
+                lang.choose(
+                    " PgUp/Dn detalhes · Esc volta · 1-5 telas · ? ajuda · q sai",
+                    " PgUp/Dn details · Esc back · 1-5 views · ? help · q quit",
                 )
             } else {
                 lang.choose(
-                    " ←→ grafo • ↑↓ tipo • a catálogo total • F1 detalhes • ? ajuda • PgUp/Dn rola • Tab páginas • q sai",
-                    " ←→ graph • ↑↓ type • a full catalog • F1 inspect • ? help • PgUp/Dn scroll • Tab pages • q quit",
+                    " ↑↓ tipo · Enter detalhes · a catálogo · 1-5 telas · ? ajuda · q sai",
+                    " ↑↓ type · Enter details · a catalog · 1-5 views · ? help · q quit",
                 )
             })
             .block(panel("", GREEN, no_color)),
@@ -514,10 +524,17 @@ fn render_overview(
     if view == OverviewView::Disk {
         render_disk(frame, graphs, state, sections[1], lang, no_color);
         frame.render_widget(
-            Paragraph::new(lang.choose(
-                " ←→ grafo • ↑↓ arquivo • F1 explica • ? ajuda • Tab páginas • q sai",
-                " ←→ graph • ↑↓ file • F1 explain • ? help • Tab pages • q quit",
-            ))
+            Paragraph::new(if state.explain {
+                lang.choose(
+                    " ←→ grafo · ↑↓ arquivo · Esc volta · 1-5 telas · ? ajuda · q sai",
+                    " ←→ graph · ↑↓ file · Esc back · 1-5 views · ? help · q quit",
+                )
+            } else {
+                lang.choose(
+                    " ←→ grafo · ↑↓ arquivo · F1 detalhes · 1-5 telas · ? ajuda · q sai",
+                    " ←→ graph · ↑↓ file · F1 details · 1-5 views · ? help · q quit",
+                )
+            })
             .block(panel("", GREEN, no_color)),
             sections[2],
         );
@@ -661,17 +678,10 @@ fn render_overview(
         columns[1],
     );
     frame.render_widget(
-        Paragraph::new(if frame.area().width < 100 {
-            lang.choose(
-                " ↑↓ grafo • Tab páginas • ? ajuda • q sai • offline",
-                " ↑↓ graph • Tab pages • ? help • q quit • offline",
-            )
-        } else {
-            lang.choose(
-                " ↑↓ grafo • Tab páginas • ? ajuda • q sai • snapshot: --snapshot  •  offline: pare o servidor primeiro",
-                " ↑↓ graph • Tab pages • ? help • q quit • snapshot: --snapshot • offline: stop server first",
-            )
-        })
+        Paragraph::new(lang.choose(
+            " ↑↓ grafo · PgUp/Dn rola · 1-5 telas · ? ajuda · q sai",
+            " ↑↓ graph · PgUp/Dn scroll · 1-5 views · ? help · q quit",
+        ))
         .block(panel("", GREEN, no_color)),
         sections[2],
     );
@@ -733,10 +743,14 @@ fn render_page_help(
             ),
         ),
     };
+    let navigation = lang.choose(
+        "1-5 abre telas · Tab / Shift+Tab próxima / anterior\nEsc fecha ajuda/detalhes · q sai",
+        "1-5 opens views · Tab / Shift+Tab next / previous\nEsc closes help/details · q quits",
+    );
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Paragraph::new(format!(
-            "{content}\n\n{}",
+            "{navigation}\n\n{content}\n\n{}",
             lang.choose("? ou Esc fecha a ajuda.", "? or Esc closes help.")
         ))
         .wrap(Wrap { trim: false })
@@ -811,6 +825,9 @@ fn handle_key(
     view: &mut OverviewView,
     graphs: &[GraphSummary],
 ) -> bool {
+    if key == KeyCode::Char('q') {
+        return true;
+    }
     if state.help && !matches!(key, KeyCode::Char('?') | KeyCode::Esc) {
         return false;
     }
@@ -823,6 +840,13 @@ fn handle_key(
         KeyCode::Esc if state.help => {
             state.help = false;
             state.scroll = 0;
+        }
+        KeyCode::Char('1'..='5') => {
+            if let KeyCode::Char(number) = key {
+                *view = OverviewView::from_index((number as u8 - b'1') as usize);
+            }
+            state.scroll = 0;
+            state.explain = false;
         }
         KeyCode::Tab => {
             *view = OverviewView::from_index(view.index() + 1);
@@ -840,11 +864,10 @@ fn handle_key(
             state.all_connections = !state.all_connections;
             state.scroll = 0;
         }
-        KeyCode::Esc if *view == OverviewView::Ontology && state.explain => {
+        KeyCode::Esc if state.explain => {
             state.explain = false;
             state.scroll = 0;
         }
-        KeyCode::Char('q') | KeyCode::Esc => return true,
         KeyCode::F(1)
             if matches!(view, OverviewView::Disk | OverviewView::Ontology)
                 && !(*view == OverviewView::Ontology && state.all_connections) =>
@@ -1008,6 +1031,78 @@ mod tests {
             &mut view,
             &graphs
         ));
+    }
+
+    #[test]
+    fn direct_view_keys_and_escape_keep_the_offline_workspace_open() {
+        let graphs = vec![GraphSummary::default()];
+        for (index, expected) in OverviewView::ALL.into_iter().enumerate() {
+            let mut state = OverviewSelection {
+                scroll: 5,
+                explain: true,
+                ..OverviewSelection::default()
+            };
+            let mut view = OverviewView::Graph;
+            assert!(!handle_key(
+                KeyCode::Char(char::from(b'1' + index as u8)),
+                &mut state,
+                &mut view,
+                &graphs
+            ));
+            assert_eq!(view, expected);
+            assert_eq!(state.scroll, 0);
+            assert!(!state.explain);
+            assert!(!handle_key(KeyCode::Esc, &mut state, &mut view, &graphs));
+            state.explain = true;
+            assert!(!handle_key(KeyCode::Esc, &mut state, &mut view, &graphs));
+            assert!(!state.explain);
+            state.help = true;
+            assert!(!handle_key(KeyCode::Esc, &mut state, &mut view, &graphs));
+            assert!(!state.help);
+            state.help = true;
+            assert!(handle_key(
+                KeyCode::Char('q'),
+                &mut state,
+                &mut view,
+                &graphs
+            ));
+        }
+    }
+
+    #[test]
+    fn compact_offline_navigation_shows_direct_keys_help_and_quit() {
+        for lang in [Language::En, Language::PtBr] {
+            for view in OverviewView::ALL {
+                let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        render_overview(
+                            frame,
+                            &[GraphSummary::default()],
+                            &mut OverviewSelection::default(),
+                            view,
+                            lang,
+                            true,
+                        )
+                    })
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let navigation = (0..80).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
+                for key in ["1 ", "2 ", "3 ", "4 ", "5 "] {
+                    assert!(navigation.contains(key), "missing {key}: {navigation}");
+                }
+                let footer = (0..80)
+                    .map(|x| buffer[(x, 22)].symbol())
+                    .collect::<String>();
+                for action in [
+                    "1-5",
+                    lang.choose("? ajuda", "? help"),
+                    lang.choose("q sai", "q quit"),
+                ] {
+                    assert!(footer.contains(action), "missing {action}: {footer}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -12,13 +12,14 @@ import subprocess
 import sys
 import tempfile
 import time
+import secrets
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, Query
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from examples.python.client import GraphClient
-from examples.python.create_service_tokens import create
+from examples.python.create_service_tokens import create, write_private
 
 
 def run(binary, count):
@@ -36,6 +37,17 @@ def run(binary, count):
                 principal["instance_admin"] = True
             if principal["id"] == "reader":
                 principal["node_visibility"] = {"principals":["user:tenant:alice"]}
+        delegated_token = secrets.token_hex(32)
+        policy["principals"].append({
+            "id": "delegated-reader",
+            "token_sha256": hashlib.sha256(delegated_token.encode()).hexdigest(),
+            "graphs": {"pages": "read"},
+            "instance_admin": False,
+            "visibility_delegate": True,
+        })
+        write_private(folder / "auth/delegated-reader.json", {
+            "principal": "delegated-reader", "credentials": delegated_token,
+        })
         (folder / "auth/policy.json").write_text(json.dumps(policy))
         schema = {"version":"1", "nodes":[{"label":"Page", "properties":["title"], "indexed_fields":["title"]}],
                   "edges":[{"type":"LINK","from":{"label":"Page"},"to":{"label":"Page"},"properties":["weight"]}]}
@@ -112,6 +124,36 @@ def run(binary, count):
                                     pass
                                 else:
                                     raise AssertionError("restricted query unexpectedly succeeded")
+                        if phase == "initial":
+                            delegated_auth = ("delegated-reader", delegated_token)
+                            claims = {"principals": ["user:tenant:alice"]}
+                            with GraphDatabase.driver(f"bolt://127.0.0.1:{port}",auth=delegated_auth,max_transaction_retry_time=0) as delegated:
+                                with delegated.session(database=database) as session:
+                                    try:
+                                        session.run("MATCH (p:Page) RETURN count(*)").consume()
+                                    except Neo4jError as error:
+                                        assert error.code == "Neo.ClientError.Security.Forbidden"
+                                    else:
+                                        raise AssertionError("delegated autocommit read without metadata was allowed")
+                                with delegated.session(database=database) as session:
+                                    result = session.run(Query(
+                                        "MATCH (p:Page) RETURN count(*)",
+                                        metadata={"brainwire_visibility": claims},
+                                    ))
+                                    assert result.single()[0] == 2
+                                with delegated.session(database=database) as session:
+                                    try:
+                                        with session.begin_transaction() as tx:
+                                            tx.run("MATCH (p:Page) RETURN count(*)").consume()
+                                    except Neo4jError as error:
+                                        assert error.code == "Neo.ClientError.Security.Forbidden"
+                                    else:
+                                        raise AssertionError("delegated explicit read without metadata was allowed")
+                                with delegated.session(database=database) as session:
+                                    with session.begin_transaction(
+                                        metadata={"brainwire_visibility": claims}
+                                    ) as tx:
+                                        assert tx.run("MATCH (p:Page) RETURN count(*)").single()[0] == 2
                     snapshot_env = dict(env,BRAINWIRE_BOLT_AUTH_FILE=str(folder / "auth/reader.json"))
                     frame = subprocess.run([str(binary),"shell","--connect",f"127.0.0.1:{port}","--graph",database,"--view","graph","--node-label","Page","--entity-id","p-0","--edge-type","LINK","--target-label","Page","--snapshot","--width","120","--height","30"],env=snapshot_env,check=True,text=True,capture_output=True,timeout=30).stdout
                     assert "p-1" in frame and "p-2" not in frame
@@ -131,7 +173,7 @@ def run(binary, count):
         assert audit["status"] == "ok"
         return {"status":"PASS","nodes":count,"nodeLoadSeconds":elapsed,"nodeLoadRowsPerSecond":count/elapsed,
                 "serverSha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"driver":"neo4j==6.3.0",
-                "checks":["bounded Python batches","node partial update/remove","edge upsert/update/remove","index maintenance","private ACL stamp","ACL count/PK/traversal/WCC/SCC","restricted mutation denial","hidden scan count denial","TUI filtered graph","restart","private ACL checkpoint restore","offline audit"],
+                "checks":["bounded Python batches","node partial update/remove","edge upsert/update/remove","index maintenance","private ACL stamp","ACL count/PK/traversal/WCC/SCC","restricted mutation denial","hidden scan count denial","delegated autocommit and explicit transaction metadata required and enforced","TUI filtered graph","restart","private ACL checkpoint restore","offline audit"],
                 "scope":"synthetic protected single-node localhost; no live-source or replication claim"}
 
 

@@ -127,7 +127,9 @@ hex characters, generated from 32 random bytes. Policy JSON contains `principals
 with each entry specifying `id`, `token_sha256`, `graphs`, and `instance_admin`.
 The verifier is SHA-256 of the **exact ASCII token string**, not its decoded hex
 bytes; uppercase/lowercase token text differs. Verifier comparison uses
-`subtle::ConstantTimeEq`; principal lookup is not claimed constant-time.
+`subtle::ConstantTimeEq`; principal lookup is not claimed constant-time. Serving
+on any non-loopback address now requires a valid policy file unless the explicit
+`--allow-unauthenticated-remote` development override is set.
 
 Policies are bounded to 1MiB and 1–64 unique principals. Names use 1–128 ASCII
 letters/digits/underscores/hyphens. Graph grants are a nonempty exact-name map

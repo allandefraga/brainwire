@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = "/run/secrets/brainwire-policy.json"
@@ -87,8 +88,33 @@ def check():
         assert f"{probe}: exec: command: - brainwire - probe - --mode - {mode}" in kubernetes
     base = run(["kubectl", "kustomize", "deploy/kubernetes"], env)
     assert "BRAINWIRE_SERVER_AUTH_FILE" not in base and "BRAINWIRE_BOLT_AUTH_FILE" not in base
+    package = re.search(r"(?ms)^\[workspace\.package\]\s*$(.*?)(?=^\[|\Z)",
+                        (ROOT / "Cargo.toml").read_text())
+    assert package, "missing workspace.package section"
+    version_match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', package.group(1))
+    assert version_match, "missing workspace version"
+    version = version_match.group(1)
+    auth_release = " ".join(run(["kubectl", "kustomize", "deploy/kubernetes-release"], env).split())
+    for stanza in (
+        f"image: ghcr.io/allandefraga/brainwire:v{version}",
+        f"name: BRAINWIRE_SERVER_AUTH_FILE value: {POLICY}",
+        f"name: BRAINWIRE_BOLT_AUTH_FILE value: {HEALTH}",
+        "name: ghcr-pull",
+        "secretName: brainwire-auth",
+    ):
+        assert stanza in auth_release, stanza
+    public_release = " ".join(run(["kubectl", "kustomize", "deploy/kubernetes-public-release"], env).split())
+    for stanza in (
+        f"image: ghcr.io/allandefraga/brainwire:v{version}",
+        f"name: BRAINWIRE_SERVER_AUTH_FILE value: {POLICY}",
+        f"name: BRAINWIRE_BOLT_AUTH_FILE value: {HEALTH}",
+        "secretName: brainwire-auth",
+    ):
+        assert stanza in public_release, stanza
+    assert "imagePullSecrets" not in public_release
     checked.extend(["Kubernetes required read-only Secret projection, fsGroup, probes and retained single replica",
-                    "Development Compose and Kubernetes profiles remain without auth mounts"])
+                    "Development Compose and Kubernetes base profiles remain without auth mounts",
+                    "Versioned private/public Kubernetes overlays combine auth with appropriate GHCR pull behavior"])
     return {"mode": "local-render-only", "checks": checked}
 
 

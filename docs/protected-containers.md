@@ -1,7 +1,8 @@
 # Protected single-instance container profiles
 
-The existing development manifests remain unchanged. Optional overlays mount a
-server verifier policy and a separate read-only health credential. Generate these
+The base manifests omit credentials and now fail closed on their non-loopback
+listeners. These overlays mount a server verifier policy and a separate
+read-only health credential. Generate these
 with [service-token setup](bolt-auth.md), granting the health principal the
 configured **default database**. Policy/token updates require a server restart;
 secret-file projection alone does not reload Brainwire's in-memory policy.

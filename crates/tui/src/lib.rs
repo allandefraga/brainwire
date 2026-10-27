@@ -120,7 +120,6 @@ impl View {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Focus {
-    Navigation,
     Main,
     Inspector,
 }
@@ -309,7 +308,7 @@ impl App {
     pub fn new(lang: Language, view: View) -> Self {
         Self {
             view,
-            focus: Focus::Navigation,
+            focus: Focus::Main,
             help: false,
             editing: false,
             quit: false,
@@ -327,8 +326,12 @@ impl App {
         }
     }
     pub fn handle(&mut self, key: KeyEvent) {
+        if (!self.editing || self.help) && key.code == KeyCode::Char('q') {
+            self.quit = true;
+            return;
+        }
         if self.help {
-            if matches!(key.code, KeyCode::F(1) | KeyCode::Esc) {
+            if matches!(key.code, KeyCode::F(1) | KeyCode::Char('?') | KeyCode::Esc) {
                 self.help = false;
             }
             return;
@@ -354,15 +357,15 @@ impl App {
             return;
         }
         match key.code {
-            KeyCode::F(1) => self.help = true,
+            KeyCode::F(1) | KeyCode::Char('?') => self.help = true,
             KeyCode::Tab => {
                 self.focus = match self.focus {
-                    Focus::Navigation => Focus::Main,
                     Focus::Main => Focus::Inspector,
-                    Focus::Inspector => Focus::Navigation,
+                    Focus::Inspector => Focus::Main,
                 }
             }
-            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            KeyCode::Char('q') => self.quit = true,
+            KeyCode::Esc => self.focus = Focus::Main,
             KeyCode::Char('1'..='4') => {
                 if let KeyCode::Char(c) = key.code {
                     self.set_view(View::from_index((c as u8 - b'1') as usize));
@@ -422,13 +425,6 @@ impl App {
             return;
         }
         self.inspector_scroll = 0;
-        if self.focus == Focus::Navigation {
-            self.set_view(View::from_index(
-                (self.view.index() as isize + delta).rem_euclid(4) as usize,
-            ));
-            self.focus = Focus::Navigation;
-            return;
-        }
         let (index, len) = match self.view {
             View::Graph => (&mut self.selected_node, self.fixture.nodes.len()),
             View::Query => {
@@ -631,8 +627,9 @@ mod tests {
     #[test]
     fn transitions_and_editor_shortcuts() {
         let mut app = App::new(Language::En, View::Graph);
-        app.handle(key(KeyCode::Tab));
         assert_eq!(app.focus, Focus::Main);
+        app.handle(key(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Inspector);
         app.handle(key(KeyCode::Char('2')));
         assert_eq!(app.view, View::Query);
         app.handle(key(KeyCode::Enter));
@@ -648,8 +645,15 @@ mod tests {
         assert!(!app.editing);
         app.handle(key(KeyCode::F(1)));
         assert!(app.help);
+        app.handle(key(KeyCode::Char('q')));
+        assert!(app.quit);
+        app.quit = false;
         app.handle(key(KeyCode::Esc));
         assert!(!app.help);
+        app.focus = Focus::Inspector;
+        app.handle(key(KeyCode::Esc));
+        assert_eq!(app.focus, Focus::Main);
+        assert!(!app.quit);
         app.handle(key(KeyCode::Char('q')));
         assert!(app.quit);
     }
@@ -659,12 +663,7 @@ mod tests {
         app.handle(key(KeyCode::Enter));
         let before = app.query.clone();
         app.handle(key(KeyCode::F(1)));
-        for code in [
-            KeyCode::Char('q'),
-            KeyCode::Char('4'),
-            KeyCode::F(5),
-            KeyCode::Tab,
-        ] {
+        for code in [KeyCode::Char('4'), KeyCode::F(5), KeyCode::Tab] {
             app.handle(key(code));
         }
         app.paste("unexpected mutation");
@@ -676,6 +675,16 @@ mod tests {
         app.handle(key(KeyCode::Esc));
         assert!(!app.help);
         assert!(app.editing);
+    }
+
+    #[test]
+    fn q_quits_from_help_opened_while_editing() {
+        let mut app = App::new(Language::En, View::Query);
+        app.handle(key(KeyCode::Enter));
+        app.handle(key(KeyCode::F(1)));
+        assert!(app.editing && app.help);
+        app.handle(key(KeyCode::Char('q')));
+        assert!(app.quit);
     }
 
     #[test]
@@ -699,7 +708,7 @@ mod tests {
                             lang.choose("O QUE SIGNIFICA", "WHAT IT MEANS"),
                             lang.choose("O QUE POSSO FAZER", "AVAILABLE ACTIONS"),
                             "DEMO: ",
-                            "F1/Esc",
+                            "F1/?/Esc",
                         ] {
                             assert!(visible.contains(text), "{w}x{h} {view:?}: missing {text}");
                         }
@@ -723,15 +732,38 @@ mod tests {
     }
 
     #[test]
-    fn navigation_arrows_keep_focus_until_page_is_opened() {
+    fn starts_on_content_and_number_keys_switch_views() {
         let mut app = App::new(Language::En, View::Graph);
-        for view in [View::Query, View::Memory, View::Disk, View::Graph] {
-            app.handle(key(KeyCode::Down));
+        assert_eq!(app.focus, Focus::Main);
+        for (number, view) in [
+            ('2', View::Query),
+            ('3', View::Memory),
+            ('4', View::Disk),
+            ('1', View::Graph),
+        ] {
+            app.handle(key(KeyCode::Char(number)));
             assert_eq!(app.view, view);
-            assert_eq!(app.focus, Focus::Navigation);
+            assert_eq!(app.focus, Focus::Main);
         }
+    }
+
+    #[test]
+    fn question_mark_opens_quick_help() {
+        let mut app = App::new(Language::En, View::Graph);
+        app.handle(key(KeyCode::Char('?')));
+        assert!(app.help);
+    }
+
+    #[test]
+    fn tab_only_toggles_content_and_explanation() {
+        let mut app = App::new(Language::En, View::Graph);
+        app.handle(key(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Inspector);
         app.handle(key(KeyCode::Tab));
         assert_eq!(app.focus, Focus::Main);
+        app.handle(key(KeyCode::Down));
+        assert_eq!(app.selected_node, 1);
+        assert_eq!(app.view, View::Graph);
     }
 
     #[test]
@@ -921,7 +953,7 @@ mod composition_tests {
                     "L0",
                     "L1",
                     "L2",
-                    "F1 help",
+                    "F1/? help",
                 ] {
                     assert!(disk.contains(expected), "{w}x{h}: {expected}");
                 }

@@ -10,6 +10,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import tempfile
@@ -132,6 +133,20 @@ def run(kind_binary, image, rows, node_image):
             kube("create", "namespace", namespace)
             manifest = command(["kubectl", "kustomize", str(root / "deploy/kubernetes")])
             assert manifest.count("image: brainwire:local") == 1
+            # This disposable local kind acceptance uses synthetic data and a
+            # loopback-only port-forward, so its generated Pod opts into dev auth.
+            manifest, replacements = re.subn(
+                r"(?m)^([ \t]*)image: brainwire:local[ \t]*$",
+                lambda match: (
+                    f"{match.group(1)}image: brainwire:local\n"
+                    f"{match.group(1)}args:\n"
+                    f"{match.group(1)}  - serve\n"
+                    f"{match.group(1)}  - --allow-unauthenticated-remote"
+                ),
+                manifest,
+            )
+            if replacements != 1:
+                raise RuntimeError(f"expected one local Brainwire container, found {replacements}")
             kube("apply", "-f", "-", text=manifest.replace("image: brainwire:local", f"image: {image}"))
             ready()
             version = json.loads(kube("version", "-o", "json"))["serverVersion"]["gitVersion"]

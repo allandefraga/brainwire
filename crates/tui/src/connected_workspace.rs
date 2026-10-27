@@ -36,6 +36,14 @@ impl ConnectedView {
             Self::Graph => lang.choose("Grafo", "Graph"),
         }
     }
+    fn purpose(self, lang: Language) -> &'static str {
+        match self {
+            Self::Ontology => lang.choose("Tipos e ligações", "Types & links"),
+            Self::Memory => lang.choose("Pool de consultas", "Query budget"),
+            Self::Indexes => lang.choose("Estado de índices", "Lookup readiness"),
+            Self::Graph => lang.choose("Relações reais", "Stored links"),
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub enum ConnectedSnapshot {
@@ -146,6 +154,9 @@ impl Workspace {
         if key.kind != event::KeyEventKind::Press {
             return false;
         }
+        if key.code == KeyCode::Char('q') {
+            return true;
+        }
         if self.help {
             if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
                 self.help = false;
@@ -153,7 +164,6 @@ impl Workspace {
             return false;
         }
         match key.code {
-            KeyCode::Char('q') => return true,
             KeyCode::Char('?') => self.help = true,
             KeyCode::Tab => self.select(
                 ConnectedView::from_index(
@@ -183,7 +193,6 @@ impl Workspace {
                                 state.inspect = false;
                                 state.scroll = 0;
                             }
-                            KeyCode::Esc => return true,
                             KeyCode::Enter | KeyCode::F(1) => {
                                 state.inspect = !state.inspect;
                                 state.scroll = 0;
@@ -201,14 +210,11 @@ impl Workspace {
                             KeyCode::PageDown => state.scroll = state.scroll.saturating_add(5),
                             _ => {}
                         }
-                    } else if key.code == KeyCode::Esc {
-                        return true;
                     }
                 }
                 ConnectedView::Indexes => {
                     if let Some(state) = &mut self.indexes {
                         match key.code {
-                            KeyCode::Esc => return true,
                             KeyCode::Up => state.selected = state.selected.saturating_sub(1),
                             KeyCode::Down => {
                                 state.selected = (state.selected + 1)
@@ -221,23 +227,14 @@ impl Workspace {
                             }
                             _ => {}
                         }
-                    } else if key.code == KeyCode::Esc {
-                        return true;
                     }
                 }
                 ConnectedView::Graph => {
-                    if key.code == KeyCode::Esc {
-                        return true;
-                    }
                     if let Some(state) = &mut self.graph {
                         state.handle(key.code);
                     }
                 }
-                ConnectedView::Memory => {
-                    if key.code == KeyCode::Esc {
-                        return true;
-                    }
-                }
+                ConnectedView::Memory => {}
             },
         }
         false
@@ -253,9 +250,17 @@ fn render(
 ) {
     let area = frame.area();
     let content = if area.width >= 120 {
-        let columns = Layout::horizontal([Constraint::Length(20), Constraint::Min(0)]).split(area);
+        let columns = Layout::horizontal([Constraint::Length(22), Constraint::Min(0)]).split(area);
         let mut lines = vec![
-            Line::raw(lang.choose(" SOMENTE LEITURA", " READ ONLY")),
+            Line::from(Span::styled(
+                lang.choose(" CONECTADO", " CONNECTED"),
+                if no_color {
+                    Style::default()
+                } else {
+                    Style::default().fg(CYAN)
+                },
+            )),
+            Line::raw(lang.choose(" Somente leitura", " Read only")),
             Line::raw(""),
         ];
         for view in [
@@ -278,10 +283,23 @@ fn render(
                     Style::default()
                 },
             )));
+            lines.push(Line::from(Span::styled(
+                format!("   {}", view.purpose(lang)),
+                if no_color {
+                    Style::default()
+                } else {
+                    Style::default().fg(CYAN)
+                },
+            )));
             lines.push(Line::raw(""));
         }
-        lines.push(Line::raw(" Tab / Shift+Tab"));
-        lines.push(Line::raw(lang.choose(" alterna telas", " switch panes")));
+        lines.push(Line::raw(
+            lang.choose(" Tab  próxima tela", " Tab  next view"),
+        ));
+        lines.push(Line::raw(
+            lang.choose(" ?    guia rápido", " ?    quick guide"),
+        ));
+        lines.push(Line::raw(lang.choose(" q    sair", " q    quit")));
         frame.render_widget(
             Paragraph::new(lines).block(panel(
                 lang.choose("NAVEGAÇÃO", "NAVIGATION"),
@@ -365,34 +383,29 @@ fn render(
         content.width,
         content.height.min(3),
     );
-    let navigation = format!(
-        " 1 {}  2 {}  3 {}  4 {} • Tab • r {} • ? {} • q {}",
-        ConnectedView::Ontology.name(lang),
-        ConnectedView::Memory.name(lang),
-        ConnectedView::Indexes.name(lang),
-        ConnectedView::Graph.name(lang),
-        lang.choose("atualiza", "refresh"),
-        lang.choose("ajuda", "help"),
-        lang.choose("sai", "quit")
+    let navigation = lang.choose(
+        " 1 Ontologia  2 Memória  3 Índices  4 Grafo | r atualiza  ? ajuda  q sai",
+        " 1 Ontology  2 Memory  3 Indexes  4 Graph | r refresh  ? help  q quit",
     );
     let controls = if !has_sample {
         lang.choose("SEM AMOSTRA / SOMENTE LEITURA", "NO SAMPLE / READ ONLY")
     } else {
         match workspace.active {
             ConnectedView::Ontology => lang.choose(
-                "↑↓ tipo • Enter/F1 detalhes • PgUp/Dn rola",
-                "↑↓ type • Enter/F1 inspect • PgUp/Dn scroll",
+                "↑↓ escolhe tipo • Enter detalhes • Tab próxima tela",
+                "↑↓ select type • Enter details • Tab next view",
             ),
             ConnectedView::Memory => lang.choose(
-                "POOL DE CONSULTAS / SOMENTE LEITURA",
-                "QUERY POOL / READ ONLY",
+                "MEMÓRIA DE CONSULTAS • somente leitura • Tab próxima tela",
+                "QUERY MEMORY • read only • Tab next view",
             ),
-            ConnectedView::Indexes => {
-                lang.choose("↑↓ índice • PgUp/Dn rola", "↑↓ index • PgUp/Dn scroll")
-            }
+            ConnectedView::Indexes => lang.choose(
+                "↑↓ escolhe índice • Tab próxima tela",
+                "↑↓ select index • Tab next view",
+            ),
             ConnectedView::Graph => lang.choose(
-                "Até 20 relações; não é o grau total. ↑↓ / PgUp/Dn",
-                "Up to 20 relationships; not total degree. ↑↓ / PgUp/Dn",
+                "↑↓ escolhe relação • Tab próxima tela",
+                "↑↓ select relationship • Tab next view",
             ),
         }
     };
@@ -403,34 +416,38 @@ fn render(
     if workspace.help {
         let (title, body) = match workspace.active {
             ConnectedView::Ontology => (
-                lang.choose("Ontologia conectada", "Connected ontology"),
+                lang.choose("Guia rápido / Ontologia", "Quick guide / Ontology"),
                 lang.choose(
-                    "Snapshot real do schema do grafo selecionado. Conexoes sao assinaturas permitidas; nao provam que existam arestas gravadas.\n\n↑↓ escolhe tipo; Enter/F1 abre o inspetor; PgUp/PgDn percorre propriedades e relacoes. Tab ou 1–4 muda de painel; r atualiza.\n\nO catalogo global esta disponivel no inspetor offline. Esta tela conectada mostra o tipo selecionado.",
-                    "A real schema snapshot from the selected graph. Connections are allowed signatures; they do not prove stored edge records exist.\n\n↑↓ selects a type; Enter/F1 opens its inspector; PgUp/PgDn scrolls properties and relationships. Tab or 1–4 changes pane; r refreshes.\n\nThe global catalog is available in the offline inspector. This connected view shows the selected type.",
+                    "Conexões são assinaturas permitidas pelo esquema; não provam que existam arestas gravadas.\n\n↑↓ escolhe tipo; Enter/F1 abre detalhes; PgUp/PgDn rola.",
+                    "Connections are allowed schema links; they do not prove stored edges exist.\n\n↑↓ selects a type; Enter/F1 opens details; PgUp/PgDn scrolls.",
                 ),
             ),
             ConnectedView::Memory => (
-                lang.choose("Memoria conectada", "Connected memory"),
+                lang.choose("Guia rápido / Memória", "Quick guide / Memory"),
                 lang.choose(
-                    "Contadores atuais do pool compartilhado de consultas no servidor. Reservas podem durar ate o fim da transacao; nao sao RSS nem uso total do processo.\n\nTab ou 1–4 muda de painel; r busca uma amostra nova. Esta tela e somente leitura.\n\nA TUI conectada consulta o servidor sem abrir os arquivos RocksDB localmente.",
-                    "Current counters from the server's shared query pool. Reservations can last until transaction end; these are not RSS or total process usage.\n\nTab or 1–4 changes pane; r fetches a new sample. This pane is read-only.\n\nThe connected TUI queries the server without opening local RocksDB files.",
+                    "Reservas do pool compartilhado de consultas no servidor. Podem durar até o fim da transação; não são RSS nem o uso total do processo.\n\nr busca uma amostra nova.",
+                    "The server's shared query reservations can last until transaction end. They are not RSS or total process usage.\n\nr fetches a new sample.",
                 ),
             ),
             ConnectedView::Indexes => (
-                lang.choose("Indices conectados", "Connected indexes"),
+                lang.choose("Guia rápido / Índices", "Quick guide / Indexes"),
                 lang.choose(
-                    "Declarado significa que o schema pede o indice. Pronto significa que a construcao terminou. Enquanto pendente, a consulta pode usar scan.\n\n↑↓ ou PgUp/PgDn seleciona indice; Tab ou 1–4 muda de painel; r atualiza. Esta tela e somente leitura.",
-                    "Declared means the schema requests the index. Ready means construction finished. While pending, a query may use a scan.\n\n↑↓ or PgUp/PgDn selects an index; Tab or 1–4 changes pane; r refreshes. This pane is read-only.",
+                    "Declarado significa pedido pelo esquema. Pronto significa que a construção terminou. Um índice pendente pode exigir uma varredura dos dados.\n\n↑↓ escolhe índice; PgUp/PgDn percorre a lista.",
+                    "Declared means requested by the schema. Ready means the build finished. A pending index may still require a scan.\n\n↑↓ selects an index; PgUp/PgDn moves through the list.",
                 ),
             ),
             ConnectedView::Graph => (
-                lang.choose("Grafo conectado", "Connected graph"),
+                lang.choose("Guia rápido / Grafo", "Quick guide / Graph"),
                 lang.choose(
-                    "Explora uma amostra limitada de relacoes reais a partir do nodo selecionado. O limite da amostra nao e o grau total do nodo.\n\n↑↓ seleciona resultado; campos de configuracao identificam nodo e relacao. Tab ou 1–4 muda de painel; r atualiza. Nenhuma escrita e feita.",
-                    "Explores a bounded sample of real relationships from the selected node. The sample limit is not the node's total degree.\n\n↑↓ selects a result; configuration fields identify the node and relationship. Tab or 1–4 changes pane; r refreshes. No writes are performed.",
+                    "Uma amostra limitada de relações reais do nó configurado. O limite de 20 relações não é o grau total do nó.\n\n↑↓ escolhe uma relação; PgUp/PgDn percorre a lista.",
+                    "A bounded sample of real relationships for the configured node. The 20-relationship sample is not the node's total degree.\n\n↑↓ selects a relationship; PgUp/PgDn moves through the list.",
                 ),
             ),
         };
+        let guide = lang.choose(
+            "1 Ontologia  Tipos e ligações\n2 Memória    Orçamento de consultas\n3 Índices    Prontidão das buscas\n4 Grafo      Relações gravadas\n\nTab / Shift+Tab alterna telas. r atualiza.\nEsc fecha ajuda/detalhes; q sempre sai.\nEsta TUI é somente leitura.\n\nNESTA TELA\n",
+            "1 Ontology  Types and allowed links\n2 Memory    Query memory budget\n3 Indexes   Lookup readiness\n4 Graph     Stored connections\n\nTab / Shift+Tab switches views. r refreshes.\nEsc closes help/details; q always quits.\nThis workspace is read only.\n\nTHIS VIEW\n",
+        );
         let width = content.width.saturating_sub(4).clamp(1, 88);
         let height = content.height.saturating_sub(2).clamp(1, 24);
         let popup = Rect::new(
@@ -442,7 +459,7 @@ fn render(
         frame.render_widget(Clear, popup);
         frame.render_widget(
             Paragraph::new(format!(
-                "{body}\n\n{}",
+                "{guide}{body}\n\n{}",
                 lang.choose("? ou Esc fecha a ajuda.", "? or Esc closes help.")
             ))
             .wrap(Wrap { trim: false })
@@ -624,7 +641,7 @@ mod tests {
             for (width, height) in [(80, 24), (120, 30), (160, 48)] {
                 for (view, meaning_en, meaning_pt) in [
                     (ConnectedView::Ontology, "allowed", "permitidas"),
-                    (ConnectedView::Memory, "not RSS", "nao sao RSS"),
+                    (ConnectedView::Memory, "RSS", "RSS"),
                     (
                         ConnectedView::Indexes,
                         "Declared means",
@@ -656,6 +673,57 @@ mod tests {
                     assert!(!workspace.help);
                 }
             }
+        }
+    }
+    #[test]
+    fn escape_closes_details_and_help_while_only_q_quits_the_workspace() {
+        for view in [
+            ConnectedView::Ontology,
+            ConnectedView::Memory,
+            ConnectedView::Indexes,
+            ConnectedView::Graph,
+        ] {
+            let mut workspace = Workspace::new();
+            workspace.select(view, &mut fetch);
+            assert!(!workspace.handle(key(KeyCode::Esc), &mut fetch));
+            if view == ConnectedView::Ontology {
+                workspace.handle(key(KeyCode::Enter), &mut fetch);
+                assert!(workspace.ontology.as_ref().unwrap().inspect);
+                assert!(!workspace.handle(key(KeyCode::Esc), &mut fetch));
+                assert!(!workspace.ontology.as_ref().unwrap().inspect);
+            }
+            workspace.handle(key(KeyCode::Char('?')), &mut fetch);
+            assert!(!workspace.handle(key(KeyCode::Esc), &mut fetch));
+            assert!(!workspace.help);
+            assert!(!workspace.handle(key(KeyCode::Esc), &mut fetch));
+            assert!(workspace.handle(key(KeyCode::Char('q')), &mut fetch));
+        }
+    }
+    #[test]
+    fn narrow_footer_keeps_refresh_help_and_exit_visible() {
+        let mut workspace = Workspace::new();
+        workspace.refresh(&mut fetch);
+        for (lang, controls) in [
+            (Language::En, ["r refresh", "? help", "q quit"]),
+            (Language::PtBr, ["r atualiza", "? ajuda", "q sai"]),
+        ] {
+            let output = text(&mut workspace, lang, 80, 24, true);
+            for control in controls {
+                assert!(output.contains(control), "missing {control}: {output}");
+            }
+            workspace.help = true;
+            let guide = text(&mut workspace, lang, 80, 24, true);
+            let pages = if lang == Language::En {
+                ["1 Ontology", "2 Memory", "3 Indexes", "4 Graph"]
+            } else {
+                ["1 Ontologia", "2 Memória", "3 Índices", "4 Grafo"]
+            };
+            for page in pages {
+                assert!(guide.contains(page), "missing {page}: {guide}");
+            }
+            assert!(guide.contains("Shift+Tab"));
+            assert!(workspace.handle(key(KeyCode::Char('q')), &mut fetch));
+            workspace.help = false;
         }
     }
     #[test]
@@ -840,7 +908,6 @@ mod tests {
                     "comment-1",
                     "HAS_COMMENT",
                     "4",
-                    lang.choose("não é o grau total", "not total degree"),
                 ] {
                     assert!(output.contains(expected), "{expected}: {output}");
                 }

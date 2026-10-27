@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate-and-package:
+  validate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -25,10 +25,35 @@ jobs:
       - name: Validate local links and assets
         run: python scripts/check_docs_site.py
 
-      - name: Package private documentation site
-        uses: actions/upload-artifact@v4
+  build:
+    if: github.repository_visibility == 'public'
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v4
         with:
-          name: brainwire-docs-${{ github.sha }}
           path: docs-site/
-          if-no-files-found: error
-          retention-days: 30
+
+  deploy:
+    if: github.repository_visibility == 'public'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages site
+        id: deployment
+        uses: actions/deploy-pages@v4

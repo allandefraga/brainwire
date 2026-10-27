@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -23,9 +24,15 @@ def run(image):
         port = listener.getsockname()[1]
     env = {key: value for key, value in os.environ.items() if not key.startswith("BRAINWIRE_")}
     env.update(BRAINWIRE_IMAGE=image, BRAINWIRE_BIND_PORT=str(port))
+    override_dir = tempfile.TemporaryDirectory(prefix=f"{project}-")
+    override = Path(override_dir.name) / "local-unauthenticated-test.yaml"
+    override.write_text(
+        "services:\n  brainwire:\n    command: [\"serve\", \"--allow-unauthenticated-remote\"]\n"
+    )
+    compose_files = ["-f", str(root / "deploy/compose.yaml"), "-f", str(override)]
 
     def compose(*args, check=True):
-        return subprocess.run(["docker", "compose", "-p", project, "-f", str(root / "deploy/compose.yaml"), *args],
+        return subprocess.run(["docker", "compose", "-p", project, *compose_files, *args],
                               env=env, check=check, capture_output=True, text=True)
 
     def exit_code():
@@ -52,7 +59,7 @@ def run(image):
             with driver.session(database="default") as session:
                 tx = session.begin_transaction()
                 tx.run("CREATE (c:Customer {entity_id:'drain-customer', email:'drain@example.test'})").consume()
-                stopping = subprocess.Popen(["docker", "compose", "-p", project, "-f", str(root / "deploy/compose.yaml"), "stop"],
+                stopping = subprocess.Popen(["docker", "compose", "-p", project, *compose_files, "stop"],
                                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 for _ in range(100):
                     if "shutdown requested" in compose("logs", "brainwire", check=False).stdout:
@@ -88,6 +95,7 @@ def run(image):
                                      "idle-only stop exits 0", "offline audit ok"]}, indent=2))
     finally:
         compose("down", "--volumes", "--remove-orphans")
+        override_dir.cleanup()
 
 
 if __name__ == "__main__":

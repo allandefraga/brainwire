@@ -36,17 +36,20 @@ between terminal emulators.
 
 ## Explore the demo
 
+The screenshots show synthetic screen layouts. The key table below is the
+current shortcut reference.
+
 | Key | Action |
 |---|---|
 | `1`, `2`, `3`, `4` | Switch to Graph, Query, Memory or Disk outside editing |
-| `Tab` | Move focus between page navigation, content and the explanation panel |
-| Arrow keys | Change page while page navigation is focused; otherwise move selection or scroll the focused panel |
+| `Tab` | Toggle between the main content and its explanation panel |
+| Arrow keys | Move the selected node, memory item, file or query result |
 | `PgUp`, `PgDn` | Move the editor viewport while editing, or scroll the focused inspector |
 | `Enter` | Inspect a selection or enter editing, according to focus |
-| `F1` | Open page-specific help explaining its purpose, fields and controls |
+| `F1` | Open page-specific help, including while editing a query |
+| `?` | Open help outside query editing; in the editor, `?` is ordinary query text |
 | `F5` | Run the supported guided query example |
-| `Esc` | Close help or leave editing before exiting |
-| `?` | In the local overview and connected workspace, open page-specific help |
+| `Esc` | Close help or finish editing; `q` quits |
 | `q` | Quit when not editing |
 
 Both guided examples wrap at 80 columns. Longer edited text shows an overflow
@@ -100,5 +103,4 @@ The atomic Cypher executor and durable Bolt server are implemented. The
 read-only multi-graph overview is connected to local storage. A connected
 graph explorer still needs bounded neighborhood results, and live memory/file
 views need server telemetry and storage-inspection contracts. The
-[Observatory design](design/2026-09-26-brainwire-observatory.md) records those
-interfaces and the selected identity.
+The green and cyan visual system is shared with the Brainwire logo and docs site.

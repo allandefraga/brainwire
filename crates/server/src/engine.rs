@@ -193,9 +193,8 @@ fn graph_access(access: &AccessContext, graph: &str) -> Result<QueryAccess, Engi
 
 /// The visibility a transaction reads under: the principal's static policy, or,
 /// for a visibility delegate that sends one, its caller's (the transaction is
-/// then read-only). A delegate has no static policy, so delegation only ever
-/// narrows what it may already see; a governed read must send the visibility,
-/// and an unsent one leaves the delegate's own access. Only a delegate (or an
+/// then read-only). A delegate has no static policy, so every transaction must
+/// carry caller visibility; omitting it is denied. Only a delegate (or an
 /// unprotected development server) may send one.
 fn transaction_visibility(
     access: &AccessContext,
@@ -203,7 +202,7 @@ fn transaction_visibility(
 ) -> Result<Option<ReadVisibility>, EngineError> {
     match access {
         AccessContext::Authenticated(principal) if principal.visibility_delegate => {
-            Ok(delegated.or_else(|| principal.node_visibility.clone()))
+            delegated.map(Some).ok_or_else(forbidden)
         }
         AccessContext::Authenticated(principal) => match delegated {
             Some(_) => Err(error(
@@ -1092,10 +1091,15 @@ mod tests {
             "Neo.ClientError.Security.Forbidden"
         );
         engine.abort().unwrap();
-        // No visibility sent: the delegate's own (unrestricted) access.
-        engine.begin(None).unwrap();
-        assert_eq!(ids(&mut engine).len(), 2);
-        engine.commit().unwrap();
+        // Missing caller visibility must fail closed for both transaction modes.
+        assert_eq!(
+            engine.begin(None).unwrap_err().code,
+            "Neo.ClientError.Security.Forbidden"
+        );
+        assert_eq!(
+            engine.begin_read_only(None).unwrap_err().code,
+            "Neo.ClientError.Security.Forbidden"
+        );
         // A principal that is not a delegate cannot send one.
         engine.set_access(principal(false)).unwrap();
         assert_eq!(

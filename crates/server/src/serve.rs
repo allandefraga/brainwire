@@ -3,6 +3,7 @@
 use brainwire_bolt::auth::{AuthMode, AuthPolicy};
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,7 +13,11 @@ use crate::config;
 use crate::databases::Databases;
 use crate::engine::DbEngine;
 
-pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Result<(), String> {
+pub fn run(
+    explicit_config: Option<&Path>,
+    cluster_config: Option<&Path>,
+    allow_unauthenticated_remote: bool,
+) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|e| format!("config: {e}"))?;
     let implicit = config::find_file(&cwd);
     let env: BTreeMap<String, String> = std::env::vars().collect();
@@ -54,6 +59,8 @@ pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Res
         let listener = TcpListener::bind(&loaded.config.server.listen)
             .await
             .map_err(|e| format!("cannot bind {}: {e}", loaded.config.server.listen))?;
+        let address = listener.local_addr().map_err(|e| e.to_string())?;
+        validate_listener_security(address, protected, allow_unauthenticated_remote)?;
         let (replica, databases) = if let Some(cluster) = &cluster_config {
             let peer_listener = TcpListener::bind(&cluster.listen).await.map_err(|_| "cannot bind private peer listener")?;
             let (replica, databases) = crate::cluster::Replica::start(&loaded.config, cluster, peer_listener).await?;
@@ -148,4 +155,40 @@ fn termination() -> std::io::Result<impl std::future::Future<Output = ()>> {
         }
         eprintln!("brainwire: shutdown requested; draining sessions");
     })
+}
+
+fn validate_listener_security(
+    address: SocketAddr,
+    protected: bool,
+    allow_unauthenticated_remote: bool,
+) -> Result<(), String> {
+    if address.ip().is_loopback() || protected || allow_unauthenticated_remote {
+        return Ok(());
+    }
+    Err("refusing unauthenticated non-loopback Bolt listener; configure server.auth_file or explicitly opt in with --allow-unauthenticated-remote on an isolated development network".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_listener_security;
+    use std::net::SocketAddr;
+
+    fn address(value: &str) -> SocketAddr {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn unauthenticated_listeners_are_loopback_only_by_default() {
+        assert!(validate_listener_security(address("127.0.0.1:7687"), false, false).is_ok());
+        assert!(validate_listener_security(address("[::1]:7687"), false, false).is_ok());
+        assert!(validate_listener_security(address("0.0.0.0:7687"), false, false).is_err());
+        assert!(validate_listener_security(address("[::]:7687"), false, false).is_err());
+        assert!(validate_listener_security(address("192.0.2.10:7687"), false, false).is_err());
+    }
+
+    #[test]
+    fn remote_listener_requires_auth_or_clear_development_opt_in() {
+        assert!(validate_listener_security(address("0.0.0.0:7687"), true, false).is_ok());
+        assert!(validate_listener_security(address("0.0.0.0:7687"), false, true).is_ok());
+    }
 }

@@ -56,6 +56,18 @@ class ReleaseFileTests(unittest.TestCase):
             f"newTag: v{next_candidate}",
             files[Path("deploy/kubernetes-release/kustomization.yaml")],
         )
+        self.assertIn(
+            f"newTag: v{next_candidate}",
+            files[Path("deploy/kubernetes-public-release/kustomization.yaml")],
+        )
+        self.assertIn(
+            f"DOCUMENTATION / v{next_candidate} <!-- brainwire-release-version -->",
+            files[Path("docs-site/index.html")],
+        )
+        self.assertIn(
+            f"v{next_candidate} · evolving <!-- brainwire-release-version -->",
+            files[Path("docs-site/index.html")],
+        )
         lock = files[Path("Cargo.lock")]
         self.assertEqual(lock.count(f'version = "{next_candidate}"'), 7)
 

@@ -43,7 +43,7 @@ def start_container(name, volume, image):
         "--env", "BRAINWIRE_MEMORY_CACHE=256MiB",
         "--env", "BRAINWIRE_MEMORY_MEMTABLES=32MiB",
         "--env", "BRAINWIRE_MEMORY_QUERY=256MiB",
-        image,
+        image, "serve", "--allow-unauthenticated-remote",
     )
     address = docker("port", name, "7687/tcp").stdout.strip()
     host, port_text = address.rsplit(":", 1)

@@ -80,7 +80,6 @@ conversion and named-database selection.
   Per-RUN guards, a shared reservation pool and cooperative execution deadlines
   are implemented; see [query limits](query-allocation-guards.md).
 
-The [implementation slice](superpowers/plans/2026-09-27-brainwire-transactions.md)
-and [next-session preflight](superpowers/plans/2026-09-26-brainwire-bolt-transaction-preflight.md)
-record the original delivery boundary. The [server guide](serve.md) describes
+The [recovery guide](termination-recovery.md) describes crash and restart
+behavior. The [server guide](serve.md) describes
 the current local runtime and its limits.

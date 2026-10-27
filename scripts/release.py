@@ -16,9 +16,11 @@ VERSION_FILES = (
     Path("Cargo.toml"),
     Path("Cargo.lock"),
     Path("deploy/kubernetes-release/kustomization.yaml"),
+    Path("deploy/kubernetes-public-release/kustomization.yaml"),
     Path("README.md"),
     Path("docs/container.md"),
     Path("docs/orchestrators.md"),
+    Path("docs-site/index.html"),
 )
 MARKER = "brainwire-release-version"
 VERSION_RE = re.compile(
@@ -191,17 +193,25 @@ def updated_files(old: Version, new: Version) -> dict[Path, str]:
         result[Path("Cargo.lock")], str(old), str(new)
     )
 
-    kustomization = Path("deploy/kubernetes-release/kustomization.yaml")
-    result[kustomization], count = re.subn(
-        rf"(?m)^(\s+newTag:\s*){re.escape(old_tag)}(\s*)$",
-        rf"\g<1>{new_tag}\g<2>",
-        result[kustomization],
-        count=1,
-    )
-    if count != 1:
-        raise ValueError(f"release Kustomize overlay must pin exactly {old_tag}")
+    for kustomization in (
+        Path("deploy/kubernetes-release/kustomization.yaml"),
+        Path("deploy/kubernetes-public-release/kustomization.yaml"),
+    ):
+        result[kustomization], count = re.subn(
+            rf"(?m)^(\s+newTag:\s*){re.escape(old_tag)}(\s*)$",
+            rf"\g<1>{new_tag}\g<2>",
+            result[kustomization],
+            count=1,
+        )
+        if count != 1:
+            raise ValueError(f"{kustomization} must pin exactly {old_tag}")
 
-    for relative in (Path("README.md"), Path("docs/container.md"), Path("docs/orchestrators.md")):
+    for relative in (
+        Path("README.md"),
+        Path("docs/container.md"),
+        Path("docs/orchestrators.md"),
+        Path("docs-site/index.html"),
+    ):
         result[relative] = replace_marked_versions(result[relative], old_tag, new_tag, relative)
     return result
 

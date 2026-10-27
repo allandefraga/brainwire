@@ -12,13 +12,13 @@ Connect people, projects, events and documents. Keep those relationships durable
 <p align="center">
   <a href="#quickstart">Get started ↓</a> &nbsp;·&nbsp;
   <a href="docs/local-cypher.md">Cypher guide</a> &nbsp;·&nbsp;
-  <a href="docs/2026-10-pilot-roadmap.md">Roadmap &amp; beta limits</a>
+  <a href="docs/beta-operator-checklist.md">Beta readiness</a>
 </p>
 
 <p align="center">
-  <img src="docs/design/assets/brainwire-tui-demo-graph.png" alt="Brainwire terminal backoffice visualizing a synthetic connected graph" width="100%">
+  <img src="docs-site/assets/ontology-map.svg" alt="Brainwire ontology explorer concept showing synthetic Person, Project, Document and Topic types" width="100%">
 </p>
-<p align="center"><sub>Live terminal UI · 36 synthetic nodes · 64 relationships · no customer data</sub></p>
+<p align="center"><sub>A synthetic ontology preview. Arrows describe allowed schema links, not stored-data counts.</sub></p>
 
 Brainwire is an independent graph database for builders who need structured
 relationships and durable state behind their applications. It is written in
@@ -29,7 +29,7 @@ Run it locally or in Docker with a persistent volume.
 out-of-the-box RAG pipeline. Your application chooses what to ingest; Brainwire
 keeps entities and relationships connected so your app can ask better questions.
 
-> **v0.6.0-beta.1 · private beta candidate.** <!-- brainwire-release-version --> Brainwire is under active development and has
+> **v0.6.0-beta.2 · beta candidate.** <!-- brainwire-release-version --> Brainwire is under active development and has
 > not been qualified for production. The release pipeline publishes a versioned
 > image only after source and container recovery checks pass.
 
@@ -139,50 +139,34 @@ For the Python helper's batch API, property semantics, and supported inputs, see
 [Python client and ingestion](docs/python-client.md). The helper currently lives
 in this repository; it is **not** a separately published Python package.
 
-## Releases, images and docs
+## Releases and container images
 
 Every push to `main` runs formatting, workspace tests, Clippy, Python helper
-tests, release-version tests and a real Bolt/Python ingestion and restart check.
-The `v*` tag workflow repeats those checks, builds a versioned Docker image,
-verifies the image through Python/Bolt writes and retained-volume restarts,
-then pushes that same image to the private GitHub Container Registry (GHCR) and
-creates a GitHub release with its digest attached. A `-beta.N` or `-rc.N` tag
-creates a prerelease; a plain SemVer tag creates a stable release. It does not
-publish a floating `latest` tag.
-The docs site in `docs-site/` is link-checked and packaged as a private Actions
-artifact on pushes to `main`. GitHub Pages is unavailable for this private repo
-on its current plan; publishing a live public site requires a different plan or
-an external host.
+tests, release-version checks and a Bolt/Python ingestion and restart check.
+The `v*` tag workflow repeats source checks, builds a versioned Docker image,
+tests Python/Bolt writes and retained-volume restart recovery, then publishes
+the tested image and attaches its digest to the GitHub release. A `-beta.N` or
+`-rc.N` tag creates a prerelease; a plain SemVer tag creates a stable release.
+It does not create a floating `latest` tag. Check the latest workflow status
+before relying on an image: a local tag alone does not mean it was published.
 
-The previous candidate, `v0.2.0-beta.1`, did not publish: its 22m37s CI run
-passed workspace tests, then Clippy rejected a deprecated Rust atomic API under
-`-D warnings` ([run details](https://github.com/allandefraga/brainwire/actions/runs/39428295694)).
-The pipeline now pins the same Rust 1.98.1 toolchain as Docker and caches build
-artifacts, including when another check fails. The first cold run can still be
-slow; the cache's effect and the repaired CI must be confirmed on GitHub before
-the next image is available.
-After that, these commands authenticate Docker to GHCR and download the server
-image to your local Docker engine. They do not start Brainwire or copy graph
-data:
+To pull a tagged image from GHCR:
 
 ```sh
-docker login ghcr.io -u YOUR_GITHUB_USERNAME
-# At the password prompt, enter a GitHub personal access token (classic)
-# with read:packages access. Do not use your GitHub account password.
-docker pull ghcr.io/allandefraga/brainwire:v0.6.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.6.0-beta.2 # brainwire-release-version
 ```
 
-`docker login ghcr.io` authenticates Docker to GitHub Container Registry. The
-token is needed because this repository and its container package are private.
-The release workflow uses GitHub's built-in `GITHUB_TOKEN` to publish the image;
-you only need your own token when pulling it from another machine. See GitHub's
+If the image is private, run `docker login ghcr.io` and enter a GitHub token
+with `read:packages` access when prompted. Public images do not require login.
+Repository visibility and package visibility are separate; check both before
+announcing a public image. See GitHub's
 [GHCR authentication guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-with-a-personal-access-token-classic).
-Use the [local release workflow](docs/releasing.md) to preview and create a
-SemVer version, synchronize Docker/Kubernetes references, and make a local tag
-without pushing it.
-The Compose quickstart above builds locally from source; see the
-[container guide](docs/container.md) for running the published image with a
-persistent graph-data volume.
+
+The [local release workflow](docs/releasing.md) previews a SemVer version,
+updates marked Docker/Kubernetes references, runs checks and creates a local
+commit and tag. It never pushes or publishes. The Compose quickstart builds
+from source; see the [container guide](docs/container.md) for persistent
+volumes and running the versioned image.
 
 ## See what the TUI can do
 
@@ -226,8 +210,9 @@ These are measured local runs on synthetic data, not production SLOs. See the
   [protected containers](docs/protected-containers.md) and
   [transport guidance](docs/protected-transport.md) before connecting other
   services.
-- Versioned ontology/catalogs do **not** mean historical data revisions. Durable
-  history and as-of traversal for both nodes and edges are not implemented.
+- Ontology/catalog versions and transaction snapshots are not historical graph
+  data. Nodes and edges do not keep durable revisions; `AS OF` reads and automatic
+  retention are not implemented. See the [temporal data guide](docs/temporal-data.md).
 - DuckLake ingestion is version-pinned snapshot comparison, not native CDC. A
   production source mapping, authoritative ACL integration and representative
   application workload still need validation.
@@ -240,7 +225,7 @@ These are measured local runs on synthetic data, not production SLOs. See the
   comparison status](docs/benchmarks/README.md).
 
 The current release boundary and acceptance evidence are tracked in the
-[October beta roadmap](docs/2026-10-pilot-roadmap.md). For an application trial,
+[beta operator checklist](docs/beta-operator-checklist.md). For an application trial,
 start in **shadow mode** with a rebuildable graph and keep the existing source as
 the authority until integration, security, recovery and workload gates pass.
 
@@ -260,8 +245,9 @@ the authority until integration, security, recovery and workload gates pass.
 | Configure authentication and network protection | [Auth](docs/bolt-auth.md) · [container auth](docs/protected-containers.md) · [TLS boundary](docs/protected-transport.md) |
 | Evaluate experimental quorum replication | [Quorum operations and limitations](docs/quorum-replication.md) |
 | Review measured performance and comparison status | [Benchmarks](docs/benchmarks/README.md) |
-| Review measurements, recovery and remaining gates | [Beta roadmap](docs/2026-10-pilot-roadmap.md) · [operator checklist](docs/beta-operator-checklist.md) |
-| See design decisions | [Design documents](docs/design/) · [session journal](JOURNAL.md) |
+| Understand data history and temporal limits | [Temporal data](docs/temporal-data.md) |
+| Review deployment readiness and recovery limits | [Operator checklist](docs/beta-operator-checklist.md) · [Docker, Swarm and Kubernetes](docs/orchestrators.md) · [Quorum operations](docs/quorum-replication.md) |
+| Explore system design | [Design documents](docs/design/) · [Temporal data model](docs/temporal-data.md) |
 
 ## Build it locally
 
@@ -282,7 +268,7 @@ Cypher, indexes, restart and the connected TUI with synthetic data.
 
 ## Release status and license
 
-**Version:** `v0.6.0-beta.1` · private beta candidate · not production-qualified. <!-- brainwire-release-version -->
+**Version:** `v0.6.0-beta.2` · private beta candidate · not production-qualified. <!-- brainwire-release-version -->
 The [tag source](https://github.com/allandefraga/brainwire/tree/v0.1.1) identifies
 the exact source snapshot. That tag predates adoption of Apache-2.0 and carries
 no open-source license grant; use a later tagged release for Apache-licensed

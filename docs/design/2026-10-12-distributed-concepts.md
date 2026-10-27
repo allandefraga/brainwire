@@ -277,7 +277,7 @@ must not silently become a bypass of consensus.
 
 ### Bulk loading needs its own durability decision
 
-The approved [design spec](../superpowers/specs/2026-09-24-brainwire-design.md)
+The [quorum replication guide](../quorum-replication.md)
 section 1.7 proposes online bulk loading with the WAL disabled until a final
 flush and sync, and a redo contract after an interrupted load. This is planned
 wording, not the current resumable Python importer's ordinary synchronous

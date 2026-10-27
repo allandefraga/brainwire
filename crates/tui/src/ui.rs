@@ -37,7 +37,11 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
         .split(area);
     let header = Line::from(vec![
         Span::styled(
-            " BRAINWIRE ",
+            " ●─●─● ",
+            style(GREEN, no_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "BRAINWIRE",
             style(GREEN, no_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -76,7 +80,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
     } else {
         ["1 Graph", "2 Query", "3 Memory", "4 Disk & Files"]
     };
-    let nav: Vec<Line> = names
+    let mut nav: Vec<Line> = names
         .iter()
         .enumerate()
         .map(|(i, n)| {
@@ -90,6 +94,17 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
             ))
         })
         .collect();
+    nav.extend([
+        Line::raw(""),
+        Line::from(Span::styled(
+            app.lang.choose(" 1-4 telas", " 1-4 views"),
+            style(CYAN, no_color),
+        )),
+        Line::from(Span::styled(
+            app.lang.choose(" Tab painéis", " Tab panels"),
+            style(CYAN, no_color),
+        )),
+    ]);
     let detail_height = if area.height < 30 { 5 } else { 8 };
     let full_explain = app.view == View::Disk && area.width >= 100;
     let mut sidebar_area = body[0];
@@ -106,15 +121,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
         graph(frame, app, sidebar[1], no_color, true);
     }
     frame.render_widget(
-        Paragraph::new(nav).block(block(
-            app.lang.choose("Vistas", "Views"),
-            if app.focus == Focus::Navigation {
-                GREEN
-            } else {
-                CYAN
-            },
-            no_color,
-        )),
+        Paragraph::new(nav).block(block(app.lang.choose("Vistas", "Views"), CYAN, no_color)),
         nav_area,
     );
     let right = Layout::default()
@@ -273,33 +280,82 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
             .collect::<Vec<_>>(),
     );
     let actions = if app.help {
-        app.lang.choose(
-            " F1/Esc fecha ajuda • outras teclas pausadas",
-            " F1/Esc close help • other keys paused",
-        )
+        Line::from(app.lang.choose(
+            " F1/?/Esc fecha ajuda • q sai",
+            " F1/?/Esc close help • q quits",
+        ))
     } else if app.editing {
-        app.lang.choose(
-            " F1 ajuda • digite/cole • PgUp/Dn rola • F5 roda • Enter/Esc termina",
-            " F1 help • type/paste • PgUp/Dn scroll • F5 run • Enter/Esc finish",
+        shortcut_line(
+            &[
+                ("F5", app.lang.choose("roda", "run")),
+                (
+                    "Enter/Esc",
+                    app.lang.choose("termina edição", "finish editing"),
+                ),
+                ("PgUp/Dn", app.lang.choose("rola", "scroll")),
+                ("F1", app.lang.choose("ajuda", "help")),
+            ],
+            no_color,
+        )
+    } else if app.focus == Focus::Inspector {
+        shortcut_line(
+            &[
+                ("↑↓", app.lang.choose("rola", "scroll")),
+                ("Esc", app.lang.choose("volta", "back")),
+                ("Tab", app.lang.choose("painéis", "panels")),
+                ("F1/?", app.lang.choose("ajuda", "help")),
+                ("q", app.lang.choose("sai", "quit")),
+            ],
+            no_color,
         )
     } else if app.view == View::Query {
-        app.lang.choose(
-            " F1 ajuda • Tab foco • ←→ exemplos • Enter edita • F5 roda • q sai",
-            " F1 help • Tab focus • ←→ examples • Enter edit • F5 run • q quit",
+        shortcut_line(
+            &[
+                ("←→", app.lang.choose("exemplos", "examples")),
+                ("Enter", app.lang.choose("edita", "edit")),
+                ("F5", app.lang.choose("roda", "run")),
+                ("Tab", app.lang.choose("painéis", "panels")),
+                ("F1/?", app.lang.choose("ajuda", "help")),
+                ("q", app.lang.choose("sai", "quit")),
+            ],
+            no_color,
         )
     } else {
-        app.lang.choose(
-            " F1 ajuda • Tab foco • 1-4 páginas • ↑↓ seleciona • Enter abre • q sai",
-            " F1 help • Tab focus • 1-4 pages • ↑↓ select • Enter open • q quit",
+        shortcut_line(
+            &[
+                ("↑↓", app.lang.choose("escolhe", "select")),
+                ("Enter", app.lang.choose("detalhes", "details")),
+                ("Tab", app.lang.choose("painéis", "panels")),
+                ("F1/?", app.lang.choose("ajuda", "help")),
+                ("q", app.lang.choose("sai", "quit")),
+            ],
+            no_color,
         )
     };
     frame.render_widget(
-        Paragraph::new(vec![pages, Line::from(actions)]).style(style(PALE, no_color)),
+        Paragraph::new(vec![pages, actions]).style(style(PALE, no_color)),
         sections[2],
     );
     if app.help {
         help_overlay(frame, app, sections[1], no_color);
     }
+}
+
+fn shortcut_line(items: &[(&str, &str)], no_color: bool) -> Line<'static> {
+    Line::from(
+        items
+            .iter()
+            .flat_map(|(key, label)| {
+                [
+                    Span::styled(
+                        format!(" {key} "),
+                        style(GREEN, no_color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("{label} "), style(PALE, no_color)),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
@@ -313,7 +369,7 @@ fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
         View::Graph => (
             app.lang.choose("Explore os nós e suas conexões no exemplo.", "Explore nodes and their connections in the example."),
             app.lang.choose("Nós são entidades. Linhas são relações; * marca as selecionadas.\nC=Customer, O=Company, P=Project; ◆ marca o nó selecionado.", "Nodes are entities. Lines are relationships; * marks selected links.\nC=Customer, O=Company, P=Project; ◆ marks the selected node."),
-            app.lang.choose("Tab: foco no grafo. ↑↓: seleciona nó. Enter: explica o selecionado.", "Tab: focus graph. ↑↓: select node. Enter: explain selection."),
+            app.lang.choose("1-4: muda de tela. Tab: muda de painel. ↑↓: escolhe nó.\nEnter: abre detalhes. Esc: volta ao conteúdo.", "1-4: change view. Tab: change panel. ↑↓: select node.\nEnter: open details. Esc: return to content."),
         ),
         View::Query => (
             app.lang.choose("Experimente dois exemplos guiados de Cypher.", "Try two guided Cypher examples."),
@@ -323,12 +379,12 @@ fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
         View::Memory => (
             app.lang.choose("Entenda orçamentos e uso de memória.", "Understand memory budgets and usage."),
             app.lang.choose("Configurado é orçamento, não RAM reservada; usado é ilustrativo.\nCache guarda leituras e inclui memtables (buffers de escrita).\nRSS é memória física do processo; não some RSS e cache.", "Configured is a budget, not reserved RAM; used is illustrative.\nCache stores reads and includes memtables (write buffers).\nRSS is process resident memory; do not add RSS and cache."),
-            app.lang.choose("Tab: foco nos indicadores. ↑↓: escolhe indicador.\nEnter: abre explicação; ↑↓ no inspetor rola o texto.", "Tab: focus metrics. ↑↓: select metric.\nEnter: open explanation; ↑↓ in inspector scrolls text."),
+            app.lang.choose("↑↓: escolhe indicador. Tab: alterna para explicação.\nNo inspetor, ↑↓ rola o texto.", "↑↓: select metric. Tab: toggle explanation.\nIn the inspector, ↑↓ scrolls text."),
         ),
         View::Disk => (
             app.lang.choose("Veja para que serve cada arquivo do armazenamento.", "Learn what each storage file does."),
             app.lang.choose("WAL registra escritas; SST guarda dados ordenados em disco.\nMANIFEST registra as tabelas; CURRENT aponta ao manifesto ativo.\nMemtable → L0 → L1 → L2 mostra o fluxo ilustrativo da escrita.", "WAL records writes; SST stores sorted data on disk.\nMANIFEST tracks tables; CURRENT points to the active manifest.\nMemtable → L0 → L1 → L2 illustrates the storage write flow."),
-            app.lang.choose("Tab: foco nos arquivos. ↑↓: seleciona arquivo.\nEnter: explica arquivo; ↑↓ no inspetor rola o texto.", "Tab: focus files. ↑↓: select file.\nEnter: explain file; ↑↓ in inspector scrolls text."),
+            app.lang.choose("↑↓: escolhe arquivo. Tab: alterna para explicação.\nNo inspetor, ↑↓ rola o texto.", "↑↓: select file. Tab: toggle explanation.\nIn the inspector, ↑↓ scrolls text."),
         ),
     };
     let mut lines = Vec::new();
@@ -352,8 +408,8 @@ fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
         "DEMO: synthetic data; does not change files or configuration.",
     )));
     let title = format!(
-        " {} / {} • F1/Esc {} ",
-        app.lang.choose("Ajuda", "Help"),
+        " {} / {} • F1/?/Esc {} ",
+        app.lang.choose("Guia rápido", "Quick guide"),
         app.view.display(app.lang),
         app.lang.choose("fecha", "close")
     );
@@ -602,8 +658,8 @@ fn disk(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
                 "Memtables / WAL / Compaction"
             ),
             app.lang.choose(
-                "SINTÉTICO • arquivos ilustrativos. F1 explica; Tab, ↑↓ rola.",
-                "SYNTHETIC • illustrative files. F1 explains; Tab, ↑↓ scroll."
+                "SINTÉTICO • arquivos ilustrativos. F1 ou ? explica; Tab, ↑↓ rola.",
+                "SYNTHETIC • illustrative files. F1 or ? explains; Tab, ↑↓ scroll."
             )
         );
         frame.render_widget(
@@ -842,5 +898,60 @@ fn file_type(i: usize, lang: Language) -> &'static str {
         ][i]
     } else {
         FILE_TYPES[i]
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn compact_demo_footer_keeps_contextual_actions_visible() {
+        for lang in [Language::En, Language::PtBr] {
+            for view in [View::Graph, View::Query, View::Memory, View::Disk] {
+                for focus in [Focus::Main, Focus::Inspector] {
+                    let mut app = App::new(lang, view);
+                    app.focus = focus;
+                    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+                    terminal.draw(|frame| render(frame, &app, true)).unwrap();
+                    let buffer = terminal.backend().buffer();
+                    let footer = (0..80)
+                        .map(|x| buffer[(x, 23)].symbol())
+                        .collect::<String>();
+                    for action in ["F1", "Tab", lang.choose("q sai", "q quit")] {
+                        assert!(footer.contains(action), "missing {action}: {footer}");
+                    }
+                    if focus == Focus::Inspector {
+                        assert!(footer.contains(lang.choose("Esc volta", "Esc back")));
+                    }
+                    if view == View::Query && focus == Focus::Main {
+                        assert!(footer.contains(lang.choose("F5 roda", "F5 run")));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn editing_keeps_question_mark_as_text_and_shows_f1_help() {
+        for lang in [Language::En, Language::PtBr] {
+            let mut app = App::new(lang, View::Query);
+            app.handle(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            app.handle(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+            assert!(app.query.ends_with('?'));
+
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| render(frame, &app, true)).unwrap();
+            let screen = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(screen.contains("F1"));
+            assert!(!screen.contains("F1/?"));
+        }
     }
 }

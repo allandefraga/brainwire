@@ -34,6 +34,37 @@ access for compatibility; use it only for deliberately unrestricted services.
 Explicit `null` is rejected. An explicit empty object is a deny-by-default
 policy, and omitted ACL metadata makes ordinary nodes invisible to it.
 
+For dynamic per-caller filtering, configure a separate service principal with
+`"visibility_delegate": true` and no `node_visibility`. The trusted backend
+must attach `brainwire_visibility` to **every** read transaction using the
+caller identity it resolved from its own authenticated session. For example,
+the Neo4j Python driver accepts Bolt transaction metadata as `metadata=`:
+
+```python
+from neo4j import unit_of_work
+
+@unit_of_work(metadata={"brainwire_visibility": {
+    "principals": ["user:zendesk-main:alice"],
+    "allowed_connectors": ["zendesk-main"],
+    "open_connectors": [],
+    "entry_strict": True,
+    "knowledge_grants": [],
+}})
+def read_tickets(tx):
+    return [record.data() for record in tx.run(
+        "MATCH (t:Ticket) RETURN t.entity_id LIMIT 20"
+    )]
+
+with driver.session(database="tickets") as session:
+    records = session.execute_read(read_tickets)
+```
+
+Missing or malformed metadata is denied, including for autocommit and explicit
+transactions. Do not forward caller-supplied visibility claims directly from an
+untrusted client; the application backend must derive them from its own trusted
+identity/ACL source. Use a separate unrestricted writer/admin identity for
+ingestion and ACL stamping.
+
 ## Visibility rules
 
 The implementation follows the inspected external application `AclPredicate` composition:

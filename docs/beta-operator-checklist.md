@@ -3,7 +3,7 @@
 Use this checklist with the [protected quickstart](mvp-quickstart.md),
 [protected transport qualification](benchmarks/2026-10-13-beta.md) and
 [ACL/incremental candidate qualification](benchmarks/2026-10-13-beta-acl.md) and
-[remaining gates](2026-10-pilot-roadmap.md). It is an operator rehearsal for a
+[remaining release gates](releasing.md). It is an operator rehearsal for a
 rebuildable shadow graph, not authorization to replace external application's production
 store. Every live-source/deployment step needs an explicit selected environment.
 

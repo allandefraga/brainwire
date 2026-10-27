@@ -13,12 +13,14 @@ brainwire serve
 To use a separate data directory or port, set `BRAINWIRE_SERVER_DATA_DIR` and
 `BRAINWIRE_SERVER_LISTEN`, or put them in `brainwire.toml` and pass `--config`.
 Container deployments must mount a retained volume at `server.data_dir` and
-set memory budgets appropriate to that container. The default listen address
-is loopback, so a container needs an explicit bind address such as
-`0.0.0.0:7687` plus network access controls. Authentication is optional; without
-`server.auth_file` the server runs unprotected. Native TLS remains unavailable;
-use the optional [single-host TLS proxy](protected-transport.md) or another
-qualified encrypted boundary for protected shared connections.
+set memory budgets appropriate to that container. The default listen address is loopback. A non-loopback listener now refuses to
+start without a valid `server.auth_file`, unless the operator explicitly passes
+`--allow-unauthenticated-remote`. That override is only for an isolated
+synthetic development network; do not use it for a customer or shared deployment.
+The bundled Compose demo sets it because its Bolt port is published on host
+loopback only. Protected Compose, Kubernetes and Swarm profiles use an auth file.
+Native TLS remains unavailable; use the optional [single-host TLS proxy](protected-transport.md)
+or another qualified encrypted boundary for protected shared connections.
 
 Development-mode example using the Neo4j Python driver on isolated loopback:
 
@@ -104,8 +106,8 @@ stopped.
 This is a single-node server. Kubernetes and Docker Swarm packaging are
 explicit deployment goals; durable volumes and restarts on either orchestrator
 come before multi-machine replication. Container orchestration alone does not
-replicate the graph. The [data and recovery design](design/2026-09-27-brainwire-data-and-recovery.md)
-defines the later replicated-cluster and failure acceptance criteria.
+replicate the graph. The [temporal data guide](temporal-data.md) describes the
+history model and its current limits.
 
 ## Connected ontology inspection
 
@@ -129,3 +131,10 @@ The [TLS proxy guide](protected-transport.md) qualifies strict Python certificat
 checks and pool reuse across the proxy's shorter 60-second idle timeout. Native
 SIGTERM drains open transactions for a bounded grace; see
 [termination recovery](termination-recovery.md).
+
+
+When using a container, do not copy the demo override into a shared deployment.
+Mount a valid policy through `server.auth_file` / `BRAINWIRE_SERVER_AUTH_FILE`
+and use the protected [Compose, Kubernetes or Swarm overlays](protected-containers.md).
+The server checks the actual bound address before opening RocksDB, so a failed
+security check does not initialize or modify a graph.
