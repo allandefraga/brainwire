@@ -58,7 +58,11 @@ pub fn run(explicit_config: Option<&Path>, cluster_config: Option<&Path>) -> Res
             let peer_listener = TcpListener::bind(&cluster.listen).await.map_err(|_| "cannot bind private peer listener")?;
             let (replica, databases) = crate::cluster::Replica::start(&loaded.config, cluster, peer_listener).await?;
             (Some(replica), databases)
-        } else { (None, Arc::new(Databases::open_all(&loaded.config)?)) };
+        } else {
+            let databases = Arc::new(Databases::open_all(&loaded.config)?);
+            databases.start_index_workers();
+            (None, databases)
+        };
         // Registered after the stores open, so a signal during recovery still
         // stops at once (crash-safe), and before the first accept.
         let stop = termination().map_err(|e| format!("cannot install signal handlers: {e}"))?;

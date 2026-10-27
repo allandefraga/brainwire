@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use brainwire_store::db::{Database, Resources, StoreConfig};
 
@@ -17,6 +19,34 @@ pub struct Databases {
     query_limits: brainwire_cypher::ExecutionLimits,
     query_pool: Arc<brainwire_cypher::QueryMemoryPool>,
     checkpoint_dir: Option<PathBuf>,
+    index_workers: AtomicBool,
+}
+
+/// Runs online index builds and drops of one database in bounded batches.
+/// The thread holds only a weak reference, so it ends when the store closes.
+fn spawn_index_worker(name: &str, db: &Arc<Database>) {
+    let weak = Arc::downgrade(db);
+    let owned = name.to_owned();
+    let spawned = std::thread::Builder::new()
+        .name(format!("index-{name}"))
+        .spawn(move || loop {
+            let Some(db) = weak.upgrade() else { return };
+            let pause = match db.index_step(brainwire_store::catalog::INDEX_BATCH) {
+                Ok(true) => None,
+                Ok(false) => Some(Duration::from_millis(200)),
+                Err(error) => {
+                    eprintln!("database {owned}: index job failed: {error}");
+                    Some(Duration::from_secs(5))
+                }
+            };
+            drop(db);
+            if let Some(pause) = pause {
+                std::thread::sleep(pause);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("database {name}: cannot start index worker: {error}");
+    }
 }
 
 pub(crate) fn valid_name(name: &str) -> bool {
@@ -75,6 +105,7 @@ impl Databases {
                     .map_err(|_| "memory.query exceeds platform address size")?,
             )),
             checkpoint_dir: config.server.checkpoint_dir.clone(),
+            index_workers: AtomicBool::new(false),
         };
         if !discover {
             return Ok(registry);
@@ -93,6 +124,20 @@ impl Databases {
         }
         registry.create(&config.server.default_database)?;
         Ok(registry)
+    }
+
+    /// Start background index jobs for every open and later created database.
+    /// Only a standalone server does this; offline commands leave jobs pending.
+    pub fn start_index_workers(&self) {
+        let databases = self
+            .databases
+            .lock()
+            .expect("database registry lock poisoned");
+        if !self.index_workers.swap(true, Ordering::SeqCst) {
+            for (name, db) in databases.iter() {
+                spawn_index_worker(name, db);
+            }
+        }
     }
 
     pub fn query_limits(&self) -> brainwire_cypher::ExecutionLimits {
@@ -147,6 +192,9 @@ impl Databases {
             Database::open(&path, &self.resources)
                 .map_err(|e| format!("cannot open database {name}: {e}"))?,
         );
+        if self.index_workers.load(Ordering::SeqCst) {
+            spawn_index_worker(name, &db);
+        }
         databases.insert(name.to_owned(), Arc::clone(&db));
         Ok(db)
     }

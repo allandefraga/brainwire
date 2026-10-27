@@ -129,10 +129,10 @@ pub(crate) fn render_at(
         .enumerate()
         .map(|(offset, index)| {
             let selected = start + offset == state.selected;
-            let status = if index.state == "scalar_equality_ready" {
-                lang.choose("PRONTO", "READY")
-            } else {
-                lang.choose("DECLARADO", "DECLARED")
+            let status = match index.state.as_str() {
+                "scalar_equality_ready" => lang.choose("PRONTO", "READY"),
+                "populating" => lang.choose("POPULANDO", "POPULATING"),
+                _ => lang.choose("DECLARADO", "DECLARED"),
             };
             Row::new(vec![
                 format!(

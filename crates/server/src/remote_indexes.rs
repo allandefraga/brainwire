@@ -82,7 +82,10 @@ fn decode_record(value: PackValue) -> Result<IndexSummary, String> {
     else {
         return Err("index row must contain three strings".into());
     };
-    if !matches!(state.as_str(), "scalar_equality_ready" | "declared_only") {
+    if !matches!(
+        state.as_str(),
+        "scalar_equality_ready" | "declared_only" | "populating"
+    ) {
         return Err("unknown index state".into());
     }
     Ok(IndexSummary {
