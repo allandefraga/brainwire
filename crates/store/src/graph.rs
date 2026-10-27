@@ -887,9 +887,10 @@ pub fn node_visible(
     node_visible_with_control(txn, catalog, id, policy, |_| Ok(()))
 }
 
-/// Reserve decoded-row and private-ACL work before decoding either borrowed
-/// storage value. Callback errors retain the caller's exact error type.
-/// Estimates cover decoded container growth, not allocator overhead or RSS.
+/// Check visibility without owning node properties when document grants are
+/// absent. Stored node bytes are still validated; private ACL allocation is
+/// admitted before decoding. Document grants retain the full-row path because
+/// their decision depends on `document_id`. Callback errors preserve their type.
 pub fn node_visible_with_control<E: From<GraphError> + From<StoreError>>(
     txn: &Txn,
     catalog: &Catalog,
@@ -897,10 +898,29 @@ pub fn node_visible_with_control<E: From<GraphError> + From<StoreError>>(
     policy: &ReadVisibility,
     mut control: impl FnMut(usize) -> Result<(), E>,
 ) -> Result<bool, E> {
-    Ok(
-        get_node_with_visibility_and_control(txn, catalog, id, policy, &mut control)?
-            .is_some_and(|(_, visible, _)| visible),
-    )
+    if policy.knowledge_grants.is_some() {
+        return Ok(
+            get_node_with_visibility_and_control(txn, catalog, id, policy, &mut control)?
+                .is_some_and(|(_, visible, _)| visible),
+        );
+    }
+    policy.validate().map_err(GraphError::from)?;
+    control(0)?;
+    let key = id.0.to_be_bytes();
+    txn.with_get(Cf::Node, &key, |node_bytes| {
+        let Some(node_bytes) = node_bytes else {
+            return Ok(false);
+        };
+        // Preserve corrupt-row failures without allocating an unused NodeRecord.
+        estimate_node_allocation(node_bytes)?;
+        txn.with_get(Cf::Acl, &key, |acl_bytes| {
+            if let Some(acl_bytes) = acl_bytes {
+                control(estimate_acl_allocation(acl_bytes)?)?;
+            }
+            let acl = acl_bytes.map(decode_node_acl).transpose()?;
+            Ok(policy.is_visible(acl.as_ref(), false))
+        })
+    })
 }
 
 /// Lists nodes of one type in partition zero by their encoded id order.
@@ -1670,6 +1690,257 @@ mod tests {
                 .unwrap();
         let cat = db.apply_ontology(&mapping).unwrap();
         (dir, res, db, cat)
+    }
+
+    fn visibility_fixture() -> (tempfile::TempDir, Resources, Database, Catalog, NodeId) {
+        let (dir, resources, db, catalog) = setup();
+        let mut seed = db.begin();
+        let id = merge_node(
+            &mut seed,
+            &catalog,
+            "Customer",
+            "visibility-large",
+            &BTreeMap::from([
+                ("payload".into(), Value::Str("x".repeat(1_048_576))),
+                ("document_id".into(), Value::Str("doc-1".into())),
+            ]),
+        )
+        .unwrap();
+        set_node_acl(
+            &mut seed,
+            id,
+            &NodeAcl {
+                allow: vec!["alice".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        seed.commit().unwrap();
+        (dir, resources, db, catalog, id)
+    }
+
+    #[test]
+    fn visibility_without_document_grants_does_not_allocate_the_node_payload() {
+        let (_dir, _resources, db, catalog, id) = visibility_fixture();
+        let txn = db.begin();
+        for (principal, expected) in [("alice", true), ("bob", false)] {
+            let mut charged = 0usize;
+            let policy = ReadVisibility {
+                principals: vec![principal.into()],
+                ..Default::default()
+            };
+            let visible =
+                node_visible_with_control::<GraphError>(&txn, &catalog, id, &policy, |bytes| {
+                    charged = charged.checked_add(bytes).unwrap();
+                    if charged > 16_384 {
+                        Err(GraphError::Catalog("synthetic allocation limit".into()))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .unwrap();
+            assert_eq!(visible, expected);
+            assert!(charged > 0 && charged < 16_384);
+        }
+        let error = node_visible_with_control::<GraphError>(
+            &txn,
+            &catalog,
+            id,
+            &ReadVisibility::default(),
+            |bytes| {
+                if bytes == 0 {
+                    Ok(())
+                } else {
+                    Err(GraphError::Catalog(
+                        "synthetic ACL admission refusal".into(),
+                    ))
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, GraphError::Catalog(ref text) if text == "synthetic ACL admission refusal")
+        );
+    }
+
+    #[test]
+    fn visibility_fast_path_preserves_corruption_missing_nodes_and_grants() {
+        let (_dir, _resources, db, catalog, id) = visibility_fixture();
+        let policy = ReadVisibility {
+            principals: vec!["alice".into()],
+            ..Default::default()
+        };
+        let mut txn = db.begin();
+        let mut with_grants = policy.clone();
+        with_grants.allow_all = true;
+        with_grants.knowledge_grants = Some(vec![]);
+        assert!(!node_visible(&txn, &catalog, id, &with_grants).unwrap());
+        let error =
+            node_visible_with_control::<GraphError>(&txn, &catalog, id, &with_grants, |bytes| {
+                if bytes > 16_384 {
+                    Err(GraphError::Catalog("full document admission".into()))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+        assert!(
+            matches!(error, GraphError::Catalog(ref text) if text == "full document admission")
+        );
+        for deny_all in [false, true] {
+            let mut check = policy.clone();
+            check.deny_all = deny_all;
+            txn.put(Cf::Node, node_key(id), vec![0]);
+            assert!(node_visible(&txn, &catalog, id, &check).is_err());
+        }
+        drop(txn);
+        let mut txn = db.begin();
+        txn.put(Cf::Acl, node_key(id), vec![1, b'{']);
+        for deny_all in [false, true] {
+            let mut check = policy.clone();
+            check.deny_all = deny_all;
+            assert!(node_visible(&txn, &catalog, id, &check).is_err());
+        }
+        txn.delete(Cf::Node, node_key(id));
+        assert!(!node_visible(&txn, &catalog, id, &policy).unwrap());
+        let invalid = ReadVisibility {
+            principals: vec![String::new()],
+            ..Default::default()
+        };
+        assert!(node_visible(&txn, &catalog, id, &invalid).is_err());
+    }
+
+    #[test]
+    fn visibility_only_matches_full_record_evaluation_for_policy_and_acl_variants() {
+        let (_dir, _resources, db, catalog, id) = visibility_fixture();
+        let grant = format!("knowledge-doc:{}", "a".repeat(64));
+        let policies = [
+            ReadVisibility::default(),
+            ReadVisibility {
+                allow_all: true,
+                ..Default::default()
+            },
+            ReadVisibility {
+                allow_all: true,
+                deny_all: true,
+                ..Default::default()
+            },
+            ReadVisibility {
+                principals: vec!["alice".into()],
+                ..Default::default()
+            },
+            ReadVisibility {
+                principals: vec!["alice".into()],
+                allowed_connectors: Some(vec!["c1".into()]),
+                entry_strict: true,
+                ..Default::default()
+            },
+            ReadVisibility {
+                principals: vec!["bob".into()],
+                allowed_connectors: Some(vec!["c1".into()]),
+                open_connectors: vec!["c1".into()],
+                ..Default::default()
+            },
+            ReadVisibility {
+                allow_all: true,
+                knowledge_grants: Some(vec![]),
+                ..Default::default()
+            },
+            ReadVisibility {
+                principals: vec!["alice".into()],
+                knowledge_grants: Some(vec![grant.clone()]),
+                ..Default::default()
+            },
+        ];
+        let acls = [
+            NodeAcl::default(),
+            NodeAcl {
+                allow: vec!["alice".into()],
+                ..Default::default()
+            },
+            NodeAcl {
+                allow: vec!["alice".into()],
+                deny: vec!["alice".into()],
+                ..Default::default()
+            },
+            NodeAcl {
+                allow: vec!["alice".into()],
+                connector_ids: vec!["c1".into()],
+                ..Default::default()
+            },
+            NodeAcl {
+                allow: vec![grant],
+                source_table: Some("doc_props__synthetic".into()),
+                ..Default::default()
+            },
+        ];
+        let mut txn = db.begin();
+        for acl in acls {
+            set_node_acl(&mut txn, id, &acl).unwrap();
+            for policy in &policies {
+                let expected = get_node_with_visibility_and_control::<GraphError>(
+                    &txn,
+                    &catalog,
+                    id,
+                    policy,
+                    |_| Ok(()),
+                )
+                .unwrap()
+                .unwrap()
+                .1;
+                assert_eq!(node_visible(&txn, &catalog, id, policy).unwrap(), expected);
+            }
+        }
+        txn.delete(Cf::Acl, node_key(id));
+        for policy in &policies {
+            let expected = get_node_with_visibility_and_control::<GraphError>(
+                &txn,
+                &catalog,
+                id,
+                policy,
+                |_| Ok(()),
+            )
+            .unwrap()
+            .unwrap()
+            .1;
+            assert_eq!(node_visible(&txn, &catalog, id, policy).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn visibility_fast_path_uses_transaction_snapshot_and_overlay() {
+        let (_dir, _resources, db, catalog, id) = visibility_fixture();
+        let alice = ReadVisibility {
+            principals: vec!["alice".into()],
+            ..Default::default()
+        };
+        let bob = ReadVisibility {
+            principals: vec!["bob".into()],
+            ..Default::default()
+        };
+        let snapshot = db.begin();
+        let mut writer = db.begin();
+        set_node_acl(
+            &mut writer,
+            id,
+            &NodeAcl {
+                allow: vec!["bob".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!node_visible(&writer, &catalog, id, &alice).unwrap());
+        assert!(node_visible(&writer, &catalog, id, &bob).unwrap());
+        assert!(node_visible(&snapshot, &catalog, id, &alice).unwrap());
+        writer.commit().unwrap();
+        assert!(node_visible(&snapshot, &catalog, id, &alice).unwrap());
+        assert!(!node_visible(&snapshot, &catalog, id, &bob).unwrap());
+        let mut deleted = db.begin();
+        assert!(node_visible(&deleted, &catalog, id, &bob).unwrap());
+        detach_delete(&mut deleted, id).unwrap();
+        assert!(!node_visible(&deleted, &catalog, id, &bob).unwrap());
+        drop(deleted);
+        assert!(node_visible(&db.begin(), &catalog, id, &bob).unwrap());
     }
 
     #[test]

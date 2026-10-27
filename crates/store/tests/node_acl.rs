@@ -242,7 +242,7 @@ fn visibility_filter_keeps_dangling_corruption_detection_and_control_errors() {
 }
 
 #[test]
-fn visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_callback_error() {
+fn visibility_precharges_acl_and_full_record_paths_keep_node_guards() {
     let (_dir, _resources, db, catalog) = setup();
     let mut tx = db.begin();
     let node = graph::merge_node(
@@ -264,6 +264,8 @@ fn visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_cal
             + identity_len
             + std::mem::size_of::<graph::NodeRecord>()
             + raw_len;
+    let raw_acl = tx.get(Cf::Acl, &node.0.to_be_bytes()).unwrap().unwrap();
+    let acl_estimate = raw_acl.len() * 32 + 1024;
     let mut attempts = Vec::new();
     let error = graph::node_visible_with_control::<graph::GraphError>(
         &tx,
@@ -281,6 +283,55 @@ fn visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_cal
     )
     .unwrap_err();
     assert!(matches!(error,graph::GraphError::UnknownLabel(ref value) if value=="guard sentinel"));
+    assert_eq!(attempts, vec![0, acl_estimate]);
+    assert!(acl_estimate < node_estimate);
+    // APIs returning an owned node still reserve before decoding it.
+    let mut attempts = Vec::new();
+    let error = graph::get_node_with_visibility_and_control::<graph::GraphError>(
+        &tx,
+        &catalog,
+        node,
+        &policy(),
+        |bytes| {
+            attempts.push(bytes);
+            if bytes > 0 {
+                Err(graph::GraphError::UnknownLabel(
+                    "node guard sentinel".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error,graph::GraphError::UnknownLabel(ref value) if value=="node guard sentinel")
+    );
+    assert_eq!(attempts, vec![0, node_estimate]);
+    let mut document_policy = policy();
+    document_policy.knowledge_grants = Some(vec![]);
+    let mut attempts = Vec::new();
+    let error = graph::node_visible_with_control::<graph::GraphError>(
+        &tx,
+        &catalog,
+        node,
+        &document_policy,
+        |bytes| {
+            attempts.push(bytes);
+            if bytes > 0 {
+                Err(graph::GraphError::UnknownLabel(
+                    "document guard sentinel".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error,graph::GraphError::UnknownLabel(ref value) if value=="document guard sentinel")
+    );
     assert_eq!(attempts, vec![0, node_estimate]);
     assert_eq!(
         graph::node_visible_with_control::<graph::GraphError>(
@@ -312,7 +363,7 @@ fn visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_cal
             if bytes > 0 {
                 positive_calls += 1;
             }
-            if positive_calls == 2 {
+            if positive_calls == 1 {
                 Err(graph::GraphError::UnknownLabel("ACL guard sentinel".into()))
             } else {
                 Ok(())
@@ -323,7 +374,8 @@ fn visibility_precharges_borrowed_node_and_acl_before_decoding_and_preserves_cal
     assert!(
         matches!(error,graph::GraphError::UnknownLabel(ref value) if value=="ACL guard sentinel")
     );
-    assert_eq!(charged, node_estimate + raw_acl.len() * 32 + 1024);
+    assert_eq!(positive_calls, 1);
+    assert_eq!(charged, raw_acl.len() * 32 + 1024);
     assert!(graph::node_visible(&tx, &catalog, node, &policy()).is_err());
 }
 
@@ -355,7 +407,7 @@ fn null_heavy_node_and_acl_private_error_are_guarded_without_secret_leak() {
         graph::get_node_with_control::<graph::GraphError>(&tx, node, guard),
         Err(graph::GraphError::UnknownLabel(_))
     ));
-    let error = graph::node_visible_with_control::<graph::GraphError>(
+    let visible = graph::node_visible_with_control::<graph::GraphError>(
         &tx,
         &catalog,
         node,
@@ -365,20 +417,49 @@ fn null_heavy_node_and_acl_private_error_are_guarded_without_secret_leak() {
             guard(bytes)
         },
     )
-    .unwrap_err();
-    assert!(matches!(error, graph::GraphError::UnknownLabel(_)));
-    assert!(largest >= 4096 * std::mem::size_of::<Value>());
+    .unwrap();
+    assert!(!visible);
+    assert_eq!(largest, 0); // No ACL exists and visibility does not own the payload.
+    assert!(matches!(
+        graph::get_node_with_visibility_and_control::<graph::GraphError>(
+            &tx,
+            &catalog,
+            node,
+            &policy(),
+            guard,
+        ),
+        Err(graph::GraphError::UnknownLabel(_))
+    ));
+    assert!(matches!(
+        graph::node_field_with_control::<graph::GraphError>(&tx, node, None, "body", guard),
+        Err(graph::GraphError::UnknownLabel(_))
+    ));
+    let mut document_policy = policy();
+    document_policy.knowledge_grants = Some(vec![]);
+    assert!(matches!(
+        graph::node_visible_with_control::<graph::GraphError>(
+            &tx,
+            &catalog,
+            node,
+            &document_policy,
+            guard,
+        ),
+        Err(graph::GraphError::UnknownLabel(_))
+    ));
     drop(tx);
     let mut broken = db.begin();
     let mut bytes = vec![1];
     bytes.extend_from_slice(br#"{"allow":"private-principal-secret"}"#);
     broken.put(Cf::Acl, node.0.to_be_bytes().to_vec(), bytes);
     broken.commit().unwrap();
-    let error = graph::get_node_acl(&db.begin(), node)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("invalid private node ACL encoding"));
-    assert!(!error.contains("private-principal-secret"));
+    for error in [
+        graph::get_node_acl(&db.begin(), node).unwrap_err(),
+        graph::node_visible(&db.begin(), &catalog, node, &policy()).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        assert!(error.contains("invalid private node ACL encoding"));
+        assert!(!error.contains("private-principal-secret"));
+    }
 }
 
 #[test]

@@ -384,7 +384,7 @@ fn authoritative_document_grants_override_allow_all_when_actual_document_id_is_p
 }
 
 #[test]
-fn large_hidden_rows_are_precharged_before_decode_and_release_query_pool_on_rejection() {
+fn hidden_payload_is_not_decoded_for_visibility_only_reads() {
     use brainwire_cypher::{ExecutionLimits, QueryMemoryPool};
     use std::sync::Arc;
     let (_dir, db) = setup();
@@ -399,43 +399,30 @@ fn large_hidden_rows_are_precharged_before_decode_and_release_query_pool_on_reje
     let mut small = QueryTransaction::begin_with_limits(
         &db,
         ExecutionLimits {
-            memory_bytes: 4096,
+            memory_bytes: 8192,
             timeout: None,
         },
     )
     .unwrap()
     .with_read_visibility(policy())
     .unwrap();
-    assert!(matches!(
-        small.run(query, &BTreeMap::new()),
-        Err(ExecError::MemoryLimit { .. })
-    ));
-    assert_eq!(small.state(), QueryTransactionState::Failed);
+    assert!(small.run(query, &BTreeMap::new()).unwrap().rows.is_empty());
+    assert_eq!(small.commit().unwrap(), None);
     let pool = Arc::new(QueryMemoryPool::new(8192));
     let mut pooled =
         QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
             .unwrap()
             .with_read_visibility(policy())
             .unwrap();
-    let error = pooled.run(query, &BTreeMap::new()).unwrap_err();
-    assert!(
-        matches!(error,ExecError::MemoryPoolExhausted{requested,..} if requested>16_384),
-        "{error:?}"
-    );
-    assert_eq!(pool.usage().reserved_bytes, 0);
-    assert_eq!(pool.usage().rejections, 1);
-    let mut reuse =
-        QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
-            .unwrap()
-            .with_read_visibility(policy())
-            .unwrap();
-    reuse.run("RETURN 1", &BTreeMap::new()).unwrap();
-    reuse.commit().unwrap();
+    assert!(pooled.run(query, &BTreeMap::new()).unwrap().rows.is_empty());
+    assert!(pool.usage().peak_bytes <= 8192);
+    assert_eq!(pool.usage().rejections, 0);
+    assert_eq!(pooled.commit().unwrap(), None);
     assert_eq!(pool.usage().reserved_bytes, 0);
 }
 
 #[test]
-fn null_heavy_hidden_and_visible_lists_use_decoded_estimates_before_allocation() {
+fn null_heavy_payloads_are_guarded_only_when_the_read_needs_them() {
     use brainwire_cypher::{ExecutionLimits, QueryMemoryPool};
     use std::sync::Arc;
     let (_dir, db) = setup();
@@ -449,64 +436,89 @@ fn null_heavy_hidden_and_visible_lists_use_decoded_estimates_before_allocation()
         .unwrap();
         stamp(&db, id, vec![principal], vec![]);
     }
-    // Without a policy only the requested property is decoded, so the large
-    // payload never reaches the guard.
-    let unrestricted = brainwire_cypher::execute_with_limits(
-        &db,
-        "MATCH (n:Doc {entity_id:'null-visible'}) RETURN n.entity_id",
-        &BTreeMap::new(),
-        ExecutionLimits {
-            memory_bytes: 48 * 1024,
-            timeout: None,
-        },
-    );
-    assert!(unrestricted.is_ok(), "{unrestricted:?}");
-    for (id, restricted_policy) in [("null-visible", true), ("null-hidden", true)] {
+    for (id, expected) in [
+        ("null-visible", vec![vec![string("null-visible")]]),
+        ("null-hidden", vec![]),
+    ] {
         let query = format!("MATCH (n:Doc {{entity_id:'{id}'}}) RETURN n.entity_id");
-        let mut transaction = QueryTransaction::begin_with_limits(
+        let mut tx = QueryTransaction::begin_with_limits(
             &db,
             ExecutionLimits {
                 memory_bytes: 48 * 1024,
                 timeout: None,
             },
         )
+        .unwrap()
+        .with_read_visibility(policy())
         .unwrap();
-        if restricted_policy {
-            transaction = transaction.with_read_visibility(policy()).unwrap();
-        }
-        assert!(
-            matches!(
-                transaction.run(&query, &BTreeMap::new()),
-                Err(ExecError::MemoryLimit { .. })
-            ),
-            "{id} restricted={restricted_policy}"
-        );
-        assert_eq!(transaction.state(), QueryTransactionState::Failed);
+        assert_eq!(tx.run(&query, &BTreeMap::new()).unwrap().rows, expected);
+        assert_eq!(tx.commit().unwrap(), None);
         let pool = Arc::new(QueryMemoryPool::new(48 * 1024));
-        let mut transaction =
+        let mut tx =
             QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap()
+                .with_read_visibility(policy())
                 .unwrap();
-        if restricted_policy {
-            transaction = transaction.with_read_visibility(policy()).unwrap();
-        }
-        let error = transaction.run(&query, &BTreeMap::new()).unwrap_err();
-        assert!(
-            matches!(error,ExecError::MemoryPoolExhausted{requested,..} if requested>48*1024),
-            "{error:?}"
-        );
+        assert_eq!(tx.run(&query, &BTreeMap::new()).unwrap().rows, expected);
+        assert_eq!(tx.commit().unwrap(), None);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+        assert_eq!(pool.usage().rejections, 0);
+    }
+    // Owning the visible payload or whole record still requires predecode admission.
+    for result in ["n.payload", "n"] {
+        let query = format!("MATCH (n:Doc {{entity_id:'null-visible'}}) RETURN {result}");
+        let mut tx = QueryTransaction::begin_with_limits(
+            &db,
+            ExecutionLimits {
+                memory_bytes: 48 * 1024,
+                timeout: None,
+            },
+        )
+        .unwrap()
+        .with_read_visibility(policy())
+        .unwrap();
+        assert!(matches!(
+            tx.run(&query, &BTreeMap::new()),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+        assert_eq!(tx.state(), QueryTransactionState::Failed);
+        let pool = Arc::new(QueryMemoryPool::new(48 * 1024));
+        let mut tx =
+            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
+                .unwrap()
+                .with_read_visibility(policy())
+                .unwrap();
+        assert!(matches!(
+            tx.run(&query, &BTreeMap::new()),
+            Err(ExecError::MemoryPoolExhausted { .. })
+        ));
         assert_eq!(pool.usage().reserved_bytes, 0);
         assert_eq!(pool.usage().rejections, 1);
-        let mut reuse =
-            QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), Arc::clone(&pool))
-                .unwrap();
-        reuse.run("RETURN 1", &BTreeMap::new()).unwrap();
-        reuse.rollback();
-        assert_eq!(pool.usage().reserved_bytes, 0);
     }
+    // Some(empty) remains authoritative and retains the guarded document path.
+    let mut grants = policy();
+    grants.knowledge_grants = Some(vec![]);
+    let mut tx = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 48 * 1024,
+            timeout: None,
+        },
+    )
+    .unwrap()
+    .with_read_visibility(grants)
+    .unwrap();
+    assert!(matches!(
+        tx.run(
+            "MATCH (n:Doc {entity_id:'null-visible'}) RETURN n.entity_id",
+            &BTreeMap::new()
+        ),
+        Err(ExecError::MemoryLimit { .. })
+    ));
 }
 
 #[test]
-fn acl_stamp_of_null_heavy_node_fits_metadata_budget_without_decoding_its_payload() {
+fn acl_stamp_and_identity_read_do_not_decode_null_heavy_payloads() {
     use brainwire_cypher::ExecutionLimits;
     let (_dir, db) = setup();
     let catalog = db.catalog().unwrap().unwrap();
@@ -530,8 +542,7 @@ fn acl_stamp_of_null_heavy_node_fits_metadata_budget_without_decoding_its_payloa
     .unwrap();
     let result = admin.run_with_access(
         "CALL db.setNodeAcl({label:'Doc',entityId:'stamp-null-heavy',allow:['alice']}) YIELD updated RETURN updated",
-        &BTreeMap::new(),
-        QueryAccess { write: true, instance_admin: true },
+        &BTreeMap::new(), QueryAccess { write: true, instance_admin: true },
     ).unwrap();
     assert_eq!(result.rows, vec![vec![Out::Value(Value::Bool(true))]]);
     assert!(admin.commit().unwrap().is_some());
@@ -545,15 +556,17 @@ fn acl_stamp_of_null_heavy_node_fits_metadata_budget_without_decoding_its_payloa
     .unwrap()
     .with_read_visibility(policy())
     .unwrap();
-    assert!(matches!(
-        reader.run(
-            "MATCH (n:Doc {entity_id:'stamp-null-heavy'}) RETURN n.entity_id",
-            &BTreeMap::new(),
-        ),
-        Err(ExecError::MemoryLimit { .. })
-    ));
-    // Functional budgets complement inspection of the store setter's nonallocating path.
-    assert_eq!(reader.state(), QueryTransactionState::Failed);
+    assert_eq!(
+        reader
+            .run(
+                "MATCH (n:Doc {entity_id:'stamp-null-heavy'}) RETURN n.entity_id",
+                &BTreeMap::new()
+            )
+            .unwrap()
+            .rows,
+        vec![vec![string("stamp-null-heavy")]]
+    );
+    assert_eq!(reader.commit().unwrap(), None);
 }
 
 #[test]
