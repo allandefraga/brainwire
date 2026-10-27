@@ -1,8 +1,9 @@
 //! Private, bounded node ACL metadata and read-visibility policy evaluation.
 use serde::{Deserialize, Serialize};
 
-pub const MAX_ACL_BYTES: usize = 64 * 1024;
-const MAX_ITEMS: usize = 256;
+/// Five lists of 5000 entries of 256 bytes each (plus JSON quoting/commas) fit with headroom.
+pub const MAX_ACL_BYTES: usize = 8 * 1024 * 1024;
+const MAX_ITEMS: usize = 5000;
 const MAX_TEXT_BYTES: usize = 256;
 const GRANT_PREFIX: &str = "knowledge-doc:";
 
@@ -30,9 +31,9 @@ pub struct ReadVisibility {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AclError {
-    #[error("ACL lists require at most 256 nonempty strings of at most 256 bytes")]
+    #[error("ACL lists require at most 5000 nonempty strings of at most 256 bytes")]
     InvalidList,
-    #[error("encoded ACL exceeds 64 KiB")]
+    #[error("encoded ACL exceeds 8 MiB")]
     TooLarge,
     #[error("knowledge grants require knowledge-doc: followed by 64 lowercase hex characters")]
     InvalidGrant,
@@ -61,7 +62,17 @@ fn document_source(value: &str) -> bool {
     value.starts_with("doc_props__") || value.starts_with("clean/doc_props__")
 }
 fn overlap(left: &[String], right: &[String]) -> bool {
-    left.iter().any(|item| right.contains(item))
+    let (small, large) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    if small.len() <= 8 {
+        return small.iter().any(|item| large.contains(item));
+    }
+    // Large lists: one hash set instead of a quadratic scan.
+    let set: std::collections::HashSet<&str> = large.iter().map(String::as_str).collect();
+    small.iter().any(|item| set.contains(item.as_str()))
 }
 
 impl NodeAcl {
@@ -221,7 +232,7 @@ mod tests {
     fn private_metadata_and_policy_validation_are_bounded_and_strict() {
         assert!(NodeAcl::default().validate().is_ok());
         assert!(NodeAcl {
-            allow: vec!["x".into(); 257],
+            allow: vec!["x".into(); 5001],
             ..NodeAcl::default()
         }
         .validate()
@@ -233,11 +244,43 @@ mod tests {
         .validate()
         .is_err());
         assert!(NodeAcl {
-            allow: vec!["x".repeat(256); 256],
+            allow: vec!["x".into(); 5000],
             ..NodeAcl::default()
         }
         .validate()
-        .is_err());
+        .is_ok());
+        // Five full lists of 5000 maximal entries still encode within the cap.
+        assert!(NodeAcl {
+            allow: vec!["x".repeat(256); 5000],
+            deny: vec!["y".repeat(256); 5000],
+            connector_ids: vec!["z".repeat(256); 5000],
+            sources: vec!["w".repeat(256); 5000],
+            source_table: Some("t".repeat(256)),
+        }
+        .validate()
+        .is_ok());
+        let big = ReadVisibility {
+            principals: vec!["u".into()],
+            ..ReadVisibility::default()
+        };
+        let mut allow: Vec<String> = (0..5000).map(|i| format!("p{i}")).collect();
+        allow[0] = "first".into();
+        allow[4999] = "last".into();
+        let acl = NodeAcl {
+            allow,
+            ..NodeAcl::default()
+        };
+        assert!(!big.is_visible(Some(&acl), false));
+        for who in ["first", "last"] {
+            let policy = ReadVisibility {
+                principals: (0..20)
+                    .map(|i| format!("n{i}"))
+                    .chain([who.to_string()])
+                    .collect(),
+                ..ReadVisibility::default()
+            };
+            assert!(policy.is_visible(Some(&acl), false));
+        }
         assert!(serde_json::from_str::<NodeAcl>(r#"{"document_id":"fake"}"#).is_err());
         assert!(serde_json::from_str::<ReadVisibility>(r#"{"fake":true}"#).is_err());
         assert!(ReadVisibility {

@@ -298,7 +298,7 @@ fn stamp_requires_both_privileges_validates_whole_metadata_and_is_transactional(
         &BTreeMap::new()).is_err());
     let too_many = BTreeMap::from([(
         "allow".into(),
-        Value::List((0..257).map(|_| Value::Str("alice".into())).collect()),
+        Value::List((0..5001).map(|_| Value::Str("alice".into())).collect()),
     )]);
     assert!(execute(&db,
         "CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:$allow}) YIELD updated RETURN updated LIMIT 0",
@@ -724,4 +724,58 @@ fn an_administrator_reads_back_node_acls_and_a_restricted_reader_cannot() {
         Err(ExecError::Forbidden(_))
     ));
     assert!(restricted(&db, READ).is_err());
+}
+
+#[test]
+fn acl_lists_of_5000_entries_round_trip_and_5001_are_rejected() {
+    let (_dir, db) = setup();
+    let grants = |n: usize| -> Vec<String> { (0..n).map(|i| format!("principal-{i}")).collect() };
+    let set = |n: usize| {
+        let params = BTreeMap::from([(
+            "allow".into(),
+            Value::List(grants(n).into_iter().map(Value::Str).collect()),
+        )]);
+        execute(&db, "CALL db.setNodeAcl({label:'Doc',entityId:'hidden',allow:$allow}) YIELD updated RETURN updated", &params)
+    };
+    let error = set(5001).unwrap_err().to_string();
+    assert!(error.contains("at most 5000"), "{error}");
+    set(5000).unwrap();
+    let refs = BTreeMap::from([(
+        "refs".into(),
+        Value::List(vec![Value::Map(BTreeMap::from([
+            ("label".into(), Value::Str("Doc".into())),
+            ("entityId".into(), Value::Str("hidden".into())),
+        ]))]),
+    )]);
+    let rows = execute(
+        &db,
+        "CALL db.nodeAcls($refs) YIELD allow RETURN allow",
+        &refs,
+    )
+    .unwrap()
+    .rows;
+    let Out::Value(Value::List(stored)) = &rows[0][0] else {
+        panic!("allow is a list")
+    };
+    assert_eq!(stored.len(), 5000);
+    for who in ["principal-0", "principal-4999"] {
+        let mut tx = QueryTransaction::begin(&db)
+            .unwrap()
+            .with_read_visibility(ReadVisibility {
+                principals: vec![who.into()],
+                ..Default::default()
+            })
+            .unwrap();
+        let out = tx
+            .run_with_access(
+                "MATCH (n:Doc) RETURN n.entity_id",
+                &BTreeMap::new(),
+                QueryAccess {
+                    write: false,
+                    instance_admin: false,
+                },
+            )
+            .unwrap();
+        assert_eq!(out.rows, vec![vec![string("hidden")]]);
+    }
 }

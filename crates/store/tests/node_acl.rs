@@ -88,7 +88,7 @@ fn actual_document_property_activates_exclusive_grants_and_invalid_stamps_do_not
     };
     assert!(!graph::node_visible(&tx, &catalog, node, &restricted).unwrap());
     let invalid = NodeAcl {
-        allow: vec!["x".into(); 257],
+        allow: vec!["x".into(); 5001],
         ..NodeAcl::default()
     };
     assert!(graph::set_node_acl(&mut tx, node, &invalid).is_err());

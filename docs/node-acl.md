@@ -51,8 +51,8 @@ The implementation follows the inspected external application `AclPredicate` com
   `ENTRY AND (OPEN OR row_acl)` rule, including its OPEN precedence.
 
 Comparisons are exact; canonicalization belongs to the trusted claim/stamp
-producer. Lists cap at 256 nonempty strings of at most 256 UTF-8 bytes; node ACL
-encoding caps at 64 KiB. Knowledge grant syntax is `knowledge-doc:` plus 64
+producer. Lists cap at 5000 nonempty strings of at most 256 UTF-8 bytes; node ACL
+encoding caps at 8 MiB. Knowledge grant syntax is `knowledge-doc:` plus 64
 lowercase hex characters. external application's larger grant limits are not yet supported;
 oversized claims fail closed.
 
