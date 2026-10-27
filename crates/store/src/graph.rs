@@ -1057,6 +1057,66 @@ pub fn visit_nodes_of_type_with_values<E: From<GraphError> + From<StoreError>>(
     )
 }
 
+/// Exclusive upper bound of the node sequences allocated for a type.
+pub fn node_seq_bound(txn: &Txn, ty: TypeId) -> Result<u64, StoreError> {
+    Ok(
+        match txn.get(Cf::Meta, &crate::alloc::node_counter_key(ty))? {
+            Some(bytes) => u64::from_be_bytes(
+                bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| StoreError::Corrupt("id counter".into()))?,
+            ),
+            None => 0,
+        },
+    )
+}
+
+/// Stream the nodes with ids in `[lo, hi)` together with their stored values.
+pub fn visit_nodes_in_range_with_values<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    lo: NodeId,
+    hi: NodeId,
+    mut visit: impl FnMut(NodeId, &[u8]) -> Result<(), E>,
+) -> Result<(), E> {
+    txn.visit_range::<E>(
+        Cf::Node,
+        &lo.0.to_be_bytes(),
+        &hi.0.to_be_bytes(),
+        |key, value| visit(node_id_value(key).map_err(GraphError::from)?, value),
+    )
+}
+
+/// [`visit_edges_of_label`] restricted to owner ids in `[lo, hi)`.
+pub fn visit_edges_in_range<E: From<GraphError> + From<StoreError>>(
+    txn: &Txn,
+    cf: Cf,
+    lo: NodeId,
+    hi: NodeId,
+    edge_types: &[EdgeTypeId],
+    mut visit: impl FnMut(NodeId, EdgeRef) -> Result<(), E>,
+) -> Result<(), E> {
+    if !matches!(cf, Cf::Out | Cf::In) {
+        return Err(
+            StoreError::Corrupt("adjacency requires out or in column family".into()).into(),
+        );
+    }
+    txn.visit_range::<E>(cf, &lo.0.to_be_bytes(), &hi.0.to_be_bytes(), |key, _| {
+        let (owner, edge_type, other, id) = decode_edge_key(key).map_err(GraphError::from)?;
+        if edge_types.is_empty() || edge_types.contains(&edge_type) {
+            visit(
+                owner,
+                EdgeRef {
+                    edge_type,
+                    other,
+                    id,
+                },
+            )?;
+        }
+        Ok(())
+    })
+}
+
 pub fn node_exists(txn: &Txn, id: NodeId) -> Result<bool, StoreError> {
     txn.with_get(Cf::Node, &id.0.to_be_bytes(), |bytes| Ok(bytes.is_some()))
 }

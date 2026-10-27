@@ -128,6 +128,7 @@ fn env_ctx<'t, 'db>(env: &'t Env<'_>, txn: &'t Txn<'db>) -> Context<'t, 'db> {
         vars: env.vars,
         cache: None,
         param_vals: Some(env.param_vals),
+        partition: None,
     }
 }
 

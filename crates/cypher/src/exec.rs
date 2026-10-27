@@ -11,6 +11,7 @@ mod eval;
 use budget::Budget;
 pub use budget::{ExecutionLimits, QueryMemoryPool, QueryMemoryUsage};
 mod graph;
+mod parallel;
 mod plan;
 mod procedures;
 mod run;
@@ -164,6 +165,8 @@ struct Context<'a, 'db> {
     cache: Option<&'a NodeCache>,
     /// Parameters converted once per query.
     param_vals: Option<&'a BTreeMap<String, val::Val>>,
+    /// A parallel worker's share of one label scan: (anchor slot, lo, hi).
+    partition: Option<(usize, NodeId, NodeId)>,
 }
 
 /// Lets property reads reuse the value a label scan already holds.
@@ -680,6 +683,7 @@ fn execute_clauses(
             vars: &empty,
             cache: None,
             param_vals: None,
+            partition: None,
         },
     )?;
     let param_vals = params

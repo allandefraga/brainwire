@@ -528,3 +528,37 @@ fn unwind_merge_set_upserts_in_one_write_and_keeps_set_semantics() {
         vec![vec![v(10)]]
     );
 }
+
+#[test]
+fn large_label_scans_split_across_workers_match_sequential_results() {
+    let (_dir, db) = setup();
+    // Above the parallel threshold (50k), in batches.
+    for start in (0..60_000).step_by(10_000) {
+        run(&db, &format!("UNWIND range({start}, {}) AS i CREATE (:Car {{entity_id: 'bulk' + i, brand: ['A', 'B', 'C'][i % 3], year: i % 7}})", start + 9_999));
+    }
+    run(&db, "MATCH (p:Person {entity_id: 'ana'}), (c:Car) WHERE c.year = 6 AND c.entity_id STARTS WITH 'bulk' MERGE (p)-[:OWNS]->(c)");
+    assert_eq!(
+        run(&db, "MATCH (c:Car) WHERE c.entity_id STARTS WITH 'bulk' RETURN c.brand AS b, count(*) AS n, sum(c.year) AS s, min(c.year) AS lo, max(c.year) AS hi ORDER BY b"),
+        vec![
+            vec![v("A"), v(20_000), v(59_997), v(0), v(6)],
+            vec![v("B"), v(20_000), v(59_998), v(0), v(6)],
+            vec![v("C"), v(20_000), v(59_999), v(0), v(6)]
+        ]
+    );
+    assert_eq!(
+        run(&db, "MATCH (c:Car) WHERE c.year < 100 RETURN c.entity_id AS id ORDER BY c.year DESC, id LIMIT 2"),
+        vec![vec![v("bulk1000")], vec![v("bulk10002")]]
+    );
+    // A non-aggregating scan keeps sequential (id) order across chunks.
+    let rows = run(&db, "MATCH (c:Car) WHERE c.year = 3 RETURN c.entity_id");
+    assert_eq!(rows.len(), 8_571);
+    assert_eq!(rows[0], vec![v("bulk3")]);
+    assert_eq!(rows.last().unwrap(), &vec![v("bulk59993")]);
+    assert_eq!(
+        run(
+            &db,
+            "MATCH (c:Car)<-[:OWNS]-(p:Person) WHERE c.year = 6 RETURN p.name, count(*) AS n"
+        ),
+        vec![vec![v("Ana"), v(8_571)]]
+    );
+}

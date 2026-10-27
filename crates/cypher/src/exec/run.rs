@@ -32,7 +32,7 @@ impl From<StoreError> for Flow {
         Self::Error(value.into())
     }
 }
-type Emit<'e> = dyn FnMut(Row) -> Result<(), Flow> + 'e;
+pub(super) type Emit<'e> = dyn FnMut(Row) -> Result<(), Flow> + 'e;
 
 fn finish(result: Result<(), Flow>) -> Result<(), ExecError> {
     match result {
@@ -66,6 +66,7 @@ impl<'a> Env<'a> {
             vars: self.vars,
             cache: Some(&self.cache),
             param_vals: Some(self.param_vals),
+            partition: None,
         }
     }
 }
@@ -135,6 +136,9 @@ fn run_part(
         match barrier.map(|b| &ops[b]) {
             None => {
                 let ctx = env.ctx(txn);
+                if let Some(rows) = parallel::collect(&ctx, segment, &input)? {
+                    return Ok(rows);
+                }
                 let mut rows = vec![];
                 for row in input {
                     finish(stream(&ctx, segment, row, &mut |row| {
@@ -147,6 +151,14 @@ fn run_part(
             }
             Some(Op::Project(projection)) => {
                 let ctx = env.ctx(txn);
+                if let Some(rows) = parallel::project(&ctx, segment, projection, &input)? {
+                    input = rows;
+                    start = end + 1;
+                    if start >= ops.len() {
+                        return Ok(input);
+                    }
+                    continue;
+                }
                 let mut acc = Accumulator::new(projection, &ctx)?;
                 let mut stopped = false;
                 for row in input {
@@ -184,7 +196,12 @@ fn run_part(
 }
 
 /// Run streaming operators for one row, calling `emit` for each result.
-fn stream(ctx: &Context<'_, '_>, ops: &[Op], row: Row, emit: &mut Emit<'_>) -> Result<(), Flow> {
+pub(super) fn stream(
+    ctx: &Context<'_, '_>,
+    ops: &[Op],
+    row: Row,
+    emit: &mut Emit<'_>,
+) -> Result<(), Flow> {
     let Some((op, rest)) = ops.split_first() else {
         return emit(row);
     };
@@ -281,7 +298,7 @@ struct Group {
     seen: Vec<Option<HashSet<Key>>>,
 }
 
-struct Accumulator<'p> {
+pub(super) struct Accumulator<'p> {
     plan: &'p ProjectPlan,
     skip: usize,
     limit: usize,
@@ -293,7 +310,7 @@ struct Accumulator<'p> {
 }
 
 impl<'p> Accumulator<'p> {
-    fn new(plan: &'p ProjectPlan, ctx: &Context<'_, '_>) -> Result<Self, ExecError> {
+    pub(super) fn new(plan: &'p ProjectPlan, ctx: &Context<'_, '_>) -> Result<Self, ExecError> {
         let skip = plan
             .skip
             .as_ref()
@@ -322,7 +339,7 @@ impl<'p> Accumulator<'p> {
         self.skip.saturating_add(self.limit)
     }
 
-    fn push(&mut self, ctx: &Context<'_, '_>, row: Row) -> Result<(), Flow> {
+    pub(super) fn push(&mut self, ctx: &Context<'_, '_>, row: Row) -> Result<(), Flow> {
         if self.limit == 0 {
             return Err(Flow::Stop);
         }
@@ -421,6 +438,41 @@ impl<'p> Accumulator<'p> {
         Ok(())
     }
 
+    /// Fold a parallel worker's partial result into this one. Workers are
+    /// merged in scan order, so first-seen group order and collect order
+    /// match a sequential scan.
+    pub(super) fn merge(
+        &mut self,
+        ctx: &Context<'_, '_>,
+        other: Accumulator<'p>,
+    ) -> Result<(), ExecError> {
+        for group in other.group_list {
+            let lookup = Key(group.key.clone());
+            match self.groups.get(&lookup) {
+                Some(&index) => {
+                    for (state, incoming) in
+                        self.group_list[index].states.iter_mut().zip(group.states)
+                    {
+                        merge_state(state, incoming)?;
+                    }
+                }
+                None => {
+                    ctx.budget.retain(
+                        group.key.iter().map(Val::bytes).sum::<usize>()
+                            + 128 * group.states.len().max(1),
+                    )?;
+                    self.group_list.push(group);
+                    self.groups.insert(lookup, self.group_list.len() - 1);
+                }
+            }
+        }
+        for (order, row) in other.rows {
+            ctx.budget.retain_row(&row)?;
+            self.rows.push((order, row));
+        }
+        Ok(())
+    }
+
     fn trim(&mut self, ctx: &Context<'_, '_>, keep: usize) {
         eval::order_rows(&mut self.rows, &self.descending);
         for (order, row) in self.rows.drain(keep.min(self.rows.len())..) {
@@ -429,7 +481,7 @@ impl<'p> Accumulator<'p> {
         }
     }
 
-    fn finish(mut self, ctx: &Context<'_, '_>) -> Result<Vec<Row>, ExecError> {
+    pub(super) fn finish(mut self, ctx: &Context<'_, '_>) -> Result<Vec<Row>, ExecError> {
         if let Some(agg) = &self.plan.aggregate {
             if self.group_list.is_empty() && agg.keys.is_empty() {
                 self.group_list.push(Group {
@@ -486,6 +538,55 @@ impl<'p> Accumulator<'p> {
             .map(|(_, row)| row)
             .collect())
     }
+}
+
+fn merge_state(state: &mut AggState, incoming: AggState) -> Result<(), ExecError> {
+    match (state, incoming) {
+        (AggState::Count(a), AggState::Count(b)) => *a += b,
+        (
+            AggState::Sum { int, float, floats },
+            AggState::Sum {
+                int: i2,
+                float: f2,
+                floats: fl2,
+            },
+        ) => {
+            if !*floats && !fl2 {
+                *int = int
+                    .checked_add(i2)
+                    .ok_or_else(|| ExecError::Semantic("integer overflow in sum".into()))?;
+            } else {
+                let mine = if *floats { *float } else { *int as f64 };
+                *float = mine + if fl2 { f2 } else { i2 as f64 };
+                *floats = true;
+            }
+        }
+        (AggState::Avg { sum, n }, AggState::Avg { sum: s2, n: n2 }) => {
+            *sum += s2;
+            *n += n2;
+        }
+        (AggState::Min(a), AggState::Min(b)) => {
+            if let Some(b) = b {
+                if a.as_ref().is_none_or(|x| val::sort_cmp(&b, x).is_lt()) {
+                    *a = Some(b);
+                }
+            }
+        }
+        (AggState::Max(a), AggState::Max(b)) => {
+            if let Some(b) = b {
+                if a.as_ref().is_none_or(|x| val::sort_cmp(&b, x).is_gt()) {
+                    *a = Some(b);
+                }
+            }
+        }
+        (AggState::Collect(a), AggState::Collect(b)) => a.extend(b),
+        (AggState::Stdev(a, ints), AggState::Stdev(b, ints2)) => {
+            a.extend(b);
+            *ints &= ints2;
+        }
+        _ => unreachable!("merged states come from the same aggregate"),
+    }
+    Ok(())
 }
 
 fn initial(func: &str) -> AggState {
@@ -763,7 +864,7 @@ fn scan_edges(
         Cf::In
     };
     let (expand_step, after) = rest.split_first().expect("expand step follows");
-    store::visit_edges_of_label::<Flow>(ctx.txn, cf, ty.id, &expand.types, |owner, edge| {
+    let visit = |owner: NodeId, edge: EdgeRef| {
         let _scope = ctx.budget.scope();
         ctx.budget.charge(16)?;
         let mut row = row.clone();
@@ -775,7 +876,13 @@ fn scan_edges(
                 Ok(())
             }
         })
-    })
+    };
+    match ctx.partition.filter(|(slot, _, _)| *slot == node.slot) {
+        Some((_, lo, hi)) => {
+            store::visit_edges_in_range::<Flow>(ctx.txn, cf, lo, hi, &expand.types, visit)
+        }
+        None => store::visit_edges_of_label::<Flow>(ctx.txn, cf, ty.id, &expand.types, visit),
+    }
 }
 
 fn node_ok(
@@ -830,8 +937,9 @@ fn anchor(
             Some(ty) => vec![ty.id],
             None => ctx.catalog.node_types.iter().map(|t| t.id).collect(),
         };
+        let partition = ctx.partition.filter(|(slot, _, _)| *slot == node.slot);
         for ty in types {
-            store::visit_nodes_of_type_with_values::<Flow>(ctx.txn, ty, |id, bytes| {
+            let mut each = |id: NodeId, bytes: &[u8]| {
                 if let Some(cache) = ctx.cache {
                     let mut slot = cache.0.borrow_mut();
                     match slot.as_mut() {
@@ -844,7 +952,13 @@ fn anchor(
                     }
                 }
                 candidate(id)
-            })?;
+            };
+            match partition {
+                Some((_, lo, hi)) => {
+                    store::visit_nodes_in_range_with_values::<Flow>(ctx.txn, lo, hi, &mut each)?
+                }
+                None => store::visit_nodes_of_type_with_values::<Flow>(ctx.txn, ty, &mut each)?,
+            }
         }
         Ok(())
     };

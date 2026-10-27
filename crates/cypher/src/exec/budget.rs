@@ -46,17 +46,17 @@ impl QueryMemoryPool {
 }
 pub(super) struct Reservation {
     pool: Arc<QueryMemoryPool>,
-    bytes: Cell<usize>,
+    bytes: AtomicUsize,
 }
 impl Reservation {
     pub fn new(pool: Arc<QueryMemoryPool>) -> Self {
         Self {
             pool,
-            bytes: Cell::new(0),
+            bytes: AtomicUsize::new(0),
         }
     }
     fn grow_to(&self, bytes: usize) -> Result<(), ExecError> {
-        let extra = bytes.saturating_sub(self.bytes.get());
+        let extra = bytes.saturating_sub(self.bytes.load(Ordering::Relaxed));
         if extra == 0 {
             return Ok(());
         }
@@ -70,7 +70,7 @@ impl Reservation {
                 });
         match result {
             Ok(previous) => {
-                self.bytes.set(bytes);
+                self.bytes.store(bytes, Ordering::Relaxed);
                 self.pool
                     .peak
                     .fetch_max(previous + extra, Ordering::Relaxed);
@@ -91,7 +91,7 @@ impl Drop for Reservation {
     fn drop(&mut self) {
         self.pool
             .reserved
-            .fetch_sub(self.bytes.get(), Ordering::Relaxed);
+            .fetch_sub(self.bytes.load(Ordering::Relaxed), Ordering::Relaxed);
     }
 }
 
@@ -180,6 +180,18 @@ impl<'a> Budget<'a> {
         Scope {
             budget: self,
             mark: self.used.get(),
+        }
+    }
+    /// A worker's guard for a parallel scan: an equal share of what remains,
+    /// the same deadline, no shared pool reservation (the parent holds it).
+    pub fn fork(&self, parts: usize) -> Budget<'static> {
+        Budget {
+            limit: self.remaining() / parts.max(1),
+            used: Cell::new(0),
+            retained: Cell::new(0),
+            reservation: None,
+            deadline: self.deadline,
+            ticks: Cell::new(0),
         }
     }
     pub fn pool_usage(&self) -> Option<QueryMemoryUsage> {
@@ -304,7 +316,7 @@ mod tests {
                     barrier.wait();
                     barrier.wait();
                     if result.is_ok() {
-                        assert_eq!(reservation.bytes.get(), 160);
+                        assert_eq!(reservation.bytes.load(Ordering::Relaxed), 160);
                     }
                 });
             }
