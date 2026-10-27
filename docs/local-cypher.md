@@ -199,8 +199,12 @@ whole row. `ORDER BY n.entity_id [WHERE n.entity_id > $after] LIMIT k` walks
 the primary key in order and stops after `k` rows. A label scan of at least
 50,000 nodes that ends in an aggregation, `ORDER BY ... LIMIT` or the final
 `RETURN` is split across up to eight worker threads; results keep the
-sequential order. `DISTINCT` aggregates, visibility-restricted transactions and
-cursor pages stay sequential. `UNWIND ... MERGE (n {entity_id: ...}) SET ...`
+sequential order, and a visibility-restricted transaction filters each worker's
+share with its policy. A visibility that hides nothing (`allow_all` without
+`deny_all` or knowledge grants) runs ordinary read pipelines on the unrestricted
+path. Procedure calls retain the policy so private ACL metadata and physical scan
+counters stay protected; all visibility transactions remain read-only. `DISTINCT`
+aggregates and cursor pages stay sequential. `UNWIND ... MERGE (n {entity_id: ...}) SET ...`
 is fused into one node write per row when no value reads `n`.
 
 ### Writing fast queries

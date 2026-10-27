@@ -791,3 +791,184 @@ fn reserved_acl_properties_are_semantic_client_errors() {
         assert!(matches!(error, ExecError::Semantic(_)), "{q}: {error:?}");
     }
 }
+
+#[test]
+fn allow_all_count_keeps_the_fast_path_without_reading_large_node_payloads() {
+    use brainwire_cypher::ExecutionLimits;
+    let (_dir, db) = setup();
+    execute(
+        &db,
+        "CREATE (:Doc {entity_id:'large', payload:$payload})",
+        &BTreeMap::from([("payload".into(), Value::Str("x".repeat(65_536)))]),
+    )
+    .unwrap();
+    let mut tx = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 8192,
+            timeout: None,
+        },
+    )
+    .unwrap()
+    .with_read_visibility(ReadVisibility {
+        allow_all: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        tx.run("MATCH (n:Doc) RETURN count(n)", &BTreeMap::new())
+            .unwrap()
+            .rows,
+        vec![vec![int(7)]]
+    );
+    assert_eq!(tx.commit().unwrap(), None);
+}
+
+#[test]
+fn allow_all_remains_read_only_and_cannot_read_private_acl_metadata() {
+    let (_dir, db) = setup();
+    for query in [
+        "CREATE (:Doc {entity_id:'new'})",
+        "MATCH (n:Doc {entity_id:'a'}) SET n.title='changed'",
+        "CALL db.setNodeAcl({label:'Doc',entityId:'a',allow:['bob']}) YIELD updated RETURN updated",
+        "CALL db.nodeAcls([{label:'Doc',entityId:'a'}]) YIELD allow RETURN allow",
+        "CALL graph.project() YIELD scannedRelationshipCount RETURN scannedRelationshipCount LIMIT 0",
+        "RETURN 1 AS ignored UNION CALL graph.project() YIELD scannedRelationshipCount RETURN scannedRelationshipCount AS ignored",
+        "RETURN 1 AS ignored UNION CALL db.nodeAcls([{label:'Doc',entityId:'a'}]) YIELD allow RETURN allow AS ignored",
+    ] {
+        let mut tx = QueryTransaction::begin(&db).unwrap()
+            .with_read_visibility(ReadVisibility { allow_all: true, ..Default::default() }).unwrap();
+        assert!(matches!(tx.run(query, &BTreeMap::new()), Err(ExecError::Forbidden(_))), "{query}");
+        assert_eq!(tx.state(), QueryTransactionState::Failed);
+    }
+}
+
+#[test]
+fn allow_all_with_denial_or_authoritative_grants_stays_filtered() {
+    let (_dir, db) = setup();
+    for (visibility, expected) in [
+        (
+            ReadVisibility {
+                allow_all: true,
+                deny_all: true,
+                ..Default::default()
+            },
+            0,
+        ),
+        (
+            ReadVisibility {
+                allow_all: true,
+                knowledge_grants: Some(vec![]),
+                ..Default::default()
+            },
+            5,
+        ),
+    ] {
+        let mut tx = QueryTransaction::begin(&db)
+            .unwrap()
+            .with_read_visibility(visibility)
+            .unwrap();
+        assert_eq!(
+            tx.run("MATCH (n:Doc) RETURN count(n)", &BTreeMap::new())
+                .unwrap()
+                .rows,
+            vec![vec![int(expected)]]
+        );
+    }
+}
+
+#[test]
+fn parallel_acl_scans_preserve_filtered_aggregations_top_k_row_order_and_endpoints() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = open(dir.path());
+    let schema: GraphMapping = serde_json::from_str(
+        r#"{"version":"1","nodes":[{"label":"Doc","properties":["group","score"]}],"edges":[{"type":"LINK","from":{"label":"Doc"},"to":{"label":"Doc"}}]}"#,
+    )
+    .unwrap();
+    db.apply_ontology(&schema).unwrap();
+    // Exceed the parallel scan threshold without relying on elapsed time.
+    for start in (0..50_100).step_by(1_000) {
+        let end = (start + 1_000).min(50_100);
+        let mut tx = QueryTransaction::begin(&db).unwrap();
+        tx.run(&format!("UNWIND range({start}, {}) AS i CREATE (:Doc {{entity_id:'doc-' + i, group:i % 2, score:i}})", end - 1), &BTreeMap::new()).unwrap();
+        tx.commit().unwrap();
+        let catalog = db.catalog().unwrap().unwrap();
+        let ty = catalog.node_type("Doc").unwrap();
+        let mut tx = db.begin();
+        for i in start..end {
+            let id =
+                brainwire_store::graph::find_by_entity_id(&tx, &format!("doc-{i}"), Some(ty.id))
+                    .unwrap()[0];
+            brainwire_store::graph::set_node_acl(
+                &mut tx,
+                id,
+                &brainwire_core::acl::NodeAcl {
+                    allow: vec![if i % 2 == 0 { "alice" } else { "bob" }.into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    // Spread visible and hidden endpoints across the scanned label's ID range.
+    for source in [0, 10_000, 20_000, 30_000, 40_000, 50_000] {
+        execute(&db, &format!(
+            "MATCH (a:Doc {{entity_id:'doc-{source}'}}), (hidden:Doc {{entity_id:'doc-{}'}}), (visible:Doc {{entity_id:'doc-{}'}}) CREATE (a)-[:LINK]->(hidden), (a)-[:LINK]->(visible), (hidden)-[:LINK]->(visible)",
+            source + 1, source + 2), &BTreeMap::new()).unwrap();
+    }
+    assert_eq!(
+        execute(
+            &db,
+            "MATCH (n:Doc)-[:LINK]->(m:Doc) RETURN count(*)",
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .rows,
+        vec![vec![int(18)]]
+    );
+    assert_eq!(
+        restricted(&db, "MATCH (n:Doc)-[:LINK]->(m:Doc) RETURN count(*)")
+            .unwrap()
+            .rows,
+        vec![vec![int(6)]]
+    );
+    let traversed = restricted(
+        &db,
+        "MATCH (n:Doc)-[:LINK]->(m:Doc) RETURN n.entity_id, m.entity_id",
+    )
+    .unwrap();
+    let expected: Vec<_> = [0, 10_000, 20_000, 30_000, 40_000, 50_000]
+        .into_iter()
+        .map(|source| {
+            vec![
+                string(&format!("doc-{source}")),
+                string(&format!("doc-{}", source + 2)),
+            ]
+        })
+        .collect();
+    assert_eq!(traversed.rows, expected);
+    let queries = [
+        (
+            "MATCH (n:Doc) RETURN n.group AS g, count(*) AS n, sum(n.score) AS s ORDER BY g",
+            vec![vec![int(0), int(25_050), int(627_477_450)]],
+        ),
+        (
+            "MATCH (n:Doc) RETURN n.entity_id AS id ORDER BY n.score DESC LIMIT 2",
+            vec![vec![string("doc-50098")], vec![string("doc-50096")]],
+        ),
+    ];
+    for (query, expected) in queries {
+        assert_eq!(restricted(&db, query).unwrap().rows, expected, "{query}");
+    }
+    let output = restricted(&db, "MATCH (n:Doc) WHERE n.score < 8 RETURN n.entity_id").unwrap();
+    assert_eq!(
+        output.rows,
+        vec![
+            vec![string("doc-0")],
+            vec![string("doc-2")],
+            vec![string("doc-4")],
+            vec![string("doc-6")]
+        ]
+    );
+}

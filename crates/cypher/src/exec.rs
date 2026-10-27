@@ -702,6 +702,12 @@ fn execute_clauses(
             "read visibility transactions cannot mutate the graph or ACL metadata",
         ));
     }
+    // Keep procedure-level metadata restrictions even when row visibility is open.
+    let calls_procedure = clauses
+        .clone()
+        .any(|clause| matches!(clause, Clause::Call { .. }));
+    // Ordinary allow-all reads skip ACL decoding while retaining the write guard above.
+    let visibility = visibility.filter(|policy| !policy.sees_everything() || calls_procedure);
     let budget = Budget::new(limits, reservation);
     budget.charge(source_bytes)?;
     budget.charge(budget::map_bytes(params))?;

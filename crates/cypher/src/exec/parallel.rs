@@ -1,7 +1,8 @@
 //! Parallel label scans for aggregating and top-k projections: the anchor
 //! label's id range is split across worker threads, each with its own query
 //! guard share and accumulator, and the partial results are merged in scan
-//! order on the calling thread.
+//! order on the calling thread. A visibility-restricted transaction filters
+//! each worker's share with its policy, as the sequential scan would.
 use super::plan::*;
 use super::run::{stream, Accumulator, Flow, Row};
 use super::*;
@@ -17,7 +18,7 @@ pub(super) fn project(
     projection: &ProjectPlan,
     input: &[Row],
 ) -> Result<Option<Vec<Row>>, ExecError> {
-    if ctx.visibility.is_some() || input.len() != 1 || projection.distinct || projection.presorted {
+    if input.len() != 1 || projection.distinct || projection.presorted {
         return Ok(None);
     }
     match &projection.aggregate {
@@ -51,9 +52,6 @@ pub(super) fn collect(
     segment: &[Op],
     input: &[Row],
 ) -> Result<Option<Vec<Row>>, ExecError> {
-    if ctx.visibility.is_some() {
-        return Ok(None);
-    }
     let Some(partials) = split(ctx, segment, input, |worker, segment, row| {
         let mut rows = vec![];
         match stream(worker, segment, row, &mut |row| {
@@ -127,13 +125,14 @@ fn split<'p, T: Send>(
         })
         .collect();
     let budgets: Vec<Budget<'static>> = ranges.iter().map(|_| ctx.budget.fork(workers)).collect();
-    let (txn, catalog, params, vars, param_vals, checkpoint_dir) = (
+    let (txn, catalog, params, vars, param_vals, checkpoint_dir, visibility) = (
         ctx.txn,
         ctx.catalog,
         ctx.params,
         ctx.vars,
         ctx.param_vals,
         ctx.checkpoint_dir,
+        ctx.visibility,
     );
     let slot = anchor.slot;
     let row = &input[0];
@@ -150,7 +149,8 @@ fn split<'p, T: Send>(
                         catalog,
                         params,
                         budget: &budget,
-                        visibility: None,
+                        // Each worker filters its share with the same policy.
+                        visibility,
                         checkpoint_dir,
                         vars,
                         cache: Some(&cache),

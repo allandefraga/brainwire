@@ -112,6 +112,12 @@ impl ReadVisibility {
         Ok(())
     }
 
+    /// True when [`Self::is_visible`] holds for every node whatever its ACL:
+    /// `allow_all` with no `deny_all` and no document grants to enforce.
+    pub fn sees_everything(&self) -> bool {
+        self.allow_all && !self.deny_all && self.knowledge_grants.is_none()
+    }
+
     /// Exact ENTRY AND (OPEN OR row ACL), with authoritative document grants.
     /// Callers validate metadata before evaluating; absent metadata is row-denied.
     pub fn is_visible(&self, acl: Option<&NodeAcl>, has_document_id: bool) -> bool {
@@ -166,6 +172,22 @@ mod tests {
     fn values(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).into()).collect()
     }
+    #[test]
+    fn only_allow_all_without_deny_or_grants_sees_everything() {
+        let mut policy = ReadVisibility {
+            allow_all: true,
+            ..ReadVisibility::default()
+        };
+        assert!(policy.sees_everything());
+        assert!(policy.is_visible(None, true));
+        policy.knowledge_grants = Some(vec![]);
+        assert!(!policy.sees_everything());
+        policy.knowledge_grants = None;
+        policy.deny_all = true;
+        assert!(!policy.sees_everything());
+        assert!(!ReadVisibility::default().sees_everything());
+    }
+
     #[test]
     fn truth_table_preserves_entry_open_deny_and_missing_provenance() {
         let mut acl = NodeAcl {
