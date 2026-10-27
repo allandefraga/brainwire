@@ -122,6 +122,10 @@ struct CommitState {
     /// checking the cap never has to sum the deque.
     history_keys: usize,
     active: BTreeMap<u64, usize>,
+    /// Start sequences of active transactions that have written or recorded
+    /// a dependency. Read-only snapshots never check conflicts, so history
+    /// they alone pin may be dropped once over the cap.
+    writers: BTreeMap<u64, usize>,
     /// The highest commit sequence ever evicted from `history`: raised on
     /// every eviction in `prune` (whether the entry was safe to drop or
     /// not) and on recovery from a poisoned lock (`Committer::lock`). A
@@ -133,11 +137,16 @@ struct CommitState {
 }
 
 impl CommitState {
-    fn release(&mut self, start: u64) {
-        if let Some(n) = self.active.get_mut(&start) {
-            *n -= 1;
-            if *n == 0 {
-                self.active.remove(&start);
+    fn release(&mut self, start: u64, writer: bool) {
+        for map in [&mut self.active]
+            .into_iter()
+            .chain(writer.then_some(&mut self.writers))
+        {
+            if let Some(n) = map.get_mut(&start) {
+                *n -= 1;
+                if *n == 0 {
+                    map.remove(&start);
+                }
             }
         }
         self.prune();
@@ -158,8 +167,15 @@ impl CommitState {
     /// longer be made precisely.
     fn prune(&mut self) {
         let horizon = self.active.keys().next().copied().unwrap_or(self.seq);
+        let writer_horizon = self.writers.keys().next().copied().unwrap_or(self.seq);
+        let hard_cap = self.cap.saturating_mul(8);
         while let Some(&(front_seq, _)) = self.history.front() {
-            if front_seq > horizon && self.history_keys <= self.cap {
+            // Safe for everyone; over the cap, safe for every writer (only
+            // read-only snapshots predate it); far over the cap, forced.
+            let safe = front_seq <= horizon;
+            let readers_only = front_seq <= writer_horizon && self.history_keys > self.cap;
+            let forced = self.history_keys > hard_cap;
+            if !(safe || readers_only || forced) {
                 break;
             }
             let (commit_seq, keys) = self
@@ -190,6 +206,8 @@ pub struct Txn<'db> {
     /// that did not exist yet when this transaction scanned (a phantom).
     depends_prefix: BTreeSet<Key>,
     done: bool,
+    /// Registered in the committer's writer set (first write or dependency).
+    writer: bool,
     estimated_bytes: usize,
     pub(crate) replicated_ids: bool,
     pub(crate) used_standalone_ids: bool,
@@ -221,6 +239,7 @@ impl Database {
             depends: BTreeSet::new(),
             depends_prefix: BTreeSet::new(),
             done: false,
+            writer: false,
             estimated_bytes: 0,
             replicated_ids: false,
             used_standalone_ids: false,
@@ -281,7 +300,31 @@ impl<'db> Txn<'db> {
         visit(value.as_deref())
     }
 
+    /// Join the committer's writer set before the first write or dependency,
+    /// so conflict history this transaction needs is kept past the cap.
+    fn touch(&mut self) {
+        if !self.writer {
+            self.writer = true;
+            *self
+                .db
+                .committer
+                .lock()
+                .writers
+                .entry(self.start_seq)
+                .or_insert(0) += 1;
+        }
+    }
+
+    /// Record a point dependency without reading the key.
+    pub fn depend(&mut self, cf: Cf, key: &[u8]) {
+        self.touch();
+        if self.depends.insert((cf, key.to_vec())) {
+            self.estimated_bytes = self.estimated_bytes.saturating_add(128 + key.len());
+        }
+    }
+
     pub fn get_for_update(&mut self, cf: Cf, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+        self.touch();
         if self.depends.insert((cf, key.to_vec())) {
             self.estimated_bytes = self.estimated_bytes.saturating_add(128 + key.len());
         }
@@ -297,6 +340,7 @@ impl<'db> Txn<'db> {
     }
 
     fn stage(&mut self, cf: Cf, key: Vec<u8>, value: Option<Vec<u8>>) {
+        self.touch();
         let bytes = value.as_ref().map_or(0, Vec::len);
         let key_bytes = key.len();
         match self.writes.insert((cf, key), value) {
@@ -315,6 +359,7 @@ impl<'db> Txn<'db> {
         }
     }
     fn depend_prefix(&mut self, cf: Cf, prefix: &[u8]) {
+        self.touch();
         if self.depends_prefix.insert((cf, prefix.to_vec())) {
             self.estimated_bytes = self.estimated_bytes.saturating_add(128 + prefix.len());
         }
@@ -545,7 +590,7 @@ impl<'db> Txn<'db> {
         };
         // Validate bounds/reserved metadata without persisting anything.
         batch.validate(limits)?;
-        st.release(self.start_seq);
+        st.release(self.start_seq, self.writer);
         self.done = true;
         Ok(Some(batch))
     }
@@ -567,7 +612,7 @@ impl<'db> Txn<'db> {
         }
         let conflict = self.has_conflict(&st);
         if conflict {
-            st.release(start);
+            st.release(start, self.writer);
             self.done = true;
             return Err(TxnError::Conflict);
         }
@@ -605,7 +650,7 @@ impl<'db> Txn<'db> {
             st.history.push_back((seq, keys));
         }
         let seq = st.seq;
-        st.release(start);
+        st.release(start, self.writer);
         self.done = true;
         Ok(seq)
     }
@@ -614,7 +659,10 @@ impl<'db> Txn<'db> {
 impl Drop for Txn<'_> {
     fn drop(&mut self) {
         if !self.done {
-            self.db.committer.lock().release(self.start_seq);
+            self.db
+                .committer
+                .lock()
+                .release(self.start_seq, self.writer);
         }
     }
 }
@@ -1046,6 +1094,37 @@ mod tests {
     // caps it; this proves the cap is actually enforced and that eviction
     // beyond the safe horizon is reported as a conflict instead of silently
     // skipped.
+    #[test]
+    fn a_long_reader_does_not_make_disjoint_writers_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig {
+            conflict_history_keys: 4,
+            ..StoreConfig::for_tests()
+        });
+        let db = Database::open(dir.path(), &res).unwrap();
+        // A read-only snapshot held open across many commits.
+        let reader = db.begin();
+        reader.get(Cf::Node, b"anything").unwrap();
+        let mut writer = db.begin();
+        writer.put(Cf::Node, b"writer".to_vec(), b"w".to_vec());
+        // Twelve disjoint commits (two history keys each with the sequence
+        // marker): six times the cap, under the hard cap of eight times.
+        for i in 0..12u8 {
+            let mut filler = db.begin();
+            filler.put(Cf::Node, vec![b'f', i], b"x".to_vec());
+            filler.commit().unwrap();
+        }
+        writer.commit().unwrap();
+        // A real write-write overlap still conflicts after the history grew.
+        let mut first = db.begin();
+        let mut second = db.begin();
+        first.put(Cf::Node, b"same".to_vec(), b"1".to_vec());
+        second.put(Cf::Node, b"same".to_vec(), b"2".to_vec());
+        first.commit().unwrap();
+        assert!(matches!(second.commit(), Err(TxnError::Conflict)));
+        drop(reader);
+    }
+
     #[test]
     fn a_transaction_older_than_the_pruned_history_conflicts_on_any_touch() {
         let dir = tempfile::tempdir().unwrap();
