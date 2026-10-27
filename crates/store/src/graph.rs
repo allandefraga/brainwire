@@ -17,9 +17,9 @@ use brainwire_core::value::Value;
 use crate::db::{Database, StoreError};
 use crate::txn::{Cf, Txn, TxnError};
 
-const CATALOG_KEY: &[u8] = b"catalog";
-const INDEX_READY_KEY: &[u8] = b"scalar-index-v2-ready";
-const MAX_ATOMIC_BACKFILL_KEYS: usize = 100_000;
+pub(crate) const CATALOG_KEY: &[u8] = b"catalog";
+pub(crate) const INDEX_READY_KEY: &[u8] = b"scalar-index-v2-ready";
+pub(crate) const MAX_ATOMIC_BACKFILL_KEYS: usize = 100_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GraphError {
@@ -39,6 +39,8 @@ pub enum GraphError {
         "scalar index backfill exceeds {MAX_ATOMIC_BACKFILL_KEYS} keys; use a bounded migration"
     )]
     IndexBackfillTooLarge,
+    #[error("{0}")]
+    Catalog(String),
     #[error(transparent)]
     Id(#[from] IdError),
     #[error(transparent)]
@@ -336,7 +338,7 @@ pub struct EdgeRef {
     pub id: EdgeId,
 }
 
-fn catalog_error(e: impl std::fmt::Display) -> StoreError {
+pub(crate) fn catalog_error(e: impl std::fmt::Display) -> StoreError {
     StoreError::Catalog(e.to_string())
 }
 
@@ -403,7 +405,8 @@ impl Database {
             Some(bytes) => Some(serde_json::from_slice(&bytes).map_err(catalog_error)?),
             None => None,
         };
-        let next = Catalog::apply(mapping, previous.as_ref()).map_err(catalog_error)?;
+        let mut next = Catalog::apply(mapping, previous.as_ref()).map_err(catalog_error)?;
+        let mut rebuilt = Vec::new();
         let was_ready = scalar_indexes_ready(txn)?;
         let mut backfilled = 0;
         // A new declaration is backfilled in the same atomic batch as the
@@ -455,6 +458,14 @@ impl Database {
                 for key in keys {
                     txn.put(Cf::Idx, key, Vec::new());
                 }
+                crate::catalog::clear_jobs(txn, &prefix);
+                rebuilt.push((ty.id, field.clone()));
+            }
+        }
+        // Built here in full, so any online build or drop job is obsolete.
+        for (id, field) in rebuilt {
+            if let Some(ty) = next.node_types.iter_mut().find(|ty| ty.id == id) {
+                ty.populating.retain(|f| *f != field);
             }
         }
         txn.put(
@@ -472,7 +483,7 @@ fn node_key(id: NodeId) -> Vec<u8> {
     id.0.to_be_bytes().to_vec()
 }
 
-fn index_field_prefix(ty: TypeId, field: &str) -> Vec<u8> {
+pub(crate) fn index_field_prefix(ty: TypeId, field: &str) -> Vec<u8> {
     let mut key = Vec::new();
     put_u16(&mut key, ty.0);
     put_bytes(&mut key, field.as_bytes());
@@ -510,14 +521,14 @@ fn index_value(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
-fn index_key(field_prefix: &[u8], value: &Value, id: NodeId) -> Option<Vec<u8>> {
+pub(crate) fn index_key(field_prefix: &[u8], value: &Value, id: NodeId) -> Option<Vec<u8>> {
     let mut key = field_prefix.to_vec();
     key.extend(index_value(value)?);
     put_u64(&mut key, id.0);
     Some(key)
 }
 
-fn property_value<'a>(row: &'a Row, ty: &NodeType, field: &str) -> Option<&'a Value> {
+pub(crate) fn property_value<'a>(row: &'a Row, ty: &NodeType, field: &str) -> Option<&'a Value> {
     ty.column(field)
         .and_then(|id| row.columns.get(&id))
         .or_else(|| row.extra.get(field))
@@ -570,7 +581,7 @@ fn decode_edge_key(key: &[u8]) -> Result<(NodeId, EdgeTypeId, NodeId, EdgeId), S
     Ok((NodeId(a), EdgeTypeId(ty), NodeId(b), EdgeId(id)))
 }
 
-fn node_id_value(bytes: &[u8]) -> Result<NodeId, StoreError> {
+pub(crate) fn node_id_value(bytes: &[u8]) -> Result<NodeId, StoreError> {
     let raw: [u8; 8] = bytes
         .try_into()
         .map_err(|_| StoreError::Corrupt("node id value".into()))?;
@@ -601,7 +612,7 @@ fn estimate_node_allocation(bytes: &[u8]) -> Result<usize, StoreError> {
         .ok_or_else(|| StoreError::Corrupt("node allocation estimate overflow".into()))
 }
 
-fn decode_node(bytes: &[u8]) -> Result<(String, Row), StoreError> {
+pub(crate) fn decode_node(bytes: &[u8]) -> Result<(String, Row), StoreError> {
     let corrupt = || StoreError::Corrupt("node value".into());
     let len: [u8; 4] = bytes
         .get(..4)
@@ -703,6 +714,8 @@ pub fn merge_node(
     };
     let old = row.clone();
     row.schema_version = catalog.version;
+    // Values of dropped properties are purged whenever their node is written.
+    row.columns.retain(|id, _| !ty.retired_columns.contains(id));
     apply_props(&mut row, &ty.columns, props);
     update_node_indexes(txn, ty, id, &old, &row);
     txn.put(Cf::Node, node_key(id), encode_node(entity_id, &row));
@@ -972,7 +985,7 @@ pub fn visit_by_indexed_property<E: From<GraphError> + From<StoreError>>(
     value: &Value,
     mut visit: impl FnMut(NodeId) -> Result<(), E>,
 ) -> Result<bool, E> {
-    if !ty.indexed.iter().any(|name| name == field) || !scalar_indexes_ready(txn)? {
+    if !ty.index_online(field) || !scalar_indexes_ready(txn)? {
         return Ok(false);
     }
     let Some(encoded) = index_value(value) else {
@@ -1170,7 +1183,7 @@ pub fn visit_index_range<E: From<GraphError> + From<StoreError>>(
     prefix: Option<&str>,
     mut visit: impl FnMut(NodeId) -> Result<(), E>,
 ) -> Result<bool, E> {
-    if !ty.indexed.iter().any(|name| name == field) || !scalar_indexes_ready(txn)? {
+    if !ty.index_online(field) || !scalar_indexes_ready(txn)? {
         return Ok(false);
     }
     let field_prefix = index_field_prefix(ty.id, field);
@@ -1524,7 +1537,7 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
                 .as_ref()
                 .and_then(|c| c.node_types.iter().find(|ty| ty.id == id.type_id()))
             {
-                for field in &ty.indexed {
+                for field in ty.indexed.iter().filter(|f| ty.index_online(f)) {
                     if let Some(key) = property_value(&row, ty, field)
                         .and_then(|v| index_key(&index_field_prefix(ty.id, field), v, id))
                     {
@@ -1561,7 +1574,7 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
     if ready {
         if let Some(catalog) = &catalog {
             for ty in &catalog.node_types {
-                for field in &ty.indexed {
+                for field in ty.indexed.iter().filter(|f| ty.index_online(f)) {
                     let prefix = index_field_prefix(ty.id, field);
                     txn.visit_prefix::<StoreError>(Cf::Idx, &prefix, |key, _| {
                         let bad = || {
