@@ -779,3 +779,15 @@ fn acl_lists_of_5000_entries_round_trip_and_5001_are_rejected() {
         assert_eq!(out.rows, vec![vec![string("hidden")]]);
     }
 }
+
+#[test]
+fn reserved_acl_properties_are_semantic_client_errors() {
+    let (_dir, db) = setup();
+    for q in [
+        "CREATE (n:Doc {entity_id:'r', acl_allow:['a']})",
+        "MATCH (n:Doc {entity_id:'a'}) SET n.ACL_deny = ['a']",
+    ] {
+        let error = execute(&db, q, &BTreeMap::new()).unwrap_err();
+        assert!(matches!(error, ExecError::Semantic(_)), "{q}: {error:?}");
+    }
+}

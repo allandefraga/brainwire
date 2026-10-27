@@ -107,6 +107,14 @@ impl From<GraphError> for ExecError {
         match e {
             GraphError::Txn(TxnError::Conflict) => Self::Conflict,
             GraphError::UnknownLabel(s) | GraphError::UnknownEdgeType(s) => Self::Semantic(s),
+            // Caller mistakes, not storage failures: surface as client errors.
+            e @ (GraphError::BadSignature(_)
+            | GraphError::ReservedProperty(_)
+            | GraphError::Acl(_)
+            | GraphError::NodeNotFound(_)
+            | GraphError::Id(brainwire_core::ids::IdError::BadElementId)) => {
+                Self::Semantic(e.to_string())
+            }
             e => Self::Graph(e),
         }
     }

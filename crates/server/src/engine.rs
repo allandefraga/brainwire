@@ -739,6 +739,27 @@ mod tests {
     }
 
     #[test]
+    fn reserved_property_write_is_a_client_error_and_storage_errors_stay_database_errors() {
+        let (_directory, _databases, mut engine) = scoped_engine_fixture();
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine.begin(None).unwrap();
+        let failure = engine
+            .run(
+                None,
+                "CREATE (n:Customer {entity_id:'x', acl_allow:['a']})",
+                &PackValue::Map(vec![]),
+            )
+            .err()
+            .expect("reserved property must fail");
+        assert_eq!(failure.code, "Neo.ClientError.Statement.SemanticError");
+        let corrupt = ExecError::from(brainwire_store::db::StoreError::Corrupt("x".into()));
+        assert_eq!(
+            error_code(&corrupt),
+            "Neo.DatabaseError.General.UnknownError"
+        );
+    }
+
+    #[test]
     fn parameter_conversion_failure_discards_prior_writes_and_reservations() {
         let dir = tempfile::tempdir().unwrap();
         let mut config = crate::config::Config::default();
