@@ -414,6 +414,7 @@ impl<'a> Parser<'a> {
     fn parse_create_index(&mut self) -> Result<Clause, ParseError> {
         self.advance(); // CREATE
         self.advance(); // INDEX
+        let mut if_not_exists = false;
         let (label, key, name) = if self.eat_keyword("ON") {
             let (label, key) = self.parse_legacy_index_target()?;
             (label, key, None)
@@ -426,6 +427,7 @@ impl<'a> Parser<'a> {
             if self.eat_keyword("IF") {
                 self.expect_keyword("NOT")?;
                 self.expect_keyword("EXISTS")?;
+                if_not_exists = true;
             }
             self.expect_keyword("FOR")?;
             self.expect(Tok::LParen, "'('")?;
@@ -457,6 +459,7 @@ impl<'a> Parser<'a> {
                 text(label),
                 text(key),
                 name.map(text).unwrap_or(Expr::Literal(Value::Null)),
+                Expr::Literal(Value::Bool(if_not_exists)),
             ],
             yields: vec![],
             where_: None,
@@ -484,10 +487,11 @@ impl<'a> Parser<'a> {
             vec![text(label), text(key)]
         } else {
             let name = self.expect_ident("an index name")?;
-            if self.eat_keyword("IF") {
+            let if_exists = self.eat_keyword("IF");
+            if if_exists {
                 self.expect_keyword("EXISTS")?;
             }
-            vec![text(name)]
+            vec![text(name), Expr::Literal(Value::Bool(if_exists))]
         };
         Ok(Clause::Call {
             name: "db.dropIndex".into(),
@@ -1786,9 +1790,9 @@ mod tests {
     #[test]
     fn ddl_maps_to_catalog_procedures() {
         for (source, args) in [
-            ("CREATE INDEX FOR (n:L) ON (n.p)", 3),
-            ("CREATE INDEX idx IF NOT EXISTS FOR (n:L) ON (n.p)", 3),
-            ("CREATE INDEX ON :L(p)", 3),
+            ("CREATE INDEX FOR (n:L) ON (n.p)", 4),
+            ("CREATE INDEX idx IF NOT EXISTS FOR (n:L) ON (n.p)", 4),
+            ("CREATE INDEX ON :L(p)", 4),
         ] {
             let q = parse(source).unwrap();
             let Clause::Call {
@@ -1804,7 +1808,11 @@ mod tests {
             );
         }
         let q = parse("DROP INDEX idx IF EXISTS").unwrap();
-        assert!(matches!(&q.clauses[0], Clause::Call { name, .. } if name == "db.dropIndex"));
+        assert!(matches!(&q.clauses[0], Clause::Call { name, args, .. }
+            if name == "db.dropIndex" && args[1] == Expr::Literal(Value::Bool(true))));
+        let q = parse("CREATE INDEX idx IF NOT EXISTS FOR (n:L) ON (n.p)").unwrap();
+        assert!(matches!(&q.clauses[0], Clause::Call { args, .. }
+            if args[3] == Expr::Literal(Value::Bool(true))));
         assert!(parse("CREATE INDEX FOR (n:L) ON (m.p)").is_err());
     }
 

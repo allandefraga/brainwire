@@ -109,7 +109,11 @@ pub(super) fn apply(
             Ok(out)
         }
         Op::Call { name, args, .. } => {
-            procedures::admin(txn, env, name, args)?;
+            let values = args
+                .iter()
+                .map(|arg| super::eval::constant(arg, &env_ctx(env, txn)))
+                .collect::<Result<Vec<_>, _>>()?;
+            procedures::admin(txn, name, &values)?;
             *wrote = true;
             Ok(vec![])
         }

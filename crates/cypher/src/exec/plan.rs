@@ -1441,7 +1441,7 @@ impl Planner<'_, '_, '_> {
             [label] => self.ctx.catalog.node_type(label),
             _ => None,
         };
-        let indexed = |field: &str| ty.is_some_and(|ty| ty.indexed.iter().any(|f| f == field));
+        let indexed = |field: &str| ty.is_some_and(|ty| ty.index_online(field));
         let var = node.var.as_deref();
         // Values usable for lookups may only depend on earlier rows.
         let usable = |e: &Expr| {

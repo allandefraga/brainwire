@@ -106,7 +106,9 @@ impl From<GraphError> for ExecError {
     fn from(e: GraphError) -> Self {
         match e {
             GraphError::Txn(TxnError::Conflict) => Self::Conflict,
-            GraphError::UnknownLabel(s) | GraphError::UnknownEdgeType(s) => Self::Semantic(s),
+            GraphError::UnknownLabel(s)
+            | GraphError::UnknownEdgeType(s)
+            | GraphError::Catalog(s) => Self::Semantic(s),
             // Caller mistakes, not storage failures: surface as client errors.
             e @ (GraphError::BadSignature(_)
             | GraphError::ReservedProperty(_)
@@ -307,20 +309,10 @@ impl<'db> QueryTransaction<'db> {
                 "query allocation limit must be positive".into(),
             ));
         }
-        let txn = db.begin();
+        let mut txn = db.begin();
         // A plain read: read-only transactions must not join the committer's
         // writer set. Writers add the catalog dependency before commit.
-        let catalog = match txn.get(Cf::Meta, b"catalog")? {
-            Some(bytes) => {
-                serde_json::from_slice(&bytes).map_err(|e| StoreError::Catalog(e.to_string()))?
-            }
-            None => Catalog {
-                version: 0,
-                node_types: vec![],
-                edge_types: vec![],
-                streams: vec![],
-            },
-        };
+        let catalog = load_catalog(&mut txn)?;
         Ok(Self {
             txn: Some(txn),
             catalog,
@@ -495,6 +487,16 @@ impl<'db> QueryTransaction<'db> {
             self.fail();
             return Err(error);
         }
+        let changes_catalog = query
+            .clauses
+            .iter()
+            .any(|clause| matches!(clause, Clause::Call { name, .. } if plan::is_admin_call(name)));
+        if changes_catalog && self.replicated_mode {
+            self.fail();
+            return Err(ExecError::Forbidden(
+                "catalog changes are not replicated; apply them to a standalone server",
+            ));
+        }
         let result = execute_clauses(
             self.txn.as_mut().expect("active transaction"),
             &self.catalog,
@@ -509,6 +511,16 @@ impl<'db> QueryTransaction<'db> {
         match result {
             Ok((output, wrote)) => {
                 self.wrote |= wrote;
+                if changes_catalog {
+                    // Later runs in this transaction see the staged catalog.
+                    match load_catalog(self.txn.as_mut().expect("active transaction")) {
+                        Ok(catalog) => self.catalog = catalog,
+                        Err(error) => {
+                            self.fail();
+                            return Err(error);
+                        }
+                    }
+                }
                 Ok(output)
             }
             Err(error) => {
@@ -610,6 +622,22 @@ impl<'db> QueryTransaction<'db> {
             self.state = QueryTransactionState::RolledBack;
         }
     }
+}
+
+/// The transaction's catalog. Reading it for update makes a write transaction
+/// conflict with any catalog change that commits first.
+fn load_catalog(txn: &mut Txn<'_>) -> Result<Catalog, ExecError> {
+    Ok(match txn.get(Cf::Meta, b"catalog")? {
+        Some(bytes) => {
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Catalog(e.to_string()))?
+        }
+        None => Catalog {
+            version: 0,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        },
+    })
 }
 
 /// Execute and atomically commit a single query.

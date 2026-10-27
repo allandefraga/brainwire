@@ -25,7 +25,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "sourceTable",
             "sources",
         ]),
-        "db.indexes" => Ok(&["label", "property", "state"]),
+        "db.indexes" => Ok(&["label", "property", "state", "name"]),
         "db.labels" => Ok(&["label"]),
         "db.relationshipTypes" => Ok(&["relationshipType"]),
         "db.propertyKeys" => Ok(&["propertyKey"]),
@@ -607,10 +607,14 @@ pub(super) fn run(
     }
     if name == "db.indexes" {
         let ready = brainwire_store::graph::scalar_indexes_ready(ctx.txn)?;
-        let state = if ready {
-            "scalar_equality_ready"
-        } else {
-            "declared_only"
+        let state = |ty: &brainwire_core::schema::NodeType, field: &str| {
+            if !ty.index_online(field) {
+                "populating"
+            } else if ready {
+                "scalar_equality_ready"
+            } else {
+                "declared_only"
+            }
         };
         return ctx
             .catalog
@@ -621,7 +625,8 @@ pub(super) fn run(
                     bind(vec![
                         value(Value::Str(ty.label.clone())),
                         value(Value::Str(field.clone())),
-                        value(Value::Str(state.into())),
+                        value(Value::Str(state(ty, field).into())),
+                        value(Value::Str(ty.index_name(field))),
                     ])
                 })
             })
@@ -785,11 +790,66 @@ pub(super) fn run(
 }
 
 /// Catalog changes made while the server runs (see `brainwire_store::catalog`).
-pub(super) fn admin(
-    _txn: &mut Txn<'_>,
-    _env: &super::run::Env<'_>,
-    name: &str,
-    _args: &[Expr],
-) -> Result<(), ExecError> {
-    Err(ExecError::Unsupported(format!("procedure {name}")))
+pub(super) fn admin(txn: &mut Txn<'_>, name: &str, args: &[Value]) -> Result<(), ExecError> {
+    use brainwire_store::catalog::{self, IndexTarget};
+    let text = |index: usize| match args.get(index) {
+        Some(Value::Str(text)) => Ok(text.as_str()),
+        _ => Err(semantic(format!(
+            "{name} argument {} must be a string",
+            index + 1
+        ))),
+    };
+    let flag = |index: usize| match args.get(index) {
+        None => Ok(false),
+        Some(Value::Bool(flag)) => Ok(*flag),
+        _ => Err(semantic(format!(
+            "{name} argument {} must be a boolean",
+            index + 1
+        ))),
+    };
+    let arity = |range: std::ops::RangeInclusive<usize>| {
+        if range.contains(&args.len()) {
+            Ok(())
+        } else {
+            Err(semantic(format!("{name} takes {range:?} arguments")))
+        }
+    };
+    match name {
+        "db.createIndex" => {
+            arity(2..=4)?;
+            let index_name = match args.get(2) {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(text(2)?),
+            };
+            catalog::create_index(txn, text(0)?, text(1)?, index_name, flag(3)?)?
+        }
+        "db.dropIndex" => {
+            arity(1..=2)?;
+            match args.get(1) {
+                Some(Value::Str(property)) => catalog::drop_index(
+                    txn,
+                    IndexTarget::Property {
+                        label: text(0)?,
+                        property,
+                    },
+                    false,
+                )?,
+                _ => catalog::drop_index(txn, IndexTarget::Name(text(0)?), flag(1)?)?,
+            }
+        }
+        "db.createLabel" => {
+            arity(1..=1)?;
+            catalog::create_label(txn, text(0)?)?
+        }
+        "db.createRelationshipType" => {
+            arity(3..=3)?;
+            catalog::create_relationship_type(txn, text(0)?, text(1)?, text(2)?)?
+        }
+        "db.dropProperty" => {
+            arity(2..=2)?;
+            catalog::drop_property(txn, text(0)?, text(1)?)?
+        }
+        _ => return Err(ExecError::Unsupported(format!("procedure {name}"))),
+    }
+    Ok(())
 }
