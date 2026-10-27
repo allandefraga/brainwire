@@ -375,7 +375,13 @@ impl<'db> Txn<'db> {
         prefix: &[u8],
         visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
-        self.visit_matching(cf, prefix, |key| key.starts_with(prefix), visit)
+        self.visit_matching(
+            cf,
+            prefix,
+            prefix_end(prefix),
+            |key| key.starts_with(prefix),
+            visit,
+        )
     }
 
     /// Stream a half-open key range, including this snapshot's pending writes.
@@ -389,17 +395,27 @@ impl<'db> Txn<'db> {
         if lo >= hi {
             return Ok(());
         }
-        self.visit_matching(cf, lo, |key| key < hi, visit)
+        self.visit_matching(cf, lo, Some(hi.to_vec()), |key| key < hi, visit)
     }
 
     fn visit_matching<E: From<StoreError>>(
         &self,
         cf: Cf,
         lo: &[u8],
+        upper: Option<Vec<u8>>,
         in_range: impl Fn(&[u8]) -> bool,
         mut visit: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
-        let mut disk = self.snapshot.raw_iterator_cf(self.db.cf(cf.name())?);
+        // An upper bound stops RocksDB at the end of the range instead of
+        // skipping every newer, snapshot-invisible key past it (concurrent
+        // writers make that skip grow with the write rate).
+        let mut options = rocksdb::ReadOptions::default();
+        if let Some(upper) = upper {
+            options.set_iterate_upper_bound(upper);
+        }
+        let mut disk = self
+            .snapshot
+            .raw_iterator_cf_opt(self.db.cf(cf.name())?, options);
         disk.seek(lo);
         let mut overlay = self
             .writes
@@ -458,7 +474,11 @@ impl<'db> Txn<'db> {
         let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
         let handle = self.db.cf(cf.name())?;
         let mode = rocksdb::IteratorMode::From(prefix, rocksdb::Direction::Forward);
-        for item in self.snapshot.iterator_cf(handle, mode) {
+        let mut options = rocksdb::ReadOptions::default();
+        if let Some(upper) = prefix_end(prefix) {
+            options.set_iterate_upper_bound(upper);
+        }
+        for item in self.snapshot.iterator_cf_opt(handle, options, mode) {
             let (k, v) = item?;
             if !k.starts_with(prefix) {
                 break;
@@ -654,6 +674,18 @@ impl<'db> Txn<'db> {
         self.done = true;
         Ok(seq)
     }
+}
+
+/// The smallest key greater than every key starting with `prefix`, if any.
+fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut end = prefix.to_vec();
+    while let Some(last) = end.pop() {
+        if last < u8::MAX {
+            end.push(last + 1);
+            return Some(end);
+        }
+    }
+    None
 }
 
 impl Drop for Txn<'_> {
