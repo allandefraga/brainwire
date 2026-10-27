@@ -121,8 +121,10 @@ Do not add `--volumes` unless you intend to delete the demo database.
 
 - Persistent named graphs stored in RocksDB, with atomic local transactions and
   WAL durability.
-- Bolt connectivity, a growing Cypher subset, and node/edge creation, merge,
-  property updates and removals.
+- Bolt connectivity and a broad Cypher subset (multi-hop and variable-length
+  patterns, `WITH`, `OPTIONAL MATCH`, `UNION`, aggregates, path and relationship
+  values, an index-aware planner), plus node/edge creation, merge, property
+  updates and removals.
 - Equality indexes for supported scalar values and typed adjacency lookups.
 - A Python convenience client with bounded node cleanup and independent edge
   deletion, plus JSONL and source-snapshot import examples.

@@ -17,7 +17,8 @@ The executor extracts equality conjuncts on the pattern's starting node when
 the other operand is a literal or parameter. Reversed equality works too.
 Primary/pattern constraints remain preferred, existing bindings are retained,
 and the full WHERE predicate is still checked on each candidate. One-hop
-patterns can seek their starting node before expanding.
+patterns can seek their starting node before expanding; multi-hop patterns
+anchor on their cheapest node.
 
 ```cypher
 MATCH (c:Customer)
@@ -25,8 +26,10 @@ WHERE $email=c.email AND c.segment=true
 RETURN c.entity_id
 ```
 
-Standalone OR/NOT, ranges, row-dependent expressions, unsupported values and
-unready declarations scan. A safe equality outside an OR can still narrow an
+Standalone OR/NOT, row-dependent expressions, unsupported values and
+unready declarations scan. Equality, `IN`, ranges and `STARTS WITH` on an
+indexed property are all used as anchors (see
+[how queries are planned](local-cypher.md#how-queries-are-planned)). A safe equality outside an OR can still narrow an
 AND: `c.segment=true AND (c.email=$a OR c.email=$b)`. Selection uses the first
 usable equality; there are no selectivity statistics, intersections, ending-node
 index plans or cost-based optimization yet.

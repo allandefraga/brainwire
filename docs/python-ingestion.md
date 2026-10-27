@@ -66,7 +66,7 @@ write-buffer resources, but have independent RocksDB directories and catalogs.
 | `SET c.email = row.email` | Replaces that property; preserves other properties |
 | `SET c.email = null` | Removes the property and its old index entry |
 | `DETACH DELETE c` | Deletes the node, primary key, active scalar indexes and connected edges |
-| Whole-map `SET c = $map` / `SET c += $map` | Not supported yet; enumerate fields explicitly |
+| Whole-map `SET c = $map` / `SET c += $map` | Supported; `+=` merges, `=` replaces the properties |
 
 Use identity-only MERGE followed by SET for ingestion. Brainwire's MERGE is an
 MVP identity upsert and does not implement every openCypher pattern/constraint

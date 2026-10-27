@@ -1,6 +1,6 @@
 # Local Cypher queries
 
-`brainwire cypher` runs the implemented Cypher subset against an embedded
+`brainwire cypher` runs the [supported Cypher](#supported-cypher) against an embedded
 RocksDB database on this computer. Each successful query commits its writes
 atomically; an execution error discards that query's staged graph changes.
 Separate command invocations reopen the same directory and see committed data.
@@ -99,41 +99,126 @@ File input still materializes the parameter document. Read-only MATCH/UNWIND
 can process intermediate rows incrementally; writes and final JSON output remain
 materialized and subject to conservative accounting.
 
-## Implemented subset
+## Supported Cypher
 
-- `CREATE` and `MERGE` nodes identified by label and `entity_id`; anonymous
-  typed edges between bound nodes.
-- Labeled `MATCH`, primary-key lookup or label scan, one outgoing/incoming hop,
-  property equality and `WHERE` expressions.
-- `UNWIND`, node property `SET`, `DETACH DELETE` for nodes, and `DELETE r` for
-  bound relationships.
-- `RETURN` values or nodes, top-level `count` aggregation and grouping,
-  nonnegative integer `LIMIT`, parameters and three-valued boolean logic.
-- Scalar `size(expression)` for lists and strings; null propagates.
-- String-only `toLower(expression)` and `toUpper(expression)`; null propagates.
-- Read-only `CALL graph.project`, `graph.degree`, `graph.pagerank` and
-  `knowledge.rank`, with explicit `YIELD`, aliases, optional `WHERE` and final
-  `RETURN`/`LIMIT`. See [sparse analytics](sparse-analytics.md) and
-  [explainable knowledge ranking](knowledge-ranking.md) for examples and limits.
+92 read queries return identical results on Brainwire and Neo4j 5
+(`crates/server/tests/differential.py`, synthetic data). Everything below is
+implemented; anything else returns an explicit error.
 
-Unsupported constructs return an explicit error. Relationship variables can
-read properties (`RETURN r.weight`, `WHERE r.weight > 0.5`; a missing property
-is null) and identify relationships for `DELETE r`. Returning whole
-relationship values and relationship `SET`/`CREATE`/`MERGE` bindings are not
-implemented; set edge properties with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r`
-removes directed edges of the bound type between matched endpoints, preserves
-the endpoint nodes, and respects graph write authorization. The executor streams
-supported read pipelines; writes, grouped aggregates,
-CALL and final query results remain materialized. `memory.query` enforces
-conservative accounting rather than a hard RSS ceiling. Full Cypher and
-range/vector search remain separate work. Optional graph-scoped authorization
-and connected ontology/memory/index inspection are implemented. The
-durable Bolt server uses the same executor and store.
+**Clauses.** `MATCH`, `OPTIONAL MATCH`, `WHERE`, `WITH` (`DISTINCT`, `WHERE`,
+`ORDER BY`, `SKIP`, `LIMIT`, aggregation mid-query), `RETURN` (same options,
+plus `*`), `UNWIND`, `UNION` / `UNION ALL` (the two cannot be mixed in one
+query), `CREATE`, `MERGE ... ON CREATE SET / ON MATCH SET`, `SET`
+(`n.p = v`, `n += map`, `n = map`, `n:Label`), `REMOVE`, `DELETE`,
+`DETACH DELETE` (nodes, relationships, paths), `CALL ... YIELD ... WHERE`, and
+`CREATE INDEX` / `DROP INDEX` (mapped to catalog procedures).
+
+**Patterns.** Several hops in one pattern, comma-separated patterns, variable
+length `*`, `*n`, `*n..m` (bound 64), untyped relationships `-[r]->`,
+alternative types `[:A|B]`, undirected `-[r]-`, unlabeled `MATCH (n)`,
+relationship property maps, named paths `p = (...)`, and relationship
+uniqueness within one `MATCH`. Pattern predicates and `exists(pattern)` work
+in `WHERE`.
+
+**Expressions.** `CASE`, list comprehensions, `any/all/none/single`, `reduce`,
+map projection, list indexing and slicing, `+ - * / % ^` on numbers, strings
+and lists, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IN`, `XOR`, `n:Label`,
+`IS [NOT] NULL`, parameters and three-valued logic.
+
+**Functions.** `id`, `elementId`, `labels`, `type`, `properties`, `keys`,
+`startNode`, `endNode`, `nodes`, `relationships`, `length`, `size`,
+`coalesce`, `head`, `last`, `tail`, `range`, `reverse`, `exists`, `isEmpty`,
+`valueType`, `timestamp`, `rand`, `pi`, `e`; conversions `toString`,
+`toInteger`, `toFloat`, `toBoolean` and the `...OrNull` forms; strings
+`toLower`, `toUpper`, `trim`, `ltrim`, `rtrim`, `replace`, `substring`,
+`left`, `right`, `split`; math `abs`, `ceil`, `floor`, `round`, `sqrt`,
+`sign`, `exp`, `log`, `log10`.
+
+**Aggregates.** `count`, `sum`, `avg`, `min`, `max`, `collect`, `stdev`,
+`stdevp`, `percentileCont`, `percentileDisc`, with `DISTINCT` and grouping.
+
+**Procedures.** `db.labels`, `db.relationshipTypes`, `db.propertyKeys`,
+`dbms.components`, `db.schema`, `db.indexes`, `db.commitState`,
+`db.checkpoint`, `db.memory`, `db.setNodeAcl(s)`, `db.nodeAcls`,
+`graph.project`, `graph.degree`, `graph.pagerank` and `knowledge.rank`. See
+[sparse analytics](sparse-analytics.md) and
+[explainable knowledge ranking](knowledge-ranking.md).
+
+**Returned values.** Nodes, relationships, paths and lists or maps of them are
+returned as Bolt Node, Relationship and Path structures (JSON envelopes with
+`type` in the CLI). Relationship variables read properties
+(`r.weight`, missing is null) and can be deleted with `DELETE r`.
+
+**Identity rules.**
+
+- A node has exactly one label, fixed at creation. Writes (`CREATE`, `MERGE`)
+  need a label; reads may omit it.
+- `MERGE` without `entity_id` derives the id from the node's properties, so
+  the same properties find the same node. `CREATE` without `entity_id`
+  generates one.
+
+**Not supported.** `CALL { }` subqueries, `EXISTS { }` subquery syntax (use
+`exists(pattern)` or a pattern predicate), pattern comprehensions, regex
+`=~`, `FOREACH`, `LOAD CSV`, temporal and spatial types, and aggregates
+inside `size()`. Full Cypher, range/vector search and ANN remain separate
+work.
+
+Whole relationship `SET` is not available; create or update edge properties
+with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r` removes the matched
+relationship, preserves endpoint nodes and respects graph write authorization.
+
+The executor streams read pipelines; writes and the final result stay
+materialized. `memory.query` enforces conservative accounting rather than a
+hard RSS ceiling. Optional graph-scoped authorization and connected
+ontology/memory/index inspection are implemented. The durable Bolt server
+uses the same executor and store.
 
 The CLI uses configured `memory.query` as a [conservative allocation guard](query-allocation-guards.md).
-An exceeded guard fails atomically. LIMIT stops supported read-only
-MATCH/UNWIND pipelines early. `server.query_timeout_ms` sets a cooperative
-execution deadline, including rollback on expiry.
+An exceeded guard fails atomically. `LIMIT` stops read pipelines early.
+`server.query_timeout_ms` sets a cooperative execution deadline, including
+rollback on expiry. Caller mistakes (reserved properties, bad signatures, ACL
+validation, unknown nodes, bad element ids) are reported as client errors
+(`Neo.ClientError.Statement.SemanticError`); storage and IO failures stay
+database errors.
+
+## How queries are planned
+
+Each pattern starts from its cheapest node (the anchor), then expands:
+
+1. a variable already bound earlier in the query;
+2. `id(n)` / `elementId(n)` equality;
+3. `entity_id` equality or `IN` (primary-key lookups), then an `entity_id`
+   range or `STARTS WITH`;
+4. an indexed property with `=`, `IN`, a range or `STARTS WITH`;
+5. a label scan.
+
+`WHERE` conjuncts run right after the step that binds their variables.
+A label scan expanded in one direction streams the adjacency column family
+without reading the nodes, and property reads decode one field instead of the
+whole row. `ORDER BY n.entity_id [WHERE n.entity_id > $after] LIMIT k` walks
+the primary key in order and stops after `k` rows. A label scan of at least
+50,000 nodes that ends in an aggregation, `ORDER BY ... LIMIT` or the final
+`RETURN` is split across up to eight worker threads; results keep the
+sequential order. `DISTINCT` aggregates, visibility-restricted transactions and
+cursor pages stay sequential. `UNWIND ... MERGE (n {entity_id: ...}) SET ...`
+is fused into one node write per row when no value reads `n`.
+
+### Writing fast queries
+
+- Look nodes up by `entity_id`, or by an indexed property declared in the
+  ontology (`indexed_fields`). An unindexed property predicate scans the label.
+- Page with a cursor on the primary key, not `SKIP`:
+
+  ```cypher
+  MATCH (n:Customer) WHERE n.entity_id > $after
+  RETURN n.entity_id, n.name ORDER BY n.entity_id LIMIT 1000
+  ```
+
+  Pass the last `entity_id` of each page as `$after`.
+- Batch writes with `UNWIND $rows AS row MERGE (n:Label {entity_id: row.id})
+  SET n.a = row.a`, 500 to 1000 rows per query.
+- Filter early and anchor on the most selective node; a bound or
+  `entity_id`-keyed node makes every later hop a seek.
 
 ## List and text size
 
