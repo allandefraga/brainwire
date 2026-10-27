@@ -33,6 +33,7 @@ impl From<StoreError> for Flow {
     }
 }
 pub(super) type Emit<'e> = dyn FnMut(Row) -> Result<(), Flow> + 'e;
+type NodeCandidate<'a> = dyn FnMut(NodeId, Option<&[u8]>) -> Result<(), Flow> + 'a;
 
 fn finish(result: Result<(), Flow>) -> Result<(), ExecError> {
     match result {
@@ -447,19 +448,23 @@ impl<'p> Accumulator<'p> {
         other: Accumulator<'p>,
     ) -> Result<(), ExecError> {
         for group in other.group_list {
+            let _scope = ctx.budget.scope();
+            let key_bytes = group.key.iter().map(Val::bytes).sum::<usize>();
+            ctx.budget.charge(key_bytes)?;
             let lookup = Key(group.key.clone());
             match self.groups.get(&lookup) {
                 Some(&index) => {
                     for (state, incoming) in
                         self.group_list[index].states.iter_mut().zip(group.states)
                     {
-                        merge_state(state, incoming)?;
+                        merge_state(state, incoming, ctx.budget)?;
                     }
                 }
                 None => {
                     ctx.budget.retain(
-                        group.key.iter().map(Val::bytes).sum::<usize>()
-                            + 128 * group.states.len().max(1),
+                        key_bytes
+                            .saturating_mul(2)
+                            .saturating_add(128 * group.states.len().max(1)),
                     )?;
                     self.group_list.push(group);
                     self.groups.insert(lookup, self.group_list.len() - 1);
@@ -540,7 +545,11 @@ impl<'p> Accumulator<'p> {
     }
 }
 
-fn merge_state(state: &mut AggState, incoming: AggState) -> Result<(), ExecError> {
+fn merge_state(
+    state: &mut AggState,
+    incoming: AggState,
+    budget: &Budget<'_>,
+) -> Result<(), ExecError> {
     match (state, incoming) {
         (AggState::Count(a), AggState::Count(b)) => *a += b,
         (
@@ -568,6 +577,7 @@ fn merge_state(state: &mut AggState, incoming: AggState) -> Result<(), ExecError
         (AggState::Min(a), AggState::Min(b)) => {
             if let Some(b) = b {
                 if a.as_ref().is_none_or(|x| val::sort_cmp(&b, x).is_lt()) {
+                    budget.retain(b.bytes())?;
                     *a = Some(b);
                 }
             }
@@ -575,18 +585,48 @@ fn merge_state(state: &mut AggState, incoming: AggState) -> Result<(), ExecError
         (AggState::Max(a), AggState::Max(b)) => {
             if let Some(b) = b {
                 if a.as_ref().is_none_or(|x| val::sort_cmp(&b, x).is_gt()) {
+                    budget.retain(b.bytes())?;
                     *a = Some(b);
                 }
             }
         }
-        (AggState::Collect(a), AggState::Collect(b)) => a.extend(b),
+        (AggState::Collect(a), AggState::Collect(b)) => {
+            let growth = merge_capacity_bytes(a, b.len());
+            budget.retain(
+                b.iter()
+                    .map(Val::bytes)
+                    .sum::<usize>()
+                    .saturating_add(growth),
+            )?;
+            a.extend(b);
+        }
         (AggState::Stdev(a, ints), AggState::Stdev(b, ints2)) => {
+            let growth = merge_capacity_bytes(a, b.len());
+            budget.retain(
+                b.len()
+                    .saturating_mul(std::mem::size_of::<f64>())
+                    .saturating_add(growth),
+            )?;
             a.extend(b);
             *ints &= ints2;
         }
         _ => unreachable!("merged states come from the same aggregate"),
     }
     Ok(())
+}
+
+// A Vec extension can grow geometrically; account the replacement buffer
+// before extending while the workers' original buffers remain retained.
+fn merge_capacity_bytes<T>(values: &Vec<T>, additional: usize) -> usize {
+    let length = values.len().saturating_add(additional);
+    if length <= values.capacity() {
+        0
+    } else {
+        length
+            .max(4)
+            .saturating_mul(2)
+            .saturating_mul(std::mem::size_of::<T>())
+    }
 }
 
 fn initial(func: &str) -> AggState {
@@ -891,6 +931,16 @@ fn node_ok(
     id: NodeId,
     row: &[Val],
 ) -> Result<bool, ExecError> {
+    node_ok_with_value(ctx, node, id, row, None)
+}
+
+fn node_ok_with_value(
+    ctx: &Context<'_, '_>,
+    node: &NodeStep,
+    id: NodeId,
+    row: &[Val],
+    value: Option<&[u8]>,
+) -> Result<bool, ExecError> {
     if !node.labels.is_empty() {
         let label = graph::label_of(ctx, id)?;
         if node.labels.iter().any(|l| l != label) {
@@ -899,6 +949,9 @@ fn node_ok(
     }
     if !node.bound && ctx.visibility.is_some() && !graph::visible(ctx, id)? {
         return Ok(false);
+    }
+    if let (Some(value), Some(cache)) = (value, ctx.cache) {
+        cache_node_value(cache, ctx.budget, id, value)?;
     }
     for (name, expected) in &node.props {
         let _scope = ctx.budget.scope();
@@ -911,16 +964,45 @@ fn node_ok(
     Ok(true)
 }
 
+// A scan cache keeps one raw row. Admit growth before copying, including the
+// old buffer while a replacement is allocated, and keep its capacity retained.
+fn cache_node_value(
+    cache: &NodeCache,
+    budget: &Budget<'_>,
+    id: NodeId,
+    value: &[u8],
+) -> Result<(), ExecError> {
+    let mut slot = cache.0.borrow_mut();
+    let capacity = slot.as_ref().map_or(0, |(_, bytes)| bytes.capacity());
+    if value.len() > capacity {
+        if !budget.try_retain_cache(value.len() - capacity, capacity)? {
+            // A skipped replacement must not expose an older value for this ID.
+            if slot.as_ref().is_some_and(|(cached, _)| *cached == id) {
+                *slot = None;
+            }
+            return Ok(());
+        }
+        *slot = Some((id, value.to_vec()));
+    } else if let Some((cached, buffer)) = slot.as_mut() {
+        *cached = id;
+        buffer.clear();
+        buffer.extend_from_slice(value);
+    } else {
+        *slot = Some((id, Vec::new()));
+    }
+    Ok(())
+}
+
 fn anchor(
     ctx: &Context<'_, '_>,
     node: &NodeStep,
     row: Row,
     next: &mut Emit<'_>,
 ) -> Result<(), Flow> {
-    let mut candidate = |id: NodeId| -> Result<(), Flow> {
+    let mut candidate = |id: NodeId, value: Option<&[u8]>| -> Result<(), Flow> {
         let _scope = ctx.budget.scope();
         ctx.budget.charge(16)?;
-        if !node_ok(ctx, node, id, &row)? {
+        if !node_ok_with_value(ctx, node, id, &row, value)? {
             return Ok(());
         }
         let mut row = row.clone();
@@ -932,27 +1014,14 @@ fn anchor(
         .labels
         .first()
         .map(|label| ctx.catalog.node_type(label).expect("validated label"));
-    let scan = |candidate: &mut dyn FnMut(NodeId) -> Result<(), Flow>| -> Result<(), Flow> {
+    let scan = |candidate: &mut NodeCandidate<'_>| -> Result<(), Flow> {
         let types: Vec<TypeId> = match ty {
             Some(ty) => vec![ty.id],
             None => ctx.catalog.node_types.iter().map(|t| t.id).collect(),
         };
         let partition = ctx.partition.filter(|(slot, _, _)| *slot == node.slot);
         for ty in types {
-            let mut each = |id: NodeId, bytes: &[u8]| {
-                if let Some(cache) = ctx.cache {
-                    let mut slot = cache.0.borrow_mut();
-                    match slot.as_mut() {
-                        Some((cached, buffer)) => {
-                            *cached = id;
-                            buffer.clear();
-                            buffer.extend_from_slice(bytes);
-                        }
-                        None => *slot = Some((id, bytes.to_vec())),
-                    }
-                }
-                candidate(id)
-            };
+            let mut each = |id: NodeId, bytes: &[u8]| candidate(id, Some(bytes));
             match partition {
                 Some((_, lo, hi)) => {
                     store::visit_nodes_in_range_with_values::<Flow>(ctx.txn, lo, hi, &mut each)?
@@ -983,7 +1052,7 @@ fn anchor(
             let ty = ty.expect("entity access has a label");
             if let Val::Str(entity_id) = eval(expr, &row, ctx)? {
                 for id in store::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))? {
-                    candidate(id)?;
+                    candidate(id, None)?;
                 }
             }
             Ok(())
@@ -1000,7 +1069,7 @@ fn anchor(
                 }
             }
             for id in ids {
-                candidate(id)?;
+                candidate(id, None)?;
             }
             Ok(())
         }
@@ -1042,7 +1111,7 @@ fn anchor(
                     return Ok(false);
                 }
                 if node_ty == ty.id {
-                    candidate(id)?;
+                    candidate(id, None)?;
                 }
                 Ok(true)
             })
@@ -1054,13 +1123,9 @@ fn anchor(
                 return Ok(());
             }
             let value = value.into_value()?;
-            if !store::visit_by_indexed_property::<Flow>(
-                ctx.txn,
-                ty,
-                field,
-                &value,
-                &mut candidate,
-            )? {
+            if !store::visit_by_indexed_property::<Flow>(ctx.txn, ty, field, &value, |id| {
+                candidate(id, None)
+            })? {
                 return scan(&mut candidate);
             }
             Ok(())
@@ -1087,7 +1152,7 @@ fn anchor(
                 }
             }
             for id in ids {
-                candidate(id)?;
+                candidate(id, None)?;
             }
             Ok(())
         }
@@ -1123,7 +1188,7 @@ fn anchor(
                 return scan(&mut candidate);
             }
             for id in ids {
-                candidate(id)?;
+                candidate(id, None)?;
             }
             Ok(())
         }
@@ -1149,7 +1214,7 @@ fn anchor(
                 return scan(&mut candidate);
             }
             for id in ids {
-                candidate(id)?;
+                candidate(id, None)?;
             }
             Ok(())
         }
@@ -1171,7 +1236,7 @@ fn anchor(
             {
                 return Ok(());
             }
-            candidate(id)
+            candidate(id, None)
         }
     }
 }
@@ -1587,4 +1652,189 @@ pub(super) fn pattern_exists(
         }
     }
     Ok(found)
+}
+
+#[cfg(test)]
+mod merge_budget_tests {
+    use super::*;
+
+    fn tiny_budget() -> Budget<'static> {
+        Budget::new(
+            ExecutionLimits {
+                memory_bytes: 1,
+                timeout: None,
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn cache_reuses_capacity_and_skipped_growth_keeps_previous_value() {
+        let cache = NodeCache::default();
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 2500,
+                timeout: None,
+            },
+            None,
+        );
+        cache_node_value(&cache, &budget, NodeId(1), &[7; 1024]).unwrap();
+        let remaining = budget.remaining();
+        cache_node_value(&cache, &budget, NodeId(2), &[8; 512]).unwrap();
+        assert_eq!(budget.remaining(), remaining);
+        cache_node_value(&cache, &budget, NodeId(3), &[9; 2048]).unwrap();
+        assert_eq!(budget.remaining(), remaining);
+        let slot = cache.0.borrow();
+        let (id, bytes) = slot.as_ref().unwrap();
+        assert_eq!(*id, NodeId(2));
+        assert_eq!(bytes, &[8; 512]);
+        assert_eq!(bytes.capacity(), 1024);
+        drop(slot);
+        cache_node_value(&cache, &budget, NodeId(2), &[9; 2048]).unwrap();
+        assert!(cache.0.borrow().is_none());
+        assert_eq!(budget.remaining(), remaining);
+    }
+
+    #[test]
+    fn denied_large_scan_values_are_not_copied_into_the_cache() {
+        use brainwire_core::{acl::ReadVisibility, schema::GraphMapping};
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Doc","properties":["payload"]}],"edges":[]}"#,
+        )
+        .unwrap();
+        db.apply_ontology(&mapping).unwrap();
+        crate::execute(
+            &db,
+            "CREATE (n:Doc {entity_id:'hidden',payload:$payload})",
+            &BTreeMap::from([("payload".into(), Value::Str("x".repeat(1024 * 1024)))]),
+        )
+        .unwrap();
+        let txn = db.begin();
+        let catalog = db.catalog().unwrap().unwrap();
+        let params = BTreeMap::new();
+        let vars = Vars::default();
+        let denied = ReadVisibility {
+            deny_all: true,
+            ..Default::default()
+        };
+        let cache = NodeCache::default();
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 128 * 1024 * 1024,
+                timeout: None,
+            },
+            None,
+        );
+        let context = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: Some(&denied),
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: Some(&cache),
+            param_vals: None,
+            partition: None,
+        };
+        let step = NodeStep {
+            slot: 0,
+            bound: false,
+            labels: vec!["Doc".into()],
+            props: vec![],
+            access: Access::Scan,
+        };
+        let mut emitted = 0;
+        finish(anchor(&context, &step, vec![Val::Null], &mut |_| {
+            emitted += 1;
+            Ok(())
+        }))
+        .unwrap();
+        assert_eq!(emitted, 0);
+        assert!(cache.0.borrow().is_none());
+
+        let small_cache = NodeCache::default();
+        let small_budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 64 * 1024,
+                timeout: None,
+            },
+            None,
+        );
+        let context = Context {
+            budget: &small_budget,
+            visibility: None,
+            cache: Some(&small_cache),
+            ..context
+        };
+        let mut counted = 0;
+        finish(anchor(&context, &step, vec![Val::Null], &mut |_| {
+            counted += 1;
+            Ok(())
+        }))
+        .unwrap();
+        assert_eq!(counted, 1);
+        assert!(small_cache.0.borrow().is_none());
+        let id = store::find_by_entity_id(&txn, "hidden", None).unwrap()[0];
+        assert_eq!(
+            graph::node_property(&context, id, "entity_id").unwrap(),
+            Value::Str("hidden".into())
+        );
+        assert!(matches!(
+            graph::node_property(&context, id, "payload"),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn collect_and_numeric_merge_reject_growth_before_mutating_state() {
+        let mut collected = AggState::Collect(vec![Val::Int(1)]);
+        assert!(matches!(
+            merge_state(
+                &mut collected,
+                AggState::Collect(vec![Val::Str("payload".into())]),
+                &tiny_budget()
+            ),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+        assert!(matches!(collected, AggState::Collect(ref values) if values.len() == 1));
+        let mut numeric = AggState::Stdev(vec![1.0], true);
+        assert!(matches!(
+            merge_state(
+                &mut numeric,
+                AggState::Stdev(vec![2.5], false),
+                &tiny_budget()
+            ),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+        assert!(matches!(numeric, AggState::Stdev(ref values, true) if values == &[1.0]));
+    }
+
+    #[test]
+    fn merge_keeps_collect_order_and_numeric_input_kind_with_budget() {
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 4096,
+                timeout: None,
+            },
+            None,
+        );
+        let mut collected = AggState::Collect(vec![Val::Int(1)]);
+        merge_state(
+            &mut collected,
+            AggState::Collect(vec![Val::Int(2)]),
+            &budget,
+        )
+        .unwrap();
+        assert!(
+            matches!(collected, AggState::Collect(ref values) if matches!(values.as_slice(), [Val::Int(1), Val::Int(2)]))
+        );
+        let mut numeric = AggState::Stdev(vec![1.0], true);
+        merge_state(&mut numeric, AggState::Stdev(vec![2.5], false), &budget).unwrap();
+        assert!(matches!(numeric, AggState::Stdev(ref values, false) if values == &[1.0, 2.5]));
+    }
 }

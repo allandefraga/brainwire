@@ -1,8 +1,7 @@
 //! Parallel label scans for aggregating and top-k projections: the anchor
 //! label's id range is split across worker threads, each with its own query
 //! guard share and accumulator, and the partial results are merged in scan
-//! order on the calling thread. A visibility-restricted transaction filters
-//! each worker's share with its policy, as the sequential scan would.
+//! order on the calling thread. Visibility-restricted scans filter each worker.
 use super::plan::*;
 use super::run::{stream, Accumulator, Flow, Row};
 use super::*;
@@ -124,7 +123,14 @@ fn split<'p, T: Send>(
             (start, end)
         })
         .collect();
-    let budgets: Vec<Budget<'static>> = ranges.iter().map(|_| ctx.budget.fork(workers)).collect();
+    let mut reservations: Vec<_> = ranges
+        .iter()
+        .map(|_| ctx.budget.worker_reservation())
+        .collect();
+    let budgets: Vec<_> = reservations
+        .iter()
+        .map(|reservation| ctx.budget.fork(workers, reservation.as_ref()))
+        .collect();
     let (txn, catalog, params, vars, param_vals, checkpoint_dir, visibility) = (
         ctx.txn,
         ctx.catalog,
@@ -137,7 +143,7 @@ fn split<'p, T: Send>(
     let slot = anchor.slot;
     let row = &input[0];
     let work = &work;
-    let partials: Vec<Result<T, ExecError>> = std::thread::scope(|scope| {
+    let partials: Vec<(Result<T, ExecError>, usize)> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
             .into_iter()
             .zip(budgets)
@@ -149,7 +155,6 @@ fn split<'p, T: Send>(
                         catalog,
                         params,
                         budget: &budget,
-                        // Each worker filters its share with the same policy.
                         visibility,
                         checkpoint_dir,
                         vars,
@@ -157,7 +162,10 @@ fn split<'p, T: Send>(
                         param_vals,
                         partition: Some((slot, start, end)),
                     };
-                    work(&worker, segment, row.clone())
+                    let result = budget
+                        .clone_row(row)
+                        .and_then(|row| work(&worker, segment, row));
+                    (result, budget.high_water())
                 })
             })
             .collect();
@@ -166,5 +174,14 @@ fn split<'p, T: Send>(
             .map(|handle| handle.join().expect("scan worker panicked"))
             .collect()
     });
-    Ok(Some(partials))
+    if let Err(error) = ctx.budget.absorb_worker_reservations(
+        &mut reservations,
+        partials.iter().map(|(_, high_water)| *high_water),
+    ) {
+        drop(partials);
+        return Err(error);
+    }
+    Ok(Some(
+        partials.into_iter().map(|(result, _)| result).collect(),
+    ))
 }

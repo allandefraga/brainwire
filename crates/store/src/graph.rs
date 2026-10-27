@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, HashSet};
 
 use brainwire_core::acl::{AclError, NodeAcl, ReadVisibility, MAX_ACL_BYTES};
 use brainwire_core::codec::{
-    decode_row, decode_row_field, encode_row, estimate_row_allocation, Row,
+    decode_row, decode_row_field, encode_row, estimate_row_allocation,
+    estimate_row_field_allocation, Row,
 };
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
@@ -1030,13 +1031,7 @@ pub fn node_field_with_control<E: From<GraphError> + From<StoreError>>(
         let Some(bytes) = bytes else {
             return Ok(None);
         };
-        let (entity_id, row) = split_node(bytes)?;
-        if name == "entity_id" {
-            control(entity_id.len())?;
-            return Ok(Some(Value::Str(entity_id.to_string())));
-        }
-        let value = decode_row_field(row, column, name).map_err(StoreError::from)?;
-        Ok(Some(value.unwrap_or(Value::Null)))
+        decode_node_field_with_control(bytes, column, name, &mut control).map(Some)
     })
 }
 
@@ -1047,11 +1042,29 @@ pub fn decode_node_field(
     column: Option<u16>,
     name: &str,
 ) -> Result<Value, StoreError> {
+    decode_node_field_with_control(bytes, column, name, |_| Ok::<_, StoreError>(()))
+}
+
+/// Admit the selected property's owned decoding before allocating its containers.
+pub fn decode_node_field_with_control<E: From<StoreError>>(
+    bytes: &[u8],
+    column: Option<u16>,
+    name: &str,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<Value, E> {
     let (entity_id, row) = split_node(bytes)?;
     if name == "entity_id" {
+        control(entity_id.len())?;
         return Ok(Value::Str(entity_id.to_string()));
     }
-    Ok(decode_row_field(row, column, name)?.unwrap_or(Value::Null))
+    if let Some(estimate) =
+        estimate_row_field_allocation(row, column, name).map_err(StoreError::from)?
+    {
+        control(estimate)?;
+    }
+    Ok(decode_row_field(row, column, name)
+        .map_err(StoreError::from)?
+        .unwrap_or(Value::Null))
 }
 
 /// Stream a label's nodes together with their stored values, in id order.
@@ -1657,6 +1670,49 @@ mod tests {
                 .unwrap();
         let cat = db.apply_ontology(&mapping).unwrap();
         (dir, res, db, cat)
+    }
+
+    #[test]
+    fn node_field_admission_rejects_large_decode_and_ignores_unrelated_payloads() {
+        let (_dir, _resources, db, _catalog) = setup();
+        let row = Row {
+            extra: BTreeMap::from([
+                ("large".into(), Value::Str("x".repeat(1_000_000))),
+                ("small".into(), Value::Str("ok".into())),
+            ]),
+            ..Row::default()
+        };
+        let mut bytes = 2u32.to_be_bytes().to_vec();
+        bytes.extend_from_slice(b"id");
+        bytes.extend_from_slice(&encode_row(&row));
+        let id = NodeId(123);
+        let mut seed = db.begin();
+        seed.put(Cf::Node, node_key(id), bytes.clone());
+        seed.commit().unwrap();
+        let txn = db.begin();
+        let denied = node_field_with_control::<GraphError>(&txn, id, None, "large", |size| {
+            assert!(size >= 1_000_000);
+            Err(GraphError::Catalog("synthetic admission denial".into()))
+        })
+        .unwrap_err();
+        assert!(
+            matches!(denied, GraphError::Catalog(ref text) if text == "synthetic admission denial")
+        );
+        let cached_denied =
+            decode_node_field_with_control::<StoreError>(&bytes, None, "large", |size| {
+                assert!(size >= 1_000_000);
+                Err(StoreError::Corrupt("synthetic admission denial".into()))
+            })
+            .unwrap_err();
+        assert!(cached_denied
+            .to_string()
+            .contains("synthetic admission denial"));
+        let small = node_field_with_control::<GraphError>(&txn, id, None, "small", |size| {
+            assert!(size < 1024);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(small, Some(Value::Str("ok".into())));
     }
 
     #[test]

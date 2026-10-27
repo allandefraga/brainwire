@@ -253,6 +253,46 @@ pub fn decode_row_field(
     Ok(found)
 }
 
+/// Nonallocating admission estimate for the values decoded by `decode_row_field`.
+/// Include matching columns as well as the overriding extra value: both can be
+/// alive while the decoder evaluates the replacement. Unrelated fields are skipped.
+pub fn estimate_row_field_allocation(
+    bytes: &[u8],
+    column: Option<u16>,
+    name: &str,
+) -> Result<Option<usize>, CodecError> {
+    let mut input = bytes;
+    get_varint(&mut input)?;
+    get_varint(&mut input)?;
+    let mut found = false;
+    let mut total = 0usize;
+    for _ in 0..get_varint(&mut input)? {
+        let id = get_varint(&mut input)? as u16;
+        if Some(id) == column {
+            found = true;
+            estimate_add(&mut total, std::mem::size_of::<Value>())?;
+            estimate_value(&mut input, 0, &mut total)?;
+        } else {
+            skip_value(&mut input, 0)?;
+        }
+    }
+    for _ in 0..get_varint(&mut input)? {
+        let len = get_varint(&mut input)? as usize;
+        if input.len() < len {
+            return Err(CodecError::Truncated);
+        }
+        let (key, rest) = input.split_at(len);
+        input = rest;
+        if key == name.as_bytes() {
+            estimate_add(&mut total, std::mem::size_of::<Value>())?;
+            estimate_value(&mut input, 0, &mut total)?;
+            return Ok(Some(total));
+        }
+        skip_value(&mut input, 0)?;
+    }
+    Ok(found.then_some(total))
+}
+
 pub fn decode_row(bytes: &[u8]) -> Result<Row, CodecError> {
     let mut input = bytes;
     let schema_version = get_varint(&mut input)? as u32;
@@ -388,6 +428,101 @@ pub fn estimate_row_allocation(bytes: &[u8]) -> Result<usize, CodecError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn field_admission_estimates_only_decoded_values_and_override_overlap() {
+        use super::*;
+        let mut row = Row::default();
+        row.columns.insert(1, Value::Int(7));
+        row.columns.insert(2, Value::Str("a".repeat(10_000)));
+        row.extra
+            .insert("chosen".into(), Value::Str("b".repeat(20_000)));
+        row.extra
+            .insert("unrelated".into(), Value::Str("x".repeat(1_000_000)));
+        let bytes = encode_row(&row);
+        assert!(
+            estimate_row_field_allocation(&bytes, Some(1), "small")
+                .unwrap()
+                .unwrap()
+                < 1024
+        );
+        assert!(
+            estimate_row_field_allocation(&bytes, Some(2), "chosen")
+                .unwrap()
+                .unwrap()
+                >= 30_000
+        );
+        assert_eq!(
+            estimate_row_field_allocation(&bytes, None, "missing").unwrap(),
+            None
+        );
+        assert_eq!(
+            decode_row_field(&bytes, Some(2), "chosen").unwrap(),
+            row.extra.get("chosen").cloned()
+        );
+        let nested = Row {
+            extra: BTreeMap::from([("list".into(), Value::List(vec![Value::Null; 1024]))]),
+            ..Row::default()
+        };
+        let estimate = estimate_row_field_allocation(&encode_row(&nested), None, "list")
+            .unwrap()
+            .unwrap();
+        assert!(estimate >= 1024 * std::mem::size_of::<Value>());
+    }
+
+    #[test]
+    fn field_admission_preserves_decoder_errors_and_early_return() {
+        use super::*;
+        let row = Row {
+            extra: BTreeMap::from([("field".into(), Value::Str("abc".into()))]),
+            ..Row::default()
+        };
+        let mut truncated = encode_row(&row);
+        truncated.pop();
+        let unknown = vec![0, 0, 1, 7, 255, 0];
+        let mut deep = vec![0, 0, 1, 7];
+        for _ in 0..MAX_DEPTH + 2 {
+            deep.extend_from_slice(&[T_LIST, 1]);
+        }
+        deep.extend_from_slice(&[T_NULL, 0]);
+        for (bytes, column, name) in [
+            (&truncated, None, "field"),
+            (&unknown, Some(7), "field"),
+            (&deep, Some(7), "field"),
+        ] {
+            assert_eq!(
+                estimate_row_field_allocation(bytes, column, name).unwrap_err(),
+                decode_row_field(bytes, column, name).unwrap_err()
+            );
+        }
+        let mut duplicate = vec![0, 0, 2];
+        put_varint(&mut duplicate, 7);
+        put_value(&mut duplicate, &Value::Str("a".repeat(100)));
+        put_varint(&mut duplicate, 7);
+        put_value(&mut duplicate, &Value::Str("b".repeat(200)));
+        put_varint(&mut duplicate, 0);
+        assert!(
+            estimate_row_field_allocation(&duplicate, Some(7), "field")
+                .unwrap()
+                .unwrap()
+                >= 300
+        );
+        assert_eq!(
+            decode_row_field(&duplicate, Some(7), "field").unwrap(),
+            Some(Value::Str("b".repeat(200)))
+        );
+        let mut early = vec![0, 0, 0, 2];
+        put_str(&mut early, "field");
+        put_value(&mut early, &Value::Str("ok".into()));
+        early.push(255); // Corrupt next-extra suffix remains ignored after a match.
+        assert!(estimate_row_field_allocation(&early, None, "field")
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            decode_row_field(&early, None, "field").unwrap(),
+            Some(Value::Str("ok".into()))
+        );
+    }
+
     #[test]
     fn single_field_decode_matches_the_full_decode() {
         let mut row = super::Row::default();

@@ -111,7 +111,12 @@ pub(super) fn node_property(
     if let Some(cache) = ctx.cache {
         if let Some((cached, bytes)) = cache.0.borrow().as_ref() {
             if *cached == id {
-                let value = decode_node_field(bytes, column, name)?;
+                let value = {
+                    let _scope = ctx.budget.scope();
+                    decode_node_field_with_control::<ExecError>(bytes, column, name, |size| {
+                        ctx.budget.charge(size)
+                    })?
+                };
                 ctx.budget
                     .charge(budget::value_bytes(&value).saturating_mul(2))?;
                 return Ok(value);

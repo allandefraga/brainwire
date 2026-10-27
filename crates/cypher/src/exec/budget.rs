@@ -55,6 +55,7 @@ impl Reservation {
             bytes: AtomicUsize::new(0),
         }
     }
+    // Each reservation has one charging executor; workers own separate leases.
     fn grow_to(&self, bytes: usize) -> Result<(), ExecError> {
         let extra = bytes.saturating_sub(self.bytes.load(Ordering::Relaxed));
         if extra == 0 {
@@ -86,6 +87,12 @@ impl Reservation {
             }
         }
     }
+    fn absorb(&self, other: Reservation) {
+        assert!(Arc::ptr_eq(&self.pool, &other.pool));
+        let bytes = other.bytes.swap(0, Ordering::Relaxed);
+        // Both leases already contribute to the same bounded pool total.
+        self.bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
 }
 impl Drop for Reservation {
     fn drop(&mut self) {
@@ -114,6 +121,7 @@ pub(super) struct Budget<'a> {
     limit: usize,
     used: Cell<usize>,
     retained: Cell<usize>,
+    peak: Cell<usize>,
     reservation: Option<&'a Reservation>,
     deadline: Option<Instant>,
     ticks: Cell<u32>,
@@ -124,6 +132,7 @@ impl<'a> Budget<'a> {
             limit: limits.memory_bytes,
             used: Cell::new(0),
             retained: Cell::new(0),
+            peak: Cell::new(0),
             reservation,
             deadline: limits
                 .timeout
@@ -145,8 +154,32 @@ impl<'a> Budget<'a> {
             reservation.grow_to(attempted)?;
         }
         self.used.set(used);
+        self.peak.set(self.peak.get().max(attempted));
         Ok(())
     }
+    /// Optional raw-row caching must not reject a query that needs only IDs.
+    /// Admit growth and replacement overlap together, before changing accounting.
+    pub fn try_retain_cache(&self, growth: usize, overlap: usize) -> Result<bool, ExecError> {
+        self.check_deadline()?;
+        let retained = self.retained.get().checked_add(growth);
+        let attempted = retained
+            .and_then(|retained| self.used.get().checked_add(retained))
+            .and_then(|used| used.checked_add(overlap));
+        let Some(attempted) = attempted.filter(|attempted| *attempted <= self.limit) else {
+            return Ok(false);
+        };
+        if let Some(reservation) = self.reservation {
+            match reservation.grow_to(attempted) {
+                Ok(()) => {}
+                Err(ExecError::MemoryPoolExhausted { .. }) => return Ok(false),
+                Err(error) => return Err(error),
+            }
+        }
+        self.retained.set(retained.expect("checked above"));
+        self.peak.set(self.peak.get().max(attempted));
+        Ok(true)
+    }
+
     /// Deadline check for hot paths: reads the clock on every 32nd call.
     pub fn tick(&self) -> Result<(), ExecError> {
         if self.deadline.is_none() {
@@ -182,17 +215,52 @@ impl<'a> Budget<'a> {
             mark: self.used.get(),
         }
     }
-    /// A worker's guard for a parallel scan: an equal share of what remains,
-    /// the same deadline, no shared pool reservation (the parent holds it).
-    pub fn fork(&self, parts: usize) -> Budget<'static> {
+    /// Independent lease for one parallel worker; keep it until results are merged.
+    pub fn worker_reservation(&self) -> Option<Reservation> {
+        self.reservation
+            .map(|parent| Reservation::new(Arc::clone(&parent.pool)))
+    }
+    /// A worker gets an equal share of the remaining query allowance and its own
+    /// pool lease, so charging workers never concurrently mutate one reservation.
+    pub fn fork<'b>(&self, parts: usize, reservation: Option<&'b Reservation>) -> Budget<'b> {
         Budget {
             limit: self.remaining() / parts.max(1),
             used: Cell::new(0),
             retained: Cell::new(0),
-            reservation: None,
+            peak: Cell::new(0),
+            reservation,
             deadline: self.deadline,
             ticks: Cell::new(0),
         }
+    }
+    pub fn high_water(&self) -> usize {
+        self.peak.get()
+    }
+    /// Retain worker high-water accounting while partials and merged data coexist.
+    /// On failure, leases stay with the caller until it drops the partial results.
+    pub fn absorb_worker_reservations(
+        &self,
+        reservations: &mut [Option<Reservation>],
+        high_waters: impl IntoIterator<Item = usize>,
+    ) -> Result<(), ExecError> {
+        self.check_deadline()?;
+        let bytes = high_waters.into_iter().try_fold(0usize, usize::checked_add);
+        let retained = bytes.and_then(|bytes| self.retained.get().checked_add(bytes));
+        let attempted = retained.and_then(|retained| self.used.get().checked_add(retained));
+        let Some(attempted) = attempted.filter(|attempted| *attempted <= self.limit) else {
+            return Err(ExecError::MemoryLimit {
+                limit: self.limit,
+                attempted: attempted.unwrap_or(usize::MAX),
+            });
+        };
+        if let Some(parent) = self.reservation {
+            for reservation in reservations.iter_mut().filter_map(Option::take) {
+                parent.absorb(reservation);
+            }
+        }
+        self.retained.set(attempted - self.used.get());
+        self.peak.set(self.peak.get().max(attempted));
+        Ok(())
     }
     pub fn pool_usage(&self) -> Option<QueryMemoryUsage> {
         self.reservation.map(|r| r.pool.usage())
@@ -215,6 +283,11 @@ impl<'a> Budget<'a> {
     }
     pub fn retain_row(&self, row: &[super::val::Val]) -> Result<(), ExecError> {
         self.retain(Self::row_bytes(row))
+    }
+    /// Admit the worker's owned bindings before deep-cloning strings or lists.
+    pub fn clone_row(&self, row: &[super::val::Val]) -> Result<Vec<super::val::Val>, ExecError> {
+        self.retain_row(row)?;
+        Ok(row.to_vec())
     }
     /// Give back what [`Self::retain_row`] retained for a row dropped early.
     pub fn release_row(&self, row: &[super::val::Val]) {
@@ -301,6 +374,207 @@ pub(super) fn value_bytes(value: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn optional_cache_admission_skips_pool_pressure_without_partial_charge() {
+        let pool = Arc::new(QueryMemoryPool::new(1000));
+        let parent_reservation = Reservation::new(Arc::clone(&pool));
+        let mut parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 1000,
+                timeout: None,
+            },
+            Some(&parent_reservation),
+        );
+        parent.charge(100).unwrap();
+        let competing = Reservation::new(Arc::clone(&pool));
+        competing.grow_to(800).unwrap();
+        assert!(!parent.try_retain_cache(200, 0).unwrap());
+        assert_eq!(parent.remaining(), 900);
+        assert_eq!(parent.high_water(), 100);
+        assert_eq!(pool.usage().reserved_bytes, 900);
+        drop(competing);
+        assert!(!parent.try_retain_cache(1000, 0).unwrap());
+        assert_eq!(parent.remaining(), 900);
+        assert_eq!(pool.usage().reserved_bytes, 100);
+        assert!(parent.try_retain_cache(200, 100).unwrap());
+        assert_eq!(parent.remaining(), 700);
+        assert_eq!(parent.high_water(), 400);
+        assert_eq!(pool.usage().reserved_bytes, 400);
+        parent.deadline = Some(Instant::now() - Duration::from_secs(1));
+        assert!(matches!(
+            parent.try_retain_cache(1, 0),
+            Err(ExecError::TimedOut)
+        ));
+    }
+
+    #[test]
+    fn parallel_worker_allocations_reserve_shared_pool_capacity() {
+        let pool = Arc::new(QueryMemoryPool::new(700));
+        let parent_reservation = Reservation::new(Arc::clone(&pool));
+        let parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 1000,
+                timeout: None,
+            },
+            Some(&parent_reservation),
+        );
+        parent.charge(100).unwrap();
+        let worker_reservation = parent.worker_reservation();
+        let worker = parent.fork(2, worker_reservation.as_ref());
+        worker.charge(400).unwrap();
+        assert_eq!(pool.usage().reserved_bytes, 500);
+        let competing = Reservation::new(Arc::clone(&pool));
+        assert!(matches!(
+            competing.grow_to(300),
+            Err(ExecError::MemoryPoolExhausted { .. })
+        ));
+    }
+
+    #[test]
+    fn joining_workers_transfers_accounting_without_double_reserving_or_leaking() {
+        let pool = Arc::new(QueryMemoryPool::new(1000));
+        {
+            let parent_reservation = Reservation::new(Arc::clone(&pool));
+            let parent = Budget::new(
+                ExecutionLimits {
+                    memory_bytes: 1000,
+                    timeout: None,
+                },
+                Some(&parent_reservation),
+            );
+            parent.charge(100).unwrap();
+            let mut leases: Vec<_> = (0..2).map(|_| parent.worker_reservation()).collect();
+            for lease in &leases {
+                parent.fork(2, lease.as_ref()).retain(200).unwrap();
+            }
+            assert_eq!(pool.usage().reserved_bytes, 500);
+            parent
+                .absorb_worker_reservations(&mut leases, [200, 200])
+                .unwrap();
+            assert_eq!(pool.usage().reserved_bytes, 500);
+            assert_eq!(parent.remaining(), 500);
+            {
+                let _scope = parent.scope();
+                parent.charge(100).unwrap();
+            }
+            assert_eq!(parent.remaining(), 500);
+            assert_eq!(pool.usage().reserved_bytes, 600);
+        }
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn oversized_worker_input_is_rejected_before_clone() {
+        let pool = Arc::new(QueryMemoryPool::new(100));
+        let reservation = Reservation::new(Arc::clone(&pool));
+        let parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 4096,
+                timeout: None,
+            },
+            Some(&reservation),
+        );
+        let lease = parent.worker_reservation();
+        let worker = parent.fork(2, lease.as_ref());
+        let row = vec![super::super::val::Val::Str("x".repeat(1024))];
+        assert!(matches!(
+            worker.clone_row(&row),
+            Err(ExecError::MemoryPoolExhausted { .. })
+        ));
+        assert_eq!(worker.high_water(), 0);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn worker_high_water_is_adopted_without_a_shared_pool() {
+        let parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 1000,
+                timeout: None,
+            },
+            None,
+        );
+        parent.charge(100).unwrap();
+        let worker = parent.fork(2, None);
+        {
+            let _scope = worker.scope();
+            worker.charge(400).unwrap();
+        }
+        assert_eq!(worker.high_water(), 400);
+        let mut leases = vec![None];
+        parent
+            .absorb_worker_reservations(&mut leases, [worker.high_water()])
+            .unwrap();
+        assert_eq!(parent.remaining(), 500);
+        assert!(matches!(
+            parent.charge(501),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn rejected_adoption_and_panicking_worker_release_their_leases() {
+        let pool = Arc::new(QueryMemoryPool::new(1000));
+        let parent_reservation = Reservation::new(Arc::clone(&pool));
+        let parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 300,
+                timeout: None,
+            },
+            Some(&parent_reservation),
+        );
+        parent.charge(100).unwrap();
+        let worker = parent.worker_reservation().unwrap();
+        worker.grow_to(250).unwrap();
+        let mut leases = vec![Some(worker)];
+        assert!(matches!(
+            parent.absorb_worker_reservations(&mut leases, [250]),
+            Err(ExecError::MemoryLimit {
+                limit: 300,
+                attempted: 350
+            })
+        ));
+        assert_eq!(pool.usage().reserved_bytes, 350);
+        assert!(leases[0].is_some());
+        drop(leases);
+        assert_eq!(pool.usage().reserved_bytes, 100);
+        assert_eq!(parent.remaining(), 200);
+        let pool_for_panic = Arc::clone(&pool);
+        assert!(std::panic::catch_unwind(move || {
+            let worker = Reservation::new(pool_for_panic);
+            worker.grow_to(200).unwrap();
+            panic!("synthetic worker panic");
+        })
+        .is_err());
+        assert_eq!(pool.usage().reserved_bytes, 100);
+        drop(parent_reservation);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn deadline_failure_keeps_worker_leases_until_caller_releases_results() {
+        let pool = Arc::new(QueryMemoryPool::new(1000));
+        let reservation = Reservation::new(Arc::clone(&pool));
+        let mut parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 1000,
+                timeout: None,
+            },
+            Some(&reservation),
+        );
+        let mut leases = vec![parent.worker_reservation()];
+        parent.fork(1, leases[0].as_ref()).retain(400).unwrap();
+        parent.deadline = Some(Instant::now() - Duration::from_secs(1));
+        assert!(matches!(
+            parent.absorb_worker_reservations(&mut leases, [400]),
+            Err(ExecError::TimedOut)
+        ));
+        assert_eq!(pool.usage().reserved_bytes, 400);
+        assert!(leases[0].is_some());
+        drop(leases);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+
     #[test]
     fn racing_reservations_never_exceed_capacity_or_leak() {
         let pool = Arc::new(QueryMemoryPool::new(1000));
