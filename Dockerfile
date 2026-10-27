@@ -38,6 +38,6 @@ ENV BRAINWIRE_SERVER_DATA_DIR=/data \
 EXPOSE 7687
 USER brainwire
 HEALTHCHECK --interval=10s --timeout=5s --start-period=180s --retries=3 \
-    CMD ["/usr/local/bin/brainwire", "probe", "--mode", "ready"]
+    CMD ["/usr/local/bin/brainwire", "probe", "--mode", "handshake"]
 ENTRYPOINT ["/usr/local/bin/brainwire"]
 CMD ["serve"]

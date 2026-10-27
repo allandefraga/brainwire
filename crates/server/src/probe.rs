@@ -17,6 +17,9 @@ const MAX_DECODED_RESPONSE: usize = 32 * 1024 * 1024;
 pub enum Mode {
     /// Complete a Bolt handshake and login without touching RocksDB.
     Live,
+    /// Complete Bolt version negotiation and HELLO only; needs no credential, so it
+    /// works against a protected server. Proves the listener answers, not query readiness.
+    Handshake,
     /// Run a read-only query through the default database.
     Ready,
 }
@@ -24,6 +27,10 @@ pub enum Mode {
 pub fn run(address: &str, mode: Mode, timeout_ms: u64) -> Result<(), String> {
     if !(1..=30_000).contains(&timeout_ms) {
         return Err("--timeout-ms must be between 1 and 30000".into());
+    }
+    if matches!(mode, Mode::Handshake) {
+        BoltClient::hello(address, timeout_ms, MAX_PROBE_RESPONSE)?;
+        return Ok(());
     }
     let mut client = BoltClient::connect(address, timeout_ms, MAX_PROBE_RESPONSE)?;
     if matches!(mode, Mode::Ready) {
@@ -56,6 +63,19 @@ pub(crate) struct BoltClient {
 
 impl BoltClient {
     pub(crate) fn connect(address: &str, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
+        let mut client = Self::hello(address, timeout_ms, max_wire)?;
+        let credentials = crate::client_auth::Credentials::load()?;
+        let auth = credentials
+            .as_ref()
+            .map(|credentials| credentials.logon())
+            .unwrap_or(PackValue::Map(vec![]));
+        client.send(0x6a, vec![auth])?;
+        success(client.receive()?).map_err(|_| "Bolt authentication failed".to_string())?;
+        Ok(client)
+    }
+
+    /// Version negotiation and HELLO, before any authentication.
+    fn hello(address: &str, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
         let address: SocketAddr = address
             .parse()
             .map_err(|e| format!("invalid Bolt address: {e}"))?;
@@ -79,13 +99,6 @@ impl BoltClient {
         }
         client.send(0x01, vec![PackValue::Map(vec![])])?;
         success(client.receive()?)?;
-        let credentials = crate::client_auth::Credentials::load()?;
-        let auth = credentials
-            .as_ref()
-            .map(|credentials| credentials.logon())
-            .unwrap_or(PackValue::Map(vec![]));
-        client.send(0x6a, vec![auth])?;
-        success(client.receive()?).map_err(|_| "Bolt authentication failed".to_string())?;
         Ok(client)
     }
 

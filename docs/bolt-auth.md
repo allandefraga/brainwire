@@ -57,6 +57,14 @@ export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/health.json
 ./target/release/brainwire probe --address 127.0.0.1:17687 --mode ready
 ```
 
+The image `HEALTHCHECK` runs `brainwire probe --mode handshake`, which completes
+only Bolt version negotiation and HELLO and needs no credential, so a protected
+container reports healthy without a token in the image. It proves the listener
+answers, not that queries work, and never bypasses authentication: `--mode ready`
+and `live` still log in with `BRAINWIRE_BOLT_AUTH_FILE`. Orchestrators that need
+query readiness can override the check with `--mode ready` and a mounted health
+credential file.
+
 Programmatic Python connection from the repository root:
 
 ```python

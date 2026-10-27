@@ -79,3 +79,57 @@ fn probe_rejects_zero_timeout_before_connecting() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--timeout-ms"));
 }
+
+#[test]
+fn handshake_probe_needs_no_credential_against_a_protected_server() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("policy.json"),
+        r#"{"principals":[{"id":"admin","token_sha256":"ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb","graphs":{"default":"read"},"instance_admin":true}]}"#,
+    )
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    drop(listener);
+    let probe = |mode: &str| {
+        command(dir.path())
+            .args([
+                "probe",
+                "--address",
+                &address,
+                "--mode",
+                mode,
+                "--timeout-ms",
+                "200",
+            ])
+            .output()
+            .unwrap()
+    };
+    assert!(!probe("handshake").status.success(), "server is down");
+    let mut server = Server(
+        command(dir.path())
+            .arg("serve")
+            .env("BRAINWIRE_SERVER_LISTEN", &address)
+            .env("BRAINWIRE_SERVER_AUTH_FILE", dir.path().join("policy.json"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let mut up = false;
+    for _ in 0..100 {
+        if probe("handshake").status.success() {
+            up = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(up, "protected server did not answer the handshake probe");
+    assert!(
+        !probe("ready").status.success(),
+        "queries still need credentials"
+    );
+    server.0.kill().unwrap();
+    server.0.wait().unwrap();
+    assert!(!probe("handshake").status.success());
+}
