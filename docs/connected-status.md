@@ -103,6 +103,12 @@ reapplication/backfill. Inspecting a declaration does not build or change it.
 
 ## Typed outgoing Graph sample
 
+![Connected graph renderer with a synthetic node and relationships](design/assets/connected-graph-preview.png)
+
+This image uses a synthetic fixture rendered by the actual TUI widgets; it is not
+a capture of a running server. In a connected session, the same view uses the
+server sample described below.
+
 Graph first checks the requested relationship signature against the real server
 ontology. It then queries source existence and matching outgoing targets in one
 read transaction. `--node-label`, `--edge-type` and `--target-label` accept
@@ -118,14 +124,19 @@ not a count of distinct neighbors. A missing source is marked not found without
 inventing a node; a present source with no matching rows does not establish that
 it has no other graph connections.
 
-Up/Down and PgUp/PgDn select and scroll the sampled target rows. The wide layout
-has a radial preview and target list; at 80 columns it shows the selected
-relationship and a scrollable list. Selection does not expand or change the
-configured source. Every displayed connection comes from the completed server
-sample. Graph requires ordinary graph read access, not instance-administrator
-permission. Target IDs are checked as nonempty strings up to 1,024 bytes;
-malformed fields, excess rows and incomplete responses fail rather than becoming
-a partial sample.
+Up/Down and PgUp/PgDn select and scroll the sampled relationship rows. On a
+wide terminal the graph draws the source and target IDs as node cards, arrows
+for the sampled outgoing links, and an inspector for the selected row. Repeated
+target IDs are grouped visually with a multiplicity; the list retains every
+relationship row. Self-links remain attached to the source node. The graph
+window follows the selected row, while a compact terminal shows the selected
+source → relationship → target and a scrollable list. At 120 columns the
+workspace hides its side navigation to give the graph more room; the numbered
+shortcuts remain available. Selection does not expand or change the configured
+source. Every displayed connection comes from the completed server sample.
+Graph requires ordinary graph read access, not instance-administrator permission.
+Target IDs are checked as nonempty strings up to 1,024 bytes; malformed fields,
+excess rows and incomplete responses fail rather than becoming a partial sample.
 
 ## Refresh, bounds and failures
 

@@ -4,10 +4,10 @@ use crate::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
-    text::Line,
+    text::{Line, Span},
     widgets::{
-        canvas::{Canvas, Circle, Line as CanvasLine},
-        Paragraph, Wrap,
+        canvas::{Canvas, Line as CanvasLine},
+        Clear, Paragraph, Wrap,
     },
     Frame,
 };
@@ -70,6 +70,42 @@ impl State {
 fn display(text: &str) -> String {
     terminal_text(&text.chars().take(256).collect::<String>())
 }
+// Canvas coordinates use terminal cells, so labels can be bounded without
+// relying on the byte length of identifiers returned by the server.
+fn fit(text: &str, width: usize) -> String {
+    let text = display(text);
+    if Span::raw(&text).width() <= width {
+        return text;
+    }
+    let mut result = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        let cells = Span::raw(c.to_string()).width();
+        if used + cells + 1 > width {
+            break;
+        }
+        result.push(c);
+        used += cells;
+    }
+    if width > 0 {
+        result.push('…');
+    }
+    result
+}
+
+// Duplicate relationship rows share a single target node on the canvas.
+fn targets(snapshot: &GraphSnapshot) -> Vec<(&str, usize)> {
+    let mut targets: Vec<(&str, usize)> = Vec::new();
+    for id in snapshot.neighbors.iter().take(20) {
+        if let Some((_, count)) = targets.iter_mut().find(|(target, _)| *target == id) {
+            *count += 1;
+        } else {
+            targets.push((id, 1));
+        }
+    }
+    targets
+}
+
 pub(crate) fn render_at(
     frame: &mut Frame,
     area: Rect,
@@ -79,17 +115,18 @@ pub(crate) fn render_at(
     lang: Language,
     no_color: bool,
 ) {
+    let color = if no_color { Color::Reset } else { GREEN };
+    let cyan = if no_color { Color::Reset } else { CYAN };
     let areas = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(if state.error.is_some() { 5 } else { 3 }),
-        Constraint::Length(4),
+        Constraint::Length(if state.error.is_some() { 6 } else { 5 }),
         Constraint::Min(0),
         Constraint::Length(3),
     ])
     .split(area);
     frame.render_widget(
         Paragraph::new(format!(
-            " BRAINWIRE / {} / {} @ {}",
+            " ●─●─● BRAINWIRE / {} / {} @ {}",
             lang.choose("GRAFO", "GRAPH"),
             display(graph),
             display(address)
@@ -104,17 +141,21 @@ pub(crate) fn render_at(
     };
     let more = state.snapshot.has_more || state.snapshot.neighbors.len() > 20;
     let mut status = format!(
-        " {} • {} {}s • {} {} / 20{}",
+        " {} • {} {}s • {} {}{}\n {}",
         lang.choose("SNAPSHOT DO SERVIDOR", "SERVER SNAPSHOT"),
         lang.choose("idade", "age"),
         state.sampled.elapsed().as_secs(),
         count,
-        lang.choose("saída", "outgoing rows"),
+        lang.choose("relações de saída", "outgoing rows"),
         if more {
             lang.choose(" • MAIS DISPONÍVEIS", " • MORE AVAILABLE")
         } else {
             ""
-        }
+        },
+        lang.choose(
+            "Até 20 relações; não é o grau total. Um tipo/direção por amostra.",
+            "Up to 20 relationships; not total degree. One type/direction per sample."
+        )
     );
     if let Some(error) = &state.error {
         status.push_str(&format!("\n {}", display(error)));
@@ -129,131 +170,30 @@ pub(crate) fn render_at(
                         "STALE • refresh failed",
                     )
                 } else {
-                    ""
+                    lang.choose("DADOS REAIS • SOMENTE LEITURA", "REAL DATA • READ ONLY")
                 },
                 CYAN,
                 no_color,
             )),
         areas[1],
     );
-    let unconfigured = state.snapshot.entity_id.is_empty();
-    let scope = if unconfigured {
-        lang.choose(
-            " Configure o rótulo, ID, aresta e rótulo de destino na linha de comando.",
-            " Set the source label, entity ID, edge type and target label in the command line.",
-        )
-        .into()
-    } else {
-        format!(
-            " {}: {}\n -[:{}]-> {} • {}",
-            display(&state.snapshot.node_label),
-            display(&state.snapshot.entity_id),
-            display(&state.snapshot.edge_type),
-            display(&state.snapshot.target_label),
-            lang.choose("somente leitura", "read only")
-        )
-    };
-    frame.render_widget(
-        Paragraph::new(scope)
-            .wrap(Wrap { trim: false })
-            .block(panel(
-                lang.choose("ENTIDADE CONFIGURADA", "CONFIGURED ENTITY"),
-                GREEN,
-                no_color,
-            )),
-        areas[2],
-    );
-    let body = if areas[3].width >= 100 {
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(areas[3])
+    let wide = areas[2].width >= 105;
+    let body = if wide {
+        Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)]).split(areas[2])
     } else {
         Layout::vertical([
-            Constraint::Length(5.min(areas[3].height / 2)),
+            Constraint::Length(7.min(areas[2].height / 2 + 1)),
             Constraint::Min(0),
         ])
-        .split(areas[3])
+        .split(areas[2])
     };
-    if state.snapshot.found && body[0].height < 8 {
-        let preview = if let Some(id) = state
-            .snapshot
-            .neighbors
-            .get(state.selected)
-            .filter(|_| count > 0)
-        {
-            format!(
-                " ● 0 ───> ○ {:02} {}\n {}",
-                state.selected + 1,
-                display(id),
-                lang.choose(
-                    "Prévia da relação selecionada; IDs na lista abaixo.",
-                    "Selected relationship preview; IDs listed below."
-                )
-            )
-        } else {
-            lang.choose(
-                " ● 0 • nenhuma relação correspondente.",
-                " ● 0 • no matching relationship.",
-            )
-            .into()
-        };
-        frame.render_widget(
-            Paragraph::new(preview)
-                .wrap(Wrap { trim: false })
-                .block(panel(
-                    lang.choose(
-                        "PRÉVIA / RELAÇÃO SELECIONADA",
-                        "PREVIEW / SELECTED RELATIONSHIP",
-                    ),
-                    GREEN,
-                    no_color,
-                )),
-            body[0],
-        );
-    } else if state.snapshot.found {
-        let color = if no_color { Color::Reset } else { GREEN };
-        let cyan = if no_color { Color::Reset } else { CYAN };
-        frame.render_widget(
-            Canvas::default()
-                .x_bounds([-12.0, 12.0])
-                .y_bounds([-8.0, 8.0])
-                .block(panel(
-                    lang.choose(
-                        "PRÉVIA / RELAÇÕES AMOSTRADAS",
-                        "PREVIEW / SAMPLED RELATIONSHIPS",
-                    ),
-                    GREEN,
-                    no_color,
-                ))
-                .paint(|ctx| {
-                    ctx.draw(&Circle {
-                        x: 0.0,
-                        y: 0.0,
-                        radius: 0.65,
-                        color,
-                    });
-                    ctx.print(0.8, 0.0, "0");
-                    for i in 0..count {
-                        let angle = i as f64 * std::f64::consts::TAU / count as f64;
-                        let (x, y) = (9.0 * angle.cos(), 5.5 * angle.sin());
-                        let selected = i == state.selected;
-                        ctx.draw(&CanvasLine {
-                            x1: 0.0,
-                            y1: 0.0,
-                            x2: x,
-                            y2: y,
-                            color: if selected { color } else { cyan },
-                        });
-                        ctx.draw(&Circle {
-                            x,
-                            y,
-                            radius: if selected { 0.6 } else { 0.3 },
-                            color: if selected { color } else { cyan },
-                        });
-                        ctx.print(x, y, format!("{}", i + 1));
-                    }
-                }),
-            body[0],
-        );
-    } else {
+    let unconfigured = state.snapshot.entity_id.is_empty();
+    let selected_id = state
+        .snapshot
+        .neighbors
+        .get(state.selected)
+        .filter(|_| count > 0);
+    if !state.snapshot.found {
         frame.render_widget(
             Paragraph::new(if unconfigured {
                 lang.choose(
@@ -267,11 +207,303 @@ pub(crate) fn render_at(
                 )
             })
             .wrap(Wrap { trim: false })
-            .block(panel(lang.choose("PRÉVIA", "PREVIEW"), GREEN, no_color)),
+            .block(panel(
+                lang.choose("VIZINHANÇA", "NEIGHBORHOOD"),
+                GREEN,
+                no_color,
+            )),
             body[0],
         );
+    } else if !wide || body[0].height < 10 {
+        let available = usize::from(body[0].width.saturating_sub(5));
+        let mut lines = vec![
+            Line::styled(
+                format!(" ● {}", fit(&state.snapshot.node_label, available)),
+                Style::default().fg(cyan),
+            ),
+            Line::styled(
+                format!("   {}", fit(&state.snapshot.entity_id, available)),
+                Style::default().fg(color),
+            ),
+        ];
+        if let Some(id) = selected_id {
+            let self_link = state.snapshot.node_label == state.snapshot.target_label
+                && id == &state.snapshot.entity_id;
+            lines.push(Line::styled(
+                format!(
+                    " {} {} ─▶",
+                    if self_link { "↺" } else { "└─" },
+                    fit(&state.snapshot.edge_type, available.saturating_sub(8))
+                ),
+                Style::default().fg(cyan),
+            ));
+            lines.push(Line::styled(
+                format!(" ○ {}", fit(&state.snapshot.target_label, available)),
+                Style::default().fg(cyan),
+            ));
+            lines.push(Line::styled(
+                format!("   {}", fit(id, available)),
+                Style::default().fg(color),
+            ));
+        } else {
+            lines.push(Line::raw(lang.choose(
+                " Sem relações deste tipo na amostra.",
+                " No matching outgoing relationships.",
+            )));
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(panel(
+                    lang.choose(
+                        "RELAÇÃO SELECIONADA • ORIGEM → DESTINO",
+                        "SELECTED LINK • SOURCE → TARGET",
+                    ),
+                    GREEN,
+                    no_color,
+                )),
+            body[0],
+        );
+    } else {
+        let grouped = targets(&state.snapshot);
+        let is_self = |id: &str| {
+            state.snapshot.node_label == state.snapshot.target_label
+                && id == state.snapshot.entity_id
+        };
+        let self_count = grouped
+            .iter()
+            .find(|(id, _)| is_self(id))
+            .map_or(0, |(_, n)| *n);
+        let visible: Vec<_> = grouped.iter().filter(|(id, _)| !is_self(id)).collect();
+        let capacity = usize::from(body[0].height.saturating_sub(2) / 4).clamp(1, 8);
+        let selected_group =
+            selected_id.and_then(|selected| visible.iter().position(|(id, _)| *id == selected));
+        let start = selected_group
+            .unwrap_or(0)
+            .saturating_sub(capacity.saturating_sub(1));
+        let end = (start + capacity).min(visible.len());
+        let width = body[0].width.saturating_sub(2);
+        let height = body[0].height.saturating_sub(2);
+        let source_width = (f64::from(width) * 0.32).floor() as u16;
+        let target_x = (f64::from(width) * 0.57).floor() as u16;
+        let target_width = width.saturating_sub(target_x + 1);
+        let source_top = height.saturating_sub(3) / 2;
+        let source_y = f64::from(height.saturating_sub(source_top + 2));
+        let title = format!(
+            " {} • {}–{} / {}",
+            lang.choose("DESTINOS REAIS", "REAL TARGETS"),
+            if visible.is_empty() { 0 } else { start + 1 },
+            end,
+            visible.len()
+        );
+        frame.render_widget(
+            Canvas::default()
+                .x_bounds([0.0, f64::from(width.max(1))])
+                .y_bounds([0.0, f64::from(height.max(1))])
+                .block(panel("", GREEN, no_color).title(title))
+                .paint(|ctx| {
+                    for (position, (id, _)) in visible.iter().skip(start).take(capacity).enumerate()
+                    {
+                        let y = f64::from(height.saturating_sub(position as u16 * 4 + 2));
+                        let edge_color = if selected_id.is_some_and(|selected| selected == *id) {
+                            color
+                        } else {
+                            cyan
+                        };
+                        let x = f64::from(target_x.saturating_sub(1));
+                        ctx.draw(&CanvasLine {
+                            x1: f64::from(source_width + 1),
+                            y1: source_y,
+                            x2: x,
+                            y2: y,
+                            color: edge_color,
+                        });
+                        ctx.draw(&CanvasLine {
+                            x1: x,
+                            y1: y,
+                            x2: x - 2.0,
+                            y2: y + 0.8,
+                            color: edge_color,
+                        });
+                        ctx.draw(&CanvasLine {
+                            x1: x,
+                            y1: y,
+                            x2: x - 2.0,
+                            y2: y - 0.8,
+                            color: edge_color,
+                        });
+                    }
+                    let edge_width = target_x.saturating_sub(source_width + 4);
+                    ctx.print(
+                        f64::from(source_width + 2),
+                        f64::from(height) - 0.3,
+                        Span::styled(
+                            fit(&state.snapshot.edge_type, usize::from(edge_width)),
+                            Style::default().fg(cyan),
+                        ),
+                    );
+                    if self_count > 0 {
+                        let x = f64::from(source_width) / 2.0;
+                        let right = f64::from(source_width + 3);
+                        for (x1, y1, x2, y2) in [
+                            (x, source_y + 2.0, x, source_y + 4.0),
+                            (x, source_y + 4.0, right, source_y + 4.0),
+                            (right, source_y + 4.0, right, source_y),
+                            (right, source_y, right - 2.0, source_y),
+                            (right - 2.0, source_y, right - 0.5, source_y + 0.8),
+                            (right - 2.0, source_y, right - 0.5, source_y - 0.8),
+                        ] {
+                            ctx.draw(&CanvasLine {
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                                color,
+                            });
+                        }
+                        ctx.print(
+                            2.0,
+                            source_y + 5.0,
+                            Span::styled(
+                                format!(
+                                    "↺ {} ×{self_count}",
+                                    lang.choose("autorrelação", "self link")
+                                ),
+                                Style::default().fg(color),
+                            ),
+                        );
+                    }
+                    if count == 0 {
+                        ctx.print(
+                            2.0,
+                            1.0,
+                            Span::styled(
+                                lang.choose(
+                                    "Sem relações deste tipo na amostra.",
+                                    "No matching outgoing relationships.",
+                                ),
+                                Style::default().fg(cyan),
+                            ),
+                        );
+                    }
+                }),
+            body[0],
+        );
+        // Crisp terminal borders keep actual identifiers readable over the edges.
+        let source = Rect::new(body[0].x + 2, body[0].y + 1 + source_top, source_width, 3);
+        frame.render_widget(Clear, source);
+        frame.render_widget(
+            Paragraph::new(fit(
+                &state.snapshot.entity_id,
+                usize::from(source.width.saturating_sub(2)),
+            ))
+            .style(Style::default().fg(color))
+            .block(panel("", GREEN, no_color).title(format!(
+                "● {}",
+                fit(
+                    &state.snapshot.node_label,
+                    usize::from(source.width.saturating_sub(4))
+                )
+            ))),
+            source,
+        );
+        for (position, (id, multiplicity)) in visible.iter().skip(start).take(capacity).enumerate()
+        {
+            let selected = selected_id.is_some_and(|selected| selected == *id);
+            let node_color = if selected { GREEN } else { CYAN };
+            let target = Rect::new(
+                body[0].x + 1 + target_x,
+                body[0].y + 1 + position as u16 * 4,
+                target_width,
+                3,
+            );
+            let identity = format!(
+                "{}{}",
+                if *multiplicity > 1 {
+                    format!("×{multiplicity} ")
+                } else {
+                    String::new()
+                },
+                display(id)
+            );
+            frame.render_widget(Clear, target);
+            frame.render_widget(
+                Paragraph::new(fit(&identity, usize::from(target.width.saturating_sub(2))))
+                    .style(Style::default().fg(if selected { color } else { cyan }))
+                    .block(panel("", node_color, no_color).title(format!(
+                        "{} {}",
+                        if selected { "▶" } else { "○" },
+                        fit(
+                            &state.snapshot.target_label,
+                            usize::from(target.width.saturating_sub(4))
+                        )
+                    ))),
+                target,
+            );
+        }
     }
-    let capacity = usize::from(body[1].height.saturating_sub(2)).max(1);
+    let sidebar = if wide {
+        Layout::vertical([
+            Constraint::Length(9.min(body[1].height.saturating_sub(3))),
+            Constraint::Min(0),
+        ])
+        .split(body[1])
+    } else {
+        Layout::vertical([Constraint::Length(0), Constraint::Min(0)]).split(body[1])
+    };
+    if wide {
+        let available = usize::from(sidebar[0].width.saturating_sub(5));
+        let mut detail = vec![
+            Line::styled(
+                format!(" ● {}", fit(&state.snapshot.node_label, available)),
+                Style::default().fg(cyan),
+            ),
+            Line::styled(
+                format!("   {}", fit(&state.snapshot.entity_id, available)),
+                Style::default().fg(color),
+            ),
+        ];
+        if let Some(id) = selected_id {
+            detail.push(Line::styled(
+                format!(
+                    " └─ {} ─▶",
+                    fit(&state.snapshot.edge_type, available.saturating_sub(7))
+                ),
+                Style::default().fg(cyan),
+            ));
+            detail.push(Line::styled(
+                format!(" ○ {}", fit(&state.snapshot.target_label, available)),
+                Style::default().fg(cyan),
+            ));
+            detail.push(Line::styled(
+                format!("   {}", fit(id, available)),
+                Style::default().fg(color),
+            ));
+            detail.push(Line::raw(fit(
+                &format!(
+                    " {} {}/{} • {}",
+                    lang.choose("Relação", "Row"),
+                    state.selected + 1,
+                    count,
+                    lang.choose("sem propriedades", "no properties")
+                ),
+                usize::from(sidebar[0].width.saturating_sub(2)),
+            )));
+        } else {
+            detail.push(Line::raw(
+                lang.choose(" Sem relação selecionada.", " No selected relationship."),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(detail).block(panel(
+                lang.choose("INSPECIONAR RELAÇÃO", "LINK INSPECTOR"),
+                GREEN,
+                no_color,
+            )),
+            sidebar[0],
+        );
+    }
+    let capacity = usize::from(sidebar[1].height.saturating_sub(2)).max(1);
     let start = state.selected.saturating_sub(capacity.saturating_sub(1));
     let mut lines = if count == 0 {
         vec![Line::raw(if !state.snapshot.found {
@@ -295,12 +527,12 @@ pub(crate) fn render_at(
                 Line::styled(
                     format!(
                         "{} {:02} {}",
-                        if i == state.selected { ">" } else { " " },
+                        if i == state.selected { "▶" } else { " " },
                         i + 1,
                         display(id)
                     ),
-                    if i == state.selected && !no_color {
-                        Style::default().fg(GREEN)
+                    if i == state.selected {
+                        Style::default().fg(color)
                     } else {
                         Style::default()
                     },
@@ -320,7 +552,7 @@ pub(crate) fn render_at(
             CYAN,
             no_color,
         )),
-        body[1],
+        sidebar[1],
     );
     frame.render_widget(
         Paragraph::new(lang.choose(
@@ -329,13 +561,13 @@ pub(crate) fn render_at(
         ))
         .block(panel(
             lang.choose(
-                "Até 20 relações; não é o grau total. Sem propriedades.",
-                "Up to 20 relationships; not total degree. No properties.",
+                "Arestas apontam da origem ao destino. Sem propriedades.",
+                "Arrows point from source to target. No properties.",
             ),
             GREEN,
             no_color,
         )),
-        areas[4],
+        areas[3],
     );
 }
 /// Refresh replaces the complete bounded sample; failures retain the old sample.
@@ -515,6 +747,77 @@ mod tests {
         assert!(state.sampled > old);
         state.refresh(Ok(sample(0)));
         assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn canvas_groups_parallel_rows_and_draws_self_links_on_the_source() {
+        let mut snapshot = sample(4);
+        snapshot.target_label = snapshot.node_label.clone();
+        snapshot.neighbors = vec![
+            "ticket-1".into(),
+            "ticket-2".into(),
+            "ticket-2".into(),
+            "ticket-3".into(),
+        ];
+        assert_eq!(
+            targets(&snapshot),
+            vec![("ticket-1", 1), ("ticket-2", 2), ("ticket-3", 1)]
+        );
+        for lang in [Language::En, Language::PtBr] {
+            let mut state = State::new(snapshot.clone());
+            let output = text(&mut state, lang, 144, 40);
+            assert!(output.contains(lang.choose("autorrelação", "self link")));
+            assert!(output.contains("×2 ticket-2"));
+            assert_eq!(state.snapshot.neighbors.len(), 4);
+        }
+    }
+
+    #[test]
+    fn canvas_follows_last_selected_row_and_bounds_untrusted_wide_labels() {
+        let value = format!("節点\x1b[31m\n{}", "界".repeat(200));
+        for width in [0, 1, 8, 19, 40] {
+            let fitted = fit(&value, width);
+            assert!(Span::raw(&fitted).width() <= width);
+            assert!(!fitted.contains('\x1b'));
+            assert!(!fitted.contains('\n'));
+        }
+        for lang in [Language::En, Language::PtBr] {
+            for width in [80, 120, 144] {
+                let mut snapshot = sample(20);
+                snapshot.entity_id = format!("source-{}", value);
+                snapshot.neighbors[0] = value.clone();
+                snapshot.neighbors[19] = format!("selected-{}", value);
+                let mut state = State::new(snapshot);
+                state.selected = 19;
+                let output = text(&mut state, lang, width, 30);
+                assert!(output.contains("source-"));
+                assert!(output.contains("selected-"));
+                assert!(output.contains("HAS_COMMENT"));
+                assert!(output.contains("TicketComment"));
+                assert!(output.contains(lang.choose("não é o grau total", "not total degree")));
+                assert!(output.contains(lang.choose("MAIS DISPONÍVEIS", "MORE AVAILABLE")));
+            }
+        }
+    }
+
+    #[test]
+    fn short_wide_inspector_retains_selected_target_when_fresh_or_stale() {
+        for lang in [Language::En, Language::PtBr] {
+            for stale in [false, true] {
+                let mut snapshot = sample(20);
+                snapshot.entity_id = format!("source-{}", "界".repeat(200));
+                snapshot.neighbors[19] = format!("chosen-{}", "界".repeat(200));
+                let mut state = State::new(snapshot);
+                state.selected = 19;
+                if stale {
+                    state.refresh(Err("Unavailable".into()));
+                }
+                let output = text(&mut state, lang, 120, 24);
+                for expected in ["source-", "chosen-", "HAS_COMMENT", "TicketComment"] {
+                    assert!(output.contains(expected), "{stale} {expected}: {output}");
+                }
+            }
+        }
     }
 
     #[test]

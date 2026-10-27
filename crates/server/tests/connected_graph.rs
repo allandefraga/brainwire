@@ -138,11 +138,11 @@ fn protected_graph_preview_bounds_relationship_rows_and_preserves_missing_and_is
             let text = String::from_utf8(out.stdout).unwrap();
             assert!(
                 text.contains(&format!(
-                    "{count} {} / 20",
+                    "{count} {}",
                     if lang == "en" {
                         "outgoing rows"
                     } else {
-                        "saída"
+                        "relações de saída"
                     }
                 )),
                 "{text}"

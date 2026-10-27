@@ -249,7 +249,10 @@ fn render(
     no_color: bool,
 ) {
     let area = frame.area();
-    let content = if area.width >= 120 {
+    // Give the graph canvas enough room on a common 120-column terminal.
+    let show_navigation =
+        area.width >= 120 && (workspace.active != ConnectedView::Graph || area.width >= 144);
+    let content = if show_navigation {
         let columns = Layout::horizontal([Constraint::Length(22), Constraint::Min(0)]).split(area);
         let mut lines = vec![
             Line::from(Span::styled(
@@ -700,6 +703,19 @@ mod tests {
         }
     }
     #[test]
+    fn graph_canvas_gets_full_width_on_a_120_column_terminal() {
+        let mut workspace = Workspace::new();
+        workspace.select(ConnectedView::Graph, &mut fetch);
+        let medium = text(&mut workspace, Language::En, 120, 30, true);
+        assert!(!medium.contains("NAVIGATION"));
+        assert!(medium.contains("ticket-1"));
+        assert!(medium.contains("comment-1"));
+        let wide = text(&mut workspace, Language::En, 160, 48, true);
+        assert!(wide.contains("NAVIGATION"));
+        assert!(wide.contains("comment-1"));
+    }
+
+    #[test]
     fn narrow_footer_keeps_refresh_help_and_exit_visible() {
         let mut workspace = Workspace::new();
         workspace.refresh(&mut fetch);
@@ -903,12 +919,7 @@ mod tests {
         for lang in [Language::En, Language::PtBr] {
             for (w, h) in [(80, 24), (120, 30)] {
                 let output = text(&mut workspace, lang, w, h, true);
-                for expected in [
-                    "ticket-1",
-                    "comment-1",
-                    "HAS_COMMENT",
-                    "4",
-                ] {
+                for expected in ["ticket-1", "comment-1", "HAS_COMMENT", "4"] {
                     assert!(output.contains(expected), "{expected}: {output}");
                 }
             }
