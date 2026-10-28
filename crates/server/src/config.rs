@@ -3,8 +3,8 @@
 //! for containers). Every key can be set by an environment variable named
 //! `BRAINWIRE_<SECTION>_<KEY>`, uppercase, e.g. `BRAINWIRE_MEMORY_CACHE`.
 //!
-//! `load` is pure: given `path: None` it never looks at the current
-//! directory, and it never reads `std::env::vars()` itself. `main.rs` is
+//! `load` discovers the host/container memory limit, but never looks at the current
+//! directory or reads `std::env::vars()` itself. `main.rs` is
 //! responsible for the implicit `./brainwire.toml` lookup (`find_file`) and
 //! for collecting the process environment.
 
@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::size::ByteSize;
+
+#[path = "memory_defaults.rs"]
+mod memory_defaults;
 
 /// The whole config: the Bolt server and the RocksDB memory budget.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -80,6 +83,7 @@ impl Default for MemorySection {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
     Default,
+    Detected(String),
     File(PathBuf),
     Env(String),
 }
@@ -196,18 +200,44 @@ pub fn find_file(cwd: &Path) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-/// Loads defaults, then `path` if given, then `env`. Pure: it touches neither
-/// the process environment nor the current directory; the caller collects
-/// both (see `find_file` and the module docs).
+/// Loads detected host/container defaults, then TOML and environment overrides.
+/// File and environment discovery remain the caller's responsibility.
 pub fn load(path: Option<&Path>, env: &BTreeMap<String, String>) -> Result<Loaded, ConfigError> {
+    load_with_limit(path, env, memory_defaults::detect())
+}
+
+fn load_with_limit(
+    path: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    limit: Option<memory_defaults::MemoryLimit>,
+) -> Result<Loaded, ConfigError> {
     let mut config = Config::default();
     let mut sources: BTreeMap<&'static str, Source> =
         KEYS.iter().map(|&key| (key, Source::Default)).collect();
 
+    if let Some(limit) = &limit {
+        config.memory.cache = ByteSize(limit.bytes / 4);
+        config.memory.memtables = ByteSize(limit.bytes / 16);
+        config.memory.query = ByteSize(limit.bytes / 8);
+        for key in ["memory.cache", "memory.memtables", "memory.query"] {
+            sources.insert(
+                key,
+                Source::Detected(format!("{} ({} bytes)", limit.source, limit.bytes)),
+            );
+        }
+    }
     if let Some(path) = path {
         apply_file(path, &mut config, &mut sources)?;
     }
     apply_env(env, &mut config, &mut sources)?;
+    if let Some(limit) = &limit {
+        if limit.bytes < 256 << 20 && matches!(sources["memory.cache"], Source::Detected(_)) {
+            return Err(ConfigError::Invalid(format!(
+                "detected memory limit {} bytes is below the minimum 256 MiB for automatic cache sizing ({}); configure explicit memory budgets only after validating workload headroom",
+                limit.bytes, limit.source
+            )));
+        }
+    }
     validate(&config)?;
 
     Ok(Loaded { config, sources })
@@ -514,12 +544,13 @@ pub fn default_file() -> String {
          # checkpoint_dir = \"/backups\"\n\
          \n\
          [memory]\n\
+         # Leave these unset for detected host/container defaults. Commented values are legacy examples, not detected defaults.\n\
          # RocksDB block cache. The memtables below are charged inside it.\n\
-         cache = \"{cache}\"\n\
+         # cache = \"{cache}\"\n\
          # Total memtable budget across all open databases, charged inside `cache`.\n\
-         memtables = \"{memtables}\"\n\
+         # memtables = \"{memtables}\"\n\
          # Shared server query reservation pool and per-RUN guard (not process RSS).\n\
-         query = \"{query}\"\n",
+         # query = \"{query}\"\n",
         listen = d.server.listen,
         data_dir = d.server.data_dir.display(),
         default_database = d.server.default_database,
@@ -587,6 +618,7 @@ fn value_text(config: &Config, key: &str) -> String {
 fn source_text(source: &Source) -> String {
     match source {
         Source::Default => "default".to_string(),
+        Source::Detected(source) => format!("detected {source}"),
         Source::File(p) => format!("file {}", p.display()),
         Source::Env(v) => format!("env {v}"),
     }
@@ -602,6 +634,150 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    // Existing parsing tests deliberately use fixed defaults, independent of the test host.
+    fn load(path: Option<&Path>, env: &BTreeMap<String, String>) -> Result<Loaded, ConfigError> {
+        load_with_limit(path, env, None)
+    }
+
+    fn limit(bytes: u64) -> Option<memory_defaults::MemoryLimit> {
+        Some(memory_defaults::MemoryLimit {
+            bytes,
+            source: "cgroup /fixture/memory.max".into(),
+        })
+    }
+
+    #[test]
+    fn detected_defaults_size_shared_budgets_and_report_source() {
+        for gib in [1, 2, 4, 16] {
+            let loaded = load_with_limit(None, &env(&[]), limit(gib << 30)).unwrap();
+            assert_eq!(loaded.config.memory.cache.0, gib << 28);
+            assert_eq!(loaded.config.memory.query.0, gib << 27);
+            assert_eq!(loaded.config.memory.memtables.0, gib << 26);
+            assert!(describe(&loaded)
+                .iter()
+                .filter(|(key, _, _)| key.starts_with("memory."))
+                .all(|(_, _, source)| source.starts_with("detected cgroup /fixture/memory.max")));
+        }
+    }
+
+    #[test]
+    fn detected_defaults_preserve_file_then_env_per_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brainwire.toml");
+        std::fs::write(&path, "[memory]\ncache='256MiB'\nquery='32MiB'\n").unwrap();
+        let loaded = load_with_limit(
+            Some(&path),
+            &env(&[("BRAINWIRE_MEMORY_QUERY", "64MiB")]),
+            limit(1 << 30),
+        )
+        .unwrap();
+        assert_eq!(loaded.config.memory.cache.0, 256 << 20);
+        assert_eq!(loaded.sources["memory.cache"], Source::File(path));
+        assert_eq!(loaded.config.memory.query.0, 64 << 20);
+        assert_eq!(
+            loaded.sources["memory.query"],
+            Source::Env("BRAINWIRE_MEMORY_QUERY".into())
+        );
+        assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
+        assert!(matches!(
+            loaded.sources["memory.memtables"],
+            Source::Detected(_)
+        ));
+    }
+
+    #[test]
+    fn low_limits_fail_automatic_sizing_but_preserve_explicit_choices() {
+        for bytes in [0, 1, (256 << 20) - 1] {
+            assert!(load_with_limit(None, &env(&[]), limit(bytes))
+                .unwrap_err()
+                .to_string()
+                .contains("minimum 256 MiB"));
+        }
+        assert!(load_with_limit(None, &env(&[]), limit(256 << 20)).is_ok());
+        let loaded = load_with_limit(
+            None,
+            &env(&[
+                ("BRAINWIRE_MEMORY_CACHE", "64MiB"),
+                ("BRAINWIRE_MEMORY_MEMTABLES", "16MiB"),
+                ("BRAINWIRE_MEMORY_QUERY", "16MiB"),
+            ]),
+            limit(64 << 20),
+        )
+        .unwrap();
+        assert_eq!(loaded.config.memory.cache.0, 64 << 20);
+    }
+
+    #[test]
+    fn legacy_explicit_file_budgets_are_preserved_without_rescaling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brainwire.toml");
+        std::fs::write(
+            &path,
+            "[memory]\ncache='10GiB'\nmemtables='1GiB'\nquery='2GiB'\n",
+        )
+        .unwrap();
+        let loaded = load_with_limit(Some(&path), &env(&[]), limit(2 << 30)).unwrap();
+        assert_eq!(loaded.config.memory, MemorySection::default());
+        for key in ["memory.cache", "memory.memtables", "memory.query"] {
+            assert_eq!(loaded.sources[key], Source::File(path.clone()));
+        }
+    }
+
+    #[test]
+    fn partial_overrides_keep_other_detected_fields_and_existing_validation() {
+        let loaded = load_with_limit(
+            None,
+            &env(&[("BRAINWIRE_MEMORY_CACHE", "1GiB")]),
+            limit(1 << 30),
+        )
+        .unwrap();
+        assert_eq!(loaded.config.memory.cache.0, 1 << 30);
+        assert_eq!(loaded.config.memory.query.0, 128 << 20);
+        assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
+        assert!(matches!(loaded.sources["memory.cache"], Source::Env(_)));
+        assert!(matches!(
+            loaded.sources["memory.query"],
+            Source::Detected(_)
+        ));
+        // An explicit cache smaller than inherited memtables still requires an explicit memtable budget.
+        assert!(load_with_limit(
+            None,
+            &env(&[("BRAINWIRE_MEMORY_CACHE", "64MiB")]),
+            limit(2 << 30)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn memtables_are_not_double_counted_in_limit_validation() {
+        let loaded = load_with_limit(
+            None,
+            &env(&[
+                ("BRAINWIRE_MEMORY_CACHE", "512MiB"),
+                ("BRAINWIRE_MEMORY_MEMTABLES", "256MiB"),
+                ("BRAINWIRE_MEMORY_QUERY", "256MiB"),
+            ]),
+            limit(1 << 30),
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.config.memory.cache.0 + loaded.config.memory.query.0,
+            768 << 20
+        );
+    }
+
+    #[test]
+    fn generated_config_retains_automatic_memory_sizing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brainwire.toml");
+        std::fs::write(&path, default_file()).unwrap();
+        let loaded = load_with_limit(Some(&path), &env(&[]), limit(1 << 30)).unwrap();
+        assert!(matches!(
+            loaded.sources["memory.cache"],
+            Source::Detected(_)
+        ));
     }
 
     #[test]
