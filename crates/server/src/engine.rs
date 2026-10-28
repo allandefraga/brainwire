@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{mpsc, Arc};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use brainwire_bolt::auth::{AccessContext, GraphAccess};
 use brainwire_bolt::packstream::PackValue;
@@ -21,6 +22,7 @@ enum Command {
         bool,
         Option<String>,
         Option<ReadVisibility>,
+        Option<(Instant, Duration)>,
         mpsc::Sender<Result<(), EngineError>>,
     ),
     Run(
@@ -29,6 +31,7 @@ enum Command {
         PackValue,
         mpsc::Sender<Result<QueryResult, EngineError>>,
     ),
+    Check(mpsc::Sender<Result<(), EngineError>>),
     Commit(mpsc::Sender<Result<Option<String>, EngineError>>),
     Abort(mpsc::Sender<Result<(), EngineError>>),
 }
@@ -106,11 +109,11 @@ impl QueryEngine for DbEngine {
     }
 
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, None, None, reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, None, None, None, reply))
     }
 
     fn begin_read_only(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, None, None, reply))
+        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, None, None, None, reply))
     }
 
     fn begin_delegated(
@@ -126,6 +129,7 @@ impl QueryEngine for DbEngine {
                 read_only,
                 request_id.map(str::to_owned),
                 Some(visibility),
+                None,
                 reply,
             )
         })
@@ -143,9 +147,37 @@ impl QueryEngine for DbEngine {
                 read_only,
                 request_id.map(str::to_owned),
                 None,
+                None,
                 reply,
             )
         })
+    }
+
+    fn begin_with_timeout(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+        visibility: Option<ReadVisibility>,
+        timeout: Option<Duration>,
+    ) -> Result<(), EngineError> {
+        let timeout = timeout
+            .filter(|timeout| !timeout.is_zero())
+            .map(|timeout| (Instant::now(), timeout));
+        self.ask(|reply| {
+            Command::Begin(
+                db.map(str::to_owned),
+                read_only,
+                request_id.map(str::to_owned),
+                visibility,
+                timeout,
+                reply,
+            )
+        })
+    }
+
+    fn check_transaction(&mut self) -> Result<(), EngineError> {
+        self.ask(Command::Check)
     }
 
     fn run(
@@ -236,7 +268,7 @@ fn worker(
                 access = next;
                 let _ = reply.send(Ok(()));
             }
-            Command::Begin(name, read_only, request_id, delegated, reply) => {
+            Command::Begin(name, read_only, request_id, delegated, timeout, reply) => {
                 let name = name.as_deref().unwrap_or(&default_database);
                 let visibility = match transaction_visibility(&access, delegated) {
                     Ok(visibility) => visibility,
@@ -299,6 +331,27 @@ fn worker(
                     )));
                     continue;
                 };
+                let deadline = match timeout {
+                    Some((started, client_timeout)) => {
+                        let timeout = databases
+                            .query_limits()
+                            .timeout
+                            .map_or(client_timeout, |server_timeout| {
+                                server_timeout.min(client_timeout)
+                            });
+                        match started.checked_add(timeout) {
+                            Some(deadline) => Some(deadline),
+                            None => {
+                                let _ = reply.send(Err(error(
+                                    "Neo.ClientError.Request.Invalid",
+                                    "transaction timeout exceeds supported duration",
+                                )));
+                                continue;
+                            }
+                        }
+                    }
+                    None => None,
+                };
                 let mut transaction = match QueryTransaction::begin_with_pool(
                     &database,
                     databases.query_limits(),
@@ -310,6 +363,13 @@ fn worker(
                         continue;
                     }
                 };
+                if let Some(deadline) = deadline {
+                    transaction = transaction.with_deadline(deadline);
+                    if let Err(err) = transaction.check_transaction_deadline() {
+                        let _ = reply.send(Err(execution_error(err)));
+                        continue;
+                    }
+                }
                 if let Some(root) = databases.checkpoint_dir() {
                     transaction = transaction.with_checkpoint_dir(root.to_path_buf());
                 }
@@ -326,7 +386,32 @@ fn worker(
                     };
                 }
                 let _ = reply.send(Ok(()));
-                while let Ok(command) = receiver.recv() {
+                loop {
+                    let command = match deadline {
+                        Some(deadline) => match receiver
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        {
+                            Ok(command) => Some(command),
+                            Err(mpsc::RecvTimeoutError::Timeout) => {
+                                let retained_memory = transaction.rollback_retaining_memory();
+                                drop(transaction);
+                                drop(_writer_permit);
+                                expired_transaction(&receiver, &mut access, None, retained_memory);
+                                break;
+                            }
+                            Err(mpsc::RecvTimeoutError::Disconnected) => None,
+                        },
+                        None => receiver.recv().ok(),
+                    };
+                    let Some(command) = command else { break };
+                    // A command queued before recv_timeout returned may already be late.
+                    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                        let retained_memory = transaction.rollback_retaining_memory();
+                        drop(transaction);
+                        drop(_writer_permit);
+                        expired_transaction(&receiver, &mut access, Some(command), retained_memory);
+                        break;
+                    }
                     match command {
                         Command::SetAccess(next, reply) => {
                             transaction.rollback();
@@ -349,7 +434,13 @@ fn worker(
                                         .run_with_access(&query, &params, query_access)
                                         .map_err(execution_error)
                                 })
-                                .and_then(output_to_bolt);
+                                .and_then(output_to_bolt)
+                                .and_then(|output| {
+                                    transaction
+                                        .check_transaction_deadline()
+                                        .map(|()| output)
+                                        .map_err(execution_error)
+                                });
                             // Conversion errors happen outside QueryTransaction::run;
                             // they must also discard earlier writes and pool reservations.
                             if result.is_err() {
@@ -357,9 +448,31 @@ fn worker(
                             }
                             let _ = reply.send(result);
                         }
+                        Command::Check(reply) => {
+                            // The pre-dispatch check is this operation's deadline
+                            // linearization point. A second mutating check here
+                            // could release accounting while Session owns rows.
+                            let result = if transaction.state()
+                                == brainwire_cypher::QueryTransactionState::Active
+                            {
+                                Ok(())
+                            } else {
+                                Err(error(
+                                    "Neo.ClientError.Transaction.TransactionNotFound",
+                                    "no active transaction",
+                                ))
+                            };
+                            let _ = reply.send(result);
+                        }
                         Command::Commit(reply) => {
                             let result = if let Some(replica) = &replica {
                                 match transaction.prepare_replication() {
+                                    Ok(Some(_))
+                                        if deadline
+                                            .is_some_and(|deadline| Instant::now() >= deadline) =>
+                                    {
+                                        Err(timeout_error())
+                                    }
                                     Ok(Some(prepared)) => replica
                                         .commit(
                                             request_id.clone().expect("replicated request"),
@@ -396,7 +509,7 @@ fn worker(
                             let _ = reply.send(Ok(()));
                             break;
                         }
-                        Command::Begin(_, _, _, _, reply) => {
+                        Command::Begin(_, _, _, _, _, reply) => {
                             let _ = reply.send(Err(error(
                                 "Neo.ClientError.Transaction.TransactionStartFailed",
                                 "transaction already active",
@@ -407,6 +520,12 @@ fn worker(
             }
             Command::Abort(reply) => {
                 let _ = reply.send(Ok(()));
+            }
+            Command::Check(reply) => {
+                let _ = reply.send(Err(error(
+                    "Neo.ClientError.Transaction.TransactionNotFound",
+                    "no active transaction",
+                )));
             }
             Command::Run(_, _, _, reply) => {
                 let _ = reply.send(Err(error(
@@ -419,6 +538,53 @@ fn worker(
                     "Neo.ClientError.Transaction.TransactionNotFound",
                     "no active transaction",
                 )));
+            }
+        }
+    }
+}
+
+fn timeout_error() -> EngineError {
+    error(
+        "Neo.ClientError.Statement.ExecutionTimedOut",
+        "transaction deadline exceeded",
+    )
+}
+
+/// Wait for session cleanup after storage resources and the replicated writer
+/// permit have been dropped. Retain result accounting until buffered rows clear.
+fn expired_transaction(
+    receiver: &mpsc::Receiver<Command>,
+    access: &mut AccessContext,
+    mut first: Option<Command>,
+    retained_memory: brainwire_cypher::exec::QueryMemoryLease,
+) {
+    loop {
+        let command = match first.take().or_else(|| receiver.recv().ok()) {
+            Some(command) => command,
+            None => return,
+        };
+        match command {
+            Command::Abort(reply) => {
+                drop(retained_memory);
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            Command::SetAccess(next, reply) => {
+                drop(retained_memory);
+                *access = next;
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            Command::Begin(_, _, _, _, _, reply) | Command::Check(reply) => {
+                let _ = reply.send(Err(timeout_error()));
+            }
+            Command::Run(_, _, _, reply) => {
+                let _ = reply.send(Err(timeout_error()));
+            }
+            Command::Commit(reply) => {
+                drop(retained_memory);
+                let _ = reply.send(Err(timeout_error()));
+                return;
             }
         }
     }
@@ -830,8 +996,15 @@ mod tests {
     }
 
     fn scoped_engine_fixture() -> (tempfile::TempDir, Arc<Databases>, DbEngine) {
+        scoped_engine_fixture_with_timeout(30_000)
+    }
+
+    fn scoped_engine_fixture_with_timeout(
+        timeout_ms: u64,
+    ) -> (tempfile::TempDir, Arc<Databases>, DbEngine) {
         let directory = tempfile::tempdir().unwrap();
         let mut config = crate::config::Config::default();
+        config.server.query_timeout_ms = timeout_ms;
         config.server.data_dir = directory.path().join("data");
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
@@ -1616,5 +1789,171 @@ mod tests {
         assert_eq!(err.code, "Neo.TransientError.Transaction.Outdated");
         second.abort().unwrap();
         assert_eq!(db.stats().unwrap().nodes, 1);
+    }
+    fn timeout_extra(ms: i64) -> PackValue {
+        PackValue::Map(vec![("tx_timeout".into(), PackValue::Int(ms))])
+    }
+
+    fn assert_transaction_timeout(responses: &[Response]) {
+        assert!(
+            matches!(responses, [Response::Failure {code,..}]
+            if code == "Neo.ClientError.Statement.ExecutionTimedOut"),
+            "{responses:?}"
+        );
+    }
+
+    #[test]
+    fn client_timeout_rolls_back_idle_explicit_writes_and_reset_recovers() {
+        let (_directory, databases, engine) = scoped_engine_fixture();
+        let mut session = protected_session(engine);
+        assert!(matches!(
+            session.handle(Request::Begin {
+                extra: timeout_extra(100)
+            })[0],
+            Response::Success(_)
+        ));
+        assert!(matches!(
+            session.handle(Request::Run {
+                query: "CREATE (:Customer {entity_id:'timeout-staged'}) RETURN 1".into(),
+                params: PackValue::Map(vec![]),
+                extra: PackValue::Map(vec![])
+            })[0],
+            Response::Success(_)
+        ));
+        assert!(databases.query_pool().usage().reserved_bytes > 0);
+        assert!(matches!(
+            session
+                .handle(Request::Pull {
+                    extra: PackValue::Map(vec![])
+                })
+                .last(),
+            Some(Response::Success(_))
+        ));
+        thread::sleep(Duration::from_millis(180));
+        assert!(databases.query_pool().usage().reserved_bytes > 0);
+        assert_transaction_timeout(&session.handle(Request::Commit));
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
+        assert!(matches!(
+            session.handle(Request::Reset)[0],
+            Response::Success(_)
+        ));
+        assert!(matches!(
+            session.handle(Request::Run {
+                query: "RETURN 1".into(),
+                params: PackValue::Map(vec![]),
+                extra: PackValue::Map(vec![])
+            })[0],
+            Response::Success(_)
+        ));
+    }
+
+    #[test]
+    fn client_timeout_prevents_implicit_pull_of_expired_rows_and_writes() {
+        let (_directory, databases, engine) = scoped_engine_fixture();
+        let mut session = protected_session(engine);
+        assert!(matches!(
+            session.handle(Request::Run {
+                query: "CREATE (:Customer {entity_id:'timeout-implicit'}) RETURN 'buffered'".into(),
+                params: PackValue::Map(vec![]),
+                extra: timeout_extra(100)
+            })[0],
+            Response::Success(_)
+        ));
+        thread::sleep(Duration::from_millis(180));
+        assert!(databases.query_pool().usage().reserved_bytes > 0);
+        assert_transaction_timeout(&session.handle(Request::Pull {
+            extra: PackValue::Map(vec![]),
+        }));
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
+        assert!(matches!(
+            session.handle(Request::Reset)[0],
+            Response::Success(_)
+        ));
+    }
+
+    #[test]
+    fn client_deadline_is_shared_across_runs_instead_of_resetting() {
+        let (_directory, _databases, engine) = scoped_engine_fixture();
+        let mut session = protected_session(engine);
+        assert!(matches!(
+            session.handle(Request::Begin {
+                extra: timeout_extra(180)
+            })[0],
+            Response::Success(_)
+        ));
+        thread::sleep(Duration::from_millis(100));
+        assert!(matches!(
+            session.handle(Request::Run {
+                query: "RETURN 1".into(),
+                params: PackValue::Map(vec![]),
+                extra: PackValue::Map(vec![])
+            })[0],
+            Response::Success(_)
+        ));
+        session.handle(Request::Pull {
+            extra: PackValue::Map(vec![]),
+        });
+        thread::sleep(Duration::from_millis(120));
+        assert_transaction_timeout(&session.handle(Request::Run {
+            query: "RETURN 2".into(),
+            params: PackValue::Map(vec![]),
+            extra: PackValue::Map(vec![]),
+        }));
+    }
+
+    #[test]
+    fn client_timeout_cancels_active_low_memory_fanout() {
+        let (_directory, databases, engine) = scoped_engine_fixture();
+        let mut session = protected_session(engine);
+        let began = Instant::now();
+        let responses = session.handle(Request::Run {
+            query: "UNWIND $v AS a UNWIND $v AS b UNWIND $v AS c UNWIND $v AS d RETURN count(*)"
+                .into(),
+            params: PackValue::Map(vec![(
+                "v".into(),
+                PackValue::List((0..200).map(PackValue::Int).collect()),
+            )]),
+            extra: timeout_extra(50),
+        });
+        assert_transaction_timeout(&responses);
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "cooperative fanout deadline was not enforced"
+        );
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn server_timeout_caps_client_duration_without_changing_legacy_transactions() {
+        let (_directory, _databases, mut engine) = scoped_engine_fixture_with_timeout(50);
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine
+            .begin_with_timeout(
+                None,
+                false,
+                None,
+                None,
+                Some(Duration::from_millis(i64::MAX as u64)),
+            )
+            .unwrap();
+        thread::sleep(Duration::from_millis(120));
+        assert_eq!(
+            engine.commit().unwrap_err().code,
+            "Neo.ClientError.Statement.ExecutionTimedOut"
+        );
+        engine.abort().unwrap();
+        // Missing/zero client timeout retains the existing per-RUN server policy.
+        for timeout in [None, Some(Duration::ZERO)] {
+            engine
+                .begin_with_timeout(None, false, None, None, timeout)
+                .unwrap();
+            thread::sleep(Duration::from_millis(80));
+            engine
+                .run(None, "RETURN 1", &PackValue::Map(vec![]))
+                .unwrap();
+            engine.commit().unwrap();
+        }
     }
 }

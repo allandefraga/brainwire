@@ -31,15 +31,17 @@ Allan's current language.
 
 ## 2026-10-28: production memory groundwork
 
-- **Done:** added cgroup/host-aware defaults with explicit override compatibility,
-  and a disposable container benchmark. Compared 1M synthetic nodes before and
-  after; both recovered and passed `db check`. See `PRODUCTION-v0.8.md`.
+- **Done:** added cgroup/host-aware defaults, a disposable container benchmark,
+  and cooperative Bolt client transaction deadlines. Compared 1M synthetic nodes
+  before and after each change; recovery and `db check` passed. See
+  `PRODUCTION-v0.8.md`.
 - **Verification:** workspace tests, Clippy with warnings denied, formatting,
-  13 benchmark unit tests, and an empty v0.7 volume check passed.
+  13 benchmark unit tests, a real Python 0.5 s timeout/rollback test, and an
+  empty v0.7 volume check passed.
 - **Decided:** derived budgets are not an RSS ceiling; do not claim production
   readiness or infer security/replication from the single-node diagnostic.
 - **Next step:** implement global admission/lifetime accounting and reproduce the
-  higher-memory multi-label workload; qualify transaction timeouts and TLS.
+  higher-memory multi-label workload; qualify timeouts under blocking I/O and TLS.
 - **Blockers:** full memory cap, native Bolt TLS, online principals and the other
   production requirements remain open; populated-volume upgrade unverified.
 

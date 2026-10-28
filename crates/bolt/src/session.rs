@@ -1,6 +1,7 @@
 //! The Bolt 5.1+ server state machine, independent of the network.
 
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use crate::auth::AccessContext;
 pub use crate::auth::AuthMode;
@@ -87,6 +88,20 @@ fn delegated_visibility(extra: &PackValue) -> Result<Option<ReadVisibility>, Res
     Ok(Some(visibility))
 }
 
+fn transaction_timeout(extra: &PackValue) -> Result<Option<Duration>, Response> {
+    if matches!(extra, PackValue::Map(fields) if fields.iter().filter(|(name, _)| name == "tx_timeout").count() > 1)
+    {
+        return Err(invalid("duplicate transaction timeout"));
+    }
+    match extra.get("tx_timeout") {
+        None | Some(PackValue::Int(0)) => Ok(None),
+        Some(PackValue::Int(ms)) if *ms > 0 => Ok(Some(Duration::from_millis(*ms as u64))),
+        _ => Err(invalid(
+            "tx_timeout must be a nonnegative integer in milliseconds",
+        )),
+    }
+}
+
 const VISIBILITY_KEY: &str = "brainwire_visibility";
 
 pub trait QueryEngine {
@@ -142,6 +157,31 @@ pub trait QueryEngine {
             code: "Neo.ClientError.Security.Forbidden".into(),
             message: "engine does not support delegated visibility".into(),
         })
+    }
+    /// Positive client timeout, bounded by the engine's server ceiling.
+    /// Legacy engines reject requested timeouts instead of silently ignoring them.
+    fn begin_with_timeout(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+        visibility: Option<ReadVisibility>,
+        timeout: Option<Duration>,
+    ) -> Result<(), EngineError> {
+        if timeout.is_some() {
+            return Err(EngineError {
+                code: "Neo.ClientError.Statement.NotSupported".into(),
+                message: "engine does not support transaction timeouts".into(),
+            });
+        }
+        match visibility {
+            Some(visibility) => self.begin_delegated(db, read_only, request_id, visibility),
+            None => self.begin_with_request_id(db, read_only, request_id),
+        }
+    }
+    /// Check before delivering buffered output from an active transaction.
+    fn check_transaction(&mut self) -> Result<(), EngineError> {
+        Ok(())
     }
     /// Commit and optionally return an engine-owned bookmark.
     /// Return success only after completion; a failure is followed by `abort`.
@@ -358,18 +398,18 @@ impl<E: QueryEngine> Session<E> {
         };
         let request_id = durable_request_id(extra)?;
         let visibility = delegated_visibility(extra)?;
+        let timeout = transaction_timeout(extra)?;
         // A failed begin may still own partially initialized engine state.
         self.pending = true;
-        match visibility {
-            Some(visibility) => {
-                self.engine
-                    .begin_delegated(self.db.as_deref(), read_only, request_id, visibility)
-            }
-            None => self
-                .engine
-                .begin_with_request_id(self.db.as_deref(), read_only, request_id),
-        }
-        .map_err(Self::engine_failure)
+        self.engine
+            .begin_with_timeout(
+                self.db.as_deref(),
+                read_only,
+                request_id,
+                visibility,
+                timeout,
+            )
+            .map_err(Self::engine_failure)
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
@@ -404,6 +444,9 @@ impl<E: QueryEngine> Session<E> {
     }
 
     fn pull(&mut self, extra: &PackValue, discard: bool) -> Vec<Response> {
+        if let Err(error) = self.engine.check_transaction() {
+            return self.fail(Self::engine_failure(error));
+        }
         let n = match extra.get("n") {
             None | Some(PackValue::Int(-1)) => usize::MAX,
             Some(PackValue::Int(n)) if *n >= 0 => usize::try_from(*n).unwrap_or(usize::MAX),
@@ -547,6 +590,11 @@ impl<E: QueryEngine> Session<E> {
                     }
                     _ => {}
                 }
+                if extra.get("tx_timeout").is_some() {
+                    return self.fail(invalid(
+                        "tx_timeout is set by BEGIN, not RUN inside a transaction",
+                    ));
+                }
                 self.start_query(&query, &params, true)
             }
             (Streaming | TxStreaming, Request::Pull { extra }) => self.pull(&extra, false),
@@ -635,6 +683,60 @@ mod tests {
     }
 
     struct ThreeRows;
+
+    #[test]
+    fn invalid_transaction_timeouts_fail_before_begin() {
+        for value in [
+            PackValue::Null,
+            PackValue::Bool(true),
+            PackValue::Float(1.0),
+            PackValue::String("10".into()),
+            PackValue::Int(-1),
+        ] {
+            for implicit in [false, true] {
+                let mut session = ready(StubEngine);
+                let extra = map(&[("tx_timeout", value.clone())]);
+                let request = if implicit {
+                    Request::Run {
+                        query: "RETURN 1".into(),
+                        params: map(&[]),
+                        extra,
+                    }
+                } else {
+                    Request::Begin { extra }
+                };
+                assert!(
+                    matches!(&session.handle(request)[0], Response::Failure {code,..}
+                    if code == "Neo.ClientError.Request.Invalid")
+                );
+            }
+        }
+        let mut session = ready(StubEngine);
+        let extra = map(&[
+            ("tx_timeout", PackValue::Int(1)),
+            ("tx_timeout", PackValue::Int(2)),
+        ]);
+        assert!(
+            matches!(&session.handle(Request::Begin {extra})[0], Response::Failure {code,..}
+            if code == "Neo.ClientError.Request.Invalid")
+        );
+    }
+
+    #[test]
+    fn unsupported_timeout_is_not_silently_ignored_but_zero_is_unlimited() {
+        let mut session = ready(StubEngine);
+        assert!(
+            matches!(&session.handle(Request::Begin {extra: map(&[("tx_timeout", PackValue::Int(1))])})[0],
+            Response::Failure {code,..} if code == "Neo.ClientError.Statement.NotSupported")
+        );
+        let mut session = ready(StubEngine);
+        assert!(matches!(
+            &session.handle(Request::Begin {
+                extra: map(&[("tx_timeout", PackValue::Int(0))])
+            })[0],
+            Response::Success(_)
+        ));
+    }
 
     #[test]
     fn transaction_mode_is_validated_and_legacy_read_support_fails_closed() {

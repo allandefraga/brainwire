@@ -191,6 +191,12 @@ pub struct PreparedReplication {
 }
 
 /// Lifecycle of a shared query transaction. Terminal states cannot be reused.
+/// Keeps materialized result accounting alive after the storage transaction expires.
+/// The transport drops this lease only after discarding its buffered rows.
+pub struct QueryMemoryLease {
+    _reservation: Option<budget::Reservation>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryTransactionState {
     Active,
@@ -287,6 +293,7 @@ pub struct QueryTransaction<'db> {
     wrote: bool,
     state: QueryTransactionState,
     limits: ExecutionLimits,
+    transaction_deadline: Option<std::time::Instant>,
     reservation: Option<budget::Reservation>,
     visibility: Option<ReadVisibility>,
     ran: bool,
@@ -319,12 +326,32 @@ impl<'db> QueryTransaction<'db> {
             wrote: false,
             state: QueryTransactionState::Active,
             limits,
+            transaction_deadline: None,
             reservation: None,
             visibility: None,
             ran: false,
             replicated_mode: false,
             checkpoint_dir: None,
         })
+    }
+
+    /// Apply an absolute deadline shared by every RUN and transaction completion.
+    /// Cooperative checks cannot interrupt a blocking storage or durable commit call.
+    pub fn with_deadline(mut self, deadline: std::time::Instant) -> Self {
+        self.transaction_deadline = Some(deadline);
+        self
+    }
+
+    pub fn check_transaction_deadline(&mut self) -> Result<(), ExecError> {
+        self.require_active()?;
+        if self
+            .transaction_deadline
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+        {
+            self.fail();
+            return Err(ExecError::TimedOut);
+        }
+        Ok(())
     }
 
     /// Share conservative transaction reservations across connections/databases.
@@ -410,7 +437,7 @@ impl<'db> QueryTransaction<'db> {
         params: &BTreeMap<String, Value>,
         access: QueryAccess,
     ) -> Result<QueryOutput, ExecError> {
-        self.require_active()?;
+        self.check_transaction_deadline()?;
         self.ran = true;
         if query.len() > self.limits.memory_bytes {
             let error = ExecError::MemoryLimit {
@@ -482,6 +509,7 @@ impl<'db> QueryTransaction<'db> {
         params: &BTreeMap<String, Value>,
         source_bytes: usize,
     ) -> Result<QueryOutput, ExecError> {
+        self.check_transaction_deadline()?;
         self.ran = true;
         if let Err(error) = self.checkpoint_preconditions(query) {
             self.fail();
@@ -497,12 +525,21 @@ impl<'db> QueryTransaction<'db> {
                 "catalog changes are not replicated; apply them to a standalone server",
             ));
         }
+        let mut limits = self.limits;
+        if let Some(deadline) = self.transaction_deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            limits.timeout = Some(
+                limits
+                    .timeout
+                    .map_or(remaining, |server| server.min(remaining)),
+            );
+        }
         let result = execute_clauses(
             self.txn.as_mut().expect("active transaction"),
             &self.catalog,
             query,
             params,
-            self.limits,
+            limits,
             source_bytes,
             self.reservation.as_ref(),
             self.visibility.as_ref(),
@@ -521,6 +558,7 @@ impl<'db> QueryTransaction<'db> {
                         }
                     }
                 }
+                self.check_transaction_deadline()?;
                 Ok(output)
             }
             Err(error) => {
@@ -536,7 +574,7 @@ impl<'db> QueryTransaction<'db> {
     /// Read-only completion drops the snapshot without checking write conflicts,
     /// preserving the standalone executor's read-only behavior.
     pub fn commit(&mut self) -> Result<Option<u64>, ExecError> {
-        self.require_active()?;
+        self.check_transaction_deadline()?;
         let mut txn = self.txn.take().expect("active transaction");
         let result = if self.wrote {
             // Rejects a catalog migration committed since this snapshot.
@@ -559,7 +597,7 @@ impl<'db> QueryTransaction<'db> {
     /// None completes a read-only request. Prepared writes remain nondurable
     /// until the caller's consensus/apply layer succeeds.
     pub fn prepare_replication(&mut self) -> Result<Option<PreparedReplication>, ExecError> {
-        self.require_active()?;
+        self.check_transaction_deadline()?;
         if !self.replicated_mode {
             self.fail();
             return Err(ExecError::Semantic(
@@ -605,6 +643,14 @@ impl<'db> QueryTransaction<'db> {
                     .transpose()
             })
             .map_err(ExecError::from);
+        let result = if self
+            .transaction_deadline
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+        {
+            Err(ExecError::TimedOut)
+        } else {
+            result
+        };
         self.reservation.take();
         self.state = match &result {
             Ok(Some(_)) => QueryTransactionState::Prepared,
@@ -612,6 +658,16 @@ impl<'db> QueryTransaction<'db> {
             Err(_) => QueryTransactionState::Failed,
         };
         result
+    }
+
+    /// Discard storage work while retaining conservative accounting for rows
+    /// still owned by the transport. Dropping the lease releases those bytes.
+    pub fn rollback_retaining_memory(&mut self) -> QueryMemoryLease {
+        let lease = QueryMemoryLease {
+            _reservation: self.reservation.take(),
+        };
+        self.rollback();
+        lease
     }
 
     /// Discard active writes and release the snapshot. Safe to call repeatedly.
