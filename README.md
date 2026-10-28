@@ -29,7 +29,7 @@ Run it locally or in Docker with a persistent volume.
 ingestion, identity mapping and agent orchestration. Brainwire stores the graph,
 executes supported Cypher and exposes it through Bolt and a local CLI.
 
-> **v0.7.0-beta.1 · source beta.** <!-- brainwire-release-version --> This beta is intended for controlled trials.
+> **v0.8.0-beta.1 · source beta.** <!-- brainwire-release-version --> This beta is intended for controlled trials.
 > Production qualification is open. A container image is published only after
 > the matching release workflow passes its source and recovery checks.
 
@@ -160,7 +160,7 @@ quickstart above until the matching GitHub release includes
 the versioned image reference is:
 
 ```sh
-docker pull ghcr.io/allandefraga/brainwire:v0.7.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.8.0-beta.1 # brainwire-release-version
 ```
 
 If the image is private, run `docker login ghcr.io` and enter a GitHub token
@@ -298,7 +298,7 @@ Cypher, indexes, restart and the connected TUI with synthetic data.
 
 ## Release status and license
 
-**Version:** `v0.7.0-beta.1` · source beta · production qualification open. <!-- brainwire-release-version -->
+**Version:** `v0.8.0-beta.1` · source beta · production qualification open. <!-- brainwire-release-version -->
 A tag identifies source; a published release and image require the workflow to
 finish successfully. The release workflow marks `-beta.N` and `-rc.N` tags as
 prereleases and plain SemVer tags as stable releases. It publishes a versioned
