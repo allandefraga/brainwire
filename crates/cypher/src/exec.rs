@@ -193,6 +193,7 @@ pub struct PreparedReplication {
 /// Lifecycle of a shared query transaction. Terminal states cannot be reused.
 /// Keeps materialized result accounting alive after the storage transaction expires.
 /// The transport drops this lease only after discarding its buffered rows.
+#[derive(Clone)]
 pub struct QueryMemoryLease {
     _reservation: Option<budget::Reservation>,
 }
@@ -658,6 +659,13 @@ impl<'db> QueryTransaction<'db> {
             Err(_) => QueryTransactionState::Failed,
         };
         result
+    }
+
+    /// Share the reservation with result owners without charging the bytes again.
+    pub fn output_memory_lease(&self) -> QueryMemoryLease {
+        QueryMemoryLease {
+            _reservation: self.reservation.clone(),
+        }
     }
 
     /// Discard storage work while retaining conservative accounting for rows

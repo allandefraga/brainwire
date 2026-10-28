@@ -1720,6 +1720,7 @@ mod tests {
             _: &PackValue,
         ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
             Ok(crate::session::QueryResult {
+                memory: None,
                 fields: vec!["value".into()],
                 rows: vec![vec![PackValue::String("x".repeat(100))]; 10],
             })
@@ -1769,6 +1770,143 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_millis(100), aborted.notified())
             .await
             .unwrap();
+    }
+
+    struct OutputAdmission(Arc<std::sync::atomic::AtomicUsize>);
+    struct OutputReservation(Arc<std::sync::atomic::AtomicUsize>);
+    impl Drop for OutputReservation {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    impl QueryEngine for OutputAdmission {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            self.0
+                .compare_exchange(
+                    0,
+                    1,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                )
+                .map_err(|_| crate::session::EngineError {
+                    code: "test.memory_exhausted".into(),
+                    message: "output occupies shared capacity".into(),
+                })?;
+            Ok(crate::session::QueryResult {
+                fields: vec!["value".into()],
+                rows: vec![vec![PackValue::String("x".repeat(4096))]; 2],
+                memory: Some(crate::session::OutputMemory::new(OutputReservation(
+                    self.0.clone(),
+                ))),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn blocked_output_keeps_admission_until_drain_disconnect_timeout_or_cancel() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for finish in ["drain", "disconnect", "timeout", "cancel"] {
+            let occupied = Arc::new(AtomicUsize::new(0));
+            let (server, mut client) = tokio::io::duplex(128);
+            let task = tokio::spawn(handle_connection_with_connection_timeouts(
+                server,
+                OutputAdmission(occupied.clone()),
+                ConnectionLimits {
+                    io_timeout: if finish == "timeout" {
+                        std::time::Duration::from_millis(80)
+                    } else {
+                        std::time::Duration::from_secs(5)
+                    },
+                    ..ConnectionLimits::default()
+                },
+                AuthMode::AllowAll,
+                DEFAULT_HANDSHAKE_TIMEOUT,
+                DEFAULT_AUTHENTICATION_TIMEOUT,
+                watch::channel(false).1,
+            ));
+            login(&mut client).await;
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("query".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            read_success(&mut client).await;
+            send_request(
+                &mut client,
+                0x3f,
+                vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+            )
+            .await;
+            // Reading the first header proves the response loop reached the blocked record.
+            let size = client.read_u16().await.unwrap() as usize;
+            assert_eq!(occupied.load(Ordering::SeqCst), 1);
+            let mut competing = OutputAdmission(occupied.clone());
+            assert!(competing
+                .run(None, "query", &PackValue::Map(vec![]))
+                .is_err());
+            match finish {
+                "drain" => {
+                    let mut body = vec![0; size];
+                    client.read_exact(&mut body).await.unwrap();
+                    assert_eq!(client.read_u16().await.unwrap(), 0);
+                    for _ in 0..2 {
+                        let size = client.read_u16().await.unwrap() as usize;
+                        let mut body = vec![0; size];
+                        client.read_exact(&mut body).await.unwrap();
+                        assert_eq!(client.read_u16().await.unwrap(), 0);
+                    }
+                    send_request(&mut client, 0x02, vec![]).await;
+                    task.await.unwrap().unwrap();
+                }
+                "disconnect" => {
+                    drop(client);
+                    let _ = task.await.unwrap();
+                }
+                "timeout" => {
+                    let error = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap_err();
+                    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+                }
+                "cancel" => {
+                    task.abort();
+                    assert!(task.await.unwrap_err().is_cancelled());
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                occupied.load(Ordering::SeqCst),
+                0,
+                "{finish} releases output accounting"
+            );
+            let result = competing
+                .run(None, "query", &PackValue::Map(vec![]))
+                .unwrap();
+            assert_eq!(occupied.load(Ordering::SeqCst), 1);
+            drop(result);
+            assert_eq!(occupied.load(Ordering::SeqCst), 0);
+        }
     }
 
     // Graceful stop: admission ends, idle sessions close at a message

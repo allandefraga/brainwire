@@ -29,6 +29,19 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-28: output reservation lifetime
+
+- **Done:** keep query-memory reservations alive until Bolt response batches are
+  sent or discarded. Added a four-label concurrent container diagnostic.
+- **Verification:** workspace tests, Clippy, formatting, benchmark unit tests and
+  a small ACL smoke passed. Before/after 2/4/8 GiB attempts ended early under
+  query-pool pressure or reader timeouts; see `PRODUCTION-v0.9.md`.
+- **Decided:** these results do not qualify production or establish an RSS cap.
+- **Next step:** bound ingress, output encoding and native allocations, implement
+  real streaming/backpressure, then repeat representative 30-minute workloads.
+- **Blockers:** global memory enforcement, native Bolt TLS, online principals,
+  Cypher compatibility, recovery and production qualification remain open.
+
 ## 2026-10-28: production memory groundwork
 
 - **Done:** added cgroup/host-aware defaults, a disposable container benchmark,

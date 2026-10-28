@@ -38,6 +38,7 @@ impl QueryEngine for Engine {
         self.event(&format!("run-db:{db:?}"))?;
         self.event("run")?;
         Ok(QueryResult {
+            memory: None,
             fields: vec!["x".into()],
             rows: vec![vec![PackValue::Int(1)]; 3],
         })

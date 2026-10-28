@@ -104,3 +104,73 @@ fn pool_reservation_stays_bounded_across_runs_and_reports_live_usage() {
     tx.rollback();
     assert_eq!(pool.usage().reserved_bytes, 0);
 }
+
+#[test]
+fn result_lease_survives_commit_prepare_rollback_and_drop_without_double_charge() {
+    for terminal in ["commit", "prepare", "rollback", "drop"] {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        if terminal == "prepare" {
+            let mapping =
+                serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                    .unwrap();
+            db.apply_ontology(&mapping).unwrap();
+        }
+        let pool = Arc::new(QueryMemoryPool::new(64_000));
+        let limits = ExecutionLimits {
+            memory_bytes: 64_000,
+            timeout: None,
+        };
+        let mut transaction =
+            QueryTransaction::begin_with_pool(&db, limits, Arc::clone(&pool)).unwrap();
+        if terminal == "prepare" {
+            transaction = transaction.with_replicated_ids();
+        }
+        transaction
+            .run(
+                if terminal == "prepare" {
+                    "CREATE (:Customer {entity_id:'lease'}) RETURN $text"
+                } else {
+                    "RETURN $text"
+                },
+                &BTreeMap::from([("text".into(), Value::Str("x".repeat(3000)))]),
+            )
+            .unwrap();
+        let held = pool.usage().reserved_bytes;
+        assert!(held > 0);
+        let result = transaction.output_memory_lease();
+        let in_flight = result.clone();
+        assert_eq!(
+            pool.usage().reserved_bytes,
+            held,
+            "cloning ownership must not double charge"
+        );
+        match terminal {
+            "commit" => {
+                transaction.commit().unwrap();
+            }
+            "prepare" => {
+                assert!(transaction.prepare_replication().unwrap().is_some());
+                assert_eq!(
+                    transaction.state(),
+                    brainwire_cypher::QueryTransactionState::Prepared
+                );
+            }
+            "rollback" => {
+                transaction.rollback();
+            }
+            "drop" => {}
+            _ => unreachable!(),
+        }
+        drop(transaction);
+        let retained = pool.usage().reserved_bytes;
+        assert!(
+            retained >= held,
+            "{terminal} released live result accounting"
+        );
+        drop(result);
+        assert_eq!(pool.usage().reserved_bytes, retained);
+        drop(in_flight);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+}

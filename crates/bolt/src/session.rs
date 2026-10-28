@@ -14,9 +14,71 @@ use brainwire_core::acl::ReadVisibility;
 /// never passes for Neo4j itself (Memgraph uses the same form).
 const SERVER_AGENT: &str = "Neo4j/5.26.0 compatible graph database server - Brainwire";
 
+/// Opaque accounting ownership shared with an engine without a transport dependency.
+#[derive(Clone)]
+pub struct OutputMemory {
+    _owner: std::sync::Arc<dyn Send + Sync>,
+}
+impl OutputMemory {
+    pub fn new(value: impl Send + Sync + 'static) -> Self {
+        Self {
+            _owner: std::sync::Arc::new(value),
+        }
+    }
+}
+impl std::fmt::Debug for OutputMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OutputMemory")
+    }
+}
+
+/// Responses retain their result accounting until consumed or dropped.
+/// The owned iterator must stay alive while each yielded response is processed.
+#[derive(Debug)]
+pub struct ResponseBatch {
+    responses: Vec<Response>,
+    memory: Option<OutputMemory>,
+}
+impl std::ops::Deref for ResponseBatch {
+    type Target = [Response];
+    fn deref(&self) -> &Self::Target {
+        &self.responses
+    }
+}
+impl PartialEq<Vec<Response>> for ResponseBatch {
+    fn eq(&self, other: &Vec<Response>) -> bool {
+        self.responses == *other
+    }
+}
+pub struct ResponseIter {
+    responses: std::vec::IntoIter<Response>,
+    _memory: Option<OutputMemory>,
+}
+impl Iterator for ResponseIter {
+    type Item = Response;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.responses.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.responses.size_hint()
+    }
+}
+impl IntoIterator for ResponseBatch {
+    type Item = Response;
+    type IntoIter = ResponseIter;
+    fn into_iter(self) -> Self::IntoIter {
+        ResponseIter {
+            responses: self.responses.into_iter(),
+            _memory: self.memory,
+        }
+    }
+}
+
 pub struct QueryResult {
     pub fields: Vec<String>,
     pub rows: Vec<Vec<PackValue>>,
+    /// Engines without shared accounting leave this unset.
+    pub memory: Option<OutputMemory>,
 }
 
 #[derive(Debug)]
@@ -242,6 +304,7 @@ impl QueryEngine for StubEngine {
         };
         let int: i64 = value.parse().map_err(|_| refuse())?;
         Ok(QueryResult {
+            memory: None,
             fields: vec![name.to_string()],
             rows: vec![vec![PackValue::Int(int)]],
         })
@@ -264,6 +327,7 @@ pub struct Session<E: QueryEngine> {
     engine: E,
     state: State,
     rows: VecDeque<Vec<PackValue>>,
+    output_memory: Option<OutputMemory>,
     db: Option<String>,
     pending: bool,
     auth: AuthMode,
@@ -286,6 +350,7 @@ impl<E: QueryEngine> Session<E> {
             engine,
             state: State::Connected,
             rows: VecDeque::new(),
+            output_memory: None,
             db: None,
             pending: false,
             auth,
@@ -298,6 +363,7 @@ impl<E: QueryEngine> Session<E> {
 
     fn cleanup(&mut self) -> Result<(), EngineError> {
         self.rows.clear();
+        self.output_memory.take();
         if self.pending {
             self.engine.abort()?;
             self.pending = false;
@@ -423,6 +489,7 @@ impl<E: QueryEngine> Session<E> {
         match self.engine.run(self.db.as_deref(), query, params) {
             Ok(result) => {
                 self.rows = result.rows.into();
+                self.output_memory = result.memory;
                 self.state = if in_tx {
                     State::TxStreaming
                 } else {
@@ -461,6 +528,7 @@ impl<E: QueryEngine> Session<E> {
         }
         let in_tx = self.state == State::TxStreaming;
         if self.rows.is_empty() {
+            self.output_memory.take();
             let mut pairs = vec![
                 ("type", PackValue::String("r".into())),
                 ("t_last", PackValue::Int(0)),
@@ -483,7 +551,19 @@ impl<E: QueryEngine> Session<E> {
         out
     }
 
-    pub fn handle(&mut self, req: Request) -> Vec<Response> {
+    pub fn handle(&mut self, req: Request) -> ResponseBatch {
+        // Retain before PULL: commit or failure may clear Session's own lease.
+        let memory = self.output_memory.clone();
+        let responses = self.handle_inner(req);
+        let memory = if responses.iter().any(|r| matches!(r, Response::Record(_))) {
+            memory
+        } else {
+            None
+        };
+        ResponseBatch { responses, memory }
+    }
+
+    fn handle_inner(&mut self, req: Request) -> Vec<Response> {
         use State::*;
         match (self.state, req) {
             (Defunct, _) => vec![],
@@ -636,6 +716,63 @@ impl<E: QueryEngine> Drop for Session<E> {
 mod tests {
     use super::*;
 
+    struct MemoryOwner(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl Drop for MemoryOwner {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    struct CommitFailureWithRows(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl QueryEngine for CommitFailureWithRows {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<QueryResult, EngineError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(QueryResult {
+                fields: vec!["x".into()],
+                rows: vec![vec![PackValue::Int(1)]; 2],
+                memory: Some(OutputMemory::new(MemoryOwner(self.0.clone()))),
+            })
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            Err(EngineError {
+                code: "test.commit".into(),
+                message: "commit failed".into(),
+            })
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn record_prefix_keeps_accounting_when_commit_fails_and_reset_clears_session() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let occupied = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut session = Session::new(CommitFailureWithRows(occupied.clone()), AuthMode::AllowAll);
+        session.handle(Request::Hello { extra: map(&[]) });
+        session.handle(Request::Logon { auth: map(&[]) });
+        session.handle(run("query"));
+        let responses = session.handle(pull(-1));
+        assert!(matches!(responses[0], Response::Record(_)));
+        assert!(matches!(responses.last(), Some(Response::Failure { .. })));
+        assert_eq!(session.state(), State::Failed);
+        session.handle(Request::Reset);
+        assert_eq!(
+            occupied.load(Ordering::SeqCst),
+            1,
+            "failure prefix still owns its rows"
+        );
+        drop(responses);
+        assert_eq!(occupied.load(Ordering::SeqCst), 0);
+    }
+
     fn map(pairs: &[(&str, PackValue)]) -> PackValue {
         PackValue::Map(
             pairs
@@ -784,6 +921,7 @@ mod tests {
             _: &PackValue,
         ) -> Result<QueryResult, EngineError> {
             Ok(QueryResult {
+                memory: None,
                 fields: vec!["i".into()],
                 rows: (0..3).map(|i| vec![PackValue::Int(i)]).collect(),
             })
@@ -1069,6 +1207,7 @@ mod protected_tests {
         ) -> Result<QueryResult, EngineError> {
             self.0.lock().unwrap().events.push("run");
             Ok(QueryResult {
+                memory: None,
                 fields: vec!["x".into()],
                 rows: vec![vec![PackValue::Int(1)]; 3],
             })

@@ -44,16 +44,25 @@ impl QueryMemoryPool {
         }
     }
 }
-pub(super) struct Reservation {
+#[derive(Clone)]
+pub(super) struct Reservation(Arc<ReservationInner>);
+
+pub(super) struct ReservationInner {
     pool: Arc<QueryMemoryPool>,
     bytes: AtomicUsize,
 }
+impl std::ops::Deref for Reservation {
+    type Target = ReservationInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 impl Reservation {
     pub fn new(pool: Arc<QueryMemoryPool>) -> Self {
-        Self {
+        Self(Arc::new(ReservationInner {
             pool,
             bytes: AtomicUsize::new(0),
-        }
+        }))
     }
     // Each reservation has one charging executor; workers own separate leases.
     fn grow_to(&self, bytes: usize) -> Result<(), ExecError> {
@@ -88,13 +97,18 @@ impl Reservation {
         }
     }
     fn absorb(&self, other: Reservation) {
+        assert_eq!(
+            Arc::strong_count(&other.0),
+            1,
+            "worker reservation must have one owner before transfer"
+        );
         assert!(Arc::ptr_eq(&self.pool, &other.pool));
         let bytes = other.bytes.swap(0, Ordering::Relaxed);
         // Both leases already contribute to the same bounded pool total.
         self.bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 }
-impl Drop for Reservation {
+impl Drop for ReservationInner {
     fn drop(&mut self) {
         self.pool
             .reserved

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use brainwire_bolt::auth::{AccessContext, GraphAccess};
 use brainwire_bolt::packstream::PackValue;
-use brainwire_bolt::session::{EngineError, QueryEngine, QueryResult};
+use brainwire_bolt::session::{EngineError, OutputMemory, QueryEngine, QueryResult};
 use brainwire_core::acl::ReadVisibility;
 use brainwire_core::value::Value;
 use brainwire_cypher::{ExecError, Out, QueryAccess, QueryOutput, QueryTransaction};
@@ -438,7 +438,13 @@ fn worker(
                                 .and_then(|output| {
                                     transaction
                                         .check_transaction_deadline()
-                                        .map(|()| output)
+                                        .map(|()| {
+                                            let mut output = output;
+                                            output.memory = Some(OutputMemory::new(
+                                                transaction.output_memory_lease(),
+                                            ));
+                                            output
+                                        })
                                         .map_err(execution_error)
                                 });
                             // Conversion errors happen outside QueryTransaction::run;
@@ -772,6 +778,7 @@ fn output_to_bolt(output: QueryOutput) -> Result<QueryResult, EngineError> {
         .map(|row| row.into_iter().map(out_to_pack).collect::<Result<_, _>>())
         .collect::<Result<_, _>>()?;
     Ok(QueryResult {
+        memory: None,
         fields: output.fields,
         rows,
     })
@@ -957,6 +964,140 @@ mod tests {
         assert!(engine.commit().is_err());
         assert_eq!(dbs.query_pool().usage().reserved_bytes, 0);
         assert_eq!(db.stats().unwrap().nodes, 0);
+    }
+
+    #[test]
+    fn output_reservation_survives_autocommit_until_response_batch_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = dir.path().join("data");
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        config.memory.query = crate::size::ByteSize(24_000);
+        let databases = Arc::new(Databases::open_all(&config).unwrap());
+        let engine = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+        let mut session = Session::new(engine, AuthMode::AllowAll);
+        session.handle(Request::Hello {
+            extra: PackValue::Map(vec![]),
+        });
+        session.handle(Request::Logon {
+            auth: PackValue::Map(vec![]),
+        });
+        let params = PackValue::Map(vec![("text".into(), PackValue::String("x".repeat(3000)))]);
+        session.handle(Request::Run {
+            query: "RETURN $text".into(),
+            params: params.clone(),
+            extra: PackValue::Map(vec![]),
+        });
+        let held = databases.query_pool().usage().reserved_bytes;
+        assert!(held > 0);
+        let pending = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+        });
+        assert!(matches!(pending[0], Response::Record(_)));
+        assert_eq!(
+            databases.query_pool().usage().reserved_bytes,
+            held,
+            "in-flight output must remain charged after autocommit"
+        );
+        let mut other = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+        other.begin(None).unwrap();
+        let error = other
+            .run(None, "RETURN $text", &params)
+            .err()
+            .expect("pending output must constrain other sessions");
+        assert_eq!(
+            error.code,
+            "Neo.TransientError.General.QueryMemoryPoolExhausted"
+        );
+        other.abort().unwrap();
+        drop(pending);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        other.begin(None).unwrap();
+        other.run(None, "RETURN $text", &params).unwrap();
+        other.commit().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn explicit_and_partial_output_keep_shared_reservations_until_cleanup() {
+        for explicit in [false, true] {
+            for cleanup in ["reset", "logoff", "drop"] {
+                let dir = tempfile::tempdir().unwrap();
+                let mut config = crate::config::Config::default();
+                config.server.data_dir = dir.path().join("data");
+                config.memory.cache = crate::size::ByteSize(64 << 20);
+                config.memory.memtables = crate::size::ByteSize(16 << 20);
+                let databases = Arc::new(Databases::open_all(&config).unwrap());
+                let engine = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+                let mut session = Session::new(engine, AuthMode::AllowAll);
+                session.handle(Request::Hello {
+                    extra: PackValue::Map(vec![]),
+                });
+                session.handle(Request::Logon {
+                    auth: PackValue::Map(vec![]),
+                });
+                if explicit {
+                    session.handle(Request::Begin {
+                        extra: PackValue::Map(vec![]),
+                    });
+                }
+                session.handle(Request::Run {
+                    query: "UNWIND [1,2] AS x RETURN x".into(),
+                    params: PackValue::Map(vec![]),
+                    extra: PackValue::Map(vec![]),
+                });
+                let first = session.handle(Request::Pull {
+                    extra: PackValue::Map(vec![("n".into(), PackValue::Int(1))]),
+                });
+                let held = databases.query_pool().usage().reserved_bytes;
+                assert!(held > 0);
+                let second = session.handle(Request::Pull {
+                    extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+                });
+                if explicit {
+                    session.handle(Request::Commit);
+                }
+                assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+                match cleanup {
+                    "reset" => {
+                        session.handle(Request::Reset);
+                    }
+                    "logoff" => {
+                        session.handle(Request::Logoff);
+                    }
+                    "drop" => {
+                        drop(session);
+                    }
+                    _ => unreachable!(),
+                }
+                assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+                drop(first);
+                assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+                drop(second);
+                assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn dropped_worker_reply_does_not_leak_output_accounting() {
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine.begin(None).unwrap();
+        let (reply, receiver) = mpsc::channel();
+        drop(receiver);
+        engine
+            .sender
+            .send(Command::Run(
+                None,
+                "RETURN $text".into(),
+                PackValue::Map(vec![("text".into(), PackValue::String("x".repeat(3000)))]),
+                reply,
+            ))
+            .unwrap();
+        engine.abort().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
     }
 
     #[test]
@@ -1532,6 +1673,7 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], Response::Record(vec![PackValue::Int(0)]));
         assert!(matches!(result[1], Response::Success(_)));
+        drop(result); // The transport has finished writing the previous response.
         let denied = session.handle(Request::Run {
             query: "CREATE (c:Customer {entity_id:'reader-write'})".into(),
             params: PackValue::Map(vec![]),

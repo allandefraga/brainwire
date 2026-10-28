@@ -59,6 +59,7 @@ impl QueryEngine for Adapter<'_> {
             })
             .collect();
         Ok(QueryResult {
+            memory: None,
             fields: output.fields,
             rows,
         })
@@ -102,14 +103,14 @@ fn begin(s: &mut Session<Adapter<'_>>) {
         Response::Success(_)
     ));
 }
-fn run(s: &mut Session<Adapter<'_>>, q: &str) -> Vec<Response> {
+fn run(s: &mut Session<Adapter<'_>>, q: &str) -> brainwire_bolt::session::ResponseBatch {
     s.handle(Request::Run {
         query: q.into(),
         params: map(),
         extra: map(),
     })
 }
-fn pull(s: &mut Session<Adapter<'_>>) -> Vec<Response> {
+fn pull(s: &mut Session<Adapter<'_>>) -> brainwire_bolt::session::ResponseBatch {
     s.handle(Request::Pull { extra: map() })
 }
 fn create(s: &mut Session<Adapter<'_>>, id: &str) {
