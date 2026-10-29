@@ -141,6 +141,8 @@ pub(super) struct NodeStep {
 
 #[derive(Debug, Clone)]
 pub(super) enum Access {
+    /// An explicit read label is absent from this transaction catalog.
+    Empty,
     Bound,
     Scan,
     EntityEq(Expr),
@@ -165,7 +167,7 @@ pub(super) enum Access {
 impl Access {
     fn score(&self) -> u8 {
         match self {
-            Access::Bound => 0,
+            Access::Empty | Access::Bound => 0,
             Access::NodeId(_) | Access::EntityEq(_) => 1,
             Access::EntityIn(_) => 2,
             Access::IndexEq(..) => 3,
@@ -181,8 +183,10 @@ pub(super) struct Expand {
     pub from: usize,
     pub rel: usize,
     pub rel_bound: bool,
-    /// Empty means any type.
+    /// Empty means any type unless `no_matching_types` is set.
     pub types: Vec<brainwire_core::ids::EdgeTypeId>,
+    /// Explicit types were supplied, but none exist in this catalog.
+    pub no_matching_types: bool,
     /// Direction relative to `from`.
     pub direction: Direction,
     pub to: NodeStep,
@@ -1276,11 +1280,6 @@ impl Planner<'_, '_, '_> {
             .chain(pattern.hops.iter().map(|(_, n)| n))
             .collect();
         for node in &chain {
-            for label in &node.labels {
-                if self.ctx.catalog.node_type(label).is_none() {
-                    return Err(semantic(format!("unknown label {label}")));
-                }
-            }
             let mut names = BTreeSet::new();
             for (name, value) in &node.props {
                 if !names.insert(name) {
@@ -1312,9 +1311,8 @@ impl Planner<'_, '_, '_> {
             });
             let mut ids = vec![];
             for name in &rel.types {
-                match self.ctx.catalog.edge_type(name) {
-                    Some(ty) => ids.push(ty.id),
-                    None => return Err(semantic(format!("unknown edge type {name}"))),
+                if let Some(ty) = self.ctx.catalog.edge_type(name) {
+                    ids.push(ty.id);
                 }
             }
             types.push(ids);
@@ -1342,7 +1340,7 @@ impl Planner<'_, '_, '_> {
                 bound: anchor_bound,
                 labels: chain[anchor].labels.clone(),
                 props: chain[anchor].props.clone(),
-                access: if anchor_bound { Access::Bound } else { access },
+                access,
             }),
             filters: vec![],
         });
@@ -1381,6 +1379,7 @@ impl Planner<'_, '_, '_> {
                     rel: rel_slots[hop],
                     rel_bound,
                     types: types[hop].clone(),
+                    no_matching_types: !rel.types.is_empty() && types[hop].is_empty(),
                     direction,
                     to: NodeStep {
                         slot: node_slots[target],
@@ -1434,6 +1433,13 @@ impl Planner<'_, '_, '_> {
         before: &Scope,
         conjunct_list: &[Expr],
     ) -> Access {
+        if node
+            .labels
+            .iter()
+            .any(|label| self.ctx.catalog.node_type(label).is_none())
+        {
+            return Access::Empty;
+        }
         if node.var.as_ref().is_some_and(|v| bound.contains(v)) {
             return Access::Bound;
         }

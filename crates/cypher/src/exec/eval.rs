@@ -338,7 +338,12 @@ pub(super) fn property(base: Val, name: &str, ctx: &Context<'_, '_>) -> Result<V
 
 fn properties(base: &Val, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
     Ok(match base {
-        Val::Node(id) => Val::from(Value::Map(graph::node_out(ctx, *id)?.props)),
+        Val::Node(id) => {
+            let mut props = graph::node_out(ctx, *id)?.props;
+            // Virtual identity remains available explicitly and in whole-node output.
+            props.remove("entity_id");
+            Val::from(Value::Map(props))
+        }
         Val::Rel(edge) => Val::from(Value::Map(graph::edge_props(ctx, edge)?)),
         Val::Map(map) => Val::Map(map.clone()),
         Val::Null => Val::Null,
@@ -390,6 +395,35 @@ fn float(v: &Val) -> Option<f64> {
         Val::Int(i) => Some(*i as f64),
         Val::Float(f) => Some(*f),
         _ => None,
+    }
+}
+
+// Cypher keeps ties towards +infinity at precision zero, and away from zero
+// at positive precision. Splitting the scale avoids overflowing 10^precision.
+fn round_number(x: f64, precision: u32) -> f64 {
+    if !x.is_finite() || precision > 324 {
+        return x;
+    }
+    if precision == 0 {
+        let lower = x.floor();
+        return if x - lower >= 0.5 { lower + 1.0 } else { lower };
+    }
+    // Scaling must not perturb a value that already fits the requested decimal
+    // precision. Rust's shortest decimal representation round-trips to x.
+    if x.to_string()
+        .split_once('.')
+        .is_none_or(|(_, fraction)| fraction.len() <= precision as usize)
+    {
+        return x;
+    }
+    let scale = 10f64.powi(precision.min(308) as i32);
+    let extra = 10f64.powi(precision.saturating_sub(308) as i32);
+    let scaled = (x * scale) * extra;
+    if scaled.is_finite() {
+        scaled.round() / extra / scale
+    } else {
+        // Overflow here means the requested decimal place is finer than x can represent.
+        x
     }
 }
 
@@ -828,7 +862,26 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                 other => return Err(type_error("reverse", &other)),
             }
         }
-        "abs" | "ceil" | "floor" | "round" | "sqrt" | "sign" | "exp" | "log" | "log10" => {
+        "round" => {
+            arity(name, &args, 1, 2)?;
+            if args.iter().any(Val::is_null) {
+                Val::Null
+            } else {
+                let x = float(&args[0]).ok_or_else(|| type_error(name, &args[0]))?;
+                let precision = args
+                    .get(1)
+                    .map(|value| int_arg(value, name))
+                    .transpose()?
+                    .flatten()
+                    .unwrap_or(0);
+                let precision = u32::try_from(precision)
+                    .ok()
+                    .filter(|precision| *precision <= i32::MAX as u32)
+                    .ok_or_else(|| semantic("round precision must be between 0 and 2147483647"))?;
+                Val::Float(round_number(x, precision))
+            }
+        }
+        "abs" | "ceil" | "floor" | "sqrt" | "sign" | "exp" | "log" | "log10" => {
             arity(name, &args, 1, 2)?;
             match (name, first()) {
                 (_, Val::Null) => Val::Null,
@@ -845,15 +898,6 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                         "abs" => Val::Float(x.abs()),
                         "ceil" => Val::Float(x.ceil()),
                         "floor" => Val::Float(x.floor()),
-                        "round" => {
-                            match args.get(1).map(|p| int_arg(p, name)).transpose()?.flatten() {
-                                Some(precision) => {
-                                    let scale = 10f64.powi(precision as i32);
-                                    Val::Float((x * scale).round() / scale)
-                                }
-                                None => Val::Float(x.round()),
-                            }
-                        }
                         "sqrt" => Val::Float(x.sqrt()),
                         "sign" => Val::Int(if x > 0.0 {
                             1

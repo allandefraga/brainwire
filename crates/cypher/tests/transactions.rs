@@ -176,17 +176,28 @@ fn catalog_migration_conflicts_with_writes() {
     let revised: GraphMapping = serde_json::from_value(serde_json::json!({"version":"2", "nodes":[{"label":"Customer"}, {"label":"NewLabel"}], "edges":[]})).unwrap();
     db.apply_ontology(&revised).unwrap();
     create(&mut tx, "two");
-    assert!(matches!(
-        old_catalog.run("MATCH (n:NewLabel) RETURN n", &BTreeMap::new()),
-        Err(ExecError::Semantic(_))
-    ));
+    let query = "MATCH (n:NewLabel) RETURN n.number";
+    assert!(old_catalog
+        .run(query, &BTreeMap::new())
+        .unwrap()
+        .rows
+        .is_empty());
     assert!(matches!(tx.commit(), Err(ExecError::Conflict)));
     rejects(&mut tx);
     assert_eq!(count(&db), n(0));
+    execute(
+        &db,
+        "CREATE (n:NewLabel {entity_id: 'new', number: 7})",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(old_catalog
+        .run(query, &BTreeMap::new())
+        .unwrap()
+        .rows
+        .is_empty());
     let mut fresh = QueryTransaction::begin(&db).unwrap();
-    assert!(fresh
-        .run("MATCH (n:NewLabel) RETURN n", &BTreeMap::new())
-        .is_ok());
+    assert_eq!(fresh.run(query, &BTreeMap::new()).unwrap().rows, n(7));
 }
 
 #[test]

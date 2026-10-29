@@ -129,14 +129,12 @@ fn bulk_unwind_and_reopen() {
 fn static_errors_survive_empty_input() {
     let (_dir, db) = db();
     for q in [
-        "MATCH (x:Nope) RETURN x",
         "UNWIND [] AS x RETURN unknown",
         "MATCH (c:Customer) SET c.entity_id = 'x'",
         "RETURN 1 MATCH (c:Customer) RETURN c",
         "MATCH (c:Customer) WHERE count(*) = 0 RETURN c",
         "RETURN count(count(*))",
         "UNWIND [] AS x RETURN x LIMIT x",
-        "MATCH (c:Customer)-[:NOPE]->(k:Company) RETURN k",
     ] {
         assert!(
             matches!(
@@ -172,6 +170,17 @@ fn static_errors_survive_empty_input() {
         execute(&db, "RETURN (", &BTreeMap::new()),
         Err(ExecError::Syntax(_))
     ));
+}
+
+#[test]
+fn undeclared_read_schema_returns_empty_input() {
+    let (_dir, db) = db();
+    for q in [
+        "MATCH (x:Nope) RETURN x",
+        "MATCH (c:Customer)-[:NOPE]->(k:Company) RETURN k",
+    ] {
+        assert!(values(&db, q).is_empty(), "{q}");
+    }
 }
 
 #[test]

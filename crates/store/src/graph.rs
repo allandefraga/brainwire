@@ -1206,7 +1206,8 @@ pub fn visit_entities_from<E: From<StoreError>>(
 
 /// Scan a ready scalar index between two bounds (inclusive; callers re-check
 /// strict bounds) or by string prefix. Returns `false`, visiting nothing,
-/// when no ready index can answer; mixed-type bounds visit nothing.
+/// when no ready index can answer. Only string bounds/prefixes are accelerated;
+/// other bounds require a scan because the v2 index cannot prove completeness.
 pub fn visit_index_range<E: From<GraphError> + From<StoreError>>(
     txn: &Txn<'_>,
     ty: &NodeType,
@@ -1230,12 +1231,6 @@ pub fn visit_index_range<E: From<GraphError> + From<StoreError>>(
     let upper_end = |mut key: Vec<u8>| {
         key.extend_from_slice(&[0xFF; 9]);
         key
-    };
-    let number = |v: Option<&Value>| match v {
-        None => Some(None),
-        Some(Value::Int(i)) => Some(Some(*i as f64)),
-        Some(Value::Float(f)) => Some(Some(*f)),
-        _ => None,
     };
     if let Some(prefix) = prefix {
         let mut escaped = Vec::new();
@@ -1261,37 +1256,12 @@ pub fn visit_index_range<E: From<GraphError> + From<StoreError>>(
             None => key(b't', &[]),
         };
         ranges.push((lo, hi));
-    } else if let (Some(lo), Some(hi)) = (number(lower), number(upper)) {
-        let lo = lo.unwrap_or(f64::NEG_INFINITY);
-        let hi = hi.unwrap_or(f64::INFINITY);
-        if lo.is_nan() || hi.is_nan() {
-            return Ok(true);
-        }
-        // Integral values live in the `i` space as big-endian two's complement:
-        // nonnegative and negative halves are each ordered.
-        let (li, ui) = (
-            lo.ceil().max(-9.223372036854776e18),
-            hi.floor().min(9.223372036854775e18),
-        );
-        if li <= ui {
-            let (li, ui) = (li as i64, ui as i64);
-            if ui >= 0 {
-                ranges.push((
-                    key(b'i', &li.max(0).to_be_bytes()),
-                    upper_end(key(b'i', &ui.to_be_bytes())),
-                ));
-            }
-            if li < 0 {
-                ranges.push((
-                    key(b'i', &li.to_be_bytes()),
-                    upper_end(key(b'i', &ui.min(-1).to_be_bytes())),
-                ));
-            }
-        }
-        // Non-integral floats: scan the whole `f` space; callers filter.
-        ranges.push((key(b'f', &[]), key(b'g', &[])));
     } else {
-        return Ok(lower.is_some() || upper.is_some());
+        // Only string ranges are complete in the v2 index. Numeric ranges may
+        // match unindexed infinities, and other comparable values (e.g. lists)
+        // have no range encoding. Scan until versioned indexes can prove
+        // completeness; the query's predicate performs exact comparisons.
+        return Ok(false);
     }
     for (lo, hi) in ranges {
         txn.visit_range::<E>(Cf::Idx, &lo, &hi, |key, _| {

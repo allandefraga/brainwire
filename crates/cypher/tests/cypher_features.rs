@@ -248,7 +248,7 @@ fn functions_case_comprehensions_and_operators() {
                 ("age".into(), Value::Int(31)),
                 ("kind".into(), Value::Str("person".into())),
             ]))),
-            list(vec!["age".into(), "city".into(), "entity_id".into(), "name".into()]),
+            list(vec!["age".into(), "city".into(), "name".into()]),
             v("SP")
         ]]
     );

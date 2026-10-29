@@ -141,6 +141,9 @@ pub(super) fn edge_property(
     edge: &Relationship,
     name: &str,
 ) -> Result<Value, ExecError> {
+    if acl_property(name) {
+        return Ok(Value::Null);
+    }
     let value = {
         let _scope = ctx.budget.scope();
         let key = (edge.source, edge.edge_type, edge.target, edge.id);
@@ -188,6 +191,7 @@ pub(super) fn edge_props(
         }
     }
     props.extend(row.extra);
+    props.retain(|name, _| !acl_property(name));
     Ok(props)
 }
 

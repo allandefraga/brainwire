@@ -37,6 +37,15 @@ BRAINWIRE_MEMORY_CACHE=64MiB BRAINWIRE_MEMORY_MEMTABLES=16MiB \
 The output is JSON with `fields` and `rows`. Scalars, lists and maps use normal
 JSON values. A returned node has an explicit envelope with `type: "node"`,
 `id`, `label` and `properties`; its properties include the virtual `entity_id`.
+The `properties(n)` and `keys(n)` functions expose application node properties,
+excluding that virtual identity; wildcard map projection `n{.*}` follows the same
+rule. Read `n.entity_id` explicitly, or project `n{.entity_id, .*}`, when the
+identity is needed. This changes earlier beta behavior, where these functions
+included `entity_id`. Whole-node results retain it for identity and client
+compatibility. A literal map key or a relationship property named `entity_id`
+remains ordinary application data and is preserved. Reserved `acl_*` names,
+matched case-insensitively, remain hidden from node and relationship scalar,
+property-map, wildcard-map and whole-entity results, including legacy rows.
 Errors print a category and explanation, and exit unsuccessfully. JSON integer
 parameters must fit signed 64-bit; fractional parameters must be finite.
 Nonfinite stored float values cannot be represented in JSON and cause an
@@ -134,6 +143,17 @@ and lists, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IN`, `XOR`, `n:Label`,
 `left`, `right`, `split`; math `abs`, `ceil`, `floor`, `round`, `sqrt`,
 `sign`, `exp`, `log`, `log10`.
 
+`round(value[, precision])` returns a float and propagates null from either
+argument. With omitted or zero precision, ties round toward positive infinity:
+`round(-2.5) = -2.0`. With positive precision, ties round away from zero:
+`round(-1.25, 1) = -1.3`. Precision accepts an integer or an integral float in
+`0..=2147483647`; invalid precision fails rather than wrapping. High precision
+preserves a value when rounding cannot change its binary float representation.
+NaN and infinity parameters remain unchanged. Decimal rounding still uses binary
+floating-point arithmetic, so this is not exact decimal arithmetic or financial
+rounding. The three-argument rounding-mode form is not supported. The zero vs
+positive precision distinction follows the [Cypher numeric function semantics](https://neo4j.com/docs/cypher-manual/current/functions/mathematical-numeric/).
+
 **Aggregates.** `count`, `sum`, `avg`, `min`, `max`, `collect`, `stdev`,
 `stdevp`, `percentileCont`, `percentileDisc`, with `DISTINCT` and grouping.
 
@@ -181,6 +201,11 @@ validation, unknown nodes, bad element ids) are reported as client errors
 (`Neo.ClientError.Statement.SemanticError`); storage and IO failures stay
 database errors.
 
+A read pattern using an undeclared node label or relationship type produces no
+matches. `OPTIONAL MATCH` preserves the input row with nulls for newly introduced
+bindings; a zero-hop variable-length path can still match its starting node.
+Schema validation remains strict for writes.
+
 ## How queries are planned
 
 Each pattern starts from its cheapest node (the anchor), then expands:
@@ -189,8 +214,9 @@ Each pattern starts from its cheapest node (the anchor), then expands:
 2. `id(n)` / `elementId(n)` equality;
 3. `entity_id` equality or `IN` (primary-key lookups), then an `entity_id`
    range or `STARTS WITH`;
-4. an indexed property with `=`, `IN`, a range or `STARTS WITH`;
-5. a label scan.
+4. an indexed property with `=`, `IN`, a string range or `STARTS WITH`;
+5. a label scan (including numeric and other non-string ranges, until the
+   scalar index can prove complete coverage).
 
 `WHERE` conjuncts run right after the step that binds their variables.
 A label scan expanded in one direction streams the adjacency column family

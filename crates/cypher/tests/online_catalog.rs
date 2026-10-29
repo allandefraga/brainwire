@@ -264,10 +264,7 @@ fn dropped_property_is_hidden_and_later_writes_are_undeclared_extras() {
         run(&db, "MATCH (c:Customer) RETURN c.cpf, keys(c)"),
         vec![vec![
             Out::Value(Value::Null),
-            Out::Value(Value::List(vec![
-                Value::Str("entity_id".into()),
-                Value::Str("name".into())
-            ])),
+            Out::Value(Value::List(vec![Value::Str("name".into())])),
         ]]
     );
     let schema = run(

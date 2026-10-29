@@ -92,8 +92,7 @@ pub(super) fn execute(
         if part.columns.is_empty() {
             continue;
         }
-        for row in produced {
-            let projected: Row = part.outputs.iter().map(|slot| row[*slot].clone()).collect();
+        for projected in produced {
             if let Some(set) = seen.as_mut() {
                 if !set.insert(Key(projected.clone())) {
                     continue;
@@ -119,6 +118,32 @@ pub(super) fn execute(
     Ok((output, wrote))
 }
 
+// Terminal output no longer needs working slots. Move each final occurrence
+// so large strings/lists are not duplicated while compacting the output row.
+fn output_slots(outputs: &[usize]) -> Vec<(usize, bool)> {
+    let mut seen = HashSet::new();
+    let mut slots: Vec<_> = outputs
+        .iter()
+        .rev()
+        .map(|&slot| (slot, seen.insert(slot)))
+        .collect();
+    slots.reverse();
+    slots
+}
+
+fn project_output(mut row: Row, outputs: &[(usize, bool)]) -> Row {
+    outputs
+        .iter()
+        .map(|&(slot, last)| {
+            if last {
+                std::mem::replace(&mut row[slot], Val::Null)
+            } else {
+                row[slot].clone()
+            }
+        })
+        .collect()
+}
+
 fn run_part(
     txn: &mut Txn<'_>,
     env: &Env<'_>,
@@ -126,6 +151,7 @@ fn run_part(
     wrote: &mut bool,
 ) -> Result<Vec<Row>, ExecError> {
     let ops = &part.ops;
+    let outputs = output_slots(&part.outputs);
     let mut input: Vec<Row> = vec![vec![Val::Null; env.vars.len()]];
     let mut start = 0;
     loop {
@@ -138,11 +164,15 @@ fn run_part(
             None => {
                 let ctx = env.ctx(txn);
                 if let Some(rows) = parallel::collect(&ctx, segment, &input)? {
-                    return Ok(rows);
+                    return Ok(rows
+                        .into_iter()
+                        .map(|row| project_output(row, &outputs))
+                        .collect());
                 }
                 let mut rows = vec![];
                 for row in input {
                     finish(stream(&ctx, segment, row, &mut |row| {
+                        let row = project_output(row, &outputs);
                         env.budget.retain_row(&row)?;
                         rows.push(row);
                         Ok(())
@@ -156,7 +186,10 @@ fn run_part(
                     input = rows;
                     start = end + 1;
                     if start >= ops.len() {
-                        return Ok(input);
+                        return Ok(input
+                            .into_iter()
+                            .map(|row| project_output(row, &outputs))
+                            .collect());
                     }
                     continue;
                 }
@@ -191,7 +224,10 @@ fn run_part(
         }
         start = end + 1;
         if start >= ops.len() {
-            return Ok(input);
+            return Ok(input
+                .into_iter()
+                .map(|row| project_output(row, &outputs))
+                .collect());
         }
     }
 }
@@ -894,6 +930,9 @@ fn scan_edges(
     rest: &[Step],
     emit: &mut Emit<'_>,
 ) -> Result<(), Flow> {
+    if expand.no_matching_types {
+        return Ok(());
+    }
     let ty = ctx
         .catalog
         .node_type(&node.labels[0])
@@ -999,6 +1038,9 @@ fn anchor(
     row: Row,
     next: &mut Emit<'_>,
 ) -> Result<(), Flow> {
+    if matches!(node.access, Access::Empty) {
+        return Ok(());
+    }
     let mut candidate = |id: NodeId, value: Option<&[u8]>| -> Result<(), Flow> {
         let _scope = ctx.budget.scope();
         ctx.budget.charge(16)?;
@@ -1032,6 +1074,7 @@ fn anchor(
         Ok(())
     };
     match &node.access {
+        Access::Empty => Ok(()),
         Access::Bound => match &row[node.slot] {
             Val::Node(id) => {
                 let id = *id;
@@ -1132,22 +1175,58 @@ fn anchor(
         }
         Access::IndexIn(field, expr) => {
             let ty = ty.expect("index access has a label");
+            // These collections are temporary, but must remain admitted while
+            // candidate emission and its nested row scopes are active.
+            let input_scope = ctx.budget.scope();
             let Val::List(items) = eval(expr, &row, ctx)? else {
                 return Ok(());
             };
             let mut values = HashSet::new();
             let mut ids = BTreeSet::new();
-            for item in items {
-                if item.is_null() || !values.insert(Key(vec![item.clone()])) {
+            let mut items = items.into_iter();
+            while let Some(item) = items.next() {
+                ctx.budget.tick()?;
+                if item.is_null() {
                     continue;
                 }
+                let key_bytes = item
+                    .bytes()
+                    .saturating_add(std::mem::size_of::<Key>())
+                    .saturating_add(128);
+                let key = {
+                    let _probe_scope = ctx.budget.scope();
+                    ctx.budget.charge(key_bytes)?;
+                    let key = Key(vec![item.clone()]);
+                    if values.contains(&key) {
+                        // Drop the duplicate allocation before its scope restores.
+                        drop(key);
+                        continue;
+                    }
+                    key
+                };
+                // Transfer this admitted probe into outer temporary accounting.
+                // No allocation intervenes; the shared lease keeps its high-water.
+                ctx.budget.charge(key_bytes)?;
+                values.insert(key);
                 let value = item.into_value()?;
                 let ready =
                     store::visit_by_indexed_property::<Flow>(ctx.txn, ty, field, &value, |id| {
-                        ids.insert(id);
+                        ctx.budget.tick()?;
+                        if !ids.contains(&id) {
+                            // Include tree-node/allocation overhead before insertion.
+                            ctx.budget.charge(128)?;
+                            ids.insert(id);
+                        }
                         Ok(())
                     })?;
                 if !ready {
+                    // No IDs have been emitted; fallback must not carry the
+                    // partial indexed lookup's allocations into the scan.
+                    drop(value);
+                    drop(items);
+                    drop(values);
+                    drop(ids);
+                    drop(input_scope);
                     return scan(&mut candidate);
                 }
             }
@@ -1171,7 +1250,6 @@ fn anchor(
             if matches!(lower, Some(Value::Null)) || matches!(upper, Some(Value::Null)) {
                 return Ok(());
             }
-            let mut ids = BTreeSet::new();
             let ready = store::visit_index_range::<Flow>(
                 ctx.txn,
                 ty,
@@ -1179,16 +1257,10 @@ fn anchor(
                 lower.as_ref(),
                 upper.as_ref(),
                 None,
-                |id| {
-                    ids.insert(id);
-                    Ok(())
-                },
+                |id| candidate(id, None),
             )?;
             if !ready {
                 return scan(&mut candidate);
-            }
-            for id in ids {
-                candidate(id, None)?;
             }
             Ok(())
         }
@@ -1197,7 +1269,6 @@ fn anchor(
             let Val::Str(prefix) = eval(expr, &row, ctx)? else {
                 return Ok(());
             };
-            let mut ids = BTreeSet::new();
             let ready = store::visit_index_range::<Flow>(
                 ctx.txn,
                 ty,
@@ -1205,16 +1276,10 @@ fn anchor(
                 None,
                 None,
                 Some(&prefix),
-                |id| {
-                    ids.insert(id);
-                    Ok(())
-                },
+                |id| candidate(id, None),
             )?;
             if !ready {
                 return scan(&mut candidate);
-            }
-            for id in ids {
-                candidate(id, None)?;
             }
             Ok(())
         }
@@ -1378,7 +1443,10 @@ fn expand_from(
             ),
         ];
         for (ok, other, cf) in candidates {
-            if ok && (expand.types.is_empty() || expand.types.contains(&rel.edge_type)) {
+            if ok
+                && !expand.no_matching_types
+                && (expand.types.is_empty() || expand.types.contains(&rel.edge_type))
+            {
                 let edge = EdgeRef {
                     edge_type: rel.edge_type,
                     other,
@@ -1399,6 +1467,9 @@ fn expand_from(
         return Ok(());
     }
     let Some((min, max)) = expand.length else {
+        if expand.no_matching_types {
+            return Ok(());
+        }
         return adjacency(
             ctx,
             from,
@@ -1450,7 +1521,7 @@ fn var_length(
             next(next_row)?;
         }
     }
-    if max.is_some_and(|max| depth >= max) {
+    if expand.no_matching_types || max.is_some_and(|max| depth >= max) {
         return Ok(());
     }
     adjacency(
@@ -1519,15 +1590,11 @@ pub(super) fn pattern_exists(
         node_ok(ctx, &step, id, row)
     };
     let types = |rel: &RelPat| -> Result<Vec<brainwire_core::ids::EdgeTypeId>, ExecError> {
-        rel.types
+        Ok(rel
+            .types
             .iter()
-            .map(|name| {
-                ctx.catalog
-                    .edge_type(name)
-                    .map(|t| t.id)
-                    .ok_or_else(|| ExecError::Semantic(format!("unknown edge type {name}")))
-            })
-            .collect()
+            .filter_map(|name| ctx.catalog.edge_type(name).map(|t| t.id))
+            .collect())
     };
     // Walk the chain left to right from a known start node.
     #[allow(clippy::too_many_arguments)]
@@ -1556,7 +1623,10 @@ pub(super) fn pattern_exists(
                 found = true;
                 break;
             }
-            if max.is_some_and(|m| depth >= m) || depth > 64 {
+            if (!rel.types.is_empty() && edge_types.is_empty())
+                || max.is_some_and(|m| depth >= m)
+                || depth > 64
+            {
                 continue;
             }
             let mut next = vec![];
@@ -1657,6 +1727,35 @@ pub(super) fn pattern_exists(
 #[cfg(test)]
 mod merge_budget_tests {
     use super::*;
+
+    #[test]
+    fn terminal_projection_moves_unique_payloads_and_only_clones_repeated_slots() {
+        let payload = "payload".repeat(1024);
+        let pointer = payload.as_ptr();
+        let projected = project_output(
+            vec![
+                Val::Int(1),
+                Val::Str(payload),
+                Val::Str("unreturned".into()),
+            ],
+            &output_slots(&[1, 0, 1]),
+        );
+        assert_eq!(projected[1], Val::Int(1));
+        let (Val::Str(first), Val::Str(last)) = (&projected[0], &projected[2]) else {
+            panic!("expected string columns")
+        };
+        assert_eq!(first, last);
+        assert_eq!(
+            last.as_ptr(),
+            pointer,
+            "last occurrence must retain original allocation"
+        );
+        assert_ne!(
+            first.as_ptr(),
+            pointer,
+            "earlier occurrence needs its own allocation"
+        );
+    }
 
     fn tiny_budget() -> Budget<'static> {
         Budget::new(

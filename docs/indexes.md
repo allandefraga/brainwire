@@ -27,10 +27,17 @@ RETURN c.entity_id
 ```
 
 Standalone OR/NOT, row-dependent expressions, unsupported values and
-unready declarations scan. Equality, `IN`, ranges and `STARTS WITH` on an
-indexed property are all used as anchors (see
-[how queries are planned](local-cypher.md#how-queries-are-planned)). A safe equality outside an OR can still narrow an
-AND: `c.segment=true AND (c.email=$a OR c.email=$b)`. Selection uses the first
+unready declarations scan. Equality, `IN`, string ranges and `STARTS WITH`
+can use an indexed property as an anchor (see
+[how queries are planned](local-cypher.md#how-queries-are-planned)). String
+range and prefix candidates are visited incrementally, so an unordered `LIMIT`
+can stop early. Numeric and other non-string ranges fall back to a label scan:
+the current index cannot prove completeness for all values, including stored
+nonfinite floats. Use `ORDER BY` when a stable result order is needed; unordered
+index results can follow index-key order. `IN` still materializes candidate IDs;
+lookup keys and candidate IDs are conservatively charged to the query budget.
+This accounting does not impose an RSS ceiling. A safe equality outside an OR
+can still narrow an AND: `c.segment=true AND (c.email=$a OR c.email=$b)`. Selection uses the first
 usable equality; there are no selectivity statistics, intersections, ending-node
 index plans or cost-based optimization yet.
 
