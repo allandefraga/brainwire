@@ -33,7 +33,7 @@ Python, query with Cypher, and inspect a running server from the terminal.
 Each named graph has its own data and ontology. Your application controls
 source ingestion, identity mapping and orchestration.
 
-> **v0.10.0-beta.1 · source beta.** <!-- brainwire-release-version --> Use for controlled trials.
+> **v0.11.0-beta.1 · source beta.** <!-- brainwire-release-version --> Use for controlled trials.
 > Production qualification is open. Review the [current limits](#current-limits)
 > and [operator checklist](docs/beta-operator-checklist.md) before using real data.
 
@@ -219,7 +219,7 @@ Use the image only after the matching release workflow publishes it and records
 a tested digest in `release-metadata.txt`:
 
 ```sh
-docker pull ghcr.io/allandefraga/brainwire:v0.10.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.11.0-beta.1 # brainwire-release-version
 ```
 
 Private images require `docker login ghcr.io` with a GitHub token that can read
@@ -253,7 +253,7 @@ cargo fmt --all -- --check
 
 ## Release status and license
 
-**Version:** `v0.10.0-beta.1` · source beta · production qualification open. <!-- brainwire-release-version -->
+**Version:** `v0.11.0-beta.1` · source beta · production qualification open. <!-- brainwire-release-version -->
 
 Current source uses [Apache-2.0](LICENSE). You may use, modify and redistribute it,
 including commercially, while following its terms. Check the license in the tag
