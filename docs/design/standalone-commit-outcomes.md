@@ -4,6 +4,44 @@ Status: design candidate only. No implementation or production guarantee is
 provided by this document. Scope is one protected server, one independently
 persisted graph, and explicit Bolt write transactions.
 
+## v0.12 review: implementation gate
+
+The working-tree memory error contract does not implement standalone request
+reconciliation. `engine::Command::Begin` still rejects an explicit
+`brainwire_request_id` when no replica is configured, and standalone COMMIT
+calls `QueryTransaction::commit` without a request identity. There is no
+standalone `db.requestStatus` procedure. `db.commitState` returns a graph-wide
+sequence; concurrent commits and read-only transactions mean that sequence
+cannot identify an uncertain caller's request.
+
+The smallest safe first delivery is **authenticated explicit transactions only**:
+
+1. Implement and test the store-incarnation/ledger format gate and a bounded
+   `commit_identified` operation in the storage layer. A successful graph batch
+   and its committed ledger entry must share the same synchronous WriteBatch.
+   The final duplicate check and quota admission must hold the committer lock.
+2. Propagate the trusted principal, graph incarnation, request seed and operation
+   fingerprint through BEGIN and COMMIT. Reject delegated visibility, read-only
+   identified transactions and external-effect procedures until their ownership
+   and atomicity contracts are defined. A shared anonymous principal is not a
+   safe request namespace.
+3. Expose an authorized, fresh-view lookup returning `committed` or
+   `not_recorded`. It must not accept an arbitrary caller identity, reveal
+   another principal's request, or describe `not_recorded` as a safe retry.
+4. Before enabling the feature, prove concurrent duplicate suppression,
+   payload-mismatch rejection, crash/reopen atomicity, quota rejection without
+   mutation, ACL isolation, upgrade/downgrade rejection and checkpoint/restore
+   identity behavior. Then connect explicit Python reconciliation without
+   managed callback replay.
+
+These steps cross store open/format handling, transaction execution, procedure
+classification, authenticated server dispatch and the client. A storage-only
+marker, a lookup bolted onto `db.commitState`, or a separate post-commit ledger
+write would expose a misleading API and is not a safe partial implementation.
+Until these gates pass, retain `CommitOutcomeUnknown` and reconcile owned
+application state with a fresh authorized read; never infer rollback from a
+lost acknowledgement or automatically repeat a non-idempotent mutation.
+
 ## Problem and observed call paths
 
 The current Bolt parser accepts `tx_metadata.brainwire_request_id` as a bounded
