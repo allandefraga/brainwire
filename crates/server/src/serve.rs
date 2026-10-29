@@ -76,12 +76,13 @@ pub fn run(
         let stores = Arc::clone(&databases);
         let default_name = loaded.config.server.default_database.clone();
         println!(
-            "brainwire serve {} databases={:?} cache={} memtables={} query={} (shared query reservations + per-RUN guard; not RSS)",
+            "brainwire serve {} databases={:?} cache={} memtables={} query={} ingress={} (shared query reservations + per-RUN guard; not RSS)",
             listener.local_addr().map_err(|e| e.to_string())?,
             databases.names(),
             loaded.config.memory.cache,
             loaded.config.memory.memtables,
             loaded.config.memory.query,
+            loaded.config.memory.ingress,
         );
         let open = brainwire_bolt::server::serve_until(
             listener,
@@ -98,6 +99,7 @@ pub fn run(
             brainwire_bolt::server::ConnectionLimits {
                 max_message_bytes: max_message,
                 max_decoded_message_bytes: max_decoded_message,
+                ingress_memory_bytes: usize::try_from(loaded.config.memory.ingress.0).map_err(|_| "memory.ingress exceeds platform address size")?,
                 io_timeout: std::time::Duration::from_millis(loaded.config.server.io_timeout_ms),
             },
             auth,

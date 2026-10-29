@@ -148,14 +148,19 @@ pub enum Response {
 
 impl Response {
     pub fn to_value(&self) -> PackValue {
+        self.clone().into_value()
+    }
+
+    /// Moves response payloads into PackStream without duplicating record storage.
+    pub fn into_value(self) -> PackValue {
         match self {
             Response::Success(meta) => PackValue::Struct {
                 tag: 0x70,
-                fields: vec![PackValue::Map(meta.clone())],
+                fields: vec![PackValue::Map(meta)],
             },
             Response::Record(values) => PackValue::Struct {
                 tag: 0x71,
-                fields: vec![PackValue::List(values.clone())],
+                fields: vec![PackValue::List(values)],
             },
             Response::Ignored => PackValue::Struct {
                 tag: 0x7E,
@@ -164,8 +169,8 @@ impl Response {
             Response::Failure { code, message } => PackValue::Struct {
                 tag: 0x7F,
                 fields: vec![PackValue::Map(vec![
-                    ("code".into(), PackValue::String(code.clone())),
-                    ("message".into(), PackValue::String(message.clone())),
+                    ("code".into(), PackValue::String(code)),
+                    ("message".into(), PackValue::String(message)),
                 ])],
             },
         }
@@ -224,6 +229,31 @@ mod tests {
             parse_request(s(0x10, vec![])).unwrap_err(),
             MessageError::BadFields(0x10)
         );
+    }
+
+    #[test]
+    fn consuming_record_conversion_reuses_owned_payload() {
+        let text = "payload".repeat(4096);
+        let pointer = text.as_ptr();
+        let values = vec![PackValue::String(text)];
+        let list_pointer = values.as_ptr();
+        let response = Response::Record(values);
+        let converted = response.into_value();
+        let PackValue::Struct { fields, .. } = converted else {
+            panic!("record struct")
+        };
+        let PackValue::List(values) = &fields[0] else {
+            panic!("record fields")
+        };
+        let PackValue::String(text) = &values[0] else {
+            panic!("payload string")
+        };
+        assert_eq!(
+            text.as_ptr(),
+            pointer,
+            "owned response payload must be moved"
+        );
+        assert_eq!(values.as_ptr(), list_pointer, "owned list must be moved");
     }
 
     #[test]

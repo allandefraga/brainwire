@@ -7,12 +7,15 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{watch, Semaphore};
 
-use crate::chunk::{encode_message, ChunkReader};
+#[cfg(test)]
+use crate::chunk::encode_message;
+use crate::chunk::{write_message, ChunkReader, ReadError};
 use crate::handshake::{negotiate, response, MAGIC};
+use crate::ingress::IngressPool;
 use crate::message::{parse_request, Response};
 #[cfg(test)]
 use crate::packstream::unpack;
-use crate::packstream::{pack, unpack_with_limit};
+use crate::packstream::{pack, unpack_admitted, PackError};
 use crate::session::{AuthMode, QueryEngine, Session, State};
 
 /// Default cap on assembled PackStream payload bytes per Bolt message,
@@ -25,6 +28,7 @@ use crate::session::{AuthMode, QueryEngine, Session, State};
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 /// Default quota for PackStream owned payloads and container backing storage.
 pub const DEFAULT_MAX_DECODED_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+pub const DEFAULT_INGRESS_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
 /// Absolute deadline for reading the handshake and writing its version reply.
 pub const DEFAULT_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -38,6 +42,8 @@ pub struct ConnectionLimits {
     pub max_message_bytes: usize,
     pub max_decoded_message_bytes: usize,
     pub io_timeout: std::time::Duration,
+    /// Shared logical assembled-input and decoded-storage quota for this listener.
+    pub ingress_memory_bytes: usize,
 }
 
 impl Default for ConnectionLimits {
@@ -46,6 +52,7 @@ impl Default for ConnectionLimits {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             max_decoded_message_bytes: DEFAULT_MAX_DECODED_MESSAGE_BYTES,
             io_timeout: std::time::Duration::from_secs(300),
+            ingress_memory_bytes: DEFAULT_INGRESS_MEMORY_BYTES,
         }
     }
 }
@@ -162,6 +169,13 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    if limits.ingress_memory_bytes == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "ingress memory budget must be positive",
+        ));
+    }
+    let ingress_pool = IngressPool::new(limits.ingress_memory_bytes);
     let make_engine = Arc::new(make_engine);
     let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
     let (drain, draining) = watch::channel(false);
@@ -205,16 +219,17 @@ where
         let make = Arc::clone(&make_engine);
         let auth = auth.clone();
         let draining = draining.clone();
+        let ingress_pool = Arc::clone(&ingress_pool);
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = handle_connection_with_connection_timeouts(
+            let _ = handle_connection_with_ingress(
                 stream,
                 make(),
                 limits,
                 auth,
-                DEFAULT_HANDSHAKE_TIMEOUT,
-                DEFAULT_AUTHENTICATION_TIMEOUT,
+                (DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_AUTHENTICATION_TIMEOUT),
                 draining,
+                ingress_pool,
             )
             .await;
         });
@@ -367,7 +382,33 @@ async fn handle_connection_with_drain<
     .await
 }
 
+#[cfg(test)]
 async fn handle_connection_with_connection_timeouts<
+    E: QueryEngine + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin,
+>(
+    stream: S,
+    engine: E,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+    handshake_timeout: std::time::Duration,
+    authentication_timeout: std::time::Duration,
+    draining: watch::Receiver<bool>,
+) -> std::io::Result<()> {
+    let pool = IngressPool::new(limits.ingress_memory_bytes);
+    handle_connection_with_ingress(
+        stream,
+        engine,
+        limits,
+        auth,
+        (handshake_timeout, authentication_timeout),
+        draining,
+        pool,
+    )
+    .await
+}
+
+async fn handle_connection_with_ingress<
     E: QueryEngine + Send + 'static,
     S: AsyncRead + AsyncWrite + Unpin,
 >(
@@ -375,9 +416,9 @@ async fn handle_connection_with_connection_timeouts<
     engine: E,
     limits: ConnectionLimits,
     auth: AuthMode,
-    handshake_timeout: std::time::Duration,
-    authentication_timeout: std::time::Duration,
+    (handshake_timeout, authentication_timeout): (std::time::Duration, std::time::Duration),
     mut draining: watch::Receiver<bool>,
+    ingress_pool: Arc<IngressPool>,
 ) -> std::io::Result<()> {
     let handshake = tokio::time::timeout(handshake_timeout, async {
         let mut hello = [0u8; 20];
@@ -401,24 +442,38 @@ async fn handle_connection_with_connection_timeouts<
     let mut session = Session::new(engine, auth);
     let mut authentication_deadline = Some(tokio::time::Instant::now() + authentication_timeout);
     let mut request_deadline = None;
+    let mut ingress = ingress_pool.lease();
     let mut reader = ChunkReader::default();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         loop {
             check_io_deadline(&mut session, authentication_deadline.or(request_deadline))?;
-            let payload = match reader.next_message_with_limit(limits.max_message_bytes) {
+            let payload = match reader
+                .next_message_admitted(limits.max_message_bytes, Some(&mut ingress))
+            {
                 Ok(Some(payload)) => payload,
                 Ok(None) => break,
-                Err(_) => {
+                Err(error) => {
+                    drop(reader);
+                    drop(ingress);
                     session.close();
+                    let message = if error == ReadError::IngressExhausted {
+                        "shared Bolt input memory budget exhausted; request not executed".to_owned()
+                    } else {
+                        format!("message larger than {} bytes", limits.max_message_bytes)
+                    };
                     io_with_deadline(
                         &mut session,
                         authentication_deadline
                             .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
                         write_failure(
                             &mut stream,
-                            "Neo.ClientError.Request.Invalid",
-                            &format!("message larger than {} bytes", limits.max_message_bytes),
+                            if error == ReadError::IngressExhausted {
+                                "Neo.TransientError.General.IngressMemoryPoolExhausted"
+                            } else {
+                                "Neo.ClientError.Request.Invalid"
+                            },
+                            &message,
                         ),
                     )
                     .await?;
@@ -426,12 +481,36 @@ async fn handle_connection_with_connection_timeouts<
                 }
             };
             let mut input = payload.as_slice();
-            match unpack_with_limit(&mut input, limits.max_decoded_message_bytes)
+            let decoded =
+                unpack_admitted(&mut input, limits.max_decoded_message_bytes, &mut ingress);
+            if matches!(decoded, Err(PackError::IngressLimit)) {
+                drop(payload);
+                drop(reader);
+                drop(ingress);
+                session.close();
+                io_with_deadline(
+                    &mut session,
+                    authentication_deadline
+                        .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
+                    write_failure(
+                        &mut stream,
+                        "Neo.TransientError.General.IngressMemoryPoolExhausted",
+                        "shared Bolt input memory budget exhausted; request not executed",
+                    ),
+                )
+                .await?;
+                return Ok(());
+            }
+            let request = decoded
                 .ok()
                 .filter(|_| input.is_empty())
-                .and_then(|v| parse_request(v).ok())
-            {
-                Some(_) if *draining.borrow() && idle(session.state()) => {
+                .and_then(|value| parse_request(value).ok());
+            drop(payload);
+            match request {
+                Some(rejected_request) if *draining.borrow() && idle(session.state()) => {
+                    drop(rejected_request);
+                    drop(reader);
+                    drop(ingress);
                     session.close();
                     io_with_deadline(
                         &mut session,
@@ -450,7 +529,10 @@ async fn handle_connection_with_connection_timeouts<
                     let response_deadline = authentication_deadline;
                     check_io_deadline(&mut session, response_deadline.or(request_deadline))?;
                     // RocksDB calls are synchronous. Keep them off Tokio's IO workers.
+                    let admission = std::mem::replace(&mut ingress, ingress_pool.lease());
                     let (next, responses) = tokio::task::spawn_blocking(move || {
+                        // A cancelled async waiter does not cancel this worker.
+                        let _admission = admission;
                         let mut session = session;
                         let responses = session.handle(req);
                         (session, responses)
@@ -469,10 +551,13 @@ async fn handle_connection_with_connection_timeouts<
                     for r in responses {
                         check_io_deadline(&mut session, write_deadline)?;
                         let mut body = Vec::new();
-                        pack(&r.to_value(), &mut body);
-                        let frame = encode_message(&body);
-                        io_with_deadline(&mut session, write_deadline, stream.write_all(&frame))
-                            .await?;
+                        pack(&r.into_value(), &mut body);
+                        io_with_deadline(
+                            &mut session,
+                            write_deadline,
+                            write_message(&mut stream, &body),
+                        )
+                        .await?;
                     }
                     check_io_deadline(&mut session, write_deadline)?;
                     if session.state() == State::Defunct {
@@ -491,6 +576,8 @@ async fn handle_connection_with_connection_timeouts<
                     // the server goes to DEFUNCT and closes the connection).
                     // Tell the client why, then close instead of carrying on
                     // with a session that never saw the failure.
+                    drop(reader);
+                    drop(ingress);
                     session.close();
                     io_with_deadline(
                         &mut session,
@@ -577,10 +664,10 @@ async fn write_failure<S: AsyncWrite + Unpin>(
             code: code.to_string(),
             message: message.to_string(),
         }
-        .to_value(),
+        .into_value(),
         &mut body,
     );
-    stream.write_all(&encode_message(&body)).await
+    write_message(stream, &body).await
 }
 
 #[cfg(test)]
@@ -589,6 +676,295 @@ mod tests {
     use crate::packstream::PackValue;
     use crate::session::StubEngine;
     use tokio::net::TcpStream;
+
+    fn pooled_connection<E: QueryEngine + Send + 'static>(
+        server: tokio::io::DuplexStream,
+        engine: E,
+        pool: Arc<IngressPool>,
+        timeout: std::time::Duration,
+    ) -> tokio::task::JoinHandle<std::io::Result<()>> {
+        tokio::spawn(handle_connection_with_ingress(
+            server,
+            engine,
+            ConnectionLimits::default(),
+            AuthMode::AllowAll,
+            (DEFAULT_HANDSHAKE_TIMEOUT, timeout),
+            watch::channel(false).1,
+            pool,
+        ))
+    }
+
+    async fn reserved_equals(pool: &IngressPool, expected: usize) {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while pool.reserved() != expected {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("input reservation converges");
+    }
+
+    #[tokio::test]
+    async fn shared_ingress_rejects_concurrent_pre_auth_messages_then_recovers() {
+        let pool = IngressPool::new(512);
+        let (a, mut ac) = tokio::io::duplex(2048);
+        let at = pooled_connection(
+            a,
+            StubEngine,
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        handshake(&mut ac).await;
+        ac.write_all(&encode_message(&vec![0; 500])[..502])
+            .await
+            .unwrap();
+        reserved_equals(&pool, 500).await;
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (b, mut bc) = tokio::io::duplex(2048);
+        let bt = pooled_connection(
+            b,
+            BeginProbe(calls.clone()),
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        handshake(&mut bc).await;
+        bc.write_all(&encode_message(&[0; 64])).await.unwrap();
+        let mut failure = Vec::new();
+        bc.read_to_end(&mut failure).await.unwrap();
+        assert_eq!(
+            decode_failure(&failure).0,
+            "Neo.TransientError.General.IngressMemoryPoolExhausted"
+        );
+        bt.await.unwrap().unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(pool.reserved(), 500);
+        drop(ac);
+        at.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+        let (c, mut cc) = tokio::io::duplex(2048);
+        let ct = pooled_connection(
+            c,
+            BeginProbe(calls.clone()),
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        login(&mut cc).await;
+        send_request(&mut cc, 0x11, vec![PackValue::Map(vec![])]).await;
+        read_success(&mut cc).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(cc);
+        ct.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+    }
+
+    #[tokio::test]
+    async fn decoded_ingress_expansion_is_rejected_before_engine_and_released() {
+        let pool = IngressPool::new(512);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(2048);
+        let task = pooled_connection(
+            server,
+            BeginProbe(calls.clone()),
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        login(&mut client).await;
+        send_request(
+            &mut client,
+            0x10,
+            vec![
+                PackValue::String("RETURN $x".into()),
+                PackValue::Map(vec![(
+                    "x".into(),
+                    PackValue::List(vec![PackValue::Null; 32]),
+                )]),
+                PackValue::Map(vec![]),
+            ],
+        )
+        .await;
+        let mut failure = Vec::new();
+        client.read_to_end(&mut failure).await.unwrap();
+        assert_eq!(
+            decode_failure(&failure).0,
+            "Neo.TransientError.General.IngressMemoryPoolExhausted"
+        );
+        task.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn partial_ingress_lease_releases_on_auth_timeout() {
+        let pool = IngressPool::new(512);
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = pooled_connection(
+            server,
+            StubEngine,
+            pool.clone(),
+            std::time::Duration::from_millis(80),
+        );
+        handshake(&mut client).await;
+        client.write_all(&[0, 3, 1, 2, 3]).await.unwrap();
+        reserved_equals(&pool, 3).await;
+        assert_eq!(
+            task.await.unwrap().unwrap_err().kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        reserved_equals(&pool, 0).await;
+    }
+
+    #[tokio::test]
+    async fn listener_shares_one_ingress_pool_before_authentication() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(serve_with_connection_limits(
+            listener,
+            || StubEngine,
+            ConnectionLimits {
+                ingress_memory_bytes: 512,
+                ..ConnectionLimits::default()
+            },
+            AuthMode::Required(Arc::new(protected_test_policy())),
+        ));
+        let mut a = TcpStream::connect(address).await.unwrap();
+        handshake(&mut a).await;
+        a.write_all(&encode_message(&[0; 500])[..502])
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let mut b = TcpStream::connect(address).await.unwrap();
+                handshake(&mut b).await;
+                b.write_all(&encode_message(&[0; 64])).await.unwrap();
+                let mut failure = Vec::new();
+                b.read_to_end(&mut failure).await.unwrap();
+                let code = decode_failure(&failure).0;
+                if code == "Neo.TransientError.General.IngressMemoryPoolExhausted" {
+                    break;
+                }
+                // The first connection may not have been scheduled yet.
+                assert_eq!(code, "Neo.ClientError.Request.Invalid");
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("listener shares admission across accepted connections");
+        drop(a);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn rejected_partial_input_is_released_before_slow_failure_write() {
+        let pool = IngressPool::new(512);
+        let (server, mut client) = tokio::io::duplex(32);
+        let task = pooled_connection(
+            server,
+            StubEngine,
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        handshake(&mut client).await;
+        client
+            .write_all(&encode_message(&[0; 100])[..102])
+            .await
+            .unwrap();
+        reserved_equals(&pool, 100).await;
+        // A second chunk exceeds the shared cap; the client deliberately never reads FAILURE.
+        let mut over = vec![0, 0];
+        over[..2].copy_from_slice(&500u16.to_be_bytes());
+        over.extend_from_slice(&[0; 500]);
+        let sender = tokio::spawn(async move {
+            let _ = client.write_all(&over).await;
+            client
+        });
+        reserved_equals(&pool, 0).await;
+        assert!(!task.is_finished(), "failure write should still be blocked");
+        let client = sender.await.unwrap();
+        drop(client);
+        let _ = task.await.unwrap();
+        reserved_equals(&pool, 0).await;
+    }
+
+    #[tokio::test]
+    async fn malformed_input_releases_shared_reservation() {
+        let pool = IngressPool::new(512);
+        let (server, mut client) = tokio::io::duplex(1024);
+        let task = pooled_connection(
+            server,
+            StubEngine,
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        handshake(&mut client).await;
+        client.write_all(&encode_message(&[0xc4])).await.unwrap();
+        let mut failure = Vec::new();
+        client.read_to_end(&mut failure).await.unwrap();
+        assert_eq!(
+            decode_failure(&failure).0,
+            "Neo.ClientError.Request.Invalid"
+        );
+        task.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+    }
+
+    struct BlockedIngressEngine {
+        entered: Arc<tokio::sync::Notify>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl QueryEngine for BlockedIngressEngine {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            self.entered.notify_one();
+            self.release
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            unreachable!()
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+    }
+    #[tokio::test]
+    async fn cancelled_socket_task_keeps_ingress_lease_in_running_worker() {
+        let pool = IngressPool::new(4096);
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let (release, receiver) = std::sync::mpsc::channel();
+        let (server, mut client) = tokio::io::duplex(2048);
+        let task = pooled_connection(
+            server,
+            BlockedIngressEngine {
+                entered: entered.clone(),
+                release: receiver,
+            },
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        login(&mut client).await;
+        send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
+        assert!(pool.reserved() > 0);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            pool.reserved() > 0,
+            "running worker still owns decoded request"
+        );
+        release.send(()).unwrap();
+        reserved_equals(&pool, 0).await;
+    }
 
     // I2 (review finding, 2026-09-25): `is_resource_exhausted` decides
     // whether an `accept()` error is a finite-resource shortage (worth a

@@ -1,5 +1,7 @@
 //! PackStream v1, the value encoding of Bolt.
 
+use crate::ingress::IngressLease;
+
 /// Maximum nesting depth `unpack` will follow before returning
 /// [`PackError::TooDeep`]. Bounds the recursion so adversarial input (e.g. a
 /// long run of tiny-list headers) cannot overflow the stack.
@@ -72,6 +74,8 @@ pub enum PackError {
     DecodedLimit,
     #[error("decoded value allocation failed")]
     Allocation,
+    #[error("shared Bolt input memory budget exhausted")]
+    IngressLimit,
 }
 
 fn pack_size(out: &mut Vec<u8>, len: usize, tiny: u8, m8: Option<u8>, m16: u8, m32: u8) {
@@ -171,17 +175,27 @@ fn be_len(input: &mut &[u8], width: usize) -> Result<usize, PackError> {
     Ok(raw.iter().fold(0usize, |acc, b| (acc << 8) | *b as usize))
 }
 
-fn charge_storage<T>(len: usize, remaining: &mut usize) -> Result<(), PackError> {
+struct DecodeBudget<'a> {
+    remaining: usize,
+    ingress: Option<&'a mut IngressLease>,
+}
+
+fn charge_storage<T>(len: usize, remaining: &mut DecodeBudget<'_>) -> Result<(), PackError> {
     let bytes = len
         .checked_mul(std::mem::size_of::<T>())
         .ok_or(PackError::DecodedLimit)?;
-    *remaining = remaining
+    let next = remaining
+        .remaining
         .checked_sub(bytes)
         .ok_or(PackError::DecodedLimit)?;
+    if let Some(lease) = remaining.ingress.as_deref_mut() {
+        lease.grow(bytes).map_err(|_| PackError::IngressLimit)?;
+    }
+    remaining.remaining = next;
     Ok(())
 }
 
-fn reserve<T>(len: usize, remaining: &mut usize) -> Result<Vec<T>, PackError> {
+fn reserve<T>(len: usize, remaining: &mut DecodeBudget<'_>) -> Result<Vec<T>, PackError> {
     charge_storage::<T>(len, remaining)?;
     let mut values = Vec::new();
     values
@@ -193,7 +207,7 @@ fn reserve<T>(len: usize, remaining: &mut usize) -> Result<Vec<T>, PackError> {
 fn bytes_of_input(
     input: &mut &[u8],
     len: usize,
-    remaining: &mut usize,
+    remaining: &mut DecodeBudget<'_>,
 ) -> Result<Vec<u8>, PackError> {
     let bytes = take(input, len)?;
     let mut owned = reserve(len, remaining)?;
@@ -201,7 +215,11 @@ fn bytes_of_input(
     Ok(owned)
 }
 
-fn string_of(input: &mut &[u8], len: usize, remaining: &mut usize) -> Result<String, PackError> {
+fn string_of(
+    input: &mut &[u8],
+    len: usize,
+    remaining: &mut DecodeBudget<'_>,
+) -> Result<String, PackError> {
     String::from_utf8(bytes_of_input(input, len, remaining)?).map_err(|_| PackError::BadUtf8)
 }
 
@@ -209,7 +227,7 @@ fn values_of(
     input: &mut &[u8],
     len: usize,
     depth: usize,
-    remaining: &mut usize,
+    remaining: &mut DecodeBudget<'_>,
 ) -> Result<Vec<PackValue>, PackError> {
     // Every encoded value needs at least one marker: reject hostile lengths before allocating.
     if input.len() < len {
@@ -226,7 +244,7 @@ fn list_of(
     input: &mut &[u8],
     len: usize,
     depth: usize,
-    remaining: &mut usize,
+    remaining: &mut DecodeBudget<'_>,
 ) -> Result<PackValue, PackError> {
     Ok(PackValue::List(values_of(input, len, depth, remaining)?))
 }
@@ -235,7 +253,7 @@ fn map_of(
     input: &mut &[u8],
     len: usize,
     depth: usize,
-    remaining: &mut usize,
+    remaining: &mut DecodeBudget<'_>,
 ) -> Result<PackValue, PackError> {
     if input.len() < len.checked_mul(2).ok_or(PackError::Truncated)? {
         return Err(PackError::Truncated);
@@ -261,15 +279,37 @@ pub fn unpack(input: &mut &[u8]) -> Result<PackValue, PackError> {
 /// Allocator overhead, the encoded input and subsequent request processing are excluded.
 pub fn unpack_with_limit(
     input: &mut &[u8],
-    mut max_decoded_bytes: usize,
+    max_decoded_bytes: usize,
 ) -> Result<PackValue, PackError> {
-    unpack_at(input, 0, &mut max_decoded_bytes)
+    unpack_at(
+        input,
+        0,
+        &mut DecodeBudget {
+            remaining: max_decoded_bytes,
+            ingress: None,
+        },
+    )
+}
+
+pub(crate) fn unpack_admitted(
+    input: &mut &[u8],
+    max_decoded_bytes: usize,
+    ingress: &mut IngressLease,
+) -> Result<PackValue, PackError> {
+    unpack_at(
+        input,
+        0,
+        &mut DecodeBudget {
+            remaining: max_decoded_bytes,
+            ingress: Some(ingress),
+        },
+    )
 }
 
 fn unpack_at(
     input: &mut &[u8],
     depth: usize,
-    remaining: &mut usize,
+    remaining: &mut DecodeBudget<'_>,
 ) -> Result<PackValue, PackError> {
     if depth > MAX_DEPTH {
         return Err(PackError::TooDeep);
@@ -338,6 +378,35 @@ mod tests {
         let mut input = bytes.as_slice();
         assert_eq!(unpack(&mut input).unwrap(), v);
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn decoded_storage_uses_shared_admission_before_allocation() {
+        use crate::ingress::IngressPool;
+        let value = PackValue::List(vec![PackValue::String("abc".into())]);
+        let mut encoded = Vec::new();
+        pack(&value, &mut encoded);
+        let required = std::mem::size_of::<PackValue>() + 3;
+        let pool = IngressPool::new(required);
+        let mut a = pool.lease();
+        let mut b = pool.lease();
+        assert_eq!(
+            unpack_admitted(&mut encoded.as_slice(), usize::MAX, &mut a).unwrap(),
+            value
+        );
+        assert_eq!(pool.reserved(), required);
+        assert_eq!(
+            unpack_admitted(&mut encoded.as_slice(), usize::MAX, &mut b),
+            Err(PackError::IngressLimit)
+        );
+        drop(a);
+        assert_eq!(pool.reserved(), 0);
+        assert_eq!(
+            unpack_admitted(&mut encoded.as_slice(), usize::MAX, &mut b).unwrap(),
+            value
+        );
+        drop(b);
+        assert_eq!(pool.reserved(), 0);
     }
 
     #[test]
@@ -529,11 +598,14 @@ mod tests {
                 Err(PackError::Truncated)
             );
         }
-        let mut remaining = 10;
+        let mut remaining = DecodeBudget {
+            remaining: 10,
+            ingress: None,
+        };
         assert_eq!(
             charge_storage::<PackValue>(usize::MAX, &mut remaining),
             Err(PackError::DecodedLimit)
         );
-        assert_eq!(remaining, 10);
+        assert_eq!(remaining.remaining, 10);
     }
 }

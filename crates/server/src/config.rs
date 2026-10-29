@@ -67,6 +67,8 @@ pub struct MemorySection {
     pub cache: ByteSize,
     pub memtables: ByteSize,
     pub query: ByteSize,
+    /// Shared Bolt assembled-input and decoded-storage admission, separate from query memory.
+    pub ingress: ByteSize,
 }
 
 impl Default for MemorySection {
@@ -75,6 +77,7 @@ impl Default for MemorySection {
             cache: ByteSize(10 << 30),
             memtables: ByteSize(1 << 30),
             query: ByteSize(2 << 30),
+            ingress: ByteSize(256 << 20),
         }
     }
 }
@@ -113,7 +116,7 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 13] = [
+pub(crate) const KEYS: [&str; 14] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -127,6 +130,7 @@ pub(crate) const KEYS: [&str; 13] = [
     "memory.cache",
     "memory.memtables",
     "memory.query",
+    "memory.ingress",
 ];
 
 /// The minimum block cache: below this, RocksDB has no room left for the
@@ -191,6 +195,8 @@ struct FileMemorySection {
     memtables: Option<ByteSize>,
     #[serde(default)]
     query: Option<ByteSize>,
+    #[serde(default)]
+    ingress: Option<ByteSize>,
 }
 
 /// Looks for `brainwire.toml` in `cwd`, for the implicit lookup `load` itself
@@ -219,7 +225,13 @@ fn load_with_limit(
         config.memory.cache = ByteSize(limit.bytes / 4);
         config.memory.memtables = ByteSize(limit.bytes / 16);
         config.memory.query = ByteSize(limit.bytes / 8);
-        for key in ["memory.cache", "memory.memtables", "memory.query"] {
+        config.memory.ingress = ByteSize((limit.bytes / 8).min(512 << 20));
+        for key in [
+            "memory.cache",
+            "memory.memtables",
+            "memory.query",
+            "memory.ingress",
+        ] {
             sources.insert(
                 key,
                 Source::Detected(format!("{} ({} bytes)", limit.source, limit.bytes)),
@@ -307,6 +319,10 @@ fn apply_file(
     if let Some(v) = file.memory.query {
         config.memory.query = v;
         sources.insert("memory.query", Source::File(path.to_path_buf()));
+    }
+    if let Some(v) = file.memory.ingress {
+        config.memory.ingress = v;
+        sources.insert("memory.ingress", Source::File(path.to_path_buf()));
     }
 
     Ok(())
@@ -411,6 +427,12 @@ fn apply_env(
         sources.insert("memory.query", Source::Env(var));
     }
 
+    let var = env_var_name("memory.ingress");
+    if let Some(v) = env.get(&var) {
+        config.memory.ingress = parse_byte_size(v, "memory.ingress")?;
+        sources.insert("memory.ingress", Source::Env(var));
+    }
+
     Ok(())
 }
 
@@ -444,6 +466,11 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if config.memory.ingress.0 == 0 || usize::try_from(config.memory.ingress.0).is_err() {
+        return Err(ConfigError::Invalid(
+            "memory.ingress must be positive and fit platform address size".into(),
+        ));
+    }
     if !(1..=3_600_000).contains(&config.server.io_timeout_ms) {
         return Err(ConfigError::Invalid(
             "server.io_timeout_ms must be between 1 and 3600000".into(),
@@ -550,7 +577,9 @@ pub fn default_file() -> String {
          # Total memtable budget across all open databases, charged inside `cache`.\n\
          # memtables = \"{memtables}\"\n\
          # Shared server query reservation pool and per-RUN guard (not process RSS).\n\
-         # query = \"{query}\"\n",
+         # query = \"{query}\"\n\
+         # Shared Bolt assembled input and decoded storage (not process RSS).\n\
+         # ingress = \"{ingress}\"\n",
         listen = d.server.listen,
         data_dir = d.server.data_dir.display(),
         default_database = d.server.default_database,
@@ -562,6 +591,7 @@ pub fn default_file() -> String {
         cache = d.memory.cache,
         memtables = d.memory.memtables,
         query = d.memory.query,
+        ingress = d.memory.ingress,
     )
 }
 
@@ -611,6 +641,7 @@ fn value_text(config: &Config, key: &str) -> String {
         "memory.cache" => config.memory.cache.to_string(),
         "memory.memtables" => config.memory.memtables.to_string(),
         "memory.query" => config.memory.query.to_string(),
+        "memory.ingress" => config.memory.ingress.to_string(),
         _ => String::new(),
     }
 }
@@ -646,6 +677,40 @@ mod tests {
             bytes,
             source: "cgroup /fixture/memory.max".into(),
         })
+    }
+
+    #[test]
+    fn ingress_limit_is_shared_detected_overridable_and_visible() {
+        for gib in [1, 2, 4, 16] {
+            let loaded = load_with_limit(None, &env(&[]), limit(gib << 30)).unwrap();
+            assert_eq!(loaded.config.memory.ingress.0, (gib << 27).min(512 << 20));
+            assert!(describe(&loaded)
+                .iter()
+                .any(|(key, _, source)| *key == "memory.ingress"
+                    && source.starts_with("detected cgroup")));
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[memory]\ningress='3MiB'\n").unwrap();
+        let from_file = load_with_limit(Some(&path), &env(&[]), limit(1 << 30)).unwrap();
+        assert_eq!(from_file.config.memory.ingress.0, 3 << 20);
+        assert_eq!(
+            from_file.sources["memory.ingress"],
+            Source::File(path.clone())
+        );
+        let override_env = load_with_limit(
+            Some(&path),
+            &env(&[("BRAINWIRE_MEMORY_INGRESS", "4MiB")]),
+            limit(1 << 30),
+        )
+        .unwrap();
+        assert_eq!(override_env.config.memory.ingress.0, 4 << 20);
+        assert_eq!(
+            override_env.sources["memory.ingress"],
+            Source::Env("BRAINWIRE_MEMORY_INGRESS".into())
+        );
+        assert!(load(None, &env(&[("BRAINWIRE_MEMORY_INGRESS", "0")])).is_err());
+        assert!(default_file().contains("# ingress ="));
     }
 
     #[test]
@@ -1143,6 +1208,7 @@ mod tests {
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
                 ("BRAINWIRE_MEMORY_QUERY", "128MiB"),
+                ("BRAINWIRE_MEMORY_INGRESS", "16MiB"),
             ]),
         )
         .unwrap();
@@ -1168,6 +1234,7 @@ mod tests {
         assert_eq!(loaded.config.memory.cache.0, 1 << 30);
         assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
         assert_eq!(loaded.config.memory.query.0, 128 << 20);
+        assert_eq!(loaded.config.memory.ingress.0, 16 << 20);
         for key in KEYS {
             assert!(
                 matches!(&loaded.sources[key], Source::Env(_)),

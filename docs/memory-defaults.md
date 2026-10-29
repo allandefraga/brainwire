@@ -40,3 +40,35 @@ cache, connections and other application allocations consume additional memory.
 A container's memory limit remains the operating system's enforcement mechanism.
 Cgroup discovery tests alone do not certify a workload under a 4 GiB limit;
 validate representative workloads and concurrent clients separately.
+
+## Shared Bolt input admission
+
+`memory.ingress` limits the combined logical assembled message bytes and
+PackStream decoded-storage charges across all connections to this server,
+including clients that have not authenticated. It is separate from
+`memory.query` and the RocksDB budgets. Unset, it uses one eighth of the detected
+memory limit, capped at 512 MiB; without detection it defaults to 256 MiB.
+Set `[memory] ingress = "128MiB"` in TOML or
+`BRAINWIRE_MEMORY_INGRESS=128MiB` in the environment. `config show` reports its
+value and source. Explicit values must be positive and fit the platform address
+size. Message size and decoded-storage caps still apply independently.
+
+Admission occurs before copying an assembled chunk or allocating charged
+PackStream storage. A request that cannot fit returns
+`Neo.TransientError.General.IngressMemoryPoolExhausted` and its connection
+closes before the request reaches the engine. Reduce batch sizes and use bounded
+backoff after a confirmed rejection. This error is different from an unknown
+commit outcome; never retry a write blindly after a lost acknowledgement.
+
+Partial-message accounting is released on disconnect, timeout or rejection.
+Rejected input is discarded before waiting for the small failure response.
+A valid request keeps its admission through synchronous engine handling, even
+if the socket task is cancelled while that worker remains running.
+
+This is a shared accounting ceiling, not a process RSS limit. Socket/read and
+framing buffers, vector capacity slack, allocator overhead, engine parameter
+copies, output encoding, catalog and native RocksDB allocations remain outside
+this budget. An input may need both its encoded size and decoded allocation
+estimate simultaneously, so a payload smaller than `memory.ingress` may still
+be rejected. Validate representative batches and concurrent workloads under
+real container limits before production deployment.
