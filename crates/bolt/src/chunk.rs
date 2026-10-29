@@ -27,6 +27,7 @@ pub fn encode_message(payload: &[u8]) -> Vec<u8> {
 }
 
 /// Writes Bolt framing with bounded scratch space, without copying the entire payload.
+#[cfg(test)]
 pub(crate) async fn write_message<W: tokio::io::AsyncWrite + Unpin>(
     stream: &mut W,
     payload: &[u8],
@@ -50,6 +51,61 @@ pub(crate) async fn write_message<W: tokio::io::AsyncWrite + Unpin>(
         stream.write_all(&frame).await?;
     }
     Ok(())
+}
+
+/// Encodes a response directly into bounded Bolt frames. Dropping this future
+/// drops its scratch and borrowed traversal state; a partial message is fatal.
+pub(crate) async fn write_packstream_message<W: tokio::io::AsyncWrite + Unpin>(
+    stream: &mut W,
+    value: &crate::packstream::PackValue,
+) -> std::io::Result<()> {
+    use crate::packstream::PackFragments;
+    use tokio::io::AsyncWriteExt;
+    let mut fragments = PackFragments::new(value)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    // Reject depth/format errors before sending any bytes. Engine work may
+    // already have committed, so an encoding failure must close the connection.
+    let mut encoded_len = 0usize;
+    for fragment in fragments.by_ref() {
+        let fragment = fragment
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        encoded_len = encoded_len
+            .checked_add(fragment.as_slice().len())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "encoded response size overflow",
+                )
+            })?;
+    }
+    fragments.rewind(value);
+    let mut frame = Vec::new();
+    frame
+        .try_reserve_exact(encoded_len.min(MAX_CHUNK) + 4)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::OutOfMemory, error))?;
+    frame.extend_from_slice(&[0, 0]);
+    for fragment in fragments {
+        let fragment = fragment
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        let mut data = fragment.as_slice();
+        while !data.is_empty() {
+            let take = data.len().min(MAX_CHUNK + 2 - frame.len());
+            frame.extend_from_slice(&data[..take]);
+            data = &data[take..];
+            if frame.len() == MAX_CHUNK + 2 {
+                frame[..2].copy_from_slice(&(MAX_CHUNK as u16).to_be_bytes());
+                stream.write_all(&frame).await?;
+                frame.clear();
+                frame.extend_from_slice(&[0, 0]);
+            }
+        }
+    }
+    let payload_len = frame.len() - 2;
+    if payload_len != 0 {
+        frame[..2].copy_from_slice(&(payload_len as u16).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+    }
+    stream.write_all(&frame).await
 }
 
 #[derive(Default)]
@@ -198,6 +254,130 @@ mod tests {
                     "one bounded frame per write"
                 );
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn packstream_writes_match_existing_encoding_with_bounded_frames() {
+        use crate::packstream::{pack, PackValue};
+        let value = PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::List(vec![
+                PackValue::String("x".repeat(MAX_CHUNK * 4 + 17)),
+                PackValue::Map(vec![("key".into(), PackValue::Int(i64::MIN))]),
+            ])],
+        };
+        let mut payload = Vec::new();
+        pack(&value, &mut payload);
+        for partial in [None, Some(7)] {
+            let mut writer = RecordingWriter {
+                partial,
+                ..Default::default()
+            };
+            write_packstream_message(&mut writer, &value).await.unwrap();
+            assert_eq!(writer.bytes, encode_message(&payload));
+            assert!(writer.largest_write <= MAX_CHUNK + 4);
+        }
+    }
+
+    #[tokio::test]
+    async fn packstream_framing_matches_at_exact_encoded_chunk_boundaries() {
+        use crate::packstream::{pack, PackValue};
+        for encoded_len in [MAX_CHUNK - 1, MAX_CHUNK, MAX_CHUNK + 1] {
+            // These strings use a three-byte PackStream length header.
+            let value = PackValue::String("x".repeat(encoded_len - 3));
+            let mut payload = Vec::new();
+            pack(&value, &mut payload);
+            assert_eq!(payload.len(), encoded_len);
+            for partial in [None, Some(7)] {
+                let mut writer = RecordingWriter {
+                    partial,
+                    ..Default::default()
+                };
+                write_packstream_message(&mut writer, &value).await.unwrap();
+                assert_eq!(
+                    writer.bytes,
+                    encode_message(&payload),
+                    "encoded_len={encoded_len}, partial={partial:?}"
+                );
+                assert!(writer.largest_write <= MAX_CHUNK + 4);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn packstream_preflight_rejects_invalid_output_without_writing() {
+        use crate::packstream::{PackValue, MAX_DEPTH, MAX_ENCODE_DEPTH};
+        let mut writer = RecordingWriter::default();
+        let invalid = PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::Null; 16],
+        };
+        assert_eq!(
+            write_packstream_message(&mut writer, &invalid)
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(writer.bytes.is_empty());
+        let mut nested = PackValue::Null;
+        for _ in 0..MAX_DEPTH + 4 {
+            nested = PackValue::List(vec![nested]);
+        }
+        write_packstream_message(&mut writer, &nested)
+            .await
+            .unwrap();
+        writer.bytes.clear();
+        for _ in MAX_DEPTH + 4..MAX_ENCODE_DEPTH + 1 {
+            nested = PackValue::List(vec![nested]);
+        }
+        // Put a full frame before the invalid value: preflight still emits nothing.
+        let invalid = PackValue::List(vec![PackValue::String("x".repeat(MAX_CHUNK * 2)), nested]);
+        assert_eq!(
+            write_packstream_message(&mut writer, &invalid)
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(writer.bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn packstream_writer_honors_backpressure_cancellation_and_io_failures() {
+        use crate::packstream::PackValue;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let value = PackValue::String("x".repeat(MAX_CHUNK * 4));
+        let (mut writer, mut reader) = tokio::io::duplex(32);
+        let timeout = tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            write_packstream_message(&mut writer, &value),
+        )
+        .await;
+        assert!(timeout.is_err());
+        writer.shutdown().await.unwrap();
+        let mut partial = Vec::new();
+        reader.read_to_end(&mut partial).await.unwrap();
+        assert_eq!(partial.len(), 32);
+        for fail in [false, true] {
+            let mut writer = RecordingWriter {
+                stop_after: Some(MAX_CHUNK + 9),
+                fail,
+                ..Default::default()
+            };
+            let error = write_packstream_message(&mut writer, &value)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.kind(),
+                if fail {
+                    std::io::ErrorKind::BrokenPipe
+                } else {
+                    std::io::ErrorKind::WriteZero
+                }
+            );
+            assert_eq!(writer.bytes.len(), MAX_CHUNK + 9);
         }
     }
 

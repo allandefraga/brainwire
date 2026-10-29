@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILES = (
     Path("Cargo.toml"),
     Path("Cargo.lock"),
+    Path("pyproject.toml"),
     Path("deploy/kubernetes-release/kustomization.yaml"),
     Path("deploy/kubernetes-public-release/kustomization.yaml"),
     Path("README.md"),
@@ -129,6 +130,17 @@ def unreleased_messages(tag: str) -> list[str]:
     return [message.strip() for message in raw.split("\x00") if message.strip()]
 
 
+def python_version(version: Version) -> str:
+    core = f"{version.major}.{version.minor}.{version.patch}"
+    if version.prerelease is None:
+        return core
+    match = re.fullmatch(r"(beta|rc)\.(\d+)", version.prerelease)
+    if match is None:
+        raise ValueError("Python packaging supports beta.N and rc.N prereleases")
+    channel = "b" if match.group(1) == "beta" else "rc"
+    return f"{core}{channel}{match.group(2)}"
+
+
 def replace_workspace_version(text: str, old: str, new: str) -> str:
     updated, count = re.subn(
         rf'(?m)^(version\s*=\s*"){re.escape(old)}("\s*)$',
@@ -191,6 +203,9 @@ def updated_files(old: Version, new: Version) -> dict[Path, str]:
     )
     result[Path("Cargo.lock")] = replace_lock_versions(
         result[Path("Cargo.lock")], str(old), str(new)
+    )
+    result[Path("pyproject.toml")] = replace_workspace_version(
+        result[Path("pyproject.toml")], python_version(old), python_version(new)
     )
 
     for kustomization in (

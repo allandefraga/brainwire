@@ -15,10 +15,14 @@ leave the production gate open: complete 30-minute 2/4/8 GiB runs, verify exact
 data and ACL results, capture kernel/cgroup evidence, and pass restart and
 restore checks using the same source, binary and configuration.
 
-A shared query/ingress budget is not a global RSS ceiling. Bounded response
+A shared query/ingress budget is not a global RSS ceiling. Linux cgroup pressure admission now rejects new RUN requests at 95% of a visible finite cgroup limit; it is cooperative, fails open when unavailable, and does not bound in-flight or native allocations. Bounded response
 encoding is not execution that produces results on demand for Bolt `PULL n`.
 Existing TLS proxy recipes are not native Bolt TLS or online identity management.
 See the [production readiness roadmap](docs/production-readiness-roadmap.md).
+
+Current local v1 work adds an advisory configured-memory summary and a bounded
+[Rust-regex subset of `=~`](docs/cypher-regex.md). These are partial steps: they
+do not establish an RSS cap, Java regex parity or the sustained-load gates.
 
 Before approving v1, also verify the stable memory/unknown-commit contracts,
 current differential Cypher corpus, transport security and live principals.

@@ -1,0 +1,180 @@
+{
+  "result": "FAIL",
+  "run_id": "a5e0dd8d9503486a994a0d743c0f1e7c",
+  "driver": "5.28.8",
+  "image": "brainwire-pressure-20261029-1225:local",
+  "memory_limit_bytes": 536870912,
+  "threshold_percent": 95,
+  "scope": "synthetic single-container Linux cgroup-v2 RUN admission",
+  "limitations": [
+    "not a global RSS ceiling",
+    "not sustained 2/4/8 GiB qualification",
+    "not power-loss or distributed failover",
+    "raw usage includes tmpfs and file cache",
+    "kernel logs not independently verified"
+  ],
+  "image_id": "sha256:3bd48e84a47a23f7f25e1596e94c3e9ba3d1ebe5bfe6cfa3086e8a21741da9e8",
+  "before": {
+    "memory.current": 7512064,
+    "memory.max": 536870912,
+    "memory.peak": 16379904,
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0,
+      "sock_throttled": 0
+    },
+    "memory.swap.max": 0
+  },
+  "server_protocol": "5.4",
+  "pressure_samples": [
+    {
+      "memory.current": 495644672,
+      "memory.max": 536870912,
+      "memory.peak": 503263232,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 504061952,
+      "memory.max": 536870912,
+      "memory.peak": 506712064,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 505016320,
+      "memory.max": 536870912,
+      "memory.peak": 508469248,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 505905152,
+      "memory.max": 536870912,
+      "memory.peak": 508469248,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 507588608,
+      "memory.max": 536870912,
+      "memory.peak": 509640704,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 507981824,
+      "memory.max": 536870912,
+      "memory.peak": 509640704,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 508723200,
+      "memory.max": 536870912,
+      "memory.peak": 510316544,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    },
+    {
+      "memory.current": 510750720,
+      "memory.max": 536870912,
+      "memory.peak": 511590400,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0
+    }
+  ],
+  "rejected_transaction_run": {
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError"
+  },
+  "owned_resources_cleaned": true,
+  "cleanup_state": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 32386,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-10-29T11:30:14.448953794Z",
+    "FinishedAt": "0001-01-01T00:00:00Z",
+    "Health": {
+      "Status": "starting",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "error_type": "AssertionError",
+  "error": "RUN was admitted while cgroup pressure was expected"
+}

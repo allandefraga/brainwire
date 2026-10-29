@@ -1,4 +1,17 @@
-# Temporal data: current behavior and a safe model
+# Keep history in an application
+
+Brainwire does not yet store queryable revisions of nodes or relationships.
+Keep authoritative history in your source system, or model explicit revision
+nodes as described below.
+
+| Mechanism available today | What it preserves |
+| --- | --- |
+| Ontology/catalog version | Schema changes needed to decode stored properties |
+| Transaction snapshot | A consistent view for that transaction |
+| Checkpoint | A local recovery copy at one point in time |
+| Application revision nodes | History only if the application writes and protects it |
+
+None of these adds native `AS OF` reads or automatic history retention.
 
 ## What the engine versions today
 
@@ -38,8 +51,8 @@ should:
 3. Commit the revision and any projection change together. Retry the whole
    transaction after a conflict, then repeat the revision-ID comparison.
 
-The projection update can use a sequence predicate inside the same explicit
-transaction:
+After checking or creating the revision in the same explicit transaction, the
+current ticket projection can use this sequence predicate:
 
 ```cypher
 MATCH (t:Ticket {entity_id: $ticket_id})

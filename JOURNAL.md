@@ -29,6 +29,86 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-29: memory admission, documentation and logo
+
+- **Done:** add cooperative Linux cgroup pressure admission before RUN, with a
+  stable transient error and rollback of pending work. It is not a hard RSS cap;
+  unavailable or hidden cgroups and in-flight/native allocations remain risks.
+- **Measured:** a 512 MiB synthetic Docker smoke rejected two RUN requests,
+  rolled back pending work, preserved committed data and recovered after relief.
+  Initial and repeat receipts are in `docs/benchmarks/2026-10-29-cgroup-pressure/`.
+- **Benchmarks:** fix the comparison runner's development authentication and
+  record a new three-system synthetic run and chart. Different protocols and
+  durability settings, a dirty Brainwire source tree and one run limit claims.
+- **Documentation and identity:** simplify core setup, Docker, CLI, TUI, Cypher
+  and Python guides, add a docs index and link checker, update the docs site,
+  and replace the logo with a green graph monogram. Private Pages remains
+  disabled; the workflow prepares an artifact for later private review.
+- **Verification:** full workspace tests, all-target Clippy and formatting passed;
+  Python examples passed 90 tests (six skipped), scripts 67, and comparison
+  runner three. The local Docker quickstart and Python example worked. Site
+  validation and 635 local inline Markdown links passed (external URLs and
+  fragments were not checked).
+- **Next step:** verify sustained 2/4/8 GiB production-like workloads, implement
+  a comprehensive process budget and true streaming, and continue the open
+  v2 goals and review of the remaining historical documents.
+- **Blockers:** the memory ceiling and v2 goals remain incomplete. No push or
+  tag until the requested items are completed and verified.
+
+## 2026-10-29: v1 memory diagnostics and Cypher regex
+
+- **Done:** add an advisory configured-memory summary to `config show` and
+  a startup warning for overcommitted/overflowing configured budgets. Count
+  memtables within cache; retain detected source and never block offline
+  recovery or change explicit overrides.
+- **Cypher:** support a bounded Rust-regex subset of `=~`, including whole-string
+  matching, nulls and a per-RUN/worker cache. Validate the pattern AST before
+  anchoring and reject unsupported Java features. The cache is charged to the
+  query budget and is dropped if the pattern changes. See `docs/cypher-regex.md`.
+- **Verification:** regression tests and Clippy passed for Cypher and server;
+  the real config command printed its summary and a deliberately oversized
+  configuration warned before failing on its missing synthetic auth file.
+- **Measured:** in a narrow 10,000-row developer-build synthetic diagnostic,
+  median elapsed fell from 2,620.415 ms to 17.211 ms after caching; three
+  samples, no p99 or general performance claim. Raw logs are in
+  `docs/benchmarks/2026-10-29-regex/`.
+- **Workspace verification:** full Rust workspace tests were interrupted while
+  compiling because free disk fell from about 3 GiB to 1.1 GiB; no result is
+  claimed. Focused Cypher and server tests, Clippy and formatting passed.
+- **Next step:** complete integrated workspace verification after freeing disk, add representative
+  varied-pattern and concurrent benchmarks, build real incremental query output,
+  enforce process-wide memory safety, and qualify sustained 2/4/8 GiB runs.
+- **Blockers:** the diagnostic is not an RSS limit; regex differs from Java,
+  deadlines are cooperative and changing patterns still recompile. The v1
+  prerequisite and 44 v2 acceptance goals remain open. No push or tag until
+  those goals are completed and verified.
+
+## 2026-10-29: memory, packaging and documentation work
+
+- **Done:** replaced full Bolt response encoding buffers with bounded framed
+  output; added a per-database estimated 64 MiB cap for retained conflict
+  history with fail-closed pruning; added a locally installable Python helper
+  using the existing Neo4j driver and release version synchronization.
+- **UX:** refreshed the README and concept artwork, documented local Docker
+  bootstrap and proposed Homebrew and desktop delivery. These are designs,
+  not a published Homebrew package or Electron application.
+- **Verification:** Bolt and store integration tests, their all-target Clippy
+  and formatting passed; workspace server built. Python examples ran 90 tests
+  with 6 skips; release helper ran 9 tests. A synthetic Docker bootstrap used
+  an isolated v0.9 image/volume. The wheel was built and installed outside the
+  source tree in the isolated packaging checkout.
+- **Measured:** synthetic response comparison receipts and limits are in
+  `docs/benchmarks/2026-10-29-bolt-response/`; results are variable and do not
+  establish the 5% regression gate. Conflict deque diagnostic is recorded in
+  `docs/benchmarks/2026-10-29-history-growth.md`.
+- **Next step:** expand representative many-small-value and concurrent workload
+  benchmarks; finish true executor streaming, RSS accounting, standalone commit
+  outcome ledger, and the 2/4/8 GiB acceptance runs. Validate the one-line
+  Docker bootstrap against a published v0.10 image.
+- **Blockers:** process RSS is not globally capped; 30-minute stability,
+  production TLS, commit reconciliation and full Cypher parity remain open.
+  Desktop/Homebrew/PyPI distribution and real DuckLake validation remain open.
+
 ## 2026-10-29: release preparation and v2 roadmap
 
 - **Done:** prepared the prior production-hardening work for a new beta; added

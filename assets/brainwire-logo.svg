@@ -1,23 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 160" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-labelledby="title desc">
   <title id="title">Brainwire</title>
-  <desc id="desc">A green and cyan connected graph mark beside the Brainwire wordmark.</desc>
-  <defs>
-    <linearGradient id="wire" x1="20" y1="24" x2="150" y2="136" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#57FF48"/>
-      <stop offset="1" stop-color="#67D9D2"/>
-    </linearGradient>
-  </defs>
-  <g fill="none" stroke="url(#wire)" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M26 28 78 80 26 132M78 80l52-52M78 80l52 52M130 28l23 52-23 52M78 80h75" stroke-width="7"/>
-    <path d="M26 28v104" stroke-width="3" opacity=".6"/>
+  <desc id="desc">A connected B monogram and a custom Brainwire wordmark in bright green and soft white, designed for dark backgrounds.</desc>
+  <g stroke="#77FF5A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M34 26v108M34 26h54l32 27-32 27H34m54 0 32 27-32 27H34"/>
+    <path d="m34 26 54 54-54 54" stroke-opacity=".35" stroke-width="3"/>
   </g>
-  <g fill="#57FF48">
-    <circle cx="26" cy="28" r="10"/><circle cx="26" cy="132" r="10"/>
-    <circle cx="130" cy="28" r="9"/><circle cx="130" cy="132" r="9"/>
+  <g fill="#77FF5A">
+    <circle cx="34" cy="26" r="8"/>
+    <circle cx="88" cy="26" r="8"/>
+    <circle cx="120" cy="53" r="8"/>
+    <circle cx="88" cy="80" r="10"/>
+    <circle cx="34" cy="80" r="8"/>
+    <circle cx="120" cy="107" r="8"/>
+    <circle cx="88" cy="134" r="8"/>
+    <circle cx="34" cy="134" r="8"/>
   </g>
-  <circle cx="78" cy="80" r="13" fill="#57FF48"/>
-  <circle cx="153" cy="80" r="11" fill="#67D9D2"/>
-  <text x="198" y="91" fill="#E9F2EC" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="61" font-weight="750" letter-spacing="2">BRAIN</text>
-  <text x="402" y="91" fill="#57FF48" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="61" font-weight="750" letter-spacing="2">WIRE</text>
-  <text x="201" y="124" fill="#8BA497" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="5">GRAPH DATABASE</text>
+  <g transform="translate(184 48)" fill="none" stroke="#F0F5EF" stroke-width="8" stroke-linecap="square" stroke-linejoin="round">
+    <path d="M0 64V0h22c26 0 26 31 0 31H0m22 0c29 0 29 33 0 33H0"/>
+    <path transform="translate(60)" d="M0 64V0h22c27 0 27 32 0 32H0m22 0 24 32"/>
+    <path transform="translate(122)" d="m0 64 23-64 23 64M8 43h30"/>
+    <path transform="translate(188)" d="M0 0v64"/>
+    <path transform="translate(211)" d="M0 64V0l43 64V0"/>
+    <g stroke="#77FF5A">
+      <path transform="translate(279)" d="m0 0 14 64 18-48 18 48 14-64"/>
+      <path transform="translate(367)" d="M0 0v64"/>
+      <path transform="translate(390)" d="M0 64V0h22c27 0 27 32 0 32H0m22 0 24 32"/>
+      <path transform="translate(454)" d="M41 0H0v64h41M0 31h33"/>
+    </g>
+  </g>
 </svg>

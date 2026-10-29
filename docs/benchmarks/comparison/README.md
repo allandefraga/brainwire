@@ -10,7 +10,28 @@ receipt and chart are checked in beside this report:
 
 ![Measured local comparison](../assets/comparison-20261019.svg)
 
-## Results
+## New local run: October 29
+
+[Raw receipt](results/20261029T113746Z-3ad8ce.json) ·
+[Chart](../assets/comparison-20261029.svg)
+
+![October 29 diagnostic](../assets/comparison-20261029.svg)
+
+| System | Point read p95 | One-hop p95 | Update series median / maximum | Fresh ingest records/s |
+|---|---:|---:|---:|---:|
+| Brainwire | 0.692 ms | 0.690 ms | 44.966 / 71.870 ms | 38,434 |
+| Neo4j Community | 4.209 ms | 2.383 ms | 82.719 / 268.842 ms | 13,976 |
+| FalkorDB | 0.444 ms | 0.439 ms | 27.457 / 32.678 ms | 59,144 |
+
+This is one synthetic run with 10,000 nodes, 20,000 edges, a single client and
+4 CPU / 8 GiB per container. All three recovered the expected counts after a
+graceful restart. Brainwire was built from a **dirty worktree** based on
+`db56230`; its local image ID and all samples are in the receipt. Different
+protocols and durability settings make this a diagnostic, not a general
+ranking or a production guarantee. The measurements do not isolate the cost
+of memory-pressure admission. See the methodology and limits below.
+
+## Historical results: October 19
 
 All three systems loaded the same 10,000-node, 20,000-edge graph and recovered
 those counts after a graceful restart of the same container with its persistent
@@ -88,9 +109,15 @@ the commit alone does not reproduce that exact candidate.
 
 ## Reproduce
 
-Install Docker and `uv`, then from the repository root:
+Install Docker and `uv`, then from the repository root. The runner uses only
+local images (`--pull=never`), so pull the pinned images first. It enables
+unauthenticated access for synthetic data: ports are bound to host loopback,
+but other Docker containers on the same bridge may still reach the service.
+Do not use sensitive data or run this on an untrusted Docker host:
 
 ```sh
+docker pull neo4j:2026.09.0
+docker pull falkordb/falkordb-server:6.0.0
 docker build --build-arg CARGO_BUILD_JOBS=1 --tag brainwire-benchmark:local .
 BRAINWIRE_IMAGE=brainwire-benchmark:local uv run --python 3.12 --with-requirements docs/benchmarks/comparison/requirements.txt \
   docs/benchmarks/comparison/run.py \

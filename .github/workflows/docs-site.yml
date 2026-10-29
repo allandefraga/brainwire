@@ -22,8 +22,28 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Validate Markdown link targets
+        run: python scripts/check_docs_links.py
+
       - name: Validate local links and assets
         run: python scripts/check_docs_site.py
+
+  private-preview:
+    if: github.repository_visibility == 'private'
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Package documentation preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainwire-docs-preview-${{ github.sha }}
+          path: docs-site/
+          if-no-files-found: error
+          retention-days: 7
 
   build:
     if: github.repository_visibility == 'public'

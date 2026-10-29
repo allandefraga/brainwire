@@ -40,6 +40,14 @@ class SemVerTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 Version.parse(value)
 
+    def test_python_release_versions_follow_pep440(self):
+        for source, expected in (("1.0.0", "1.0.0"),
+                                 ("0.10.0-beta.1", "0.10.0b1"),
+                                 ("1.0.0-rc.2", "1.0.0rc2")):
+            self.assertEqual(release.python_version(Version.parse(source)), expected)
+        with self.assertRaises(ValueError):
+            release.python_version(Version.parse("1.0.0-custom"))
+
 
 class ReleaseFileTests(unittest.TestCase):
     def test_managed_versions_advance_but_historical_license_tag_stays(self):
@@ -51,7 +59,13 @@ class ReleaseFileTests(unittest.TestCase):
             f"docker pull ghcr.io/allandefraga/brainwire:v{next_candidate} # brainwire-release-version",
             readme,
         )
-        self.assertIn("tree/v0.1.1", readme)  # Historical tag that predates the license.
+        # Historical references are preserved whether or not the README uses one.
+        historical = (f"Current v{current} <!-- brainwire-release-version -->\n"
+                      "https://github.com/example/project/tree/v0.1.1\n")
+        rewritten = release.replace_marked_versions(
+            historical, f"v{current}", f"v{next_candidate}", Path("README.md")
+        )
+        self.assertIn("tree/v0.1.1", rewritten)
         self.assertIn(
             f"newTag: v{next_candidate}",
             files[Path("deploy/kubernetes-release/kustomization.yaml")],
@@ -70,6 +84,8 @@ class ReleaseFileTests(unittest.TestCase):
         )
         lock = files[Path("Cargo.lock")]
         self.assertEqual(lock.count(f'version = "{next_candidate}"'), 7)
+        self.assertIn(f'version = "{release.python_version(next_candidate)}"',
+                      files[Path("pyproject.toml")])
 
     def test_can_advance_versions_after_a_previous_release_bump(self):
         initial = release.workspace_version()

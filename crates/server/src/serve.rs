@@ -23,6 +23,15 @@ pub fn run(
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let loaded = config::load(explicit_config.or(implicit.as_deref()), &env)
         .map_err(|e| format!("config: {e}"))?;
+    if let Some(warning) = config::memory_overcommit_warning(&loaded) {
+        eprintln!("warning: {warning}; review explicit budgets before serving");
+    }
+    let memory_pressure = crate::memory_pressure::PressureGuard::shared();
+    eprintln!(
+        "memory pressure admission: {:?} {:?} (sampled cgroup usage; not an RSS ceiling)",
+        memory_pressure.status(),
+        memory_pressure.usage(),
+    );
     let cluster_config = cluster_config
         .map(crate::cluster::ClusterConfig::load)
         .transpose()?;

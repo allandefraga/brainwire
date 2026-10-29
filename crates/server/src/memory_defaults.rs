@@ -1,10 +1,26 @@
 //! Resource discovery only: budgets do not cap process RSS.
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MemoryCapacityKind {
+    HostPhysical,
+    Cgroup,
+}
+
+impl MemoryCapacityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HostPhysical => "host_physical",
+            Self::Cgroup => "cgroup",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct MemoryLimit {
     pub bytes: u64,
     pub source: String,
+    pub kind: MemoryCapacityKind,
 }
 
 pub(super) fn detect() -> Option<MemoryLimit> {
@@ -37,6 +53,7 @@ pub(super) fn detect() -> Option<MemoryLimit> {
         (ok == 0 && bytes > 0).then(|| MemoryLimit {
             bytes,
             source: "host physical memory".into(),
+            kind: MemoryCapacityKind::HostPhysical,
         })
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -96,7 +113,41 @@ fn discover(
     let mut best = host.map(|bytes| MemoryLimit {
         bytes,
         source: "host physical memory".into(),
+        kind: MemoryCapacityKind::HostPhysical,
     });
+    for group in visible_memory_groups(cgroups, mounts) {
+        let file = group.directory.join(if group.v2 {
+            "memory.max"
+        } else {
+            "memory.limit_in_bytes"
+        });
+        if let Some(text) = read(&file) {
+            if let Ok(bytes) = text.trim().parse::<u64>() {
+                if (group.v2 || bytes < (1_u64 << 60))
+                    && best.as_ref().is_none_or(|b| bytes < b.bytes)
+                {
+                    best = Some(MemoryLimit {
+                        bytes,
+                        source: format!("cgroup {}", file.display()),
+                        kind: MemoryCapacityKind::Cgroup,
+                    });
+                }
+            }
+        }
+    }
+    best
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MemoryGroup {
+    pub directory: PathBuf,
+    pub v2: bool,
+}
+
+/// Every visible memory-controller ancestor, for capacity and pressure checks.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn visible_memory_groups(cgroups: &str, mounts: &str) -> Vec<MemoryGroup> {
+    let mut groups = Vec::new();
     for mount in mounts.lines() {
         let Some((before, after)) = mount.split_once(" - ") else {
             continue;
@@ -136,23 +187,12 @@ fn discover(
             };
             let mut directory = mountpoint.join(relative);
             loop {
-                let file = directory.join(if v2 {
-                    "memory.max"
-                } else {
-                    "memory.limit_in_bytes"
-                });
-                if let Some(text) = read(&file) {
-                    if let Ok(bytes) = text.trim().parse::<u64>() {
-                        // v1 uses a page-rounded LONG_MAX as the unlimited sentinel.
-                        if (v2 || bytes < (1_u64 << 60))
-                            && best.as_ref().is_none_or(|b| bytes < b.bytes)
-                        {
-                            best = Some(MemoryLimit {
-                                bytes,
-                                source: format!("cgroup {}", file.display()),
-                            });
-                        }
-                    }
+                let group = MemoryGroup {
+                    directory: directory.clone(),
+                    v2,
+                };
+                if !groups.contains(&group) {
+                    groups.push(group);
                 }
                 if directory == mountpoint || !directory.pop() {
                     break;
@@ -160,7 +200,7 @@ fn discover(
             }
         }
     }
-    best
+    groups
 }
 
 #[cfg(test)]
@@ -194,6 +234,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(limit.bytes, 2 << 30);
+        assert_eq!(limit.kind, MemoryCapacityKind::Cgroup);
         assert!(limit.source.contains("/cg/parent/memory.max"));
     }
     #[test]
@@ -233,7 +274,9 @@ mod tests {
                 4096
             );
         }
-        assert_eq!(fixture("0::/", V2, Some(4096), &[]).unwrap().bytes, 4096);
+        let host = fixture("0::/", V2, Some(4096), &[]).unwrap();
+        assert_eq!(host.bytes, 4096);
+        assert_eq!(host.kind, MemoryCapacityKind::HostPhysical);
         assert!(fixture("", "", None, &[]).is_none());
         assert_eq!(host_memory("MemTotal: 1024 kB\n"), Some(1 << 20));
         assert_eq!(host_memory("MemTotal: 18446744073709551615 kB"), None);

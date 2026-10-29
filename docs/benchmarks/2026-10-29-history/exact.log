@@ -1,0 +1,13 @@
+
+running 1 test
+round=0 commits=16384 total_ns=14435390 p50_ns=834 p99_ns=1792 capacity_changes=16384 retained_bytes=5734400
+round=1 commits=16384 total_ns=13806298 p50_ns=833 p99_ns=1167 capacity_changes=16384 retained_bytes=5734400
+round=2 commits=16384 total_ns=13798427 p50_ns=833 p99_ns=1167 capacity_changes=16384 retained_bytes=5734400
+round=3 commits=16384 total_ns=13879954 p50_ns=833 p99_ns=1166 capacity_changes=16384 retained_bytes=5734400
+round=4 commits=16384 total_ns=13974960 p50_ns=834 p99_ns=1167 capacity_changes=16384 retained_bytes=5734400
+round=5 commits=16384 total_ns=13921662 p50_ns=833 p99_ns=1291 capacity_changes=16384 retained_bytes=5734400
+round=6 commits=16384 total_ns=13831485 p50_ns=833 p99_ns=1167 capacity_changes=16384 retained_bytes=5734400
+test txn::tests::conflict_history_growth_diagnostic ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 104 filtered out; finished in 0.15s
+

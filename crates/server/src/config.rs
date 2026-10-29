@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::size::ByteSize;
 
 #[path = "memory_defaults.rs"]
-mod memory_defaults;
+pub(crate) mod memory_defaults;
 
 /// The whole config: the Bolt server and the RocksDB memory budget.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -97,6 +97,8 @@ pub enum Source {
 pub struct Loaded {
     pub config: Config,
     pub sources: BTreeMap<&'static str, Source>,
+    // Keep the same discovery used for defaults even if all fields are overridden.
+    detected_memory: Option<memory_defaults::MemoryLimit>,
 }
 
 /// Everything that can go wrong loading a config. Never panics on bad input.
@@ -252,7 +254,11 @@ fn load_with_limit(
     }
     validate(&config)?;
 
-    Ok(Loaded { config, sources })
+    Ok(Loaded {
+        config,
+        sources,
+        detected_memory: limit,
+    })
 }
 
 fn apply_file(
@@ -616,6 +622,96 @@ pub fn describe(loaded: &Loaded) -> Vec<(&'static str, String, String)> {
         .collect()
 }
 
+/// Comparison of configured budgets, not live allocations or workload headroom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryBudgetComparison {
+    UnknownCapacity,
+    WithinDetectedCapacity,
+    ExceedsDetectedCapacity,
+    SumOverflow,
+}
+
+impl MemoryBudgetComparison {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownCapacity => "unknown",
+            Self::WithinDetectedCapacity => "within_detected_capacity",
+            Self::ExceedsDetectedCapacity => "exceeds_detected_capacity",
+            Self::SumOverflow => "sum_overflow",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryBudgetDiagnostic {
+    pub configured_budget_bytes: Option<u64>,
+    pub detected_capacity_bytes: Option<u64>,
+    pub detected_capacity_kind: Option<&'static str>,
+    pub detected_capacity_source: Option<String>,
+    pub comparison: MemoryBudgetComparison,
+}
+
+pub fn memory_budget_diagnostic(loaded: &Loaded) -> MemoryBudgetDiagnostic {
+    let memory = &loaded.config.memory;
+    // RocksDB's write buffer manager charges memtables inside the cache.
+    let configured_budget_bytes = memory
+        .cache
+        .0
+        .checked_add(memory.query.0)
+        .and_then(|sum| sum.checked_add(memory.ingress.0));
+    let detected_capacity_bytes = loaded.detected_memory.as_ref().map(|limit| limit.bytes);
+    let comparison = match (configured_budget_bytes, detected_capacity_bytes) {
+        (None, _) => MemoryBudgetComparison::SumOverflow,
+        (Some(_), None) => MemoryBudgetComparison::UnknownCapacity,
+        (Some(total), Some(limit)) if total > limit => {
+            MemoryBudgetComparison::ExceedsDetectedCapacity
+        }
+        (Some(_), Some(_)) => MemoryBudgetComparison::WithinDetectedCapacity,
+    };
+    MemoryBudgetDiagnostic {
+        configured_budget_bytes,
+        detected_capacity_bytes,
+        detected_capacity_kind: loaded
+            .detected_memory
+            .as_ref()
+            .map(|limit| limit.kind.as_str()),
+        detected_capacity_source: loaded
+            .detected_memory
+            .as_ref()
+            .map(|limit| limit.source.clone()),
+        comparison,
+    }
+}
+
+pub fn memory_budget_summary(loaded: &Loaded) -> String {
+    let diagnostic = memory_budget_diagnostic(loaded);
+    let total = diagnostic
+        .configured_budget_bytes
+        .map_or_else(|| "overflow".into(), |v| v.to_string());
+    let capacity = diagnostic
+        .detected_capacity_bytes
+        .map_or_else(|| "unknown".into(), |v| v.to_string());
+    format!(
+        "memory budget summary: configured_budget_bytes={total} detected_capacity_bytes={capacity} capacity_kind={} capacity_source={:?} comparison={} (cache + query + ingress; memtables included in cache; not RSS or free memory; workload headroom unverified)",
+        diagnostic.detected_capacity_kind.unwrap_or("unknown"),
+        diagnostic.detected_capacity_source.as_deref().unwrap_or("unknown"),
+        diagnostic.comparison.as_str(),
+    )
+}
+
+/// Advisory only: do not prevent offline inspection and recovery.
+pub fn memory_overcommit_warning(loaded: &Loaded) -> Option<String> {
+    let diagnostic = memory_budget_diagnostic(loaded);
+    if matches!(
+        diagnostic.comparison,
+        MemoryBudgetComparison::ExceedsDetectedCapacity | MemoryBudgetComparison::SumOverflow
+    ) {
+        Some(memory_budget_summary(loaded))
+    } else {
+        None
+    }
+}
+
 fn value_text(config: &Config, key: &str) -> String {
     match key {
         "server.listen" => config.server.listen.clone(),
@@ -676,7 +772,98 @@ mod tests {
         Some(memory_defaults::MemoryLimit {
             bytes,
             source: "cgroup /fixture/memory.max".into(),
+            kind: memory_defaults::MemoryCapacityKind::Cgroup,
         })
+    }
+
+    #[test]
+    fn memory_summary_counts_cache_query_ingress_once_and_reports_capacity() {
+        let loaded = load_with_limit(None, &env(&[]), limit(1 << 30)).unwrap();
+        let summary = memory_budget_summary(&loaded);
+        assert!(
+            summary.contains("configured_budget_bytes=536870912"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("detected_capacity_bytes=1073741824"),
+            "{summary}"
+        );
+        assert!(summary.contains("within_detected_capacity"), "{summary}");
+        assert!(summary.contains("capacity_kind=cgroup"), "{summary}");
+        assert!(memory_overcommit_warning(&loaded).is_none());
+        assert!(summary.contains("memtables included in cache"), "{summary}");
+        assert!(summary.contains("not RSS or free memory"), "{summary}");
+    }
+
+    #[test]
+    fn memory_summary_preserves_overrides_and_the_original_detection() {
+        let loaded = load_with_limit(
+            None,
+            &env(&[
+                ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
+                ("BRAINWIRE_MEMORY_QUERY", "1GiB"),
+                ("BRAINWIRE_MEMORY_INGRESS", "1GiB"),
+            ]),
+            limit(1 << 30),
+        )
+        .unwrap();
+        let summary = memory_budget_summary(&loaded);
+        assert!(
+            summary.contains("configured_budget_bytes=3221225472"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("detected_capacity_bytes=1073741824"),
+            "{summary}"
+        );
+        assert!(summary.contains("exceeds_detected_capacity"), "{summary}");
+        assert!(memory_overcommit_warning(&loaded).is_some());
+        assert_eq!(loaded.config.memory.cache.0, 1 << 30);
+        assert_eq!(
+            loaded.sources["memory.cache"],
+            Source::Env("BRAINWIRE_MEMORY_CACHE".into())
+        );
+    }
+
+    #[test]
+    fn memory_summary_reports_unknown_capacity_and_overflow_without_failure() {
+        let mut loaded = load(None, &env(&[])).unwrap();
+        let summary = memory_budget_summary(&loaded);
+        assert!(
+            summary.contains("detected_capacity_bytes=unknown"),
+            "{summary}"
+        );
+        assert!(summary.contains("comparison=unknown"), "{summary}");
+        assert!(memory_overcommit_warning(&loaded).is_none());
+        loaded.config.memory.cache = ByteSize(u64::MAX);
+        loaded.config.memory.query = ByteSize(1);
+        assert!(memory_budget_summary(&loaded).contains("configured_budget_bytes=overflow"));
+        assert!(memory_overcommit_warning(&loaded).is_some());
+    }
+
+    #[test]
+    fn memory_summary_handles_exact_capacity_host_kind_and_safe_log_source() {
+        let mut loaded = load_with_limit(None, &env(&[]), limit(1 << 30)).unwrap();
+        loaded.config.memory.cache = ByteSize(512 << 20);
+        loaded.config.memory.query = ByteSize(256 << 20);
+        loaded.config.memory.ingress = ByteSize(256 << 20);
+        assert_eq!(
+            memory_budget_diagnostic(&loaded).comparison,
+            MemoryBudgetComparison::WithinDetectedCapacity
+        );
+        assert!(memory_overcommit_warning(&loaded).is_none());
+        loaded.detected_memory.as_mut().unwrap().kind =
+            memory_defaults::MemoryCapacityKind::HostPhysical;
+        loaded.detected_memory.as_mut().unwrap().source = "host\nforged log".into();
+        let summary = memory_budget_summary(&loaded);
+        assert!(summary.contains("capacity_kind=host_physical"));
+        assert!(!summary.contains('\n'));
+        loaded.config.memory.query = ByteSize(u64::MAX);
+        assert_eq!(
+            memory_budget_diagnostic(&loaded).comparison,
+            MemoryBudgetComparison::SumOverflow
+        );
+        assert!(memory_overcommit_warning(&loaded).is_some());
     }
 
     #[test]

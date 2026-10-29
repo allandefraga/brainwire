@@ -70,6 +70,8 @@ pub enum PackError {
     BadMapKey,
     #[error("value nested deeper than {} levels", MAX_DEPTH)]
     TooDeep,
+    #[error("encoded value exceeds the PackStream format limit")]
+    EncodedLimit,
     #[error("decoded value exceeds its allocation budget")]
     DecodedLimit,
     #[error("decoded value allocation failed")]
@@ -156,6 +158,206 @@ pub fn pack(value: &PackValue, out: &mut Vec<u8>) {
             out.push(*tag);
             for f in fields {
                 pack(f, out);
+            }
+        }
+    }
+}
+
+/// Borrowed payloads and small headers for incremental response encoding.
+/// The traversal stack also accommodates response envelopes around decoded data.
+pub(crate) enum PackFragment<'a> {
+    Header { bytes: [u8; 9], len: usize },
+    Payload(&'a [u8]),
+}
+
+impl PackFragment<'_> {
+    fn header(data: &[u8]) -> Self {
+        let mut bytes = [0; 9];
+        bytes[..data.len()].copy_from_slice(data);
+        Self::Header {
+            bytes,
+            len: data.len(),
+        }
+    }
+
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Header { bytes, len } => &bytes[..*len],
+            Self::Payload(bytes) => bytes,
+        }
+    }
+}
+
+fn size_fragment(
+    len: usize,
+    tiny: Option<u8>,
+    m8: u8,
+    m16: u8,
+    m32: u8,
+) -> Result<PackFragment<'static>, PackError> {
+    if let (Some(tiny), true) = (tiny, len < 16) {
+        return Ok(PackFragment::header(&[tiny | len as u8]));
+    }
+    let mut bytes = [0; 9];
+    let width = if len <= u8::MAX as usize {
+        bytes[..2].copy_from_slice(&[m8, len as u8]);
+        2
+    } else if len <= u16::MAX as usize {
+        bytes[0] = m16;
+        bytes[1..3].copy_from_slice(&(len as u16).to_be_bytes());
+        3
+    } else {
+        let len = u32::try_from(len).map_err(|_| PackError::EncodedLimit)?;
+        bytes[0] = m32;
+        bytes[1..5].copy_from_slice(&len.to_be_bytes());
+        5
+    };
+    Ok(PackFragment::Header { bytes, len: width })
+}
+
+/// Leaves room for response envelopes around the maximum decoded value depth.
+pub(crate) const MAX_ENCODE_DEPTH: usize = 2 * MAX_DEPTH;
+
+enum EncodeFrame<'a> {
+    Value(&'a PackValue, usize),
+    String(&'a str, usize),
+    Payload(&'a [u8]),
+    Values(std::slice::Iter<'a, PackValue>, usize),
+    Entries(std::slice::Iter<'a, (String, PackValue)>, usize),
+}
+
+pub(crate) struct PackFragments<'a> {
+    stack: Vec<EncodeFrame<'a>>,
+}
+
+impl<'a> PackFragments<'a> {
+    pub(crate) fn new(value: &'a PackValue) -> Result<Self, PackError> {
+        let mut encoder = Self { stack: Vec::new() };
+        encoder.push(EncodeFrame::Value(value, 0))?;
+        Ok(encoder)
+    }
+
+    fn push(&mut self, frame: EncodeFrame<'a>) -> Result<(), PackError> {
+        self.stack
+            .try_reserve(1)
+            .map_err(|_| PackError::Allocation)?;
+        self.stack.push(frame);
+        Ok(())
+    }
+
+    pub(crate) fn rewind(&mut self, value: &'a PackValue) {
+        self.stack.clear();
+        self.stack.push(EncodeFrame::Value(value, 0));
+    }
+
+    fn fragment(&mut self) -> Result<Option<PackFragment<'a>>, PackError> {
+        loop {
+            let Some(frame) = self.stack.pop() else {
+                return Ok(None);
+            };
+            match frame {
+                EncodeFrame::Payload(bytes) => return Ok(Some(PackFragment::Payload(bytes))),
+                EncodeFrame::String(value, depth) => {
+                    if depth > MAX_ENCODE_DEPTH {
+                        return Err(PackError::EncodedLimit);
+                    }
+                    self.push(EncodeFrame::Payload(value.as_bytes()))?;
+                    return size_fragment(value.len(), Some(0x80), 0xD0, 0xD1, 0xD2).map(Some);
+                }
+                EncodeFrame::Values(mut values, depth) => {
+                    if let Some(value) = values.next() {
+                        self.push(EncodeFrame::Values(values, depth))?;
+                        self.push(EncodeFrame::Value(value, depth))?;
+                    }
+                }
+                EncodeFrame::Entries(mut entries, depth) => {
+                    if let Some((key, value)) = entries.next() {
+                        self.push(EncodeFrame::Entries(entries, depth))?;
+                        self.push(EncodeFrame::Value(value, depth))?;
+                        self.push(EncodeFrame::String(key, depth))?;
+                    }
+                }
+                EncodeFrame::Value(value, depth) => {
+                    if depth > MAX_ENCODE_DEPTH {
+                        return Err(PackError::EncodedLimit);
+                    }
+                    let header = match value {
+                        PackValue::Null => PackFragment::header(&[0xC0]),
+                        PackValue::Bool(false) => PackFragment::header(&[0xC2]),
+                        PackValue::Bool(true) => PackFragment::header(&[0xC3]),
+                        PackValue::Int(value) => {
+                            let (marker, width) = if (-16..=127).contains(value) {
+                                (0, 1)
+                            } else if i8::try_from(*value).is_ok() {
+                                (0xC8, 1)
+                            } else if i16::try_from(*value).is_ok() {
+                                (0xC9, 2)
+                            } else if i32::try_from(*value).is_ok() {
+                                (0xCA, 4)
+                            } else {
+                                (0xCB, 8)
+                            };
+                            let raw = value.to_be_bytes();
+                            if marker == 0 {
+                                PackFragment::header(&raw[7..])
+                            } else {
+                                let mut bytes = [0; 9];
+                                bytes[0] = marker;
+                                bytes[1..=width].copy_from_slice(&raw[8 - width..]);
+                                PackFragment::Header {
+                                    bytes,
+                                    len: width + 1,
+                                }
+                            }
+                        }
+                        PackValue::Float(value) => {
+                            let mut bytes = [0; 9];
+                            bytes[0] = 0xC1;
+                            bytes[1..].copy_from_slice(&value.to_be_bytes());
+                            PackFragment::Header { bytes, len: 9 }
+                        }
+                        PackValue::Bytes(bytes) => {
+                            self.push(EncodeFrame::Payload(bytes))?;
+                            return size_fragment(bytes.len(), None, 0xCC, 0xCD, 0xCE).map(Some);
+                        }
+                        PackValue::String(value) => {
+                            self.push(EncodeFrame::String(value, depth))?;
+                            continue;
+                        }
+                        PackValue::List(values) => {
+                            self.push(EncodeFrame::Values(values.iter(), depth + 1))?;
+                            return size_fragment(values.len(), Some(0x90), 0xD4, 0xD5, 0xD6)
+                                .map(Some);
+                        }
+                        PackValue::Map(entries) => {
+                            self.push(EncodeFrame::Entries(entries.iter(), depth + 1))?;
+                            return size_fragment(entries.len(), Some(0xA0), 0xD8, 0xD9, 0xDA)
+                                .map(Some);
+                        }
+                        PackValue::Struct { tag, fields } => {
+                            if fields.len() > 15 {
+                                return Err(PackError::EncodedLimit);
+                            }
+                            self.push(EncodeFrame::Values(fields.iter(), depth + 1))?;
+                            PackFragment::header(&[0xB0 | fields.len() as u8, *tag])
+                        }
+                    };
+                    return Ok(Some(header));
+                }
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for PackFragments<'a> {
+    type Item = Result<PackFragment<'a>, PackError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.fragment() {
+            Ok(fragment) => fragment.map(Ok),
+            Err(error) => {
+                self.stack.clear();
+                Some(Err(error))
             }
         }
     }
@@ -378,6 +580,114 @@ mod tests {
         let mut input = bytes.as_slice();
         assert_eq!(unpack(&mut input).unwrap(), v);
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn response_fragments_match_pack_for_all_markers_and_borrow_payloads() {
+        let mut values = vec![
+            PackValue::Null,
+            PackValue::Bool(false),
+            PackValue::Bool(true),
+        ];
+        for value in [
+            i64::MIN,
+            i32::MIN as i64 - 1,
+            i32::MIN as i64,
+            -32769,
+            -32768,
+            -129,
+            -128,
+            -17,
+            -16,
+            0,
+            127,
+            128,
+            255,
+            256,
+            32767,
+            32768,
+            i32::MAX as i64,
+            i32::MAX as i64 + 1,
+            i64::MAX,
+        ] {
+            values.push(PackValue::Int(value));
+        }
+        for value in [-0.0, 1.5, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            values.push(PackValue::Float(value));
+        }
+        for len in [0, 1, 15, 16, 255, 256, 65535, 65536] {
+            values.push(PackValue::String("x".repeat(len)));
+            values.push(PackValue::Bytes(vec![3; len]));
+            values.push(PackValue::List(vec![PackValue::Null; len]));
+            values.push(PackValue::Map(
+                (0..len).map(|_| ("k".into(), PackValue::Null)).collect(),
+            ));
+        }
+        values.push(PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::List(values[..25].to_vec())],
+        });
+        for value in values {
+            let mut expected = Vec::new();
+            pack(&value, &mut expected);
+            let mut actual = Vec::new();
+            for fragment in PackFragments::new(&value).unwrap() {
+                actual.extend_from_slice(fragment.unwrap().as_slice());
+            }
+            assert_eq!(actual, expected);
+        }
+        let value = PackValue::Map(vec![(
+            "borrowed key".into(),
+            PackValue::String("borrowed value".into()),
+        )]);
+        let PackValue::Map(entries) = &value else {
+            unreachable!()
+        };
+        let PackValue::String(text) = &entries[0].1 else {
+            unreachable!()
+        };
+        let pointers: Vec<_> = PackFragments::new(&value)
+            .unwrap()
+            .filter_map(|fragment| match fragment.unwrap() {
+                PackFragment::Payload(bytes) => Some(bytes.as_ptr()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pointers, [entries[0].0.as_ptr(), text.as_ptr()]);
+    }
+
+    #[test]
+    fn response_fragment_stack_is_depth_bounded_and_errors_are_terminal() {
+        let mut nested = PackValue::Null;
+        for _ in 0..MAX_ENCODE_DEPTH {
+            nested = PackValue::Map(vec![("k".into(), nested)]);
+        }
+        let mut fragments = PackFragments::new(&nested).unwrap();
+        let mut peak_stack = 0;
+        while let Some(fragment) = fragments.next() {
+            fragment.unwrap();
+            peak_stack = peak_stack.max(fragments.stack.len());
+        }
+        assert!(peak_stack <= 2 * MAX_ENCODE_DEPTH + 3);
+        let too_deep = PackValue::List(vec![nested]);
+        let mut fragments = PackFragments::new(&too_deep).unwrap();
+        let error = fragments.find_map(Result::err);
+        assert_eq!(error, Some(PackError::EncodedLimit));
+        assert!(fragments.next().is_none());
+        let invalid_struct = PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::Null; 16],
+        };
+        assert!(matches!(
+            PackFragments::new(&invalid_struct).unwrap().next(),
+            Some(Err(PackError::EncodedLimit))
+        ));
+        if usize::BITS > 32 {
+            assert!(matches!(
+                size_fragment(usize::MAX, Some(0x80), 0xD0, 0xD1, 0xD2),
+                Err(PackError::EncodedLimit)
+            ));
+        }
     }
 
     #[test]

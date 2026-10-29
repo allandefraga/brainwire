@@ -1,4 +1,17 @@
-# Local Cypher queries
+# Run Cypher queries
+
+Choose how to connect before running a query:
+
+| Your task | Use |
+| --- | --- |
+| Query a running server | A Bolt client such as the [Python helper](python-package.md) |
+| Query local database files | `brainwire cypher`, with the server stopped |
+| Inspect the running graph | The [connected TUI](connected-status.md), which is read-only |
+
+The local CLI needs exclusive access to its RocksDB directory. For the fastest
+runnable server example, start with the [Docker guide](container.md).
+
+## Run a local example
 
 `brainwire cypher` runs the [supported Cypher](#supported-cypher) against an embedded
 RocksDB database on this computer. Each successful query commits its writes
@@ -6,10 +19,10 @@ atomically; an execution error discards that query's staged graph changes.
 Separate command invocations reopen the same directory and see committed data.
 This command is separate from the synthetic `shell --demo` interface.
 
-Build from the standalone repository:
+From the repository root, fetch dependencies once and build the CLI:
 
 ```sh
-cd /Users/fraga/Documents/brainwire
+cargo fetch --locked
 cargo build --locked --offline -p brainwire-server --bin brainwire
 ```
 
@@ -33,6 +46,8 @@ BRAINWIRE_MEMORY_CACHE=64MiB BRAINWIRE_MEMORY_MEMTABLES=16MiB \
   --query 'MATCH (c:Customer {entity_id: $id}) RETURN c.name AS name' \
   --params '{"id":"demo-c1"}'
 ```
+
+## Read results and handle errors
 
 The output is JSON with `fields` and `rows`. Scalars, lists and maps use normal
 JSON values. A returned node has an explicit envelope with `type: "node"`,
@@ -110,9 +125,11 @@ materialized and subject to conservative accounting.
 
 ## Supported Cypher
 
-92 read queries return identical results on Brainwire and Neo4j 5
-(`crates/server/tests/differential.py`, synthetic data). Everything below is
-implemented; anything else returns an explicit error.
+The clauses and functions below describe the current implementation. The
+[fixed differential harness](../crates/server/tests/differential.py) compares
+synthetic queries with Neo4j; an older passing run does not prove compatibility
+for a new binary or every query shape. Test the queries your application uses.
+Unsupported forms return an error.
 
 **Clauses.** `MATCH`, `OPTIONAL MATCH`, `WHERE`, `WITH` (`DISTINCT`, `WHERE`,
 `ORDER BY`, `SKIP`, `LIMIT`, aggregation mid-query), `RETURN` (same options,
@@ -154,6 +171,11 @@ floating-point arithmetic, so this is not exact decimal arithmetic or financial
 rounding. The three-argument rounding-mode form is not supported. The zero vs
 positive precision distinction follows the [Cypher numeric function semantics](https://neo4j.com/docs/cypher-manual/current/functions/mathematical-numeric/).
 
+**Regular expressions.** `text =~ pattern` matches the whole string using a
+bounded Rust regex subset. Pass patterns as parameters. Java-specific
+lookaround and backreferences are unsupported. See the [regex
+contract](cypher-regex.md) for flags, memory, errors and performance limits.
+
 **Aggregates.** `count`, `sum`, `avg`, `min`, `max`, `collect`, `stdev`,
 `stdevp`, `percentileCont`, `percentileDisc`, with `DISTINCT` and grouping.
 
@@ -178,8 +200,8 @@ returned as Bolt Node, Relationship and Path structures (JSON envelopes with
   generates one.
 
 **Not supported.** `CALL { }` subqueries, `EXISTS { }` subquery syntax (use
-`exists(pattern)` or a pattern predicate), pattern comprehensions, regex
-`=~`, `FOREACH`, `LOAD CSV`, temporal and spatial types, and aggregates
+`exists(pattern)` or a pattern predicate), pattern comprehensions,
+`FOREACH`, `LOAD CSV`, temporal and spatial types, and aggregates
 inside `size()`. Full Cypher, range/vector search and ANN remain separate
 work.
 
@@ -187,8 +209,9 @@ Whole relationship `SET` is not available; create or update edge properties
 with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r` removes the matched
 relationship, preserves endpoint nodes and respects graph write authorization.
 
-The executor streams read pipelines; writes and the final result stay
-materialized. `memory.query` enforces conservative accounting rather than a
+Some read pipelines process intermediate rows incrementally; writes and the
+final result remain materialized. This is not demand-driven Bolt execution for
+every query. `memory.query` enforces conservative accounting rather than a
 hard RSS ceiling. Optional graph-scoped authorization and connected
 ontology/memory/index inspection are implemented. The durable Bolt server
 uses the same executor and store.
@@ -246,7 +269,8 @@ is fused into one node write per row when no value reads `n`.
 
   Pass the last `entity_id` of each page as `$after`.
 - Batch writes with `UNWIND $rows AS row MERGE (n:Label {entity_id: row.id})
-  SET n.a = row.a`, 500 to 1000 rows per query.
+  SET n.a = row.a`. Start with small batches, measure their memory/latency and
+  increase only within the configured query budget.
 - Filter early and anchor on the most selective node; a bound or
   `entity_id`-keyed node makes every later hop a seek.
 

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Brainwire</title>
+  <desc id="desc">A bright green connected B monogram.</desc>
+  <g stroke="#77FF5A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M34 26v108M34 26h54l32 27-32 27H34m54 0 32 27-32 27H34"/>
+    <path d="m34 26 54 54-54 54" stroke-opacity=".35" stroke-width="3"/>
+  </g>
+  <g fill="#77FF5A">
+    <circle cx="34" cy="26" r="8"/><circle cx="88" cy="26" r="8"/>
+    <circle cx="120" cy="53" r="8"/><circle cx="88" cy="80" r="10"/>
+    <circle cx="34" cy="80" r="8"/><circle cx="120" cy="107" r="8"/>
+    <circle cx="88" cy="134" r="8"/><circle cx="34" cy="134" r="8"/>
+  </g>
+</svg>

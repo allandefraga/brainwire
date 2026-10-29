@@ -3,7 +3,7 @@
 //! ponytail: pool reservations keep each transaction's high-water estimate until
 //! it ends; replace with allocator-aware leases when exact live accounting exists.
 use super::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::mem::size_of;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -131,6 +131,16 @@ impl Default for ExecutionLimits {
     }
 }
 
+enum RegexCache {
+    Empty,
+    Cached {
+        pattern: String,
+        regex: regex_automata::meta::Regex,
+        credit: usize,
+    },
+    Disabled,
+}
+
 pub(super) struct Budget<'a> {
     limit: usize,
     used: Cell<usize>,
@@ -139,6 +149,7 @@ pub(super) struct Budget<'a> {
     reservation: Option<&'a Reservation>,
     deadline: Option<Instant>,
     ticks: Cell<u32>,
+    regex_cache: RefCell<RegexCache>,
 }
 impl<'a> Budget<'a> {
     pub fn new(limits: ExecutionLimits, reservation: Option<&'a Reservation>) -> Self {
@@ -152,8 +163,53 @@ impl<'a> Budget<'a> {
                 .timeout
                 .and_then(|timeout| Instant::now().checked_add(timeout)),
             ticks: Cell::new(0),
+            regex_cache: RefCell::new(RegexCache::Empty),
         }
     }
+    pub fn cached_regex_match(&self, pattern: &str, text: &str) -> Option<bool> {
+        let mut cache = self.regex_cache.borrow_mut();
+        match &*cache {
+            RegexCache::Cached {
+                pattern: found,
+                regex,
+                ..
+            } if found == pattern => return Some(regex.is_match(text.as_bytes())),
+            RegexCache::Cached { .. } => {}
+            _ => return None,
+        }
+        // Free the native cache before returning its exact retained credit.
+        // Disable refill for this RUN to avoid pattern-dependent cache thrash.
+        let old = std::mem::replace(&mut *cache, RegexCache::Disabled);
+        drop(cache);
+        if let RegexCache::Cached {
+            pattern,
+            regex,
+            credit,
+        } = old
+        {
+            drop(regex);
+            drop(pattern);
+            self.retained.set(
+                self.retained
+                    .get()
+                    .checked_sub(credit)
+                    .expect("regex cache owns its retained credit"),
+            );
+        }
+        None
+    }
+    pub fn regex_cache_empty(&self) -> bool {
+        matches!(*self.regex_cache.borrow(), RegexCache::Empty)
+    }
+    pub fn store_regex(&self, pattern: String, regex: regex_automata::meta::Regex, credit: usize) {
+        debug_assert!(self.regex_cache_empty());
+        *self.regex_cache.borrow_mut() = RegexCache::Cached {
+            pattern,
+            regex,
+            credit,
+        };
+    }
+
     pub fn charge(&self, bytes: usize) -> Result<(), ExecError> {
         self.tick()?;
         let used = self.used.get().saturating_add(bytes);
@@ -245,6 +301,7 @@ impl<'a> Budget<'a> {
             reservation,
             deadline: self.deadline,
             ticks: Cell::new(0),
+            regex_cache: RefCell::new(RegexCache::Empty),
         }
     }
     pub fn high_water(&self) -> usize {
@@ -388,6 +445,30 @@ pub(super) fn value_bytes(value: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regex_cache_credit_is_exact_and_worker_starts_empty() {
+        let parent = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 4096,
+                timeout: None,
+            },
+            None,
+        );
+        parent.retain(77).unwrap();
+        assert!(parent.try_retain_cache(128, 0).unwrap());
+        let regex = regex_automata::meta::Regex::new(r"\Aa\z").unwrap();
+        parent.store_regex("a".into(), regex, 128);
+        assert_eq!(parent.cached_regex_match("a", "a"), Some(true));
+        let worker = parent.fork(1, None);
+        assert!(worker.regex_cache_empty());
+        assert_eq!(worker.cached_regex_match("a", "a"), None);
+        assert_eq!(parent.cached_regex_match("b", "a"), None);
+        assert!(!parent.regex_cache_empty());
+        assert_eq!(parent.remaining(), 4096 - 77);
+        assert_eq!(parent.cached_regex_match("a", "a"), None);
+    }
+
     #[test]
     fn optional_cache_admission_skips_pool_pressure_without_partial_charge() {
         let pool = Arc::new(QueryMemoryPool::new(1000));

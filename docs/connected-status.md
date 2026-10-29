@@ -1,181 +1,171 @@
 # Inspect a running graph in the connected workspace
 
-`brainwire shell --connect IP:PORT --graph NAME` opens one read-only workspace
-with four panes: **Ontology, Memory, Indexes and Graph**. Ontology is the initial
-pane. Press Tab/Shift+Tab or `1`/`2`/`3`/`4` to switch panes, `r` to refresh the
-active pane and `q` to exit. Each pane is fetched only when first visited and
-keeps its own selection, sample age and stale status. All data comes through
-authenticated Bolt; the shell never opens the running server's RocksDB files.
+The connected TUI reads a running Brainwire server over Bolt. It has four panes:
+**Ontology, Memory, Indexes and Graph**. It never opens the server's RocksDB files.
+The workspace is read-only; use Python or the CLI to write data.
 
-From the repository root, with a built binary and an existing running server:
+## Open the workspace
+
+After starting the [Docker demo](container.md#fastest-local-start), use either a
+locally built binary:
+
+```sh
+./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo
+```
+
+or the binary inside its running container:
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire shell --connect 127.0.0.1:7687 --graph demo
+```
+
+| Key | Action |
+| --- | --- |
+| `Tab` / `Shift+Tab`, or `1`–`4` | Switch panes |
+| Up/Down, `PgUp` / `PgDn` | Move/scroll the current selection |
+| `r` | Refresh the active pane |
+| `?` | Explain the current pane |
+| `q` | Exit |
+
+Add `--lang pt-BR` for Portuguese. Each pane loads on its first visit and shows
+its sample age. There is no automatic polling. A denied Memory view does not
+prevent you from using authorized Ontology, Indexes or Graph views.
+
+## Select a graph neighborhood
+
+Populate the demo using the [README Python example](../README.md#write-from-python),
+then select one source and one outgoing relationship signature:
+
+```sh
+./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo \
+  --node-label Customer --entity-id customer-1 \
+  --edge-type IN_SEGMENT --target-label Segment
+```
+
+The Graph pane uses those four flags for the whole terminal session. Omitting
+them leaves the other panes usable; Graph shows an explanation of the missing
+selection. Selecting a row does not expand it or change the source.
+
+![Connected Graph renderer using synthetic node and relationship data](design/assets/connected-graph-constellation-preview.png)
+
+This preview uses synthetic data rendered by the real TUI widgets. It is not a
+capture from a live database. In a connected session, every displayed link comes
+from the completed server sample.
+
+The server ontology is checked first. The source existence and outgoing targets
+are then read in one transaction. At most **20 relationship rows** are kept; a
+21st row is used only to decide whether to show MORE AVAILABLE. This is not full
+graph degree, arbitrary graph exploration or a count of distinct neighbors.
+Parallel relationships may repeat a target. The drawing groups duplicates and
+preserves self-links; the list retains each sampled relationship row.
+
+A missing source is displayed as missing. A source with no rows for the selected
+signature may still have other links. The view reads identity strings, not
+arbitrary node/edge properties. Type names must be 1–128-byte ASCII identifiers;
+entity IDs are nonempty strings up to 1,024 bytes and are passed as parameters.
+
+## Connect to a protected server
+
+The address is numeric `IP:PORT`, such as `127.0.0.1:7687` or `[::1]:7687`.
+It is not a Bolt URL or DNS name. Select a private credential file:
 
 ```sh
 export BRAINWIRE_BOLT_AUTH_FILE=/private/path/observer.json
-./target/release/brainwire shell --connect 127.0.0.1:7687 --graph tickets \
-  --node-label Ticket --entity-id '["tenant-0","zendesk-main","ticket","0"]' \
-  --edge-type HAS_COMMENT --target-label TicketComment
-./target/release/brainwire shell --connect 127.0.0.1:7687 --graph tickets --lang pt-BR \
-  --node-label Ticket --entity-id '["tenant-0","zendesk-main","ticket","0"]' \
-  --edge-type HAS_COMMENT --target-label TicketComment
+./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo
 ```
 
-The entity ID above is the first ticket produced by the synthetic external application
-fixture and adapter. Quote it as shown; it is an identity value, not a Cypher
-expression. The four Graph flags configure one fixed neighborhood for this
-terminal session. Without them, the other three panes work normally; visiting
-Graph shows a configuration error and leaves navigation available.
-
-The explicit standalone views remain available:
+See [protected Bolt connections](bolt-auth.md) for the file format. To create a
+new synthetic policy with a telemetry observer:
 
 ```sh
-./target/release/brainwire shell --connect 127.0.0.1:7687 --graph tickets --view memory
-./target/release/brainwire shell --connect 127.0.0.1:7687 --graph tickets --view indexes --lang pt-BR
-./target/release/brainwire shell --connect 127.0.0.1:7687 --graph tickets \
-  --snapshot --width 120 --height 30
+python3 -m examples.python.create_service_tokens /private/path/auth \
+  --graph demo --include-observer
 ```
 
-A workspace snapshot captures its initial Ontology pane. Use `--view graph`
-with the four Graph flags for a plain neighborhood frame, or `--view memory`
-and `--view indexes` for those standalone frames. `--view workspace` explicitly
-selects the same workspace as the connected default.
+The generator does not print tokens or overwrite an existing directory. The
+server must use the matching generated policy. Ordinary graph readers/writers
+do not gain telemetry access from possessing a graph grant.
 
-The address is a numeric IP and port, including bracketed IPv6, rather than a
-Bolt URL or DNS name. Credentials use the private JSON file described in
-[protected Bolt connections](bolt-auth.md). The native TUI still uses plaintext
-Bolt: run it on trusted loopback or the trusted database side of an encrypted
-tunnel. The [optional TLS edge](protected-transport.md) is qualified for Python
-clients, not a native TUI TLS connection. Internal graph/schema identifiers
-remain English; interface labels and explanations support English and `pt-BR`.
-There is no connected query editor, graph selector, property editor or import-job
-controller yet. Other real panels still require offline access.
+Native TUI traffic is plaintext Bolt. Keep it on trusted loopback or the trusted
+side of an encrypted tunnel. The [optional TLS proxy](protected-transport.md)
+is qualified for Python clients, not native TUI TLS. The connected workspace has
+no query editor, graph selector, property editor or import controller.
 
 ## Memory values and permissions
 
-Memory uses exactly one row from:
-
-```cypher
-CALL db.memory()
-YIELD poolLimitBytes, poolReservedBytes, poolPeakBytes, poolRejections
-RETURN poolLimitBytes, poolReservedBytes, poolPeakBytes, poolRejections
-```
-
-For a fresh local policy, `python3 -m examples.python.create_service_tokens
-/private/path/auth --graph tickets --include-observer` adds an explicit read-only
-`observer.json` credential with the required instance-telemetry grant. Select that
-file with `BRAINWIRE_BOLT_AUTH_FILE`; ordinary reader/writer/health credentials do
-not acquire this grant. The generator never prints tokens or overwrites a directory.
+Memory fetches `CALL db.memory()` and shows four query-pool counters:
 
 | Counter | Meaning |
 | --- | --- |
-| LIMIT | Configured `memory.query` reservation budget shared by every graph on this server |
-| RESERVED | Reservations accounted now, including the query collecting this sample |
-| PEAK | Highest accounted reservation since this server process started |
-| REJECTIONS | Rejected reservation attempts since this process started |
+| LIMIT | `memory.query` budget shared across this server's graphs |
+| RESERVED | Accounted reservations now, including the sampling query |
+| PEAK | Highest accounted reservation since server startup |
+| REJECTIONS | Rejected reservation attempts since startup |
 
-These are query reservation counters, **not process RSS, total host RAM,
-RocksDB cache use or storage memtables**. The server and CLI do not report
-unknown values as zero. A server without an attached shared pool returns all
-null values, displayed as unknown. Restart resets the process-lifetime peak and
-rejection counters. A graph name selects the authorized query context; it does
-not make these counters graph-specific.
+These values are not process RSS, host RAM, RocksDB cache or memtable usage.
+A graph name selects the authorized context; it does not make the pool counters
+per-graph. Missing pool telemetry is shown as unknown. Restart resets peak and
+rejection counters.
 
-The principal needs read access to the graph **and `instance_admin: true`**.
-Ordinary graph readers can inspect ontology and indexes without gaining
-process-wide telemetry. Failure to fetch memory does not affect those views.
+The user needs graph read access **and `instance_admin: true`** for this pane.
+A normal graph reader can still inspect ontology, indexes and the selected graph
+sample. See [memory budgets and diagnostics](memory-defaults.md) for component
+budgets and their current limitations.
 
 ## Index declarations and readiness
 
-Indexes uses the existing graph-scoped procedure:
+Indexes fetches `CALL db.indexes()` with `label`, `property` and `state`.
+Select and scroll declarations with Up/Down or PgUp/PgDn:
 
-```cypher
-CALL db.indexes() YIELD label, property, state RETURN label, property, state
-```
+| Server state | Display | Meaning |
+| --- | --- | --- |
+| `scalar_equality_ready` | READY | A supported scalar index is ready |
+| `populating` | POPULATING | Online backfill has not completed |
+| `declared_only` | DECLARED | Declaration exists; queries use scans |
 
-Up/Down or PgUp/PgDn selects a declaration. The visible range and total count
-identify rows outside the viewport. `scalar_equality_ready` displays READY;
-`declared_only` displays DECLARED. The pane explains the selected state.
-Readiness is the transaction catalog's scalar-index marker, not a per-field
-build-progress percentage or a promise of vector/range/list indexes. Ready
-scalar equality access supports strings, Booleans and finite numbers. Other
-value kinds do not acquire indexed access merely because their field is listed.
-Legacy declarations without a ready marker use safe label scans until ontology
-reapplication/backfill. Inspecting a declaration does not build or change it.
-
-## Typed outgoing Graph sample
-
-![Connected graph renderer with a synthetic node and relationships](design/assets/connected-graph-preview.png)
-
-This image uses a synthetic fixture rendered by the actual TUI widgets; it is not
-a capture of a running server. In a connected session, the same view uses the
-server sample described below.
-
-Graph first checks the requested relationship signature against the real server
-ontology. It then queries source existence and matching outgoing targets in one
-read transaction. `--node-label`, `--edge-type` and `--target-label` accept
-1..128-byte ASCII identifiers starting with a letter or underscore; `--entity-id`
-accepts a nonempty value up to 1,024 bytes and is passed as a query parameter.
-The pane reads identity strings only, never arbitrary properties or mutations.
-
-The target query uses `LIMIT 21`: the pane keeps at most **20 relationship rows**
-and sets **MORE AVAILABLE / MAIS DISPONÍVEIS** only when it actually observes the
-extra row. It does not calculate full degree or traverse other types/directions.
-Parallel relationships can repeat the same target ID, so the displayed count is
-not a count of distinct neighbors. A missing source is marked not found without
-inventing a node; a present source with no matching rows does not establish that
-it has no other graph connections.
-
-Up/Down and PgUp/PgDn select and scroll the sampled relationship rows. On a
-wide terminal the graph draws the source and target IDs as node cards, arrows
-for the sampled outgoing links, and an inspector for the selected row. Repeated
-target IDs are grouped visually with a multiplicity; the list retains every
-relationship row. Self-links remain attached to the source node. The graph
-window follows the selected row, while a compact terminal shows the selected
-source → relationship → target and a scrollable list. At 120 columns the
-workspace hides its side navigation to give the graph more room; the numbered
-shortcuts remain available. Selection does not expand or change the configured
-source. Every displayed connection comes from the completed server sample.
-Graph requires ordinary graph read access, not instance-administrator permission.
-Target IDs are checked as nonempty strings up to 1,024 bytes; malformed fields,
-excess rows and incomplete responses fail rather than becoming a partial sample.
+The state is not a percentage or a promise that all property types/predicates
+are indexed. Equality and `IN` support scalar strings, Booleans and finite
+numbers; supported string ranges and prefixes can also use index candidates.
+Numeric ranges use scans for correctness. See the [index guide](indexes.md)
+for exact planner rules. Viewing a declaration does not build or modify it.
 
 ## Refresh, bounds and failures
 
-All panes show the source server, graph and sample age. A failed refresh retains
-the previous data and original age with **STALE / DESATUALIZADO**. Successful
-refresh clears that status and retains selection by identity when possible.
-Interactive workspace initial failures show an error pane without fabricated
-data, so a reader denied Memory can still open Ontology, Indexes or Graph.
-An initial workspace snapshot failure returns a nonzero exit status. Standalone
-views retain their initial-failure exit behavior.
+Successful refresh replaces the selected pane's data and keeps selection by
+identity where possible. Failed refresh preserves the previous sample with its
+original age and a STALE label. Initial interactive failures show an error pane
+without invented data. An initial snapshot failure exits with an error.
 
-Refresh is synchronous: input waits until the fetch returns. The default total
-network deadline is 3,000 ms; `--timeout-ms` accepts 1..10000 and includes
-connection, authentication, partial reads/writes and result completion. Local
-rendering and OS scheduling are not hard real-time guarantees. There is no
-background polling or automatic graph discovery.
+Fetching is synchronous: keys wait until the request returns. `--timeout-ms`
+defaults to 3,000 and accepts 1–10,000; it covers connection, authentication,
+partial IO and completion. Local scheduling/rendering are not hard realtime.
 
-Memory accepts four nonnegative integer counters, or four nulls, one record
-and successful completion within **64 KiB aggregate response bytes**. Indexes
-accept at most **200 unique label/property rows and 128 KiB aggregate response
-bytes**. Larger, malformed, duplicate, incomplete or trailing responses fail;
-the shell never presents a partial result as complete. Graph's existence and
-neighborhood transaction has a **128 KiB aggregate response limit**, in addition
-to the separate bounded schema precheck; both share the total fetch deadline.
-Display strings are escaped and bounded. Wire limits are not exact heap/RSS limits, nor do they
-turn the server's materialized query results into a streaming executor.
+| Fetch | Bound |
+| --- | --- |
+| Memory | One row, four nonnegative counters or four nulls, 64 KiB aggregate response |
+| Indexes | At most 200 unique label/property rows, 128 KiB aggregate response |
+| Graph | At most 20 displayed relationship rows, 128 KiB for existence/neighborhood transaction plus a separate bounded schema precheck |
 
-Plain snapshots accept 80..240 columns and 24..80 rows. Interactive views also
-remain safe in smaller terminals, although explanations may not fit. `NO_COLOR`
-removes color. The chosen strong-green/cyan Observatory identity is retained.
+Malformed, oversized, duplicate or incomplete responses fail instead of being
+shown as a complete sample. Display strings are escaped and bounded. These wire
+caps are not heap/RSS limits and do not make the server executor fully streaming.
 
-The constrained pilot profile uses an 8 MiB encoded request cap, a 16 MiB decoded
-request allowance and a 300,000 ms authenticated IO budget. These are server
-settings, independent of the TUI's at-most-10-second fetch deadline and response
-caps. Configure Python pool reuse with `liveness_check_timeout=30`; see
-[connection limits](connection-limits.md), [protected transport](protected-transport.md)
-and the [MVP quickstart](mvp-quickstart.md). None of these limits defines total RSS.
+## Snapshots and other views
 
-For the complete schema contract and separate bounds, see
-[connected ontology](connected-ontology.md). The [October 13 real terminal captures](design/assets/2026-10-13-beta/README.md)
-show the four-pane workspace backed by 100,000 synthetic nodes, including
-permission denial, stale recovery and a bounded high-degree Graph sample.
+```sh
+./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo \
+  --view memory --snapshot --width 120 --height 30
+./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo \
+  --view indexes --lang pt-BR
+```
+
+Use `--view graph` with the four selection flags for a neighborhood snapshot.
+The connected default `--view workspace` snapshot captures Ontology. Plain
+snapshots accept 80–240 columns and 24–80 rows; `NO_COLOR` removes color.
+
+See [connected ontology](connected-ontology.md) for the schema contract,
+[connection limits](connection-limits.md) for Python pool reuse, and
+[TUI modes](tui-demo.md) for the separate synthetic and offline inspectors.
+The [dated terminal capture report](design/assets/2026-10-13-beta/README.md)
+records a specific older 100,000-node synthetic run, not a current capacity claim.

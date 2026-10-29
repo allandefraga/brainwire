@@ -1,8 +1,9 @@
 //! Snapshot-isolated transactions with an in-house write overlay and a
 //! committer that lets the first committer win (spec 1.4). The crate does not
 //! expose WriteBatchWithIndex, hence the overlay. The committer's conflict
-//! history is bounded (`StoreConfig::conflict_history_keys`): once it holds
-//! more keys than the cap, the oldest commits are evicted even if a
+//! history is bounded by `StoreConfig::conflict_history_keys` and a conservative
+//! 64 MiB retained-size budget per database. Once either limit forces pruning,
+//! the oldest commits are evicted even if a
 //! still-open transaction could have depended on them. `pruned_through`
 //! tracks the highest commit sequence ever evicted — on every eviction, safe
 //! or not, and on recovery from a poisoned lock — so a transaction old
@@ -57,6 +58,9 @@ pub enum TxnError {
 
 type Key = (Cf, Vec<u8>);
 
+// Conservative retention accounting per database, separate from overlay memory.
+const MAX_CONFLICT_HISTORY_BYTES: usize = 64 << 20;
+
 pub(crate) struct Committer {
     state: Mutex<CommitState>,
 }
@@ -66,6 +70,7 @@ impl Committer {
         Committer {
             state: Mutex::new(CommitState {
                 cap: conflict_history_keys,
+                byte_cap: MAX_CONFLICT_HISTORY_BYTES,
                 seq: sequence.unwrap_or(0),
                 tracked: sequence.is_some(),
                 ..CommitState::default()
@@ -121,6 +126,10 @@ struct CommitState {
     /// Running total of keys held across `history`, kept in step with it so
     /// checking the cap never has to sum the deque.
     history_keys: usize,
+    /// Conservative key/container estimate, including both copies of each key.
+    /// The deque backing allocation is counted separately by `retained_bytes`.
+    history_bytes: usize,
+    byte_cap: usize,
     active: BTreeMap<u64, usize>,
     /// Start sequences of active transactions that have written or recorded
     /// a dependency. Read-only snapshots never check conflicts, so history
@@ -152,43 +161,113 @@ impl CommitState {
         self.prune();
     }
 
-    /// Evicts history in commit-sequence order: first everything at or below
-    /// the oldest active start (safe — conflict needs a commit sequence
-    /// strictly after a transaction's start, so no active or future
-    /// transaction can conflict on an entry this old), then, if the cap is
-    /// still exceeded, the oldest remaining entries regardless (unsafe: some
-    /// active transaction might have depended on one of them). Every
-    /// eviction here, safe or not, raises `pruned_through` — harmless for
-    /// the safe ones, since by construction no active transaction's start
-    /// can be below them anyway — but it's the unsafe branch that actually
-    /// matters: only it can push `pruned_through` past a still-active
-    /// transaction's start, which is what makes that transaction fail
-    /// closed at commit instead of silently passing a check that can no
-    /// longer be made precisely.
+    // The BTreeMap and history keep separate key copies. Include their inline
+    // fields plus a conservative per-key allowance for B-tree node pointers,
+    // padding and allocation metadata. Allocator slack is not an RSS guarantee.
+    fn key_bytes(key: &Key) -> usize {
+        key.1.len().saturating_mul(2).saturating_add(
+            2 * std::mem::size_of::<Key>()
+                + std::mem::size_of::<u64>()
+                + 8 * std::mem::size_of::<usize>(),
+        )
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.history_bytes.saturating_add(
+            self.history
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(u64, Vec<Key>)>()),
+        )
+    }
+
+    fn discard_history(&mut self, through: u64) {
+        self.history = VecDeque::new();
+        self.last_write.clear();
+        self.history_keys = 0;
+        self.history_bytes = 0;
+        self.pruned_through = self.pruned_through.max(through);
+    }
+
+    fn evict_oldest(&mut self) {
+        let (seq, keys) = self.history.pop_front().expect("history is not empty");
+        self.history_keys -= keys.len();
+        for key in &keys {
+            self.history_bytes -= Self::key_bytes(key);
+            if self.last_write.get(key) == Some(&seq) {
+                self.last_write.remove(key);
+            }
+        }
+        self.pruned_through = self.pruned_through.max(seq);
+        if self.history.is_empty() {
+            self.history = VecDeque::new();
+        }
+    }
+
+    /// Called only after the durable write succeeds. A commit too large to
+    /// retain invalidates older conflict checks without rejecting a commit
+    /// that has already happened or allocating its key clones.
+    fn record_history(&mut self, seq: u64, writes: &BTreeMap<Key, Option<Vec<u8>>>) {
+        let marker = (Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec());
+        let bytes = writes.keys().fold(Self::key_bytes(&marker), |sum, key| {
+            sum.saturating_add(Self::key_bytes(key))
+        });
+        let entry_bytes = std::mem::size_of::<(u64, Vec<Key>)>();
+        if bytes.saturating_add(entry_bytes) > self.byte_cap {
+            self.discard_history(seq);
+            return;
+        }
+        while !self.history.is_empty()
+            && self
+                .retained_bytes()
+                .saturating_add(bytes)
+                .saturating_add(entry_bytes)
+                > self.byte_cap
+        {
+            self.evict_oldest();
+        }
+        // Grow geometrically while that backing fits the budget. Reserving
+        // exactly one slot on every commit repeatedly reallocates the deque.
+        let available_slots = self
+            .byte_cap
+            .saturating_sub(self.history_bytes)
+            .saturating_sub(bytes)
+            / entry_bytes;
+        let growth = self.history.capacity().saturating_mul(2).max(4);
+        let reserved = if self.history.len() < self.history.capacity() || growth <= available_slots
+        {
+            self.history.try_reserve(1)
+        } else {
+            self.history.try_reserve_exact(1)
+        };
+        if reserved.is_err() || self.retained_bytes().saturating_add(bytes) > self.byte_cap {
+            self.discard_history(seq);
+            return;
+        }
+        let mut keys = Vec::with_capacity(writes.len() + 1);
+        keys.extend(writes.keys().cloned());
+        keys.push(marker);
+        for key in &keys {
+            self.last_write.insert(key.clone(), seq);
+        }
+        self.history_keys += keys.len();
+        self.history_bytes += bytes;
+        self.history.push_back((seq, keys));
+    }
+
+    /// Evict whole commits in sequence order. Advancing the watermark makes
+    /// any older writer fail closed when precise conflict checks were lost.
     fn prune(&mut self) {
         let horizon = self.active.keys().next().copied().unwrap_or(self.seq);
         let writer_horizon = self.writers.keys().next().copied().unwrap_or(self.seq);
         let hard_cap = self.cap.saturating_mul(8);
         while let Some(&(front_seq, _)) = self.history.front() {
-            // Safe for everyone; over the cap, safe for every writer (only
-            // read-only snapshots predate it); far over the cap, forced.
             let safe = front_seq <= horizon;
             let readers_only = front_seq <= writer_horizon && self.history_keys > self.cap;
-            let forced = self.history_keys > hard_cap;
+            let forced = self.history_keys > hard_cap || self.retained_bytes() > self.byte_cap;
             if !(safe || readers_only || forced) {
                 break;
             }
-            let (commit_seq, keys) = self
-                .history
-                .pop_front()
-                .expect("front() returned Some above");
-            self.history_keys -= keys.len();
-            for key in &keys {
-                if self.last_write.get(key) == Some(&commit_seq) {
-                    self.last_write.remove(key);
-                }
-            }
-            self.pruned_through = self.pruned_through.max(commit_seq);
+            self.evict_oldest();
         }
     }
 }
@@ -660,14 +739,8 @@ impl<'db> Txn<'db> {
             db.db.write_opt(batch, &opts).map_err(StoreError::from)?;
             st.seq = seq;
             st.tracked = true;
-            let mut keys: Vec<Key> = self.writes.keys().cloned().collect();
-            // Explicit point/prefix dependencies on metadata still observe it.
-            keys.push((Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec()));
-            for key in &keys {
-                st.last_write.insert(key.clone(), seq);
-            }
-            st.history_keys += keys.len();
-            st.history.push_back((seq, keys));
+            // Explicit point/prefix dependencies include the sequence marker.
+            st.record_history(seq, &self.writes);
         }
         let seq = st.seq;
         st.release(start, self.writer);
@@ -709,6 +782,223 @@ mod tests {
         let res = Resources::new(StoreConfig::for_tests());
         let db = Database::open(dir.path(), &res).unwrap();
         (dir, res, db)
+    }
+
+    fn retained_key_payload_bytes(st: &CommitState) -> usize {
+        st.history
+            .iter()
+            .flat_map(|(_, keys)| keys)
+            .map(|(_, key)| key.len())
+            .sum::<usize>()
+            + st.last_write
+                .keys()
+                .map(|(_, key)| key.len())
+                .sum::<usize>()
+    }
+
+    #[test]
+    fn history_byte_budget_evicts_large_keys_and_preserves_fresh_writer_progress() {
+        let (dir, res, db) = open();
+        db.committer.lock().byte_cap = 2048;
+        let mut writer = db.begin();
+        writer.put(Cf::Node, b"older-writer".to_vec(), b"old".to_vec());
+        let mut reader = db.begin();
+        let mut filler = db.begin();
+        filler.put(Cf::Node, vec![b'x'; 4096], b"durable".to_vec());
+        filler.commit().unwrap();
+        {
+            let st = db.committer.lock();
+            assert!(retained_key_payload_bytes(&st) <= st.byte_cap);
+            assert!(st.history_bytes <= st.byte_cap);
+            assert!(
+                st.history.is_empty(),
+                "oversized commit must not retain key clones"
+            );
+            assert!(st.last_write.is_empty());
+        }
+        assert!(matches!(writer.commit(), Err(TxnError::Conflict)));
+        assert_eq!(reader.get(Cf::Node, &vec![b'x'; 4096]).unwrap(), None);
+        reader.put(Cf::Node, b"late-write".to_vec(), b"old".to_vec());
+        assert!(matches!(reader.commit(), Err(TxnError::Conflict)));
+        let mut fresh = db.begin();
+        fresh.put(Cf::Node, b"fresh".to_vec(), b"yes".to_vec());
+        fresh.commit().unwrap();
+        drop(db);
+        let db = Database::open(dir.path(), &res).unwrap();
+        assert_eq!(
+            db.begin().get(Cf::Node, b"fresh").unwrap(),
+            Some(b"yes".to_vec())
+        );
+        assert_eq!(
+            db.begin().get(Cf::Node, &vec![b'x'; 4096]).unwrap(),
+            Some(b"durable".to_vec())
+        );
+    }
+
+    #[test]
+    fn history_byte_budget_preserves_prefix_conflicts_after_eviction() {
+        let (_dir, _res, db) = open();
+        db.committer.lock().byte_cap = 2048;
+        let mut older = db.begin();
+        assert!(older
+            .scan_prefix_for_update(Cf::Node, b"prefix:")
+            .unwrap()
+            .is_empty());
+        let mut filler = db.begin();
+        let mut key = b"prefix:".to_vec();
+        key.extend_from_slice(&[b'x'; 4096]);
+        filler.put(Cf::Node, key, vec![1]);
+        filler.commit().unwrap();
+        assert!(db.committer.lock().history.is_empty());
+        assert!(matches!(older.commit(), Err(TxnError::Conflict)));
+    }
+
+    #[test]
+    fn zero_history_byte_budget_keeps_commits_durable_and_new_writers_usable() {
+        let (_dir, _res, db) = open();
+        db.committer.lock().byte_cap = 0;
+        let mut old = db.begin();
+        old.put(Cf::Node, b"old".to_vec(), vec![1]);
+        for i in 0..3 {
+            let mut writer = db.begin();
+            writer.put(Cf::Node, vec![i], vec![i]);
+            writer.commit().unwrap();
+            let st = db.committer.lock();
+            assert!(st.history.is_empty());
+            assert!(st.last_write.is_empty());
+            assert_eq!(st.history_bytes, 0);
+            assert_eq!(st.history_keys, 0);
+        }
+        assert!(matches!(old.commit(), Err(TxnError::Conflict)));
+        assert_eq!(db.begin().get(Cf::Node, &[2]).unwrap(), Some(vec![2]));
+    }
+
+    #[test]
+    fn history_byte_accounting_tracks_overwrites_and_releases_all_backing() {
+        let (_dir, _res, db) = open();
+        db.committer.lock().byte_cap = 2048;
+        let mut old = db.begin();
+        old.put(Cf::Node, b"old-writer".to_vec(), vec![1]);
+        let key = vec![b'k'; 128];
+        for value in 0..12 {
+            let mut writer = db.begin();
+            writer.put(Cf::Node, key.clone(), vec![value]);
+            let seq = writer.commit().unwrap();
+            let st = db.committer.lock();
+            let expected = st
+                .history
+                .iter()
+                .flat_map(|(_, keys)| keys)
+                .map(CommitState::key_bytes)
+                .sum::<usize>();
+            assert_eq!(st.history_bytes, expected);
+            assert!(st.retained_bytes() <= st.byte_cap);
+            assert_eq!(st.last_write.get(&(Cf::Node, key.clone())), Some(&seq));
+        }
+        // A pruned earlier overwrite must not remove the latest conflict entry.
+        let mut first = db.begin();
+        first.get_for_update(Cf::Node, &key).unwrap();
+        let mut second = db.begin();
+        second.put(Cf::Node, key, vec![99]);
+        second.commit().unwrap();
+        assert!(matches!(first.commit(), Err(TxnError::Conflict)));
+        assert!(matches!(old.commit(), Err(TxnError::Conflict)));
+        let st = db.committer.lock();
+        assert_eq!(st.history_keys, 0);
+        assert_eq!(st.history_bytes, 0);
+        assert_eq!(st.history.capacity(), 0);
+        assert!(st.last_write.is_empty());
+    }
+
+    #[test]
+    fn history_growth_near_the_byte_limit_preserves_a_fitting_commit() {
+        let writes = BTreeMap::from([((Cf::Node, b"small".to_vec()), Some(vec![1]))]);
+        let marker = (Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec());
+        let bytes = writes.keys().map(CommitState::key_bytes).sum::<usize>()
+            + CommitState::key_bytes(&marker);
+        let mut st = CommitState {
+            byte_cap: bytes + std::mem::size_of::<(u64, Vec<Key>)>(),
+            cap: 1_000_000,
+            ..CommitState::default()
+        };
+        st.record_history(1, &writes);
+        assert_eq!(st.history.len(), 1);
+        assert_eq!(st.history.capacity(), 1);
+        assert_eq!(st.retained_bytes(), st.byte_cap);
+        assert_eq!(st.pruned_through, 0);
+    }
+
+    fn history_growth_workload(commits: usize) -> (Vec<std::time::Duration>, usize, usize) {
+        let mut st = CommitState {
+            byte_cap: MAX_CONFLICT_HISTORY_BYTES,
+            cap: 1_000_000,
+            ..CommitState::default()
+        };
+        st.active.insert(0, 1);
+        st.writers.insert(0, 1);
+        let mut capacity_changes = 0;
+        let mut previous_capacity = 0;
+        let mut timings = Vec::with_capacity(commits);
+        for seq in 1..=commits as u64 {
+            let writes = BTreeMap::from([((Cf::Node, seq.to_be_bytes().to_vec()), Some(vec![1]))]);
+            st.seq = seq;
+            let start = std::time::Instant::now();
+            st.record_history(seq, &writes);
+            timings.push(start.elapsed());
+            let capacity = st.history.capacity();
+            capacity_changes += usize::from(capacity != previous_capacity);
+            previous_capacity = capacity;
+            assert!(st.retained_bytes() <= st.byte_cap);
+        }
+        assert_eq!(st.pruned_through, 0);
+        assert_eq!(st.history.len(), commits);
+        (timings, capacity_changes, st.retained_bytes())
+    }
+
+    #[test]
+    fn small_commit_history_grows_amortized_while_an_old_writer_is_active() {
+        let (_, capacity_changes, _) = history_growth_workload(4096);
+        assert!(
+            capacity_changes <= 16,
+            "capacity changed {capacity_changes} times"
+        );
+    }
+
+    #[test]
+    #[ignore = "opt-in isolated mechanism diagnostic; not an end-to-end benchmark"]
+    fn conflict_history_growth_diagnostic() {
+        for round in 0..7 {
+            let (mut timings, capacity_changes, bytes) = history_growth_workload(16_384);
+            let total: std::time::Duration = timings.iter().sum();
+            timings.sort_unstable();
+            println!("round={round} commits={} total_ns={} p50_ns={} p99_ns={} capacity_changes={capacity_changes} retained_bytes={bytes}",
+                timings.len(), total.as_nanos(), timings[timings.len()/2].as_nanos(), timings[(timings.len()-1)*99/100].as_nanos());
+        }
+    }
+
+    #[test]
+    fn failed_commit_does_not_invalidate_retained_conflict_history() {
+        let (_dir, _res, db) = open();
+        db.committer.lock().byte_cap = 2048;
+        let old = db.begin();
+        let mut seed = db.begin();
+        seed.put(Cf::Node, b"seed".to_vec(), vec![1]);
+        seed.commit().unwrap();
+        let before = {
+            let st = db.committer.lock();
+            (st.seq, st.pruned_through, st.history_bytes, st.history_keys)
+        };
+        let mut failed = db.begin();
+        failed.put(Cf::Node, vec![0; 4096], vec![1]);
+        failed.put(Cf::Meta, COMMIT_SEQUENCE_KEY.to_vec(), vec![0]);
+        assert!(failed.commit().is_err());
+        let st = db.committer.lock();
+        assert_eq!(
+            (st.seq, st.pruned_through, st.history_bytes, st.history_keys),
+            before
+        );
+        drop(st);
+        drop(old);
     }
 
     #[test]

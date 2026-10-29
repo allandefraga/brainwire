@@ -1,109 +1,137 @@
-# Brainwire terminal demo
+# Use the terminal UI
 
-The interactive shell demonstrates the selected electric-green identity and
-the Graph, Query, Memory and Disk & Files workflow. It uses synthetic data.
-It does not connect to a running database, inspect real files or execute
-arbitrary Cypher. For real local queries, use the separate
-[`brainwire cypher` command](local-cypher.md).
-For a separate read-only TUI showing **real named local graphs**, use
-`brainwire shell --overview` as described in the
-[multi-graph backoffice guide](multi-graph-backoffice.md).
+Brainwire has three terminal modes. Choose the one that matches what you want
+to inspect:
 
-From the standalone repository:
+| Mode | Command | Data |
+| --- | --- | --- |
+| Visual demo | `brainwire shell --demo` | Synthetic examples; no real queries or file access |
+| Connected workspace | `brainwire shell --connect 127.0.0.1:7687 --graph demo` | Read-only data fetched from a running server |
+| Offline overview | `brainwire shell --overview` | Real local files and named graphs; server must be stopped |
+
+The default language is English. Add `--lang pt-BR` for Portuguese interface
+text; stored names and values stay unchanged. Use `q` to exit and `?` for help.
+
+## Build or use the Docker image
+
+From a source checkout, build the CLI/server/TUI binary:
 
 ```sh
-cd /Users/fraga/Documents/brainwire
-cargo run --locked --offline -p brainwire-server -- shell --demo
+cargo build --locked --release -p brainwire-server
+./target/release/brainwire shell --demo
 ```
 
-Dependencies must already be downloaded for `--offline`. The default UI is
-English; add `--lang pt-BR` for Portuguese. The built binary can also be launched
-directly with `./target/debug/brainwire shell --demo` after building it.
+The first build needs Rust and native RocksDB build dependencies. Use
+`--offline` only after dependencies are cached. The examples below use
+`brainwire` for readability; replace it with `./target/release/brainwire` if
+the binary is not on your PATH.
+
+With the [Docker demo](container.md#fastest-local-start) already running:
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire shell --demo
+```
+
+An interactive terminal is required on both input and output. Use snapshot mode
+for scripts or environments without a terminal.
+
+## Explore the visual demo
+
+```sh
+brainwire shell --demo
+brainwire shell --demo --lang pt-BR
+```
+
+The demo shows Graph, Query, Memory and Disk & Files using synthetic values.
+The query page accepts only its guided examples; it does not execute arbitrary
+Cypher. Use [Python](python-client.md) or the [offline Cypher command](local-cypher.md)
+for real mutations and queries.
+
+| Key | Demo action |
+| --- | --- |
+| `1`–`4` | Graph, Query, Memory, Disk & Files when not editing |
+| `Tab` | Switch the focused content/explanation panel |
+| Arrow keys | Move the selection |
+| `Enter` | Inspect or begin editing, depending on the page |
+| `F5` | Run a supported guided query |
+| `PgUp` / `PgDn` | Scroll the focused inspector or editor viewport |
+| `F1` | Page help, including while editing |
+| `?` | Help outside editing; ordinary query text inside the editor |
+| `Esc` | Close help or finish editing |
+| `q` | Exit outside editing |
+
+The footer shows controls for the current page. The selected graph node and its
+links remain identifiable without color. `NO_COLOR` disables the palette;
+`--no-anim` provides a quiet/static presentation.
+
+## Inspect a running graph
+
+```sh
+brainwire shell --connect 127.0.0.1:7687 --graph demo
+```
+
+The connected workspace opens Ontology, Memory, Indexes and Graph. Use `Tab` or
+`1`–`4`, `r` to refresh, and `?` for explanations. It is read-only and has no
+arbitrary query editor, property editor or graph selector. The Graph pane needs
+an explicit source/type selection; see the
+[connected workspace guide](connected-status.md).
+
+All connected data travels over Bolt. The TUI does not open the running server's
+RocksDB files. A protected server needs the credentials file described in
+[protected Bolt](bolt-auth.md). Native TUI connections use plaintext Bolt, so
+keep them on trusted loopback or behind an appropriate encrypted tunnel.
+
+## Inspect local files with the server stopped
+
+```sh
+brainwire shell --overview
+brainwire shell --overview --graph demo --config /path/to/brainwire.toml
+```
+
+This overview reads real named local graphs and their files. RocksDB requires
+exclusive ownership: stop any server using those directories first. It is an
+inspector, not a job scheduler or mutation editor. See the
+[multi-graph backoffice](multi-graph-backoffice.md) for its controls and exact
+inspection limits.
+
+## Capture a plain-text frame
+
+```sh
+brainwire shell --demo --snapshot --view graph --width 160 --height 48
+brainwire shell --demo --snapshot --view memory --width 120 --height 36
+brainwire shell --connect 127.0.0.1:7687 --graph demo \
+  --snapshot --view indexes --width 120 --height 30
+```
+
+Demo views are `graph`, `query`, `memory` and `disk`. Connected views are
+`workspace`, `ontology`, `memory`, `indexes` and `graph`; the connected default
+is `workspace`. Its snapshot captures the initial Ontology pane. Snapshot sizes
+are 80–240 columns and 24–80 rows. Connected Graph snapshots need the four graph
+selection flags described in the connected guide.
 
 ## Actual terminal preview
 
-These images render ANSI output captured from the running binary in a 160×48
-pseudo-terminal (default English, color enabled; captured 2026-09-27). Text uses Menlo with Apple Symbols for
-Braille graph cells. They are executable-demo captures,
-separate from the earlier generated design concepts. Font rendering varies
-between terminal emulators.
+These are dated captures of the executable **synthetic demo**, taken at 160×48
+on 2026-09-27. They illustrate that version's layout, not current server data or
+a complete picture of the present connected workspace. Font rendering varies
+between terminals.
 
-![Graph demo](design/assets/brainwire-tui-demo-graph.png)
+![Graph demo capture](design/assets/brainwire-tui-demo-graph.png)
 
-![Memory demo](design/assets/brainwire-tui-demo-memory.png)
+![Memory demo capture](design/assets/brainwire-tui-demo-memory.png)
 
-![Disk and files demo](design/assets/brainwire-tui-demo-disk.png)
+![Disk and files demo capture](design/assets/brainwire-tui-demo-disk.png)
 
-## Explore the demo
-
-The screenshots show synthetic screen layouts. The key table below is the
-current shortcut reference.
-
-| Key | Action |
-|---|---|
-| `1`, `2`, `3`, `4` | Switch to Graph, Query, Memory or Disk outside editing |
-| `Tab` | Toggle between the main content and its explanation panel |
-| Arrow keys | Move the selected node, memory item, file or query result |
-| `PgUp`, `PgDn` | Move the editor viewport while editing, or scroll the focused inspector |
-| `Enter` | Inspect a selection or enter editing, according to focus |
-| `F1` | Open page-specific help, including while editing a query |
-| `?` | Open help outside query editing; in the editor, `?` is ordinary query text |
-| `F5` | Run the supported guided query example |
-| `Esc` | Close help or finish editing; `q` quits |
-| `q` | Quit when not editing |
-
-Both guided examples wrap at 80 columns. Longer edited text shows an overflow
-hint; use `PgUp`/`PgDn` while editing to reveal the rest. Query results and the
-inspector scroll independently; changing a selection resets the inspector.
-The graph highlights the selected node and its incident edges, with labels and
-markers that remain useful when color is disabled.
-
-The footer shows the current controls. Typed shortcut characters remain text
-while editing. A changed query outside the guided examples is refused
-explicitly instead of receiving a fabricated successful result.
-
-The help overlay explains each page without replacing the selected graph,
-file, memory item or query. The page strip and footer stay visible when color is
-disabled. In the local read-only overview, `?` describes the selected page and
-`Tab`/`Shift+Tab` moves through Graphs, Pipeline, Memory, Files and Ontology.
-The Ontology guide distinguishes schema declarations (allowed type
-relationships) from edge records stored in the graph. In the connected
-workspace, `?` explains the live, read-only Ontology, Memory, Indexes and Graph
-panes; `r` refreshes the selected pane. The global connection catalog is an
-offline overview feature; the connected pane remains focused on one selected
-type.
-
-Memory figures and file rows are illustrative. The memory view explains the
-difference between a container limit, an internal component budget and actual
-usage. Memtables are included in cache accounting; query-budget enforcement
-is not implemented by this demo. The disk inspector explains the roles of
-SST, WAL, MANIFEST, CURRENT, OPTIONS, LOG and LOCK without opening or modifying
-a real database directory. Wide terminals add a folder tree, mini graph,
-selected-file details and an LSM flow from memtable to disk. The compact layout
-retains file selection, the flow and contextual help.
-
-## Preview without a terminal
-
-The snapshot mode renders the same widgets once as plain text:
-
-```sh
-cargo run --locked --offline -p brainwire-server -- shell --demo --snapshot --view graph --width 160 --height 48
-cargo run --locked --offline -p brainwire-server -- shell --demo --snapshot --view memory --lang en --width 120 --height 36
-```
-
-Views are `graph`, `query`, `memory` and `disk`. Snapshot dimensions are bounded
-to 80..240 columns and 24..80 rows. Interactive mode requires a terminal on
-both input and output. `--no-anim` and `NO_COLOR` are available for quiet or
-plain presentation. If your terminal environment sets `NO_COLOR`, unset it
-for the green palette; the application deliberately honors that preference.
+The [connected workspace guide](connected-status.md) shows the newer bounded
+Graph renderer and documents its actual fetch and navigation limits. Demo RAM
+numbers and file rows are illustrative. Connected Memory reports query
+reservations; neither is a measurement of total process RSS.
 
 ## Toward the connected MVP
 
-The Cypher executor and Bolt server are implemented. The read-only multi-graph
-overview inspects local storage with the server stopped. The connected workspace
-can show a bounded sample of real outgoing relationships for one configured
-source and relationship signature. It does not yet support interactive graph
-expansion, arbitrary Cypher editing or node/edge properties in that view. Its
-memory pane reports server query reservations, not total process memory; live
-file inspection still needs a server-side storage contract. The green and cyan
-visual system is shared with the Brainwire logo and docs site.
+Current connected panels provide schema, query-pool counters, index state and a
+bounded outgoing relationship sample. Interactive graph expansion, arbitrary
+queries, editing, live file browsing and import-job controls remain future work.
+Check [current capabilities and limits](../README.md#current-limits) before
+using a screenshot as a feature reference.

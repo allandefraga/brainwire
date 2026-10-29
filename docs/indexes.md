@@ -1,4 +1,26 @@
-# Scalar indexes through Cypher
+# Create and use scalar indexes
+
+An index can avoid a full label scan for supported predicates. Start by declaring
+an indexed field in the ontology or creating an index on a running standalone
+server. See [online catalog changes](online-catalog.md) for permissions and
+transaction rules.
+
+## Create and inspect an online index
+
+For an existing `Customer` label with an `email` property:
+
+```cypher
+CREATE INDEX customer_email IF NOT EXISTS FOR (c:Customer) ON (c.email)
+CALL db.indexes() YIELD label, property, state, name
+RETURN label, property, state, name
+```
+
+Run each statement as its own query using a graph writer with instance-admin
+access for the creation step. A new online index starts as `populating`; queries
+scan until the background build finishes. `scalar_equality_ready` means it is
+available for supported predicates. The builder resumes after a server restart.
+
+## Supported query paths
 
 Ontology `indexed_fields` and `er_fields` declare string, Boolean and finite numeric equality
 indexes. `entity_id` has a separate primary lookup. Node writes, overwrites,
@@ -6,7 +28,7 @@ NULL removal and deletion update index keys in the same RocksDB transaction;
 commit syncs the WAL. Ready declarations have been atomically backfilled.
 Legacy catalogs without the v2 ready marker scan until reapplied.
 
-Both forms now use a ready equality index:
+Both query forms can use a ready equality index:
 
 ```cypher
 MATCH (c:Customer {email:$email}) RETURN c.entity_id
@@ -55,9 +77,12 @@ than scanning entries. Readiness does not imply support for every property
 type: list/vector/map and nonfinite numeric values still scan. The built-in primary lookup
 is not listed. `db check NAME` separately audits full graph/index invariants.
 
-The TUI's `shell --overview --view query` shows the selected graph's real
-ready state, indexed fields, write path and query/CSR guidance. It remains an
-explanation panel and does not execute the displayed queries.
+Use the [connected TUI Indexes pane](connected-status.md) to inspect a running
+server's declarations and readiness. The offline `shell --overview --view query`
+panel also explains the selected graph's indexes and query path; stop the server
+before opening its local files. These views do not execute the displayed queries.
+
+## Run the small index diagnostic
 
 Reproduce a warm comparison with temporary synthetic data, correctness
 assertions, five warmups and 25 measured samples after reopening:
@@ -85,8 +110,9 @@ marker and scans all declared fields until `db apply-ontology NAME SCHEMA.json`
 rebuilds the active indexes atomically and publishes the v2 marker. Reapply the
 same appropriate ontology, not the sample schema. The existing 100,000-key-change
 cap counts both deletions and insertions: a large migration can exceed it and
-fail without changing the catalog or publishing readiness. Resumable builds
-remain pending. Do not downgrade a v2 store to an old binary; that binary cannot
+fail without changing the catalog or publishing readiness. This legacy
+offline migration is not resumable; it is separate from the resumable online
+index-build jobs described above. Do not downgrade a v2 store to an old binary; that binary cannot
 maintain numeric entries correctly.
 
 The migration regression uses 50,001 existing v1 string entries: deleting and

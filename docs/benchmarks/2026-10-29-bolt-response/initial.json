@@ -1,0 +1,1050 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "scope": "native loopback response diagnostic",
+  "limits": [
+    "sampled RSS is not a true peak or process memory ceiling",
+    "no cgroup/kernel OOM evidence",
+    "not production qualification",
+    "latencies include client hashing and transaction completion",
+    "small sample p99 is descriptive, not a service-level guarantee"
+  ],
+  "workload": {
+    "rows": 8,
+    "payload_bytes": 524288,
+    "rounds": 3,
+    "warmup": 3,
+    "repeats": 20,
+    "rss_interval": 0.05,
+    "query_timeout": 30
+  },
+  "query": "MATCH (n:Payload) RETURN n.entity_id AS id, n.payload AS payload ORDER BY id",
+  "runs": [
+    {
+      "bolt_protocol_version": "5.4",
+      "server_agent": "Neo4j/5.26.0 compatible graph database server - Brainwire",
+      "build_check_before_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "latency_ms": [
+        3.6673748400062323,
+        3.565582912415266,
+        3.533666953444481,
+        3.4990839194506407,
+        3.6270420532673597,
+        3.725250018760562,
+        3.6774170584976673,
+        3.6573330871760845,
+        3.6835409700870514,
+        3.6198750603944063,
+        3.6459998227655888,
+        3.60691687092185,
+        5.458042025566101,
+        4.011250101029873,
+        3.6268329713493586,
+        3.590208012610674,
+        3.6293750163167715,
+        3.641708055511117,
+        3.5903749521821737,
+        3.6053750663995743
+      ],
+      "latency_summary": {
+        "samples": 20,
+        "p50_ms": 3.6282085347920656,
+        "p95_ms": 4.011250101029873,
+        "p99_ms": 5.458042025566101,
+        "min_ms": 3.4990839194506407,
+        "max_ms": 5.458042025566101
+      },
+      "payload_sha256_per_repeat": [
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f"
+      ],
+      "rss": {
+        "scope": "server process RSS sampled by ps, including warmup; not a true peak or cgroup memory",
+        "requested_interval_seconds": 0.05,
+        "ps_overhead_in_timed_trials": true,
+        "sampling_errors": 0,
+        "sampled_max_rss_bytes": 50249728,
+        "samples": [
+          {
+            "elapsed_seconds": 0.007177374791353941,
+            "rss_bytes": 46661632
+          },
+          {
+            "elapsed_seconds": 0.06921329186297953,
+            "rss_bytes": 50249728
+          }
+        ]
+      },
+      "build_check_after_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "owned_process_stopped": true,
+      "owned_temp_store_removed": true,
+      "binary": "baseline",
+      "round": 1,
+      "host_after": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "arm64",
+        "cpu_count": 10,
+        "load_1_5_15": [
+          6.67626953125,
+          6.92626953125,
+          7.21875
+        ],
+        "hardware": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Mac17,2\n34359738368\nApple M5",
+          "stderr": ""
+        },
+        "power": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+          "stderr": ""
+        },
+        "settings": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+          "stderr": ""
+        },
+        "thermal": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+          "stderr": ""
+        },
+        "power_qualified": true,
+        "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+      }
+    },
+    {
+      "bolt_protocol_version": "5.4",
+      "server_agent": "Neo4j/5.26.0 compatible graph database server - Brainwire",
+      "build_check_before_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "latency_ms": [
+        3.7034580018371344,
+        3.608749946579337,
+        3.686249954625964,
+        3.8652908988296986,
+        3.8441249635070562,
+        3.7793749943375587,
+        3.789125010371208,
+        3.730708034709096,
+        3.608624916523695,
+        3.655041102319956,
+        3.779500024393201,
+        5.483959103003144,
+        3.935249987989664,
+        3.7539158947765827,
+        3.714208025485277,
+        3.6358749493956566,
+        3.6520420107990503,
+        3.597708884626627,
+        3.5797921009361744,
+        3.6182499025017023
+      ],
+      "latency_summary": {
+        "samples": 20,
+        "p50_ms": 3.7088330136612058,
+        "p95_ms": 3.935249987989664,
+        "p99_ms": 5.483959103003144,
+        "min_ms": 3.5797921009361744,
+        "max_ms": 5.483959103003144
+      },
+      "payload_sha256_per_repeat": [
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f"
+      ],
+      "rss": {
+        "scope": "server process RSS sampled by ps, including warmup; not a true peak or cgroup memory",
+        "requested_interval_seconds": 0.05,
+        "ps_overhead_in_timed_trials": true,
+        "sampling_errors": 0,
+        "sampled_max_rss_bytes": 51724288,
+        "samples": [
+          {
+            "elapsed_seconds": 0.007212582975625992,
+            "rss_bytes": 47808512
+          },
+          {
+            "elapsed_seconds": 0.06836899998597801,
+            "rss_bytes": 51724288
+          }
+        ]
+      },
+      "build_check_after_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "owned_process_stopped": true,
+      "owned_temp_store_removed": true,
+      "binary": "candidate",
+      "round": 1,
+      "host_after": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "arm64",
+        "cpu_count": 10,
+        "load_1_5_15": [
+          6.67626953125,
+          6.92626953125,
+          7.21875
+        ],
+        "hardware": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Mac17,2\n34359738368\nApple M5",
+          "stderr": ""
+        },
+        "power": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+          "stderr": ""
+        },
+        "settings": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+          "stderr": ""
+        },
+        "thermal": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+          "stderr": ""
+        },
+        "power_qualified": true,
+        "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+      }
+    },
+    {
+      "bolt_protocol_version": "5.4",
+      "server_agent": "Neo4j/5.26.0 compatible graph database server - Brainwire",
+      "build_check_before_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "latency_ms": [
+        3.6214999854564667,
+        3.6499579437077045,
+        3.562500001862645,
+        3.742208005860448,
+        3.6539591383188963,
+        3.8153750356286764,
+        3.6497500259429216,
+        3.6623331252485514,
+        7.5413750018924475,
+        3.787208115682006,
+        3.662667004391551,
+        5.574375158175826,
+        3.904833924025297,
+        3.6350409500300884,
+        3.6392919719219208,
+        3.582749981433153,
+        3.5778339952230453,
+        3.634040942415595,
+        3.5511250607669353,
+        3.577333875000477
+      ],
+      "latency_summary": {
+        "samples": 20,
+        "p50_ms": 3.649853984825313,
+        "p95_ms": 5.574375158175826,
+        "p99_ms": 7.5413750018924475,
+        "min_ms": 3.5511250607669353,
+        "max_ms": 7.5413750018924475
+      },
+      "payload_sha256_per_repeat": [
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f"
+      ],
+      "rss": {
+        "scope": "server process RSS sampled by ps, including warmup; not a true peak or cgroup memory",
+        "requested_interval_seconds": 0.05,
+        "ps_overhead_in_timed_trials": true,
+        "sampling_errors": 0,
+        "sampled_max_rss_bytes": 51773440,
+        "samples": [
+          {
+            "elapsed_seconds": 0.006830957951024175,
+            "rss_bytes": 47808512
+          },
+          {
+            "elapsed_seconds": 0.06875037495046854,
+            "rss_bytes": 51773440
+          }
+        ]
+      },
+      "build_check_after_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "owned_process_stopped": true,
+      "owned_temp_store_removed": true,
+      "binary": "candidate",
+      "round": 2,
+      "host_after": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "arm64",
+        "cpu_count": 10,
+        "load_1_5_15": [
+          6.67626953125,
+          6.92626953125,
+          7.21875
+        ],
+        "hardware": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Mac17,2\n34359738368\nApple M5",
+          "stderr": ""
+        },
+        "power": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+          "stderr": ""
+        },
+        "settings": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+          "stderr": ""
+        },
+        "thermal": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+          "stderr": ""
+        },
+        "power_qualified": true,
+        "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+      }
+    },
+    {
+      "bolt_protocol_version": "5.4",
+      "server_agent": "Neo4j/5.26.0 compatible graph database server - Brainwire",
+      "build_check_before_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "latency_ms": [
+        3.7337499670684338,
+        3.606833051890135,
+        3.6031671334058046,
+        3.6461660638451576,
+        3.6105839535593987,
+        3.6272918805480003,
+        3.6745411343872547,
+        3.644792130216956,
+        3.6202080082148314,
+        3.6311252042651176,
+        3.638500114902854,
+        3.5869998391717672,
+        5.3587500005960464,
+        3.813625080510974,
+        3.626083955168724,
+        3.6644169595092535,
+        3.7162909284234047,
+        3.635958069935441,
+        3.639250062406063,
+        3.834499977529049
+      ],
+      "latency_summary": {
+        "samples": 20,
+        "p50_ms": 3.6388750886544585,
+        "p95_ms": 3.834499977529049,
+        "p99_ms": 5.3587500005960464,
+        "min_ms": 3.5869998391717672,
+        "max_ms": 5.3587500005960464
+      },
+      "payload_sha256_per_repeat": [
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f"
+      ],
+      "rss": {
+        "scope": "server process RSS sampled by ps, including warmup; not a true peak or cgroup memory",
+        "requested_interval_seconds": 0.05,
+        "ps_overhead_in_timed_trials": true,
+        "sampling_errors": 0,
+        "sampled_max_rss_bytes": 50151424,
+        "samples": [
+          {
+            "elapsed_seconds": 0.00708441692404449,
+            "rss_bytes": 46694400
+          },
+          {
+            "elapsed_seconds": 0.0689963330514729,
+            "rss_bytes": 50151424
+          }
+        ]
+      },
+      "build_check_after_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "owned_process_stopped": true,
+      "owned_temp_store_removed": true,
+      "binary": "baseline",
+      "round": 2,
+      "host_after": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "arm64",
+        "cpu_count": 10,
+        "load_1_5_15": [
+          6.67626953125,
+          6.92626953125,
+          7.21875
+        ],
+        "hardware": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Mac17,2\n34359738368\nApple M5",
+          "stderr": ""
+        },
+        "power": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+          "stderr": ""
+        },
+        "settings": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+          "stderr": ""
+        },
+        "thermal": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+          "stderr": ""
+        },
+        "power_qualified": true,
+        "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+      }
+    },
+    {
+      "bolt_protocol_version": "5.4",
+      "server_agent": "Neo4j/5.26.0 compatible graph database server - Brainwire",
+      "build_check_before_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "latency_ms": [
+        3.7896251305937767,
+        3.9042499847710133,
+        3.9495001547038555,
+        3.8006671238690615,
+        3.753292141482234,
+        3.6842080298811197,
+        3.6722079385071993,
+        3.6922080907970667,
+        3.7840830627828836,
+        3.71075002476573,
+        3.7479170132428408,
+        5.455000093206763,
+        4.0132091380655766,
+        3.7189580034464598,
+        3.7472909316420555,
+        3.6882921122014523,
+        3.677290864288807,
+        3.6762498784810305,
+        3.6892080679535866,
+        3.6388339940458536
+      ],
+      "latency_summary": {
+        "samples": 20,
+        "p50_ms": 3.7331244675442576,
+        "p95_ms": 4.0132091380655766,
+        "p99_ms": 5.455000093206763,
+        "min_ms": 3.6388339940458536,
+        "max_ms": 5.455000093206763
+      },
+      "payload_sha256_per_repeat": [
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f"
+      ],
+      "rss": {
+        "scope": "server process RSS sampled by ps, including warmup; not a true peak or cgroup memory",
+        "requested_interval_seconds": 0.05,
+        "ps_overhead_in_timed_trials": true,
+        "sampling_errors": 0,
+        "sampled_max_rss_bytes": 50266112,
+        "samples": [
+          {
+            "elapsed_seconds": 0.006953541887924075,
+            "rss_bytes": 46645248
+          },
+          {
+            "elapsed_seconds": 0.06870916695334017,
+            "rss_bytes": 50266112
+          }
+        ]
+      },
+      "build_check_after_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "owned_process_stopped": true,
+      "owned_temp_store_removed": true,
+      "binary": "baseline",
+      "round": 3,
+      "host_after": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "arm64",
+        "cpu_count": 10,
+        "load_1_5_15": [
+          6.67626953125,
+          6.92626953125,
+          7.21875
+        ],
+        "hardware": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Mac17,2\n34359738368\nApple M5",
+          "stderr": ""
+        },
+        "power": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+          "stderr": ""
+        },
+        "settings": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome, Caffeine)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+          "stderr": ""
+        },
+        "thermal": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+          "stderr": ""
+        },
+        "power_qualified": true,
+        "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+      }
+    },
+    {
+      "bolt_protocol_version": "5.4",
+      "server_agent": "Neo4j/5.26.0 compatible graph database server - Brainwire",
+      "build_check_before_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "latency_ms": [
+        3.711625002324581,
+        3.780375001952052,
+        3.6491660866886377,
+        3.6315838806331158,
+        3.8634578231722116,
+        3.6466671153903008,
+        3.5963330883532763,
+        3.765458008274436,
+        3.628707956522703,
+        3.6447918973863125,
+        3.6752091255038977,
+        3.6440829280763865,
+        5.611166823655367,
+        3.800458973273635,
+        3.8197499234229326,
+        3.678667126223445,
+        3.6329999566078186,
+        3.6555840633809566,
+        3.6126249469816685,
+        3.6350409500300884
+      ],
+      "latency_summary": {
+        "samples": 20,
+        "p50_ms": 3.652375075034797,
+        "p95_ms": 3.8634578231722116,
+        "p99_ms": 5.611166823655367,
+        "min_ms": 3.5963330883532763,
+        "max_ms": 5.611166823655367
+      },
+      "payload_sha256_per_repeat": [
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+        "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f"
+      ],
+      "rss": {
+        "scope": "server process RSS sampled by ps, including warmup; not a true peak or cgroup memory",
+        "requested_interval_seconds": 0.05,
+        "ps_overhead_in_timed_trials": true,
+        "sampling_errors": 0,
+        "sampled_max_rss_bytes": 51937280,
+        "samples": [
+          {
+            "elapsed_seconds": 0.0074061250779777765,
+            "rss_bytes": 47874048
+          },
+          {
+            "elapsed_seconds": 0.06978141609579325,
+            "rss_bytes": 51937280
+          }
+        ]
+      },
+      "build_check_after_timing": {
+        "inspection": "ps executable names only",
+        "matched_commands": [
+          "cargo",
+          "cargo-clippy",
+          "cc1",
+          "clang",
+          "clang++",
+          "cmake",
+          "make",
+          "ninja",
+          "rust-lld",
+          "rustc"
+        ],
+        "detected": {},
+        "scope": "best-effort local process inspection; does not detect remote/VM builds"
+      },
+      "owned_process_stopped": true,
+      "owned_temp_store_removed": true,
+      "binary": "candidate",
+      "round": 3,
+      "host_after": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "arm64",
+        "cpu_count": 10,
+        "load_1_5_15": [
+          6.67626953125,
+          6.92626953125,
+          7.21875
+        ],
+        "hardware": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Mac17,2\n34359738368\nApple M5",
+          "stderr": ""
+        },
+        "power": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+          "stderr": ""
+        },
+        "settings": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome, Caffeine)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+          "stderr": ""
+        },
+        "thermal": {
+          "available": true,
+          "returncode": 0,
+          "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+          "stderr": ""
+        },
+        "power_qualified": true,
+        "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+      }
+    }
+  ],
+  "driver_version": "5.28.8",
+  "python_version": "3.12.14",
+  "host_start": {
+    "system": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "cpu_count": 10,
+    "load_1_5_15": [
+      6.67626953125,
+      6.92626953125,
+      7.21875
+    ],
+    "hardware": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "Mac17,2\n34359738368\nApple M5",
+      "stderr": ""
+    },
+    "power": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+      "stderr": ""
+    },
+    "settings": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome, Caffeine)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+      "stderr": ""
+    },
+    "thermal": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+      "stderr": ""
+    },
+    "power_qualified": true,
+    "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+  },
+  "build_check_start": {
+    "inspection": "ps executable names only",
+    "matched_commands": [
+      "cargo",
+      "cargo-clippy",
+      "cc1",
+      "clang",
+      "clang++",
+      "cmake",
+      "make",
+      "ninja",
+      "rust-lld",
+      "rustc"
+    ],
+    "detected": {},
+    "scope": "best-effort local process inspection; does not detect remote/VM builds"
+  },
+  "binaries": {
+    "baseline": {
+      "path": "/private/tmp/brainwire-v010-baseline-1029",
+      "sha256": "7e95d11905399c9a2cf07bb2a036e1f1743474c01799f61ae65cdc22494d3f1c",
+      "version": {
+        "available": true,
+        "returncode": 0,
+        "stdout": "brainwire 0.10.0-beta.1",
+        "stderr": ""
+      }
+    },
+    "candidate": {
+      "path": "/Users/fraga/Documents/brainwire/target/debug/brainwire",
+      "sha256": "7bec5bc67e6a0dc522be47db02ccbb896d9f646c12dcc565b120ba23ed169cc7",
+      "version": {
+        "available": true,
+        "returncode": 0,
+        "stdout": "brainwire 0.10.0-beta.1",
+        "stderr": ""
+      }
+    }
+  },
+  "expected_payload_sha256": "9f63d5888a000320e919d28bbd2f519dc9212d8359b0462faefe09f5c1fe266f",
+  "summaries": {
+    "baseline": {
+      "samples": 60,
+      "p50_ms": 3.6697913892567158,
+      "p95_ms": 4.0132091380655766,
+      "p99_ms": 5.458042025566101,
+      "min_ms": 3.4990839194506407,
+      "max_ms": 5.458042025566101
+    },
+    "candidate": {
+      "samples": 60,
+      "p50_ms": 3.6553125828504562,
+      "p95_ms": 5.483959103003144,
+      "p99_ms": 7.5413750018924475,
+      "min_ms": 3.5511250607669353,
+      "max_ms": 7.5413750018924475
+    }
+  },
+  "candidate_p50_change_percent": -0.3945403122544322,
+  "candidate_p99_change_percent": 38.16996949762888,
+  "host_end": {
+    "system": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "cpu_count": 10,
+    "load_1_5_15": [
+      6.67626953125,
+      6.92626953125,
+      7.21875
+    ],
+    "hardware": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "Mac17,2\n34359738368\nApple M5",
+      "stderr": ""
+    },
+    "power": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=7209059)\t100%; charged; 0:00 remaining present: true",
+      "stderr": ""
+    },
+    "settings": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "System-wide power settings:\nCurrently in use:\n standby              1\n Sleep On Power Button 1\n hibernatefile        /var/vm/sleepimage\n powernap             1\n networkoversleep     0\n disksleep            10\n sleep                1 (sleep prevented by coreaudiod, Google Chrome, powerd, sharingd)\n hibernatemode        3\n ttyskeepawake        1\n displaysleep         10 (display sleep prevented by Google Chrome, Caffeine)\n tcpkeepalive         1\n lowpowermode         0\n womp                 1",
+      "stderr": ""
+    },
+    "thermal": {
+      "available": true,
+      "returncode": 0,
+      "stdout": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+      "stderr": ""
+    },
+    "power_qualified": true,
+    "power_qualification": "macOS AC Power and active lowpowermode=0; actual thermal throttling unverified"
+  },
+  "all_payloads_verified": true,
+  "interpretation": "Correctness checks passed for this workload. Evaluate host load, variance, p99 and per-round values before interpreting performance."
+}

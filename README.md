@@ -1,192 +1,134 @@
 <p align="center">
-  <img src="assets/brainwire-logo.svg" alt="Brainwire" width="400">
+  <img src="assets/brainwire-hero.png" alt="An illustration of connected data" width="100%">
 </p>
-
-<h1 align="center">Make context connected.</h1>
+<p align="center"><sub>Concept artwork.</sub></p>
 
 <p align="center">
-  An independent graph database for the relationships behind your applications.
-  <br>Built in Rust. Stored in RocksDB. Queried with Cypher.
+  <img src="assets/brainwire-logo.svg" alt="Brainwire graph database" width="300">
 </p>
 
+<h1 align="center">Give your data connections.</h1>
+
 <p align="center">
-  <a href="#quickstart">Get started</a> &nbsp;·&nbsp;
-  <a href="#what-works-today">Explore capabilities</a> &nbsp;·&nbsp;
-  <a href="docs/local-cypher.md">Cypher guide</a> &nbsp;·&nbsp;
-  <a href="docs/beta-operator-checklist.md">Beta readiness</a> &nbsp;·&nbsp;
-  <a href="BENCHMARKS.md">Benchmarks</a> &nbsp;·&nbsp;
-  <a href="ROADMAP-v2.md">Roadmap</a>
+  A graph database for the people, documents, decisions and events behind your applications.
+  <br>Rust · RocksDB · Cypher · Bolt · Python
 </p>
 
 <p align="center">
-  <img src="assets/brainwire-graph-cover.png" alt="Abstract illustration of an interconnected green graph" width="100%">
+  <a href="#quickstart">Run it</a> &nbsp; / &nbsp;
+  <a href="#write-from-python">Python</a> &nbsp; / &nbsp;
+  <a href="#see-what-the-tui-can-do">Terminal UI</a> &nbsp; / &nbsp;
+  <a href="#documentation">Documentation</a> &nbsp; / &nbsp;
+  <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
-Connect people, projects, events and documents. Store their relationships,
-explore connected context and query the graph over Bolt from Python. Run it
-locally or in Docker with a persistent volume.
+<p align="center">
+  <a href="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml"><img src="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-65ff54?style=flat-square" alt="License: Apache-2.0"></a>
+  <a href="#current-limits"><img src="https://img.shields.io/badge/status-beta-65ff54?style=flat-square" alt="Status: beta"></a>
+</p>
 
-Your application owns ingestion, identity mapping and orchestration; Brainwire
-is the graph database layer.
+Brainwire stores records and their relationships in a durable graph. Write from
+Python, query with Cypher, and inspect a running server from the terminal.
+Each named graph has its own data and ontology. Your application controls
+source ingestion, identity mapping and orchestration.
 
-> **v0.10.0-beta.1 · source beta.** <!-- brainwire-release-version --> This beta is intended for controlled trials.
-> Production qualification is open. A container image is published only after
-> the matching release workflow passes its source and recovery checks.
+> **v0.10.0-beta.1 · source beta.** <!-- brainwire-release-version --> Use for controlled trials.
+> Production qualification is open. Review the [current limits](#current-limits)
+> and [operator checklist](docs/beta-operator-checklist.md) before using real data.
 
-## Start here
+The capabilities below describe this checkout. For a release image, use the
+documentation from its matching tag; local changes may not be included.
 
-| Explore | Why it matters |
-|---|---|
-| [Run a graph](#quickstart) | Start a persistent local demo with Docker Compose. |
-| [Write from Python](#write-from-python) | Insert nodes and relationships using parameterized Cypher over Bolt. |
-| [Inspect the graph](#see-what-the-tui-can-do) | Explore a bounded connected neighborhood and operational information in the TUI. |
-| [Know the limits](#current-limits) | Review security, memory, Cypher and production-readiness constraints. |
+## Choose how to run it
+
+| Option | What it provides | Guide |
+|---|---|---|
+| **Docker Compose** | Builds and starts a persistent local demo | [Quickstart](#quickstart) |
+| **Versioned Docker image** | Runs a published release without compiling | [Container guide](docs/container.md) |
+| **Rust source** | Builds the server, CLI and TUI | [Build locally](#build-it-locally) |
+| **Kubernetes / Swarm** | Single-instance templates with persistent storage | [Deployment guide](docs/orchestrators.md) |
+
+Homebrew and an Electron desktop app are planned; installers are not available.
+The Python helper is installable from this checkout, but is not published on PyPI.
 
 ## Quickstart
 
-You need Docker Engine and Docker Compose. From the repository root, this builds
-the image, creates a persistent demo graph with a bundled synthetic ontology,
-and waits for the server to become ready:
+Install Docker Engine and Docker Compose, then run this from the repository root:
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --build --wait --wait-timeout 900
 ```
 
-The server listens on `bolt://127.0.0.1:7687`; the graph is named `demo`. The
-first build compiles RocksDB and can take several minutes. If that port is in
-use, set `BRAINWIRE_BIND_PORT=17687` before the command and connect to port
-17687.
+This creates the synthetic `demo` graph, stores it in a named volume, and starts
+Bolt at `bolt://127.0.0.1:7687`. The first build compiles Rust and RocksDB and
+can take several minutes. Set `BRAINWIRE_BIND_PORT=17687` if port 7687 is busy,
+then use that port in clients.
 
-### Write from Python
+The demo disables authentication and publishes only on host loopback. Use it
+with synthetic data. For shared environments, follow the
+[protected container setup](docs/protected-containers.md) and
+[transport guide](docs/protected-transport.md).
 
-This example uses the standard Neo4j Bolt driver. It inserts nodes and edges
-with parameterized Cypher, then reads the relationship back. The bundled demo
-server has authentication disabled and binds the published port to localhost;
-use synthetic data only with this quickstart.
-
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install neo4j==6.3.0
-.venv/bin/python - <<'PYTHON'
-from neo4j import GraphDatabase
-
-customers = [
-    {"id": "customer-1", "name": "Ada", "email": "ada@example.test"},
-    {"id": "customer-2", "name": "Grace", "email": "grace@example.test"},
-]
-segments = [{"id": "segment-1", "name": "beta"}]
-links = [
-    {"customer_id": "customer-1", "segment_id": "segment-1"},
-    {"customer_id": "customer-2", "segment_id": "segment-1"},
-]
-
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
-    with driver.session(database="demo") as session:
-        session.run("""
-            UNWIND $rows AS row
-            MERGE (c:Customer {entity_id: row.id})
-            SET c.name = row.name, c.email = row.email
-        """, rows=customers).consume()
-        session.run("""
-            UNWIND $rows AS row
-            MERGE (s:Segment {entity_id: row.id})
-            SET s.name = row.name
-        """, rows=segments).consume()
-        session.run("""
-            UNWIND $rows AS row
-            MATCH (c:Customer {entity_id: row.customer_id})
-            MATCH (s:Segment {entity_id: row.segment_id})
-            MERGE (c)-[:IN_SEGMENT]->(s)
-        """, rows=links).consume()
-        result = sorted(session.run("""
-            MATCH (c:Customer)-[:IN_SEGMENT]->(s:Segment)
-            RETURN c.name AS customer, s.name AS segment
-        """).data(), key=lambda row: row["customer"])
-        print(result)
-PYTHON
-```
-
-Expected result:
-
-```text
-[{'customer': 'Ada', 'segment': 'beta'}, {'customer': 'Grace', 'segment': 'beta'}]
-```
-
-The demo schema includes these node labels and the `IN_SEGMENT` relationship.
-For your own graph, create it with your ontology before starting the server.
-See the [container guide](docs/container.md) for persistent volumes, custom
-schemas, restart checks and running Python from another container.
-
-Stop the demo and keep its data:
+Useful Docker commands:
 
 ```sh
+# Check the service and its startup logs.
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml ps
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail 50 brainwire
+
+# Stop the demo and keep its data.
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
 
-Do not add `--volumes` unless you intend to delete the demo database.
+Do not add `--volumes` unless you intend to delete the demo database. For a
+plain `docker run`, custom ontology, another container or a versioned image,
+use the [Docker guide](docs/container.md).
 
-## What works today
+## Write from Python
 
-| Area | Implemented now |
-|---|---|
-| Graph model | Independent named graphs, versioned ontology catalogs, one label per node, typed directed relationships, stable `entity_id` identities and declared properties |
-| Read and write | Bolt and local Cypher with atomic local transactions; create and delete nodes and edges; bounded Python upserts and property patches |
-| Cypher | Multi-hop and bounded variable-length patterns, `WITH`, `OPTIONAL MATCH`, `UNION`, expressions, aggregates, and returned node/relationship/path values |
-| Indexes | Primary identity lookup; scalar equality and `IN`, plus string range and prefix access for supported predicates; online `CREATE INDEX` / `DROP INDEX` with resumable backfill |
-| Storage | Local RocksDB, synchronized WAL commits, retained-volume restarts, consistency checks and checkpoints |
-| Graph analytics | Sparse CSR projection, degree, weighted PageRank, shortest path, reachability, WCC and SCC; explainable `knowledge.rank` |
-| Ingestion | Python lists/generators and Arrow objects, JSONL import with replay support, and pinned DuckLake snapshot comparison |
-| Terminal UI | Synthetic visual demo; offline local inspector; connected read-only ontology, query-memory counters, index status and a bounded outgoing node neighborhood |
-| Deployment | Docker/Compose, single-instance Kubernetes and Swarm manifests, protected auth overlays, health probes and explicit persistent volumes |
-
-Python writes commit each bounded batch separately: completed batches remain
-committed if a later batch fails. See the [mutation semantics](docs/python-client.md)
-and [supported Cypher](docs/local-cypher.md) for node and edge operations.
-
-The opt-in three-voter quorum path is **experimental** and has a separate
-[operations guide](docs/quorum-replication.md). The standard container manifests
-run one instance; adding replicas does not create a replicated graph.
-
-For the Python helper's batch API, property semantics, and supported inputs, see
-[Python client and ingestion](docs/python-client.md). The helper currently lives
-in this repository; it is **not** a separately published Python package.
-
-## Releases and container images
-
-Every push to `main` runs formatting, workspace tests, Clippy, Python helper
-tests, release-version checks and a Bolt/Python ingestion and restart check.
-The `v*` tag workflow repeats source checks, builds a versioned Docker image,
-tests Python/Bolt writes and retained-volume restart recovery, then publishes
-the tested image and attaches its digest to the GitHub release. A `-beta.N` or
-`-rc.N` tag creates a prerelease; a plain SemVer tag creates a stable release.
-It does not create a floating `latest` tag. Check the latest workflow status
-before relying on an image: a local tag alone does not mean it was published.
-
-A source tag can exist before its release or image. Use the source-build
-quickstart above until the matching GitHub release includes
-`release-metadata.txt` with the tested image digest. After successful publication,
-the versioned image reference is:
+With the demo running, install the helper from this checkout:
 
 ```sh
-docker pull ghcr.io/allandefraga/brainwire:v0.10.0-beta.1 # brainwire-release-version
+python3 -m venv .venv
+.venv/bin/python -m pip install .
 ```
 
-If the image is private, run `docker login ghcr.io` and enter a GitHub token
-with `read:packages` access when prompted. Public images do not require login.
-Repository visibility and package visibility are separate; check both before
-announcing a public image. See GitHub's
-[GHCR authentication guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-with-a-personal-access-token-classic).
+The package uses the Neo4j Bolt driver and does not install the database server.
+Run the following with `.venv/bin/python`:
 
-The [local release workflow](docs/releasing.md) previews a SemVer version,
-updates marked Docker/Kubernetes references, runs checks and creates a local
-commit and tag. It never pushes or publishes. The Compose quickstart builds
-from source; see the [container guide](docs/container.md) for persistent
-volumes and running the versioned image.
+```python
+from brainwire import GraphClient
+from neo4j import GraphDatabase
+
+with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+    graph = GraphClient(driver, "demo", batch_size=100)
+    graph.upsert_node("Customer", "customer-1", {"name": "Ada"})
+    graph.upsert_node("Segment", "segment-1", {"name": "beta"})
+    graph.upsert_edge(
+        ("Customer", "customer-1"), "IN_SEGMENT", ("Segment", "segment-1")
+    )
+    print(graph.run_cypher("""
+        MATCH (c:Customer)-[:IN_SEGMENT]->(s:Segment)
+        RETURN c.name AS customer, s.name AS segment
+    """))
+```
+
+The demo ontology declares these labels and relationship. For your own data,
+define an ontology before writing. Batch helpers commit each bounded batch
+separately. `None` removes a property; omitted properties stay unchanged.
+After a lost commit response, reconcile the source keys before retrying.
+
+See [Python installation](docs/python-package.md),
+[mutation semantics](docs/python-client.md), and
+[source ingestion](docs/source-ingestion.md) for authentication, lists,
+generators, Arrow inputs and resumable loads.
 
 ## See what the TUI can do
 
-After building the binary locally, inspect the running demo server:
+The TUI is the `brainwire shell` command. After [building locally](#build-it-locally),
+connect it to the demo populated by the Python example:
 
 ```sh
 ./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo \
@@ -194,112 +136,114 @@ After building the binary locally, inspect the running demo server:
   --edge-type IN_SEGMENT --target-label Segment
 ```
 
-Run the Python quickstart first to populate that neighborhood. Use `Tab` or
-`1–4` for Ontology, Memory, Indexes and Graph; `r` refreshes, `?` explains the
-current view and `q` exits. Add `--lang pt-BR` for Portuguese interface text.
+Use `Tab` or `1–4` to switch between **Ontology**, **Memory**, **Indexes** and
+**Graph**. Press `r` to refresh, `?` for help, and `q` to exit. Add
+`--lang pt-BR` for Portuguese interface text.
 
-The connected Graph pane draws actual sampled source/target IDs and directed
-links. It reads at most 20 outgoing relationship rows for the configured node,
-edge type and target label. It does not expand selected nodes or show arbitrary
-properties. Memory displays the server's shared **query reservation pool**,
-not process RSS or total RocksDB memory. The connected workspace is read-only;
-run queries and mutations through Python or the CLI. See the
-[connected workspace guide](docs/connected-status.md) for authentication,
-permissions, stale samples and the exact limits.
+The connected workspace is read-only. Graph shows a sample of up to 20 outgoing
+relationships for the chosen node and type. Memory shows shared query
+reservations, not process RSS. See the [connected TUI guide](docs/connected-status.md)
+for authentication and the exact controls.
 
-For the visual demo, run `./target/release/brainwire shell --demo`. Its queries,
-files and memory values are synthetic. For real local files and named graphs,
-use the [offline backoffice](docs/multi-graph-backoffice.md) with the server
-stopped so the shell can acquire the RocksDB lock.
+Other modes:
 
-## Performance snapshot
+- `brainwire shell --demo` opens a synthetic visual demo.
+- `brainwire shell --overview` inspects local files. Stop the server first;
+  RocksDB permits one owner of each database directory.
 
-The [v0.7 qualification report](PERF-v0.7.md),
-[engine performance notes](PERF.md), [benchmark receipts](docs/benchmarks/README.md) and
-[Neo4j/FalkorDB diagnostic](docs/benchmarks/comparison/README.md) identify their
-own dataset, configuration and measurement conditions. Each result applies to
-that run; it is not a production SLO or a general database ranking. Performance
-changes need fresh measurements on the application workload before deployment.
+## Use the command line
 
-Explore the [benchmark charts](docs/benchmarks/assets/brainwire-performance.svg)
-and the [comparison chart](docs/benchmarks/assets/comparison-20261019.svg) alongside
-their methodology; they describe specific synthetic runs, not general rankings.
+The same binary starts the server, administers local graphs and runs offline
+Cypher. Start with:
 
-The [v0.9 production report](PRODUCTION-v0.9.md) documents the latest memory
-qualification attempts and the work that remains.
+```sh
+./target/release/brainwire --help
+./target/release/brainwire config show
+./target/release/brainwire probe --mode ready
+```
+
+`probe` checks the default Bolt address. `config show` explains effective values
+and where they came from. To create a graph or query its files directly, follow
+[the local CLI quickstart](docs/mvp-quickstart.md) and
+[Cypher guide](docs/local-cypher.md). Offline commands need exclusive access;
+use Python over Bolt while the server owns the graph.
+
+## What works today
+
+| Area | Available in this checkout |
+|---|---|
+| Graphs and writes | Independent named graphs, ontology catalogs, atomic local transactions, node/edge creation and deletion, property patches and bounded Python upserts |
+| Queries and indexes | Multi-hop patterns, `WITH`, `OPTIONAL MATCH`, `UNION`, aggregates, scalar equality/`IN`, string range/prefix access and online index builds |
+| Storage | Local RocksDB, synchronized WAL commits, consistency checks, checkpoints and retained-volume restart |
+| Analytics | Sparse CSR projection, degree, weighted PageRank, shortest path, reachability, WCC/SCC and explainable `knowledge.rank` |
+| Ingestion and inspection | Python/Arrow helpers, resumable JSONL import, pinned DuckLake snapshot comparison, CLI and TUI |
+
+The local Cypher implementation includes a bounded Rust-regex subset of `=~`;
+see [its syntax and memory limits](docs/cypher-regex.md). That subset is not
+full Java regex compatibility. Check the [Cypher guide](docs/local-cypher.md)
+before porting a query.
 
 ## Current limits
 
-- Cypher compatibility is bounded: a node has one fixed label and an immutable
-  `entity_id`. `CALL {}` subqueries, `EXISTS {}` subqueries, regex `=~`, pattern
-  comprehensions, and temporal/spatial types are not implemented. Supported
-  pattern predicates and functions have their own constraints; check the
-  [Cypher guide](docs/local-cypher.md) before porting a query.
-- `memory.query` provides conservative allocation accounting and a shared query
-  reservation pool. It is not a global process RSS ceiling. Cache, memtables,
-  result materialization and other allocations still need workload sizing;
-  a 4 GiB production memory cap is not qualified. `memory.ingress` separately
-  limits accounted Bolt input across connections; it does not bound process RSS.
-  See [memory defaults](docs/memory-defaults.md) and the
-  [production roadmap](docs/production-readiness-roadmap.md).
-- The demo Compose profile explicitly enables unauthenticated development
-  access. Without an auth policy, the server accepts loopback listeners and
-  rejects non-loopback listeners unless the development override is supplied.
-  Shared environments need an auth policy and an encrypted network boundary;
-  native Bolt TLS is not implemented. Read [server security](docs/serve.md),
-  [protected containers](docs/protected-containers.md) and
-  [transport guidance](docs/protected-transport.md) before connecting other
-  services.
-- Ontology/catalog versions and transaction snapshots are not historical graph
-  data. Nodes and edges do not keep durable revisions; `AS OF` reads and automatic
-  retention are not implemented. See the [temporal data guide](docs/temporal-data.md).
-- DuckLake ingestion is version-pinned snapshot comparison, not native CDC. A
-  production source mapping, authoritative ACL integration and representative
-  application workload still need validation.
-- Three-voter quorum replication is experimental. Current local fault tests do
-  not qualify multi-machine Kubernetes/Swarm failover or production recovery.
-- Text/vector indexes, arbitrary object serialization and sharding are not
-  included. The Python helper uses the Neo4j Bolt driver; a separately published
-  Brainwire Python package with its own sync/async driver is not implemented.
-- Large ACL-filtered scans and paginated cursors need workload-specific
-  qualification. The benchmark targets for the next read-performance release
-  are engineering goals, not measured guarantees.
-- Performance receipts use synthetic local workloads. They are not production
-  SLOs. The separate Neo4j/FalkorDB diagnostic uses its own fixture and
-  conditions; read its limitations before comparing numbers. See the
-  [benchmark results and comparison status](docs/benchmarks/README.md).
-
-The current release boundary and acceptance evidence are tracked in the
-[beta operator checklist](docs/beta-operator-checklist.md). For an application trial,
-start in **shadow mode** with a rebuildable graph and keep the existing source as
-the authority until integration, security, recovery and workload gates pass.
-
-## Pick your next move
-
-| Goal | Guide |
+| Area | What to plan around |
 |---|---|
-| Install, run, restart, and connect Docker services | [Docker](docs/container.md) · [orchestrators](docs/orchestrators.md) |
-| Write nodes and edges from Python | [Python client](docs/python-client.md) · [Python ingestion](docs/python-ingestion.md) |
-| Understand supported Cypher and functions | [Cypher](docs/local-cypher.md) |
-| Inspect equality indexes and query lookup behavior | [Indexes](docs/indexes.md) |
-| Create graphs and apply an ontology | [Quickstart](docs/mvp-quickstart.md) · [ontology](docs/connected-ontology.md) |
-| Inspect a running graph through the terminal | [Connected workspace](docs/connected-status.md) |
-| Explore the visual demo or inspect local files | [TUI demo and controls](docs/tui-demo.md) · [offline backoffice](docs/multi-graph-backoffice.md) |
-| Resume version-pinned source snapshot differences | [DuckLake incremental ingestion](docs/ducklake-incremental.md) |
-| Load and keep a DuckLake table current with parallel writers | [Parallel writes and DuckLake sync](docs/parallel-ingestion.md) |
-| Configure authentication and network protection | [Auth](docs/bolt-auth.md) · [container auth](docs/protected-containers.md) · [TLS boundary](docs/protected-transport.md) |
-| Evaluate experimental quorum replication | [Quorum operations and limitations](docs/quorum-replication.md) |
-| Review measured performance and comparison status | [Benchmarks](docs/benchmarks/README.md) |
-| Understand data history and temporal limits | [Temporal data](docs/temporal-data.md) |
-| Review deployment readiness and recovery limits | [Operator checklist](docs/beta-operator-checklist.md) · [Docker, Swarm and Kubernetes](docs/orchestrators.md) · [Quorum operations](docs/quorum-replication.md) |
-| Explore system design | [Design documents](docs/design/) · [Temporal data model](docs/temporal-data.md) |
+| **Memory** | Query and ingress budgets estimate allocations. They do not enforce a global RSS ceiling, and the sustained 2/4/8 GiB qualification is incomplete. Read [memory defaults](docs/memory-defaults.md) and the [production roadmap](docs/production-readiness-roadmap.md). |
+| **Cypher** | One fixed label per node and immutable `entity_id`. Subqueries, pattern comprehensions and native temporal/spatial types remain unsupported. See [supported Cypher](docs/local-cypher.md). |
+| **Security** | The demo is unauthenticated. Shared access needs an auth policy and verified encryption boundary; native Bolt TLS is not implemented. See [server security](docs/serve.md). |
+| **Time and sources** | Catalog versions are not node/edge history. No native `AS OF` or automatic retention. DuckLake support compares pinned snapshots rather than native CDC. See [temporal data](docs/temporal-data.md) and [DuckLake ingestion](docs/ducklake-incremental.md). |
+| **Scale and ecosystem** | Three-voter quorum is experimental; ordinary deployment templates run one instance. Sharding, native text/vector indexes, a public Python package and an independent sync/async Bolt driver remain open. See [quorum operations](docs/quorum-replication.md) and the [v2 roadmap](ROADMAP-v2.md). |
+| **Performance** | Large ACL scans and cursor workloads need application-specific tests. Recorded benchmarks are synthetic diagnostics, not production SLOs. Start with [BENCHMARKS.md](BENCHMARKS.md). |
+
+For a first trial, use a rebuildable shadow graph and keep the existing source
+as the authority until integration, security, recovery and workload checks pass.
+
+## Documentation
+
+| Task | Guide |
+|---|---|
+| Install, configure, restart and connect containers | [Docker](docs/container.md) · [Kubernetes / Swarm](docs/orchestrators.md) |
+| Create graphs and apply an ontology | [Local quickstart](docs/mvp-quickstart.md) · [ontology](docs/connected-ontology.md) |
+| Write, patch, remove and import data | [Python API](docs/python-client.md) · [source ingestion](docs/source-ingestion.md) · [DuckLake sync](docs/parallel-ingestion.md) |
+| Query and inspect | [Cypher](docs/local-cypher.md) · [indexes](docs/indexes.md) · [connected TUI](docs/connected-status.md) · [offline inspector](docs/multi-graph-backoffice.md) |
+| Protect and recover data | [Authentication](docs/bolt-auth.md) · [transport](docs/protected-transport.md) · [checkpoints](docs/checkpoints.md) · [operator checklist](docs/beta-operator-checklist.md) |
+| Evaluate measured results | [Benchmark index](BENCHMARKS.md) · [Neo4j/FalkorDB diagnostic](docs/benchmarks/comparison/README.md) |
+
+The Markdown guides in `docs/` are readable on GitHub. `docs-site/` is a separate
+static documentation landing page. Learn how to preview it and what GitHub Pages
+does in the [site guide](docs/github-pages.md). The [documentation index](docs/README.md)
+separates current guides from historical reports.
+
+## Releases and container images
+
+Use the image only after the matching release workflow publishes it and records
+a tested digest in `release-metadata.txt`:
+
+```sh
+docker pull ghcr.io/allandefraga/brainwire:v0.10.0-beta.1 # brainwire-release-version
+```
+
+Private images require `docker login ghcr.io` with a GitHub token that can read
+the package. Repository and image visibility are separate settings. See the
+[container guide](docs/container.md) for startup and authentication.
+
+Pushes to `main` run CI. Version tags run release checks, build the image and
+verify writes and restart recovery before publication. Beta/RC tags create
+prereleases. A tag alone does not prove that an image exists, and a published
+image does not qualify production. See [releasing](docs/releasing.md) for the
+local helper, versioning and workflow details.
 
 ## Build it locally
 
-Install Rust 1.98.1 as selected by `rust-toolchain.toml`; CI and the Docker
-builder use the same version. The commands below use `--offline`, so dependencies
-must already be cached. On the first connected build, run `cargo fetch --locked` first.
-Then run:
+Install the Rust toolchain in `rust-toolchain.toml` and native build dependencies
+(Clang/libclang, CMake and pkg-config). From the repository root:
+
+```sh
+cargo fetch --locked
+cargo build --release --locked --offline -p brainwire-server
+./target/release/brainwire --version
+```
+
+The resulting binary includes the server, CLI and TUI. To verify a source change:
 
 ```sh
 cargo test --workspace --locked --offline
@@ -307,33 +251,16 @@ cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo fmt --all -- --check
 ```
 
-Build the server binary with `cargo build --release --locked --offline -p brainwire-server`.
-The [local demo](examples/python/local_demo.py) exercises Python batches,
-Cypher, indexes, restart and the connected TUI with synthetic data.
-
 ## Release status and license
 
 **Version:** `v0.10.0-beta.1` · source beta · production qualification open. <!-- brainwire-release-version -->
-A tag identifies source; a published release and image require the workflow to
-finish successfully. The release workflow marks `-beta.N` and `-rc.N` tags as
-prereleases and plain SemVer tags as stable releases. It publishes a versioned
-Docker image to GHCR only after source and container recovery checks pass. Follow the
-[release workflow](https://github.com/allandefraga/brainwire/actions/workflows/release.yml)
-for its current status. It does not publish a Rust crate or Python package. The
-image is a delivery artifact, not a production-readiness claim; see the
-[current limits](#current-limits).
 
-**License:** Current Brainwire source uses [Apache-2.0](LICENSE), a permissive
-open-source license. Some [older releases](https://github.com/allandefraga/brainwire/tree/v0.1.1)
-predate that license and carry no open-source license grant; check the license
-in the tag you distribute. People may use, modify, redistribute, and sell the software, including
-for commercial and BYOC deployments, while following its notice and license
-terms. Others may sell their own versions too; this license does not reserve
-exclusive commercial rights. The Docker image includes the license at
-`/usr/share/licenses/brainwire/` and carries the `Apache-2.0` license label.
-`publish = false` is separate: it keeps these Rust crates from being uploaded to
-package registries such as crates.io. It does not prevent use of the source or
-Docker image and does not control GitHub releases.
+Current source uses [Apache-2.0](LICENSE). You may use, modify and redistribute it,
+including commercially, while following its terms. Check the license in the tag
+you distribute: some older releases predate this license grant. The license does
+not make a private repository or image publicly accessible.
 
-Repository and GHCR package visibility are separate access settings. The
-license does not make a private repository or private image publicly accessible.
+`publish = false` prevents uploading the Rust crates to registries such as
+crates.io. It does not prevent running the source, using Docker images or
+creating GitHub releases. The current release workflow does not publish a Rust
+crate or Python package to a registry.

@@ -1,118 +1,45 @@
 # Run Brainwire in Docker
 
-The [Compose/Kubernetes/Swarm guide](orchestrators.md) now includes runnable
-single-writer templates and their local validation commands.
+Use Docker Compose for the first local trial. It builds the server, creates a
+synthetic graph named `demo`, and keeps its files in a named Docker volume.
+You need Docker Engine and Docker Compose. Run the commands below from the
+Brainwire repository root.
 
-The image packages the **single-node** Bolt server and its administration CLI.
-It runs independently of any application repository. Each application connects
-over Bolt and chooses a named graph. These commands use synthetic data on
-localhost. The server requires an auth policy on non-loopback listeners and
-fails closed without one. The container profile has no replication or native TLS;
-[experimental quorum replication](quorum-replication.md) is a separate profile. The [optional TLS proxy](protected-transport.md)
-provides the qualified single-host encrypted Python entry path. Its base profile
-is unprotected; optional
-[service-token overlays](protected-containers.md) provide named-graph grants.
-Use it only on a trusted/encrypted test
-network. See [server limits](serve.md).
-
-The image carries the Apache-2.0 license at
-`/usr/share/licenses/brainwire/LICENSE` and labels the image accordingly. No
-special Docker configuration is needed for the license; follow the license's
-notice and redistribution terms when sharing the image.
+This guide uses an unauthenticated demo on host loopback. For shared or real
+data, use the [protected container setup](protected-containers.md) and a
+[verified encrypted connection](protected-transport.md). The native Bolt server
+has no TLS. The normal Docker profiles run one database instance;
+[experimental quorum replication](quorum-replication.md) has a separate setup.
 
 ## Fastest local start
 
-From the repository root, with Docker Engine running and Docker Compose installed,
-this builds Brainwire, creates a persistent named volume, initializes the bundled
-`demo` ontology once,
-and starts the server:
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  up --build --wait --wait-timeout 900
+```
+
+The first build compiles Rust and RocksDB and can take several minutes. After
+the build, Compose waits up to 900 seconds for query readiness. The Bolt address
+is `bolt://127.0.0.1:7687` and the database name is `demo`.
+
+If port 7687 is busy, run the startup command with
+`BRAINWIRE_BIND_PORT=17687` before `docker compose`, then connect to port 17687.
+Use the same project name and Compose file for later management commands:
 
 ```sh
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --build --wait --wait-timeout 900
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml ps
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire brainwire probe --mode ready
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs brainwire
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire probe --mode ready
 ```
 
-Connect a client to `bolt://127.0.0.1:7687`, using database `demo`.
-The explicit project name keeps this demo separate from other Compose projects.
-The first build compiles RocksDB and can take several minutes; the 900-second
-wait begins after building and waits for a healthy server. If port 7687 is busy,
-prefix the startup command with `BRAINWIRE_BIND_PORT=17687` and connect to port
-17687 instead. Inspect startup failures with
-`docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs`.
+The initializer skips an existing `demo` graph. Restarting this Compose project
+with its original volume preserves the graph.
 
-Stop the demo while retaining its named volume and graph data:
+## Write and read from Python
 
-```sh
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
-```
-
-Adding `--volumes` to that command permanently deletes this demo database. Use
-these commands to consume a versioned image from a private registry without
-building it locally:
-
-```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.10.0-beta.1 # brainwire-release-version
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --wait --wait-timeout 900
-```
-
-Log in to the registry first with `docker login ghcr.io`. Release images are
-tagged with the exact Git release tag (for example `v0.10.0-beta.1`). <!-- brainwire-release-version --> The
-Kubernetes release overlay pins the same tag. For a deployment requiring
-immutable provenance, resolve the published image to its digest and pin that
-digest in your environment's deployment configuration. `up` can be repeated safely;
-the initializer skips an already-created `demo` graph.
-
-Build and initialize a named Docker volume:
-
-```sh
-docker build -t brainwire:local .
-docker volume create brainwire-data
-docker run --rm --mount type=volume,src=brainwire-data,dst=/data \
-  brainwire:local db create demo \
-  --ontology /opt/brainwire/example-schema.json
-```
-
-Run the server, then connect a Bolt driver to `bolt://127.0.0.1:7687`:
-
-```sh
-docker run --detach --name brainwire-local --init --restart unless-stopped \
-  --stop-timeout 60 \
-  --publish 127.0.0.1:7687:7687 \
-  --mount type=volume,src=brainwire-data,dst=/data \
-  --memory 2g \
-  --env BRAINWIRE_SERVER_DEFAULT_DATABASE=demo \
-  --env BRAINWIRE_MEMORY_CACHE=256MiB \
-  --env BRAINWIRE_MEMORY_MEMTABLES=32MiB \
-  --env BRAINWIRE_MEMORY_QUERY=256MiB \
-  brainwire:local serve --allow-unauthenticated-remote
-```
-
-This explicit development override is only for synthetic data on an isolated
-machine; the host port is loopback-bound. For real data or shared access, use
-the [authenticated container profile](protected-containers.md), not this
-unauthenticated command.
-
-Check readiness before connecting. Repeat the probe until it exits successfully;
-`docker logs brainwire-local` shows startup errors:
-
-```sh
-docker exec brainwire-local brainwire probe --mode ready
-docker inspect --format '{{.State.Health.Status}}' brainwire-local
-```
-
-The image starts `brainwire serve` by default. `/data` holds all named graphs;
-the graph `demo` was created offline with the bundled synthetic Customer/Company
-ontology. `db create` refuses to replace an existing graph. Applying a real
-ontology uses the same offline command path with a read-only schema mount. Stop the server before offline administration
-so only one process opens each RocksDB directory.
-
-## Write and query from Python
-
-Run from any directory; the driver needs no Brainwire source checkout. This uses
-the same Bolt/Cypher path as the repository's Python batch convenience API.
-Create a virtual environment once, then run the example:
+The database runs in Docker; Python can run on the host. Create an environment
+and install the Bolt driver:
 
 ```sh
 python3 -m venv .venv
@@ -120,161 +47,177 @@ python3 -m venv .venv
 .venv/bin/python - <<'PYTHON'
 from neo4j import GraphDatabase
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None,
+                          max_transaction_retry_time=0) as driver:
     with driver.session(database="demo") as session:
-        # A bounded batch commits atomically; replay merges by stable entity_id.
         session.run("""
             UNWIND $rows AS row
-            MERGE (c:Customer {entity_id:row.entity_id})
-            SET c.name=row.name, c.email=row.email, c.segment=row.segment
+            MERGE (c:Customer {entity_id:row.id})
+            SET c.name=row.name, c.email=row.email
         """, rows=[
-            {"entity_id":"customer-1", "name":"Ada", "email":"ada@example.test", "segment":"beta"},
-            {"entity_id":"customer-2", "name":"Grace", "email":"grace@example.test", "segment":"beta"},
+            {"id":"customer-1", "name":"Ada", "email":"ada@example.test"},
+            {"id":"customer-2", "name":"Grace", "email":"grace@example.test"},
         ]).consume()
         print(session.run("""
             MATCH (c:Customer {email:$email})
             RETURN c.entity_id AS id, c.name AS name
         """, email="ada@example.test").data())
-        print(session.run("""
-            CALL db.indexes() YIELD label, property, state
-            RETURN label, property, state
-        """).data())
 PYTHON
 ```
 
-The first result is `[{'id': 'customer-1', 'name': 'Ada'}]`. The bundled ontology
-declares the email equality index; inspect its real readiness in the second
-result. The driver uses direct `bolt://` connectivity. The supported language is
-[the Brainwire Cypher subset](local-cypher.md); driver compatibility does not
-imply the complete Neo4j feature set. For individual writes, property removal,
-edges and iterable batches see [the Python convenience API](python-client.md).
-That helper currently lives in the repository; it is not a published SDK.
+Expected output: `[{'id': 'customer-1', 'name': 'Ada'}]`.
+The demo ontology includes `Customer` and an email equality index. Consume each
+write result to complete the autocommit transaction. A lost commit response is
+an unknown outcome; reconcile the stable IDs before retrying.
 
-For another application container on the same Docker network, connect to the
-Brainwire service name (for example `bolt://brainwire:7687` in Compose).
-`127.0.0.1` inside that application container addresses the application itself.
-The database stays a separate service with its own persistent volume; the
-application does not need to compile or embed it.
+For bounded upserts and property patches, the repository also has a
+[locally installable Python helper](python-package.md). It uses the Neo4j driver;
+a public PyPI package is not claimed. See the [mutation contract](python-client.md)
+and [supported Cypher](local-cypher.md).
 
-To connect services launched by **separate Compose projects**, create and share
-an external Docker network. This development example uses the synthetic demo
-profile, which has authentication disabled; use only synthetic data on this
-trusted local network:
+## Open the TUI
+
+Open a second terminal and run the TUI inside the running container:
 
 ```sh
-docker network create brainwire-integration
-BRAINWIRE_SHARED_NETWORK=brainwire-integration \
-  docker compose -p brainwire-demo \
-  -f deploy/compose.demo.yaml -f deploy/compose.shared-network.yaml \
-  up --build --wait --wait-timeout 900
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire shell --connect 127.0.0.1:7687 --graph demo
 ```
 
-Attach the consumer service to the same external network in its own Compose
-file and configure its Bolt URI as `bolt://brainwire:7687`:
+Use `Tab` or `1`–`4` for Ontology, Memory, Indexes and Graph; `r` refreshes,
+`?` explains the current pane, and `q` exits. The connected workspace is
+read-only. The Graph pane needs four selection flags; the
+[connected workspace guide](connected-status.md) shows an example.
 
-```yaml
-services:
-  consumer:
-    environment:
-      BRAINWIRE_BOLT_URI: bolt://brainwire:7687
-    networks:
-      - default
-      - brainwire-integration
-
-networks:
-  brainwire-integration:
-    external: true
-    name: brainwire-integration
-```
-
-The Compose service name `brainwire` resolves through the network alias. Before
-using real application data, switch to the protected service-token profile and
-an encrypted/trusted transport boundary; this network overlay alone provides
-neither authentication nor encryption. See [protected containers](protected-containers.md).
-
-## Restart, inspect and stop
+For an entirely synthetic visual demonstration, run:
 
 ```sh
-docker restart --timeout 60 brainwire-local
-docker exec brainwire-local brainwire probe --mode ready
-# Stop before inspecting the store with an offline administration command.
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire shell --demo
+```
+
+That demo does not inspect the running database. See [TUI modes and controls](tui-demo.md).
+
+## Stop, restart and keep the data
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml restart brainwire
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
+```
+
+`down` removes the containers and retains the named volume. Run the startup
+command again to reopen it. Adding `--volumes` deletes this demo's data.
+A new volume on another machine is a new database, not recovery of this one.
+Keep independent backups; see [checkpoints](checkpoints.md) and
+[termination and recovery](termination-recovery.md).
+
+## Use a published release image
+
+A source tag can exist before its image. Check the matching GitHub release and
+its workflow before using it. After the image has been published:
+
+```sh
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.10.0-beta.1 # brainwire-release-version
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  up --no-build --wait --wait-timeout 900
+```
+
+Images use the exact release tag, for example `v0.10.0-beta.1`. <!-- brainwire-release-version -->
+For reproducible deployment, pin the digest from the release receipt. A private
+GHCR image requires `docker login ghcr.io` with a GitHub token authorized to read
+that package. Public images do not require login. Keep credentials out of shell
+arguments and source files.
+
+## Start a local demo with one command
+
+After building `brainwire:local` with `docker build -t brainwire:local .`, you
+can start the synthetic demo with one command. This exposes an unauthenticated
+server on host loopback only and is intended for local experiments:
+
+```sh
+docker run -d --name brainwire-local -p 127.0.0.1:7687:7687 -v brainwire-local-data:/data -e BRAINWIRE_SERVER_DEFAULT_DATABASE=demo --entrypoint /bin/sh brainwire:local -ec 'if [ ! -f /data/demo/CURRENT ]; then brainwire db create demo --ontology /opt/brainwire/example-schema.json; fi; exec brainwire serve --allow-unauthenticated-remote'
+```
+
+The named volume keeps the graph when the container stops. For shared or real
+data, follow the [protected container guide](protected-containers.md).
+This bootstrap was smoke-tested with a locally built v0.10.0-beta.1
+candidate and synthetic data. Validate the exact image and environment you use;
+this is not a production or recovery qualification.
+
+## Use your own ontology and a single container
+
+Compose is the shortest setup. The equivalent separate steps make the storage
+and initialization explicit:
+
+```sh
+docker build -t brainwire:local .
+docker volume create brainwire-data
+docker run --rm --mount type=volume,src=brainwire-data,dst=/data \
+  brainwire:local db create demo --ontology /opt/brainwire/example-schema.json
+docker run --detach --name brainwire-local --init --restart unless-stopped \
+  --stop-timeout 60 --publish 127.0.0.1:7687:7687 \
+  --mount type=volume,src=brainwire-data,dst=/data --memory 2g \
+  --env BRAINWIRE_SERVER_DEFAULT_DATABASE=demo \
+  --env BRAINWIRE_MEMORY_CACHE=256MiB \
+  --env BRAINWIRE_MEMORY_MEMTABLES=32MiB \
+  --env BRAINWIRE_MEMORY_QUERY=256MiB \
+  brainwire:local serve --allow-unauthenticated-remote
+```
+
+To create a real graph, mount your ontology JSON read-only and pass its container
+path to `db create`. That command refuses to replace an existing graph. The
+container runs as UID/GID 10001; bind-mounted data must be writable by that user.
+All named graphs live below `/data`. The image includes the CLI and license at
+`/usr/share/licenses/brainwire/LICENSE`.
+
+Stop the server before opening the same files with an offline command:
+
+```sh
 docker stop --timeout 60 brainwire-local
 docker run --rm --mount type=volume,src=brainwire-data,dst=/data \
   brainwire:local db check demo
 docker start brainwire-local
 ```
 
-Re-run the Python example after readiness: the same two identities remain,
-without duplicate nodes. Removing the container (`docker rm -f brainwire-local`)
-does not remove the explicitly named volume. `docker volume rm brainwire-data`
-permanently deletes this test database after its containers are removed.
+The `--memory` Docker limit constrains the container. Brainwire component budgets
+are separate estimates; they do not prove a process RSS ceiling or no-OOM
+behavior. Read [memory defaults and diagnostics](memory-defaults.md).
 
-## Application delivery
+## Connect another application container
 
-The current runnable path is to clone this independent repository, check out a
-chosen revision and build `brainwire:local`. No published registry image is
-promised by this guide. For private distribution, build and publish one versioned
-image in the database repository's release process, then have application
-operators pull that exact image tag or digest. Applications supply configuration,
-credentials, ontology and retained storage; they do not build their own modified
-database. The [Compose/Kubernetes/Swarm templates](orchestrators.md) are the
-starting point for this packaging. Choose the protected token/TLS overlays for
-remote access. This document does not publish an image or change a cluster.
-
-## Storage and recovery boundaries
-
-The container runs as UID/GID 10001 and expects its volume to be writable by
-that user. The image does not declare an anonymous `VOLUME`: every deployment
-must explicitly name or mount its durable storage. A fresh local volume is a
-fresh database. Do not treat a container restart on a different machine with a
-new local volume as recovery of the old member.
-
-The image has a Docker health check that runs `brainwire probe --mode ready`.
-That command negotiates Bolt, logs on and executes `RETURN 1` against the
-default database. `brainwire probe --mode live` checks the session path without
-running a query. The health check has a 180-second startup grace period; larger
-recovery tests may need a longer one. The default probe targets
-`127.0.0.1:7687`; override it if the container listener port changes.
-
-For a restart check, write synthetic data, kill the container, then start a new
-container with the **same** `brainwire-data` volume and read it back. The
-[driver acceptance script](../crates/server/tests/mvp_demo.py) has `write` and
-`read` modes for this purpose. The repeatable
-[container restart test](../crates/server/tests/container_restart.py) creates
-its own temporary volume, writes 10,000 synthetic Customers, performs five
-kill/recreate cycles, interrupts uncommitted indexed overwrites, checks stale
-index removal and runs an offline audit before removing its test resources:
+On the same Compose network, use `bolt://brainwire:7687`. `127.0.0.1` inside
+another container points to that container, not to Brainwire. For separate
+Compose projects, the [shared network overlay](../deploy/compose.shared-network.yaml)
+uses an explicit external network:
 
 ```sh
-python crates/server/tests/container_restart.py
+docker network create brainwire-integration
+BRAINWIRE_SHARED_NETWORK=brainwire-integration \
+  docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  -f deploy/compose.shared-network.yaml up --build --wait --wait-timeout 900
 ```
 
-This tests process/container recovery, not machine loss. The example ontology
-is bundled only to make local test setup reproducible; use an appropriate
-ontology for real graphs.
+Attach the consumer to that network in its own Compose configuration. The demo
+is still unauthenticated; the network itself adds no authentication or encryption.
+Use the [protected profiles](protected-containers.md) before sharing real data.
 
-Before Kubernetes or Docker Swarm deployment, configure explicit startup,
-readiness and liveness probes using these modes. Package stable member
-identities and durable per-member volumes; run the failure matrix in the
-[data recovery guide](termination-recovery.md).
-On Docker Swarm, service placement must keep each member bound to the correct
-storage, or use a storage system that can reattach that member's volume. On
-Kubernetes, a StatefulSet and persistent volume claims are the intended first
-single-node pattern. Multi-machine high availability requires Brainwire's own
-replication protocol and quorum tests in addition to either orchestrator.
+## Health checks and deployment
 
-The Dockerfile uses BuildKit cache mounts for Cargo downloads and build output.
-The executable is copied outside the mount before the runtime image is built;
-no compiler or writable build cache is packaged in the final image. A clean
-first build still compiles RocksDB C++, while later local rebuilds reuse it.
+| Check | What it proves |
+| --- | --- |
+| `brainwire probe --mode handshake` | Bolt negotiation and HELLO answer; no credential or database query |
+| `brainwire probe --mode live` | Negotiation and login succeed; no query |
+| `brainwire probe --mode ready` | The default database serves `RETURN 1` |
 
-The builder sets `RUSTUP_TOOLCHAIN=1.98.1` to match its base image, so the
-repository's development `stable` channel cannot silently select another Rust
-release. `CARGO_BUILD_JOBS` defaults to 2 to limit concurrent RocksDB C++ compiler
-memory; builders with sufficient free resources can override it using
-`docker build --build-arg CARGO_BUILD_JOBS=4 -t brainwire:local .`.
+The Dockerfile's built-in health check uses **handshake**. The demo Compose file
+overrides it with **ready**. Configure the appropriate probe and credentials for
+your deployment; a responding listener alone does not establish query readiness.
+Use `--address` if the listener changes and `--timeout-ms` to bound a probe.
 
-The locked shared target cache preserves compiled dependencies, including RocksDB.
-Each uncached source build runs `cargo clean --release --workspace` first so
-workspace artifacts from another build cannot appear newer than copied sources.
-This prevents stale cross-crate APIs while retaining the expensive native cache.
+[Docker/Compose, Kubernetes and Swarm deployment](orchestrators.md) covers the
+current single-instance templates. Keep the correct persistent volume attached
+to its instance. Multiple containers do not create graph replicas automatically.
+The [container restart harness](../crates/server/tests/container_restart.py)
+uses its own synthetic data to check retained-volume recovery; that test does
+not establish machine-loss recovery.

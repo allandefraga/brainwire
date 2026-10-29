@@ -241,6 +241,7 @@ pub enum TextOp {
     StartsWith,
     EndsWith,
     Contains,
+    Regex,
 }
 
 /// Aggregate function names recognized in projections.

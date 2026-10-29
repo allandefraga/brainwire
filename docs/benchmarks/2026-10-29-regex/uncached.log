@@ -1,0 +1,10 @@
+
+running 1 test
+rows=1000 operator=regex median_ms=256.594 samples_ms=[256.358375, 256.59420900000003, 269.42775]
+rows=1000 operator=starts_with median_ms=1.221 samples_ms=[1.204208, 1.220959, 1.381709]
+rows=10000 operator=regex median_ms=2620.415 samples_ms=[2582.920166, 2620.4146659999997, 2666.838542]
+rows=10000 operator=starts_with median_ms=11.883 samples_ms=[11.862959, 11.883417, 11.973457999999999]
+test regex_recompile_diagnostic ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 8.72s
+

@@ -978,7 +978,14 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.check(&Tok::RegexMatch) {
-                return Err(self.error_here("not supported yet: regular expressions (=~)"));
+                self.advance();
+                let right = self.parse_additive()?;
+                left = self.wrap(
+                    &[left.depth, right.depth],
+                    offset,
+                    Expr::Text(Box::new(left.expr), TextOp::Regex, Box::new(right.expr)),
+                )?;
+                continue;
             }
             let op = match self.peek() {
                 Tok::Eq => CmpOp::Eq,
@@ -1858,10 +1865,7 @@ mod tests {
         let e = parse("MATCH (c:Customer RETURN c").unwrap_err();
         assert!(e.offset > 0);
         assert!(parse("").is_err());
-        assert!(parse("MATCH (a) WHERE a.x =~ 'x' RETURN a")
-            .unwrap_err()
-            .message
-            .contains("regular"));
+        assert!(parse("MATCH (a) WHERE a.x =~ 'x' RETURN a").is_ok());
     }
 
     // -- nesting limit -------------------------------------------------------

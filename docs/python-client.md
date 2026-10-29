@@ -1,14 +1,34 @@
-# Python single, batch and partial mutations
+# Write and update a graph from Python
 
-The small `examples.python.client.GraphClient` convenience API uses the existing
-Neo4j driver, named Brainwire graph, Bolt transactions and Cypher executor. It
-does not create another storage path or promise the complete Neo4j API.
-Apply the ontology first; use a protected writer credential file.
+Install the helper from this checkout using the [Python package guide](python-package.md).
+`GraphClient` uses the Neo4j Bolt driver to send Cypher to one named Brainwire
+graph. The application creates and closes the driver and chooses credentials.
+For a runnable synthetic demo, use the [README example](../README.md#write-from-python).
+
+## Choose the operation
+
+| Task | Helper |
+| --- | --- |
+| Create or update one node | `upsert_node` |
+| Patch an existing node without creating it | `update_node` |
+| Create or update a relationship between existing nodes | `upsert_edge` |
+| Patch an existing relationship | `update_edge` |
+| Load rows in bounded transactions | `load_nodes`, `load_edges` |
+| Remove known nodes and their incident relationships | `delete_nodes` |
+| Remove selected relationships and keep the nodes | `delete_edges` |
+| Run parameterized Cypher | `run_cypher` |
+
+## Single records and property patches
+
+This example assumes an ontology declaring `Ticket`, `TicketComment` and
+`HAS_COMMENT`, plus the properties used below. It runs from the checkout and
+uses its credential-file helper; [protected connections](bolt-auth.md) explains
+that file. Apply your ontology first and use a writer credential.
 
 ```python
 from neo4j import GraphDatabase
 from examples.python.connection import auth_from_env
-from examples.python.client import GraphClient
+from brainwire import GraphClient
 
 with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
                           liveness_check_timeout=30) as driver:
@@ -20,7 +40,8 @@ with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
                       ("TicketComment","c-1"), {"weight":0.7})
     graph.update_edge(("Ticket","t-42"), "HAS_COMMENT",
                       ("TicketComment","c-1"), {"weight":0.9}, remove=["old_score"])
-    removed = graph.delete_nodes("Ticket", obsolete_ticket_ids)
+    # Explicit identities only; this does not discover stale source records.
+    removed = graph.delete_nodes("Ticket", ["t-obsolete"])
     rows = graph.run_cypher(
         "MATCH (t:Ticket {entity_id:$id})-[:HAS_COMMENT]->(c:TicketComment) "
         "RETURN c.entity_id AS id, c.body AS body LIMIT 20",
@@ -30,7 +51,7 @@ with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
 ```
 
 `run_cypher(query, parameters={})` runs one statement against this client's
-named graph and returns fully materialized record dictionaries. Parameters are
+named graph and returns a materialized list of record dictionaries. Parameters are
 separate from query text. Each statement is atomic; the helper does not retry
 uncertain writes. Use `write_transaction(..., request_id=...)` for retained
 quorum request identities. See the [implemented Cypher grammar and examples](local-cypher.md)
@@ -184,8 +205,8 @@ UTF-8 JSON input, not exact Bolt bytes, wire quota or RSS. Values are null, bool
 int64, finite float, string, list and string-keyed map, with nesting capped at 32.
 Identifiers use ASCII letters/digits/underscore, starting with a letter or
 underscore, and at most 128 characters; values are parameters, never query text.
-ACL property names are reserved. This helper is currently a repository example,
-not a published/installable SDK.
+ACL property names are reserved. The helper is installable from this checkout;
+see [Python package setup](python-package.md). It is not published on PyPI.
 
 `load_nodes` and `load_edges` do not maintain a persistent source cursor. For
 replay after a lost acknowledgement, use the
@@ -272,7 +293,7 @@ also make only one explicit attempt, but do not gain a durable source cursor or
 retained request identity automatically.
 
 ```python
-from examples.python.client import GraphClient, request_key
+from brainwire import GraphClient, request_key
 
 seed = "ticket-t42-source-revision-7"  # Persist before sending; reuse on retry.
 key = request_key("brainwire-quorum-demo", "tickets", "writer", seed)

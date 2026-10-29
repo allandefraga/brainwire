@@ -7,6 +7,75 @@ fn semantic(message: impl Into<String>) -> ExecError {
     ExecError::Semantic(message.into())
 }
 
+// Admission estimate includes bounded compiler/cache work, not allocator RSS.
+const REGEX_TEMPORARY_BYTES: usize = 1 << 20;
+const REGEX_PATTERN_BYTES: usize = 4096;
+const REGEX_PROGRAM_BYTES: usize = 64 << 10;
+
+#[cfg(test)]
+std::thread_local! { static REGEX_COMPILATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+fn compile_regex(pattern: &str) -> Result<regex_automata::meta::Regex, ExecError> {
+    #[cfg(test)]
+    REGEX_COMPILATIONS.with(|count| count.set(count.get() + 1));
+    // Validate before adding anchors: raw text could escape the wrapper or
+    // consume its closing delimiter with an extended-mode trailing comment.
+    // Printing the parsed AST removes comments while preserving literal escapes.
+    let parsed = regex_syntax::ast::parse::ParserBuilder::new()
+        .nest_limit(64)
+        .octal(false)
+        .build()
+        .parse(pattern)
+        .map_err(|_| semantic("invalid or unsupported regular expression"))?;
+    let pattern = format!(r"\A(?:{parsed})\z");
+    regex_automata::meta::Regex::builder()
+        .configure(
+            regex_automata::meta::Regex::config()
+                .nfa_size_limit(Some(REGEX_PROGRAM_BYTES))
+                .onepass_size_limit(Some(REGEX_PROGRAM_BYTES))
+                .hybrid_cache_capacity(REGEX_PROGRAM_BYTES)
+                .dfa(false)
+                .backtrack(false)
+                .utf8_empty(true),
+        )
+        .syntax(
+            regex_automata::util::syntax::Config::new()
+                .nest_limit(64)
+                .utf8(true),
+        )
+        .build(&pattern)
+        .map_err(|_| semantic("invalid, unsupported or oversized regular expression"))
+}
+
+fn regex_match(text: &str, pattern: &str, ctx: &Context<'_, '_>) -> Result<bool, ExecError> {
+    if pattern.len() > REGEX_PATTERN_BYTES {
+        return Err(semantic(
+            "regular expression exceeds the 4096-byte pattern limit",
+        ));
+    }
+    ctx.budget.check_deadline()?;
+    if let Some(matches) = ctx.budget.cached_regex_match(pattern, text) {
+        ctx.budget.check_deadline()?;
+        return Ok(matches);
+    }
+    let credit = REGEX_TEMPORARY_BYTES + pattern.len() + 256;
+    if ctx.budget.regex_cache_empty() && ctx.budget.try_retain_cache(credit, 0)? {
+        let regex = compile_regex(pattern)?;
+        ctx.budget.check_deadline()?;
+        let matches = regex.is_match(text.as_bytes());
+        ctx.budget.store_regex(pattern.to_owned(), regex, credit);
+        ctx.budget.check_deadline()?;
+        return Ok(matches);
+    }
+    let _scope = ctx.budget.scope();
+    ctx.budget.charge(REGEX_TEMPORARY_BYTES)?;
+    let regex = compile_regex(pattern)?;
+    ctx.budget.check_deadline()?;
+    let matches = regex.is_match(text.as_bytes());
+    ctx.budget.check_deadline()?;
+    Ok(matches)
+}
+
 fn type_error(what: &str, value: &Val) -> ExecError {
     ExecError::Semantic(format!("{what} does not accept {}", value.type_name()))
 }
@@ -141,6 +210,7 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
                 TextOp::StartsWith => a.starts_with(&b),
                 TextOp::EndsWith => a.ends_with(&b),
                 TextOp::Contains => a.contains(&b),
+                TextOp::Regex => regex_match(&a, &b, ctx)?,
             }),
             _ => Val::Null,
         },
@@ -1059,5 +1129,26 @@ pub(super) fn limit(expr: &Expr, ctx: &Context<'_, '_>) -> Result<usize, ExecErr
             usize::try_from(n).map_err(|_| semantic("LIMIT exceeds platform capacity"))
         }
         _ => Err(semantic("SKIP and LIMIT need a nonnegative integer")),
+    }
+}
+
+#[cfg(test)]
+mod regex_cache_tests {
+    use super::*;
+    use brainwire_store::db::{Resources, StoreConfig};
+
+    #[test]
+    fn repeated_constant_pattern_compiles_once_for_ten_thousand_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        REGEX_COMPILATIONS.with(|count| count.set(0));
+        let output = execute(
+            &db,
+            "UNWIND range(1,10000) AS n WITH n WHERE 'abc' =~ 'a.*' RETURN count(*)",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(output.rows, vec![vec![Out::Value(Value::Int(10000))]]);
+        assert_eq!(REGEX_COMPILATIONS.with(|count| count.get()), 1);
     }
 }

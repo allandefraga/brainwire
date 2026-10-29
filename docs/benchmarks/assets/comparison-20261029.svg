@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="760" viewBox="0 0 1120 760" role="img" aria-labelledby="title desc">
+<title id="title">Local graph database comparison</title><desc id="desc">Synthetic workload comparison. Lower latency is better; higher ingestion throughput is better.</desc>
+<rect width="1120" height="760" rx="20" fill="#0b1220"/><text x="44" y="56" fill="#f2f6fc" font-family="system-ui,sans-serif" font-size="25" font-weight="700">Same synthetic graph · local Docker run</text>
+<text x="44" y="84" fill="#9eacc0" font-family="system-ui,sans-serif" font-size="14">10,000 nodes · 20,000 directed edges · 4 CPU / 8 GiB cap · 5 read/update repeats</text>
+<text x="44" y="131" fill="#d9e5f5" font-family="system-ui,sans-serif" font-size="17" font-weight="700">Read latency · p95 (ms) · lower is better</text>
+<text x="44" y="198" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="15">Indexed point read</text>
+<rect x="270" y="178" width="112.9" height="14" rx="5" fill="#36d399"/>
+<text x="391.9" y="190" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">Brainwire  0.692</text>
+<rect x="270" y="199" width="687.0" height="14" rx="5" fill="#67a9ff"/>
+<text x="966.0" y="211" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">Neo4j  4.209</text>
+<rect x="270" y="220" width="72.5" height="14" rx="5" fill="#c49bff"/>
+<text x="351.5" y="232" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">FalkorDB  0.444</text>
+<text x="44" y="286" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="15">1-hop, LIMIT 20</text>
+<rect x="270" y="266" width="112.6" height="14" rx="5" fill="#36d399"/>
+<text x="391.6" y="278" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">Brainwire  0.69</text>
+<rect x="270" y="287" width="388.9" height="14" rx="5" fill="#67a9ff"/>
+<text x="667.9" y="299" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">Neo4j  2.383</text>
+<rect x="270" y="308" width="71.6" height="14" rx="5" fill="#c49bff"/>
+<text x="350.6" y="320" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">FalkorDB  0.439</text>
+<text x="44" y="379" fill="#d9e5f5" font-family="system-ui,sans-serif" font-size="17" font-weight="700">Update series maximum · ms · lower is better</text>
+<text x="44" y="411" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="13">Brainwire</text>
+<rect x="180" y="397" width="175.1" height="18" rx="5" fill="#36d399"/>
+<text x="363.1" y="411" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">71.8695</text>
+<text x="44" y="437" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="13">Neo4j</text>
+<rect x="180" y="423" width="655.2" height="18" rx="5" fill="#67a9ff"/>
+<text x="843.2" y="437" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">268.841</text>
+<text x="44" y="463" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="13">FalkorDB</text>
+<rect x="180" y="449" width="79.6" height="18" rx="5" fill="#c49bff"/>
+<text x="267.6" y="463" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">32.6778</text>
+<line x1="44" y1="490" x2="1076" y2="490" stroke="#263448"/><text x="44" y="530" fill="#d9e5f5" font-family="system-ui,sans-serif" font-size="17" font-weight="700">Fresh ingest throughput · nodes + edges / second · higher is better</text>
+<text x="44" y="570" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="14">Brainwire</text>
+<rect x="180" y="553" width="397.1" height="23" rx="6" fill="#36d399"/>
+<text x="585.1" y="570" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">38,434</text>
+<text x="44" y="606" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="14">Neo4j</text>
+<rect x="180" y="589" width="144.4" height="23" rx="6" fill="#67a9ff"/>
+<text x="332.4" y="606" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">13,976</text>
+<text x="44" y="642" fill="#d1d8e2" font-family="system-ui,sans-serif" font-size="14">FalkorDB</text>
+<rect x="180" y="625" width="611.1" height="23" rx="6" fill="#c49bff"/>
+<text x="799.1" y="642" fill="#e8eef7" font-family="ui-monospace,monospace" font-size="12">59,144</text>
+<text x="44" y="690" fill="#8d9bb0" font-family="system-ui,sans-serif" font-size="12">Diagnostic, non-audited run. Update series: 20 × 100-row batches per sample.</text><text x="44" y="712" fill="#8d9bb0" font-family="system-ui,sans-serif" font-size="12">Driver protocols and durability defaults differ; see comparison README and raw receipt.</text></svg>

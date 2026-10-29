@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brainwire"
+version = "0.10.0b1"
+description = "Bounded Python graph mutations for Brainwire over Bolt"
+readme = "docs/python-package.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+dependencies = ["neo4j>=5.28,<7"]
+
+[project.urls]
+Repository = "https://github.com/allandefraga/brainwire"
+
+[tool.setuptools]
+packages = ["brainwire"]

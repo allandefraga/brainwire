@@ -11,6 +11,8 @@ thiserror.workspace = true
 brainwire-store = { path = "../store" }
 serde_json.workspace = true
 uuid.workspace = true
+regex-automata = "0.4"
+regex-syntax = "0.8"
 
 [dev-dependencies]
 tempfile.workspace = true

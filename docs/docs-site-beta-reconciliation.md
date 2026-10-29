@@ -1,5 +1,11 @@
 # Documentation-site beta reconciliation
 
+> **Historical note (October 13):** this records a review of an earlier draft,
+> not the current site's feature status. Several statements below are now
+> outdated, including the claim that online `CREATE INDEX` is unsupported. For
+> current instructions, see the [documentation site](../docs-site/index.html),
+> [index guide](indexes.md), and [Cypher guide](local-cypher.md).
+
 The pre-existing untracked `docs-site/` draft was inspected on October 13 without
 editing or publishing it. Its visual concept can be retained, but the following
 claims and samples need reconciliation before it becomes an executable beta guide.

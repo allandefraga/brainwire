@@ -2,7 +2,10 @@
 """Run a small, reproducible local Cypher comparison in isolated Docker volumes.
 
 Only containers/volumes whose names include this run's unique ID are removed.
-Images are intentionally retained. This is a diagnostic, not an audited benchmark.
+Images must already be present locally and are intentionally retained.
+Brainwire uses unauthenticated development access for synthetic data only; its
+published port is bound to host loopback. Do not reuse this setup for real data.
+This is a diagnostic, not an audited benchmark.
 """
 from __future__ import annotations
 
@@ -33,10 +36,22 @@ IMAGES = {
 
 
 def docker(*args: str, capture: bool = True) -> str:
-    p = subprocess.run(["docker", *args], check=True, text=True,
-                       stdout=subprocess.PIPE if capture else None,
-                       stderr=subprocess.PIPE if capture else None)
+    try:
+        p = subprocess.run(["docker", *args], check=True, text=True,
+                           stdout=subprocess.PIPE if capture else None,
+                           stderr=subprocess.PIPE if capture else None)
+    except subprocess.CalledProcessError as exc:
+        # Do not echo argv: other fixtures can pass authentication in arguments.
+        raise RuntimeError(f"docker {args[0]} failed (exit {exc.returncode})\n"
+                           f"stdout:\n{exc.stdout or ''}\nstderr:\n{exc.stderr or ''}") from exc
     return p.stdout.strip() if capture else ""
+
+
+def container_logs(container: str, tail: int) -> str:
+    # Docker emits application stderr on stderr even when `docker logs` succeeds.
+    p = subprocess.run(["docker", "logs", "--tail", str(tail), container],
+                       check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return f"stdout:\n{p.stdout.strip()}\nstderr:\n{p.stderr.strip()}"
 
 
 def port(container: str, inside: str) -> int:
@@ -114,7 +129,7 @@ def run_system(system, args, run_id):
     container = None
     try:
         persisted_path = "/var/lib/falkordb/data" if system == "falkordb" else "/data"
-        common = ["run", "-d", "--name", cname, "--memory", "8g", "--cpus", "4",
+        common = ["run", "--pull=never", "-d", "--name", cname, "--memory", "8g", "--cpus", "4",
                   "-v", f"{vname}:{persisted_path}"]
         if system == "neo4j":
             container = docker(*common, "-p", "127.0.0.1::7687", "-e", "NEO4J_AUTH=neo4j/benchmark-only",
@@ -133,7 +148,7 @@ def run_system(system, args, run_id):
             ontology = pathlib.Path(args.workdir) / f"{run_id}-ontology.json"
             ontology.write_text(json.dumps({"version": "1", "nodes": [{"label": "Item", "properties": ["entity_id", "value", "score"], "indexed_fields": ["entity_id"]}], "edges": [{"type": "LINK", "from": {"label": "Item"}, "to": {"label": "Item"}}]}))
             # Initialize the volume with the exact local candidate image.
-            docker("run", "--rm", "--name", f"{cname}-init", "--memory", "8g", "--cpus", "4",
+            docker("run", "--pull=never", "--rm", "--name", f"{cname}-init", "--memory", "8g", "--cpus", "4",
                    "-v", f"{vname}:/data", "-v", f"{ontology}:/benchmark/ontology.json:ro",
                    "-e", "BRAINWIRE_SERVER_DATA_DIR=/data", "--entrypoint", "brainwire", IMAGES[system],
                    "db", "create", "benchmark", "--ontology", "/benchmark/ontology.json")
@@ -143,7 +158,7 @@ def run_system(system, args, run_id):
                                "-e", "BRAINWIRE_SERVER_LISTEN=0.0.0.0:7687",
                                "-e", "BRAINWIRE_MEMORY_CACHE=2GiB", "-e", "BRAINWIRE_MEMORY_MEMTABLES=512MiB",
                                "-e", "BRAINWIRE_MEMORY_QUERY=256MiB", "--entrypoint", "brainwire",
-                               IMAGES[system], "serve")
+                               IMAGES[system], "serve", "--allow-unauthenticated-remote")
             p = port(cname, "7687/tcp")
             uri = f"bolt://127.0.0.1:{p}"
 
@@ -254,6 +269,8 @@ def run_system(system, args, run_id):
             "run_id": run_id,
             "nodes": node_count, "edges": actual_edges, "batch_size": batch,
             "persistent_data_path": persisted_path,
+            "access_mode": ("unauthenticated development access; synthetic data only; host loopback"
+                            if system == "brainwire" else "benchmark fixture; host loopback"),
             "restart_recovered_nodes": recovered[0], "restart_recovered_edges": recovered[1],
             "ingest_seconds": round(ingest_seconds, 3),
             "ingest_records_per_second": round((node_count + actual_edges) / ingest_seconds, 1),
@@ -267,7 +284,7 @@ def run_system(system, args, run_id):
                 "update_batch_series": [round(v, 4) for v in update_times],
             },
             "container_memory_sample": stats[0], "container_cpu_sample": stats[1], "data_dir_bytes": disk,
-            "container_logs_tail": docker("logs", "--tail", "5", cname),
+            "container_logs_tail": container_logs(cname, 5),
         }
         client.close()
         return result
@@ -275,9 +292,9 @@ def run_system(system, args, run_id):
         logs = ""
         if container:
             try:
-                logs = docker("logs", "--tail", "25", cname)
-            except Exception:
-                pass
+                logs = container_logs(cname, 25)
+            except Exception as log_exc:
+                logs = f"Could not collect container logs: {log_exc}"
         raise RuntimeError(f"{system} benchmark failed: {exc}\nContainer log tail:\n{logs}") from exc
     finally:
         # Exact unique names only; images and unrelated user Docker state are retained.
@@ -314,6 +331,9 @@ def main():
     }
     for system in args.systems:
         print(f"[{system}] starting isolated run {run_id}", flush=True)
+        if system == "brainwire":
+            print("[brainwire] UNAUTHENTICATED development fixture; synthetic data only; "
+                  "published on host 127.0.0.1 only", flush=True)
         metadata["results"].append(run_system(system, args, run_id))
         path = OUT / f"{run_id}.json"
         path.write_text(json.dumps(metadata, indent=2) + "\n")

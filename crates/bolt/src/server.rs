@@ -9,13 +9,13 @@ use tokio::sync::{watch, Semaphore};
 
 #[cfg(test)]
 use crate::chunk::encode_message;
-use crate::chunk::{write_message, ChunkReader, ReadError};
+use crate::chunk::{write_packstream_message, ChunkReader, ReadError};
 use crate::handshake::{negotiate, response, MAGIC};
 use crate::ingress::IngressPool;
 use crate::message::{parse_request, Response};
 #[cfg(test)]
-use crate::packstream::unpack;
-use crate::packstream::{pack, unpack_admitted, PackError};
+use crate::packstream::{pack, unpack};
+use crate::packstream::{unpack_admitted, PackError};
 use crate::session::{AuthMode, QueryEngine, Session, State};
 
 /// Default cap on assembled PackStream payload bytes per Bolt message,
@@ -550,12 +550,11 @@ async fn handle_connection_with_ingress<
                         .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout));
                     for r in responses {
                         check_io_deadline(&mut session, write_deadline)?;
-                        let mut body = Vec::new();
-                        pack(&r.into_value(), &mut body);
+                        let value = r.into_value();
                         io_with_deadline(
                             &mut session,
                             write_deadline,
-                            write_message(&mut stream, &body),
+                            write_packstream_message(&mut stream, &value),
                         )
                         .await?;
                     }
@@ -658,16 +657,12 @@ async fn write_failure<S: AsyncWrite + Unpin>(
     code: &str,
     message: &str,
 ) -> std::io::Result<()> {
-    let mut body = Vec::new();
-    pack(
-        &Response::Failure {
-            code: code.to_string(),
-            message: message.to_string(),
-        }
-        .into_value(),
-        &mut body,
-    );
-    write_message(stream, &body).await
+    let value = Response::Failure {
+        code: code.to_string(),
+        message: message.to_string(),
+    }
+    .into_value();
+    write_packstream_message(stream, &value).await
 }
 
 #[cfg(test)]
@@ -692,6 +687,108 @@ mod tests {
             watch::channel(false).1,
             pool,
         ))
+    }
+
+    struct EncodingOutputLease(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for EncodingOutputLease {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    struct InvalidOutputEngine {
+        commits: Arc<std::sync::atomic::AtomicUsize>,
+        output_released: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl QueryEngine for InvalidOutputEngine {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, crate::session::EngineError> {
+            Ok(crate::session::QueryResult {
+                fields: vec!["invalid_output".into()],
+                rows: vec![vec![PackValue::Struct {
+                    tag: 0x71,
+                    fields: vec![PackValue::Null; 16],
+                }]],
+                memory: Some(crate::session::OutputMemory::new(EncodingOutputLease(
+                    self.output_released.clone(),
+                ))),
+            })
+        }
+        fn commit(&mut self) -> Result<Option<String>, crate::session::EngineError> {
+            self.commits
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), crate::session::EngineError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn encoding_failure_after_commit_closes_without_false_failure_and_releases_output() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let commits = Arc::new(AtomicUsize::new(0));
+        let output_released = Arc::new(AtomicBool::new(false));
+        let engine = InvalidOutputEngine {
+            commits: commits.clone(),
+            output_released: output_released.clone(),
+        };
+        let (server, mut client) = tokio::io::duplex(2048);
+        let task = pooled_connection(
+            server,
+            engine,
+            IngressPool::new(4096),
+            std::time::Duration::from_secs(5),
+        );
+        login(&mut client).await;
+        send_request(
+            &mut client,
+            0x10,
+            vec![
+                PackValue::String("WRITE AND RETURN".into()),
+                PackValue::Map(vec![]),
+                PackValue::Map(vec![]),
+            ],
+        )
+        .await;
+        read_success(&mut client).await;
+        assert!(!output_released.load(Ordering::SeqCst));
+        send_request(
+            &mut client,
+            0x3f,
+            vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+        )
+        .await;
+        let mut bytes = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            client.read_to_end(&mut bytes),
+        )
+        .await
+        .expect("encoding error closes connection")
+        .unwrap();
+        assert!(
+            bytes.is_empty(),
+            "must not emit partial RECORD or a retry-safe FAILURE after commit"
+        );
+        let error = task.await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            commits.load(Ordering::SeqCst),
+            1,
+            "engine committed before output encoding"
+        );
+        assert!(
+            output_released.load(Ordering::SeqCst),
+            "failed output releases retained accounting"
+        );
     }
 
     async fn reserved_equals(pool: &IngressPool, expected: usize) {

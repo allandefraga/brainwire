@@ -7,6 +7,7 @@ mod config;
 mod cypher;
 mod databases;
 mod engine;
+mod memory_pressure;
 mod probe;
 mod remote;
 mod remote_graph;
@@ -531,6 +532,7 @@ fn run_config_show(explicit_path: Option<&Path>) -> Result<(), String> {
     for (key, value, origin) in config::describe(&loaded) {
         println!("{key:<24} = {value:<14} ({origin})");
     }
+    println!("{}", config::memory_budget_summary(&loaded));
 
     Ok(())
 }

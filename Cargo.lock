@@ -201,6 +201,8 @@ version = "0.10.0-beta.1"
 dependencies = [
  "brainwire-core",
  "brainwire-store",
+ "regex-automata",
+ "regex-syntax",
  "serde_json",
  "tempfile",
  "thiserror",

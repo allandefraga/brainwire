@@ -14,6 +14,7 @@ use brainwire_cypher::{ExecError, Out, QueryAccess, QueryOutput, QueryTransactio
 
 use crate::cluster::Replica;
 use crate::databases::Databases;
+use crate::memory_pressure::PressureGuard;
 
 enum Command {
     SetAccess(AccessContext, mpsc::Sender<Result<(), EngineError>>),
@@ -40,6 +41,7 @@ enum Command {
 /// local database handle outlives its transaction, without unsafe lifetimes.
 pub struct DbEngine {
     sender: mpsc::SyncSender<Command>,
+    pressure: Arc<PressureGuard>,
 }
 
 impl DbEngine {
@@ -83,12 +85,38 @@ impl DbEngine {
         access: AccessContext,
         replica: Option<Arc<Replica>>,
     ) -> Result<Self, String> {
+        Self::with_pressure(
+            databases,
+            default_database,
+            access,
+            replica,
+            PressureGuard::shared(),
+        )
+    }
+
+    fn with_pressure(
+        databases: Arc<Databases>,
+        default_database: String,
+        access: AccessContext,
+        replica: Option<Arc<Replica>>,
+        pressure: Arc<PressureGuard>,
+    ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(1);
+        let worker_pressure = Arc::clone(&pressure);
         thread::Builder::new()
             .name("brainwire-query".into())
-            .spawn(move || worker(receiver, databases, default_database, access, replica))
+            .spawn(move || {
+                worker(
+                    receiver,
+                    databases,
+                    default_database,
+                    access,
+                    replica,
+                    worker_pressure,
+                )
+            })
             .map_err(|e| format!("cannot start query worker: {e}"))?;
-        Ok(Self { sender })
+        Ok(Self { sender, pressure })
     }
 
     fn ask<T>(
@@ -186,6 +214,11 @@ impl QueryEngine for DbEngine {
         query: &str,
         params: &PackValue,
     ) -> Result<QueryResult, EngineError> {
+        if self.pressure.is_pressured() {
+            // Direct engine callers also must not commit writes from a failed RUN.
+            self.ask(Command::Abort)?;
+            return Err(memory_pressure_error());
+        }
         self.ask(|reply| {
             Command::Run(
                 db.map(str::to_owned),
@@ -203,6 +236,13 @@ impl QueryEngine for DbEngine {
     fn abort(&mut self) -> Result<(), EngineError> {
         self.ask(Command::Abort)
     }
+}
+
+fn memory_pressure_error() -> EngineError {
+    error(
+        "Neo.TransientError.General.MemoryPressure",
+        "memory pressure admission rejected RUN before execution; reduce load and retry after reconciling transaction state",
+    )
 }
 
 fn forbidden() -> EngineError {
@@ -261,6 +301,7 @@ fn worker(
     default_database: String,
     mut access: AccessContext,
     replica: Option<Arc<Replica>>,
+    pressure: Arc<PressureGuard>,
 ) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -428,25 +469,29 @@ fn worker(
                                 let _ = reply.send(Err(forbidden()));
                                 continue;
                             }
-                            let result = params_from_pack(&params)
-                                .and_then(|params| {
-                                    transaction
-                                        .run_with_access(&query, &params, query_access)
-                                        .map_err(execution_error)
-                                })
-                                .and_then(output_to_bolt)
-                                .and_then(|output| {
-                                    transaction
-                                        .check_transaction_deadline()
-                                        .map(|()| {
-                                            let mut output = output;
-                                            output.memory = Some(OutputMemory::new(
-                                                transaction.output_memory_lease(),
-                                            ));
-                                            output
-                                        })
-                                        .map_err(execution_error)
-                                });
+                            let result = if pressure.is_pressured() {
+                                Err(memory_pressure_error())
+                            } else {
+                                params_from_pack(&params)
+                            }
+                            .and_then(|params| {
+                                transaction
+                                    .run_with_access(&query, &params, query_access)
+                                    .map_err(execution_error)
+                            })
+                            .and_then(output_to_bolt)
+                            .and_then(|output| {
+                                transaction
+                                    .check_transaction_deadline()
+                                    .map(|()| {
+                                        let mut output = output;
+                                        output.memory = Some(OutputMemory::new(
+                                            transaction.output_memory_lease(),
+                                        ));
+                                        output
+                                    })
+                                    .map_err(execution_error)
+                            });
                             // Conversion errors happen outside QueryTransaction::run;
                             // they must also discard earlier writes and pool reservations.
                             if result.is_err() {
@@ -816,6 +861,181 @@ mod tests {
     use brainwire_core::ids::{NodeId, TypeId};
     use brainwire_core::schema::GraphMapping;
     use brainwire_cypher::NodeOut;
+
+    fn pressure_fixture() -> (
+        tempfile::TempDir,
+        Arc<Databases>,
+        DbEngine,
+        Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        use crate::memory_pressure::PressureStatus;
+        let (dir, databases, old_engine) = scoped_engine_fixture();
+        drop(old_engine);
+        let pressured = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let state = Arc::clone(&pressured);
+        let guard = PressureGuard::fixture(move || {
+            if state.load(std::sync::atomic::Ordering::SeqCst) {
+                PressureStatus::Pressured {
+                    current: 95,
+                    limit: 100,
+                }
+            } else {
+                PressureStatus::Available {
+                    current: 0,
+                    limit: 100,
+                }
+            }
+        });
+        let engine = DbEngine::with_pressure(
+            Arc::clone(&databases),
+            "default".into(),
+            AccessContext::Unrestricted,
+            None,
+            guard,
+        )
+        .unwrap();
+        (dir, databases, engine, pressured)
+    }
+
+    #[test]
+    fn memory_pressure_rejects_run_before_conversion_and_aborts_direct_engine_writes() {
+        let (_dir, databases, mut engine, pressured) = pressure_fixture();
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "CREATE (:Customer {entity_id:'before-pressure'})",
+                &PackValue::Map(vec![]),
+            )
+            .unwrap();
+        pressured.store(true, std::sync::atomic::Ordering::SeqCst);
+        let error = engine
+            .run(
+                None,
+                "CREATE (:Customer {entity_id:'rejected'})",
+                &PackValue::Bytes(vec![1; 4096]),
+            )
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "Neo.TransientError.General.MemoryPressure");
+        assert!(!error.message.contains("/cg"));
+        assert!(engine.commit().is_err());
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
+        pressured.store(false, std::sync::atomic::Ordering::SeqCst);
+        engine.begin(None).unwrap();
+        assert_eq!(
+            engine
+                .run(None, "RETURN 1", &PackValue::Map(vec![]))
+                .unwrap()
+                .rows,
+            vec![vec![PackValue::Int(1)]]
+        );
+        engine.commit().unwrap();
+    }
+
+    #[test]
+    fn memory_pressure_rechecks_in_worker_before_parameter_conversion() {
+        use crate::memory_pressure::PressureStatus;
+        let (_dir, databases, old_engine) = scoped_engine_fixture();
+        drop(old_engine);
+        let probes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&probes);
+        let guard = PressureGuard::fixture(move || {
+            if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                PressureStatus::Available {
+                    current: 0,
+                    limit: 100,
+                }
+            } else {
+                PressureStatus::Pressured {
+                    current: 95,
+                    limit: 100,
+                }
+            }
+        });
+        let mut engine = DbEngine::with_pressure(
+            Arc::clone(&databases),
+            "default".into(),
+            AccessContext::Unrestricted,
+            None,
+            guard,
+        )
+        .unwrap();
+        engine.begin(None).unwrap();
+        let error = engine
+            .run(
+                None,
+                "CREATE (:Customer {entity_id:'never'})",
+                &PackValue::Bytes(vec![1]),
+            )
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "Neo.TransientError.General.MemoryPressure");
+        assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
+        engine.abort().unwrap();
+    }
+
+    #[test]
+    fn memory_pressure_session_can_pull_commit_and_discard_existing_results() {
+        for explicit in [true, false] {
+            let (_dir, databases, engine, pressured) = pressure_fixture();
+            let mut session = protected_session(engine);
+            stage_session_write(&mut session, &databases, explicit);
+            pressured.store(true, std::sync::atomic::Ordering::SeqCst);
+            let extra = PackValue::Map(vec![("n".into(), PackValue::Int(-1))]);
+            let responses = session.handle(if explicit {
+                Request::Pull { extra }
+            } else {
+                Request::Discard { extra }
+            });
+            assert!(matches!(responses.last(), Some(Response::Success(_))));
+            if explicit {
+                assert!(matches!(
+                    session.handle(Request::Commit)[0],
+                    Response::Success(_)
+                ));
+            }
+            assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 1);
+        }
+    }
+
+    #[test]
+    fn memory_pressure_session_rollback_reset_and_recovery_preserve_state() {
+        let (_dir, databases, engine, pressured) = pressure_fixture();
+        let mut session = protected_session(engine);
+        stage_session_write(&mut session, &databases, true);
+        session.handle(Request::Pull {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+        });
+        pressured.store(true, std::sync::atomic::Ordering::SeqCst);
+        let failure = session.handle(Request::Run {
+            query: "RETURN 1".into(),
+            params: PackValue::Map(vec![]),
+            extra: PackValue::Map(vec![]),
+        });
+        assert!(
+            matches!(&failure[0],Response::Failure {code,..} if code=="Neo.TransientError.General.MemoryPressure")
+        );
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 0);
+        assert!(matches!(
+            session.handle(Request::Reset)[0],
+            Response::Success(_)
+        ));
+        pressured.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(
+            session.handle(Request::Begin {
+                extra: PackValue::Map(vec![])
+            })[0],
+            Response::Success(_)
+        ));
+        pressured.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(
+            session.handle(Request::Rollback)[0],
+            Response::Success(_)
+        ));
+        assert!(session.handle(Request::Goodbye).is_empty());
+    }
 
     #[test]
     fn parameters_keep_nested_types_and_last_duplicate_key() {
