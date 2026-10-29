@@ -29,6 +29,39 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-29: release preparation and v2 roadmap
+
+- **Done:** prepared the prior production-hardening work for a new beta; added
+  a v2 roadmap and a benchmark entry point with explicit qualification limits.
+- **Decided:** v1 production gates precede v2 claims. This is a beta candidate,
+  not v1 qualification; numeric index ranges can fall back to scans.
+- **Next step:** validate the release CI and repeat controlled mixed workloads,
+  then close the RSS, true streaming, TLS, recovery and Cypher gates.
+- **Blockers:** prior 2/4/8 GiB loads did not complete, and no benchmark proves
+  the requested performance regression bound or end-to-end production safety.
+
+## 2026-10-28: production hardening session
+
+- **Done:** added shared Bolt input admission and reduced response-copy overhead;
+  fixed missing-schema read semantics, property/ACL filtering, rounding and
+  index range correctness. Accounted `IN` candidates and reduced retained
+  projection data. Python write helpers and ingestion paths no longer replay
+  managed transactions blindly after an uncertain commit.
+- **Recovery:** added owned-process no-ack COMMIT reconciliation and populated
+  v0.9-to-candidate volume-upgrade tests, with CI steps. The integrated test
+  observed both committed and uncommitted outcomes and passed offline checks.
+- **Verification:** workspace tests, Clippy and formatting passed; Python
+  examples and scripts tests passed with optional DuckDB-dependent tests
+  skipped. Read-only architecture and security reviews were performed.
+- **Measured:** four-label 4 GiB baseline and candidate aborted early under
+  query pool pressure; see `docs/benchmarks/2026-10-28-production-session.md`.
+  No production stability or throughput improvement is established.
+- **Next step:** genuine process-wide memory bounds, streaming results,
+  visibility/alerts, TLS and online principals; qualify real DuckLake changes,
+  run sustained representative loads and validate the new CI workflow remotely.
+- **Blockers:** RSS/OOM and 30-minute 2/4/8 GiB gates remain open. The DuckLake
+  lease is cooperative, not fencing; unknown commits require reconciliation.
+
 ## 2026-10-28: output reservation lifetime
 
 - **Done:** keep query-memory reservations alive until Bolt response batches are
@@ -147,7 +180,7 @@ No line of code before the end of phase 2.
   primary graph backend into engine work: read speed, the Cypher agents
   write, online catalog, false conflicts, write throughput, ACL size, error
   classes and the protected healthcheck; then cut a new version. Work stays
-  local on `client-integration`; nothing pushed, `main` untouched.
+  local on an integration branch; nothing pushed, `main` untouched.
 - **Done:** reproducible benchmark (`crates/cypher/benches/baseline.rs`);
   new planner and streaming executor (multi-hop, variable length, OPTIONAL
   MATCH, WITH, UNION, CASE, comprehensions, functions, aggregates, RETURN of
@@ -354,7 +387,7 @@ No line of code before the end of phase 2.
   suite includes process-kill/reopen and the new source-import `SIGKILL` test.
   `actionlint`, docs-site validation, `git diff --check`, and the release
   helper's real Bolt acceptance pass. The helper created local release
-  `v0.4.0-beta.1`. No client references were found in README, docs, examples,
+  `v0.4.0-beta.1`. No client-specific references were found in README, docs, examples,
   scripts, crates, deploy or workflows. Existing remote CI and docs workflows
   were green before these changes; updated workflow has not yet run remotely.
 - **Decided:** publish this as a beta minor release if the local release helper

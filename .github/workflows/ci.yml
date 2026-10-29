@@ -27,6 +27,8 @@ jobs:
       CXXFLAGS: -g0
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install RocksDB build prerequisites
         run: |
@@ -92,6 +94,45 @@ jobs:
         run: >-
           python crates/server/tests/python_ingestion.py
           --binary target/debug/brainwire --rows 100 --batch-size 25 --query-mib 32
+
+      - name: Verify recovery after an unacknowledged commit
+        run: >-
+          python crates/server/tests/uncertain_commit.py
+          --binary target/debug/brainwire --rows 32
+
+      - name: Verify populated volume upgrade from previous release
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_tag="$(git describe --first-parent --tags --match 'v[0-9]*' --abbrev=0 HEAD^)"
+          previous_revision="$(git rev-parse "${previous_tag}^{commit}")"
+          candidate_revision="$(git rev-parse HEAD)"
+          old_source="$(mktemp -d "${RUNNER_TEMP}/brainwire-old-source.XXXXXX")"
+          trap 'rm -rf "$old_source"' EXIT
+          git archive "$previous_revision" | tar -x -C "$old_source"
+          cp target/debug/brainwire "$RUNNER_TEMP/brainwire-candidate"
+          cargo fetch --locked --manifest-path "$old_source/Cargo.toml"
+          # Rebuild archived workspace crates; keep cached native dependencies.
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo clean --locked --offline \
+            --manifest-path "$old_source/Cargo.toml" --workspace
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --locked --offline \
+            --manifest-path "$old_source/Cargo.toml" -p brainwire-server --bin brainwire
+          cp target/debug/brainwire "$RUNNER_TEMP/brainwire-previous"
+          python crates/server/tests/volume_upgrade.py \
+            --old-binary "$RUNNER_TEMP/brainwire-previous" \
+            --new-binary "$RUNNER_TEMP/brainwire-candidate" \
+            --old-revision "$previous_revision" --new-revision "$candidate_revision" \
+            --rows 32 > "$RUNNER_TEMP/brainwire-volume-upgrade.json"
+          cat "$RUNNER_TEMP/brainwire-volume-upgrade.json"
+
+      - name: Upload volume upgrade receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainwire-volume-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/brainwire-volume-upgrade.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Save Rust build artifacts
         if: ${{ always() && !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' }}
