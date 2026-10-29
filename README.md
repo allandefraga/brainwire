@@ -1,39 +1,48 @@
 <p align="center">
-  <img src="assets/brainwire-logo.svg" alt="Brainwire" width="520">
+  <img src="assets/brainwire-logo.svg" alt="Brainwire" width="400">
 </p>
 
-<h1 align="center">Context has connections.</h1>
-
-<p align="center"><strong>A graph database for the context your AI apps need to remember.</strong><br>
-Connect people, projects, events and documents. Keep those relationships durable. Query the graph with Cypher.</p>
-
-<p align="center"><code>RUST</code> &nbsp; <code>ROCKSDB</code> &nbsp; <code>BOLT</code> &nbsp; <code>CYPHER</code> &nbsp; <code>PYTHON</code></p>
+<h1 align="center">Make context connected.</h1>
 
 <p align="center">
-  <a href="#quickstart">Get started ↓</a> &nbsp;·&nbsp;
+  An independent graph database for the relationships behind your applications.
+  <br>Built in Rust. Stored in RocksDB. Queried with Cypher.
+</p>
+
+<p align="center">
+  <a href="#quickstart">Get started</a> &nbsp;·&nbsp;
+  <a href="#what-works-today">Explore capabilities</a> &nbsp;·&nbsp;
   <a href="docs/local-cypher.md">Cypher guide</a> &nbsp;·&nbsp;
-  <a href="docs/beta-operator-checklist.md">Beta readiness</a>
+  <a href="docs/beta-operator-checklist.md">Beta readiness</a> &nbsp;·&nbsp;
+  <a href="BENCHMARKS.md">Benchmarks</a> &nbsp;·&nbsp;
+  <a href="ROADMAP-v2.md">Roadmap</a>
 </p>
 
 <p align="center">
-  <img src="docs-site/assets/graph-hero.svg" alt="Illustration of synthetic people, projects, documents and tickets connected in a graph" width="100%">
+  <img src="assets/brainwire-graph-cover.png" alt="Abstract illustration of an interconnected green graph" width="100%">
 </p>
-<p align="center"><sub>Illustrative graph with synthetic entities and relationships.</sub></p>
 
-Brainwire is an independent graph database for builders who need structured
-relationships and durable state behind their applications. It is written in
-Rust, stores data in RocksDB, speaks Bolt, and accepts bounded Python batches.
-Run it locally or in Docker with a persistent volume.
+Connect people, projects, events and documents. Store their relationships,
+explore connected context and query the graph over Bolt from Python. Run it
+locally or in Docker with a persistent volume.
 
-**Brainwire is the graph database layer for your application.** Your code owns
-ingestion, identity mapping and agent orchestration. Brainwire stores the graph,
-executes supported Cypher and exposes it through Bolt and a local CLI.
+Your application owns ingestion, identity mapping and orchestration; Brainwire
+is the graph database layer.
 
 > **v0.9.0-beta.1 · source beta.** <!-- brainwire-release-version --> This beta is intended for controlled trials.
 > Production qualification is open. A container image is published only after
 > the matching release workflow passes its source and recovery checks.
 
-## ⚡ Quickstart
+## Start here
+
+| Explore | Why it matters |
+|---|---|
+| [Run a graph](#quickstart) | Start a persistent local demo with Docker Compose. |
+| [Write from Python](#write-from-python) | Insert nodes and relationships using parameterized Cypher over Bolt. |
+| [Inspect the graph](#see-what-the-tui-can-do) | Explore a bounded connected neighborhood and operational information in the TUI. |
+| [Know the limits](#current-limits) | Review security, memory, Cypher and production-readiness constraints. |
+
+## Quickstart
 
 You need Docker Engine and Docker Compose. From the repository root, this builds
 the image, creates a persistent demo graph with a bundled synthetic ontology,
@@ -49,7 +58,7 @@ first build compiles RocksDB and can take several minutes. If that port is in
 use, set `BRAINWIRE_BIND_PORT=17687` before the command and connect to port
 17687.
 
-### 🐍 Feed it from Python
+### Write from Python
 
 This example uses the standard Neo4j Bolt driver. It inserts nodes and edges
 with parameterized Cypher, then reads the relationship back. The bundled demo
@@ -124,7 +133,7 @@ Do not add `--volumes` unless you intend to delete the demo database.
 | Graph model | Independent named graphs, versioned ontology catalogs, one label per node, typed directed relationships, stable `entity_id` identities and declared properties |
 | Read and write | Bolt and local Cypher with atomic local transactions; create and delete nodes and edges; bounded Python upserts and property patches |
 | Cypher | Multi-hop and bounded variable-length patterns, `WITH`, `OPTIONAL MATCH`, `UNION`, expressions, aggregates, and returned node/relationship/path values |
-| Indexes | Primary identity lookup; scalar equality, `IN`, range and prefix access for supported predicates; online `CREATE INDEX` / `DROP INDEX` with resumable backfill |
+| Indexes | Primary identity lookup; scalar equality and `IN`, plus string range and prefix access for supported predicates; online `CREATE INDEX` / `DROP INDEX` with resumable backfill |
 | Storage | Local RocksDB, synchronized WAL commits, retained-volume restarts, consistency checks and checkpoints |
 | Graph analytics | Sparse CSR projection, degree, weighted PageRank, shortest path, reachability, WCC and SCC; explainable `knowledge.rank` |
 | Ingestion | Python lists/generators and Arrow objects, JSONL import with replay support, and pinned DuckLake snapshot comparison |
@@ -212,9 +221,12 @@ own dataset, configuration and measurement conditions. Each result applies to
 that run; it is not a production SLO or a general database ranking. Performance
 changes need fresh measurements on the application workload before deployment.
 
-![Brainwire benchmark charts: one-hour mixed workload latency and quorum batch-write throughput](docs/benchmarks/assets/brainwire-performance.svg)
+Explore the [benchmark charts](docs/benchmarks/assets/brainwire-performance.svg)
+and the [comparison chart](docs/benchmarks/assets/comparison-20261019.svg) alongside
+their methodology; they describe specific synthetic runs, not general rankings.
 
-![Local synthetic workload comparison with Neo4j and FalkorDB](docs/benchmarks/assets/comparison-20261019.svg)
+The [v0.9 production report](PRODUCTION-v0.9.md) documents the latest memory
+qualification attempts and the work that remains.
 
 ## Current limits
 
@@ -226,7 +238,10 @@ changes need fresh measurements on the application workload before deployment.
 - `memory.query` provides conservative allocation accounting and a shared query
   reservation pool. It is not a global process RSS ceiling. Cache, memtables,
   result materialization and other allocations still need workload sizing;
-  a 4 GiB production memory cap is not qualified.
+  a 4 GiB production memory cap is not qualified. `memory.ingress` separately
+  limits accounted Bolt input across connections; it does not bound process RSS.
+  See [memory defaults](docs/memory-defaults.md) and the
+  [production roadmap](docs/production-readiness-roadmap.md).
 - The demo Compose profile explicitly enables unauthenticated development
   access. Without an auth policy, the server accepts loopback listeners and
   rejects non-loopback listeners unless the development override is supplied.

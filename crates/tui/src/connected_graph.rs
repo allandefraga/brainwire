@@ -2,7 +2,7 @@
 use crate::overview::{panel, terminal_text};
 use crate::*;
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{
@@ -91,6 +91,12 @@ fn fit(text: &str, width: usize) -> String {
         result.push('…');
     }
     result
+}
+
+// Wings remain behind the destination so both canvas sides preserve direction.
+fn arrow_wings(tip_x: f64, tip_y: f64, left: bool) -> [(f64, f64); 2] {
+    let back = if left { 1.8 } else { -1.8 };
+    [(tip_x + back, tip_y - 0.7), (tip_x + back, tip_y + 0.7)]
 }
 
 // Duplicate relationship rows share a single target node on the canvas.
@@ -275,20 +281,21 @@ pub(crate) fn render_at(
             .find(|(id, _)| is_self(id))
             .map_or(0, |(_, n)| *n);
         let visible: Vec<_> = grouped.iter().filter(|(id, _)| !is_self(id)).collect();
-        let capacity = usize::from(body[0].height.saturating_sub(2) / 4).clamp(1, 8);
+        let width = body[0].width.saturating_sub(2);
+        let height = body[0].height.saturating_sub(2);
+        let slots = usize::from(height.saturating_sub(4) / 5).clamp(1, 4);
+        let capacity = slots * 2;
         let selected_group =
             selected_id.and_then(|selected| visible.iter().position(|(id, _)| *id == selected));
         let start = selected_group
             .unwrap_or(0)
             .saturating_sub(capacity.saturating_sub(1));
         let end = (start + capacity).min(visible.len());
-        let width = body[0].width.saturating_sub(2);
-        let height = body[0].height.saturating_sub(2);
-        let source_width = (f64::from(width) * 0.32).floor() as u16;
-        let target_x = (f64::from(width) * 0.57).floor() as u16;
-        let target_width = width.saturating_sub(target_x + 1);
+        let node_width = (width / 4).max(1);
+        let source_x = width.saturating_sub(node_width) / 2;
         let source_top = height.saturating_sub(3) / 2;
         let source_y = f64::from(height.saturating_sub(source_top + 2));
+        let right_x = width.saturating_sub(node_width + 1);
         let title = format!(
             " {} • {}–{} / {}",
             lang.choose("DESTINOS REAIS", "REAL TARGETS"),
@@ -296,6 +303,12 @@ pub(crate) fn render_at(
             end,
             visible.len()
         );
+        let target_top = |position: usize| -> u16 {
+            let row = position / 2;
+            let occupied = (end - start).div_ceil(2).max(1);
+            let stride = usize::from(height.saturating_sub(4)) / occupied;
+            (2 + row * stride) as u16
+        };
         frame.render_widget(
             Canvas::default()
                 .x_bounds([0.0, f64::from(width.max(1))])
@@ -304,54 +317,62 @@ pub(crate) fn render_at(
                 .paint(|ctx| {
                     for (position, (id, _)) in visible.iter().skip(start).take(capacity).enumerate()
                     {
-                        let y = f64::from(height.saturating_sub(position as u16 * 4 + 2));
-                        let edge_color = if selected_id.is_some_and(|selected| selected == *id) {
+                        let left = position % 2 == 0;
+                        let y = f64::from(height.saturating_sub(target_top(position) + 1));
+                        let selected = selected_id.is_some_and(|selected| selected == *id);
+                        let edge_color = if selected {
                             color
+                        } else if no_color {
+                            Color::Reset
                         } else {
-                            cyan
+                            Color::Rgb(46, 115, 70)
                         };
-                        let x = f64::from(target_x.saturating_sub(1));
+                        let from_x = f64::from(if left {
+                            source_x
+                        } else {
+                            source_x + node_width
+                        });
+                        let to_x = f64::from(if left {
+                            node_width + 1
+                        } else {
+                            right_x.saturating_sub(1)
+                        });
                         ctx.draw(&CanvasLine {
-                            x1: f64::from(source_width + 1),
+                            x1: from_x,
                             y1: source_y,
-                            x2: x,
+                            x2: to_x,
                             y2: y,
                             color: edge_color,
                         });
-                        ctx.draw(&CanvasLine {
-                            x1: x,
-                            y1: y,
-                            x2: x - 2.0,
-                            y2: y + 0.8,
-                            color: edge_color,
-                        });
-                        ctx.draw(&CanvasLine {
-                            x1: x,
-                            y1: y,
-                            x2: x - 2.0,
-                            y2: y - 0.8,
-                            color: edge_color,
-                        });
+                        for (wing_x, wing_y) in arrow_wings(to_x, y, left) {
+                            ctx.draw(&CanvasLine {
+                                x1: to_x,
+                                y1: y,
+                                x2: wing_x,
+                                y2: wing_y,
+                                color: edge_color,
+                            });
+                        }
                     }
-                    let edge_width = target_x.saturating_sub(source_width + 4);
                     ctx.print(
-                        f64::from(source_width + 2),
+                        2.0,
                         f64::from(height) - 0.3,
                         Span::styled(
-                            fit(&state.snapshot.edge_type, usize::from(edge_width)),
+                            fit(
+                                &state.snapshot.edge_type,
+                                usize::from(width.saturating_sub(4)),
+                            ),
                             Style::default().fg(cyan),
                         ),
                     );
                     if self_count > 0 {
-                        let x = f64::from(source_width) / 2.0;
-                        let right = f64::from(source_width + 3);
+                        let left = f64::from(source_x + node_width / 3);
+                        let right = f64::from(source_x + node_width * 2 / 3);
                         for (x1, y1, x2, y2) in [
-                            (x, source_y + 2.0, x, source_y + 4.0),
-                            (x, source_y + 4.0, right, source_y + 4.0),
-                            (right, source_y + 4.0, right, source_y),
-                            (right, source_y, right - 2.0, source_y),
-                            (right - 2.0, source_y, right - 0.5, source_y + 0.8),
-                            (right - 2.0, source_y, right - 0.5, source_y - 0.8),
+                            (left, source_y + 2.0, left, source_y + 4.0),
+                            (left, source_y + 4.0, right, source_y + 4.0),
+                            (right, source_y + 4.0, right, source_y + 2.0),
+                            (right, source_y + 2.0, right - 1.0, source_y + 3.0),
                         ] {
                             ctx.draw(&CanvasLine {
                                 x1,
@@ -362,8 +383,8 @@ pub(crate) fn render_at(
                             });
                         }
                         ctx.print(
-                            2.0,
-                            source_y + 5.0,
+                            f64::from(source_x),
+                            (source_y + 5.0).min(f64::from(height.saturating_sub(1))),
                             Span::styled(
                                 format!(
                                     "↺ {} ×{self_count}",
@@ -389,20 +410,24 @@ pub(crate) fn render_at(
                 }),
             body[0],
         );
-        // Crisp terminal borders keep actual identifiers readable over the edges.
-        let source = Rect::new(body[0].x + 2, body[0].y + 1 + source_top, source_width, 3);
+        let source = Rect::new(
+            body[0].x + 1 + source_x,
+            body[0].y + 1 + source_top,
+            node_width,
+            3,
+        );
         frame.render_widget(Clear, source);
         frame.render_widget(
             Paragraph::new(fit(
                 &state.snapshot.entity_id,
-                usize::from(source.width.saturating_sub(2)),
+                usize::from(node_width.saturating_sub(2)),
             ))
             .style(Style::default().fg(color))
             .block(panel("", GREEN, no_color).title(format!(
                 "● {}",
                 fit(
                     &state.snapshot.node_label,
-                    usize::from(source.width.saturating_sub(4))
+                    usize::from(node_width.saturating_sub(4))
                 )
             ))),
             source,
@@ -410,12 +435,11 @@ pub(crate) fn render_at(
         for (position, (id, multiplicity)) in visible.iter().skip(start).take(capacity).enumerate()
         {
             let selected = selected_id.is_some_and(|selected| selected == *id);
-            let node_color = if selected { GREEN } else { CYAN };
             let target = Rect::new(
-                body[0].x + 1 + target_x,
-                body[0].y + 1 + position as u16 * 4,
-                target_width,
-                3,
+                body[0].x + 1 + if position % 2 == 0 { 1 } else { right_x },
+                body[0].y + 1 + target_top(position),
+                node_width,
+                2,
             );
             let identity = format!(
                 "{}{}",
@@ -428,16 +452,39 @@ pub(crate) fn render_at(
             );
             frame.render_widget(Clear, target);
             frame.render_widget(
-                Paragraph::new(fit(&identity, usize::from(target.width.saturating_sub(2))))
-                    .style(Style::default().fg(if selected { color } else { cyan }))
-                    .block(panel("", node_color, no_color).title(format!(
-                        "{} {}",
-                        if selected { "▶" } else { "○" },
-                        fit(
-                            &state.snapshot.target_label,
-                            usize::from(target.width.saturating_sub(4))
-                        )
-                    ))),
+                Paragraph::new(vec![
+                    Line::styled(
+                        if position % 2 == 0 {
+                            format!(
+                                "{} {}",
+                                fit(
+                                    &state.snapshot.target_label,
+                                    usize::from(node_width.saturating_sub(3))
+                                ),
+                                if selected { "◉" } else { "○" }
+                            )
+                        } else {
+                            format!(
+                                "{} {}",
+                                if selected { "◉" } else { "○" },
+                                fit(
+                                    &state.snapshot.target_label,
+                                    usize::from(node_width.saturating_sub(3))
+                                )
+                            )
+                        },
+                        Style::default().fg(if selected { color } else { cyan }),
+                    ),
+                    Line::styled(
+                        fit(&identity, usize::from(node_width)),
+                        Style::default().fg(if selected { color } else { cyan }),
+                    ),
+                ])
+                .alignment(if position % 2 == 0 {
+                    Alignment::Right
+                } else {
+                    Alignment::Left
+                }),
                 target,
             );
         }
@@ -747,6 +794,66 @@ mod tests {
         assert!(state.sampled > old);
         state.refresh(Ok(sample(0)));
         assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn arrows_point_outward_on_both_sides_and_short_canvas_explains_self_links() {
+        for left in [true, false] {
+            let tip = if left { 20.0 } else { 80.0 };
+            for (x, _) in arrow_wings(tip, 10.0, left) {
+                assert!(
+                    (x - tip) * (50.0 - tip) > 0.0,
+                    "wing must remain behind its tip toward the source"
+                );
+            }
+        }
+        let mut snapshot = sample(1);
+        snapshot.target_label = snapshot.node_label.clone();
+        snapshot.neighbors = vec![snapshot.entity_id.clone()];
+        for lang in [Language::En, Language::PtBr] {
+            let output = text(&mut State::new(snapshot.clone()), lang, 144, 24);
+            assert!(output.contains(lang.choose("autorrelação", "self link")));
+        }
+    }
+
+    #[test]
+    fn constellation_shows_both_sides_and_the_selected_real_identity() {
+        let mut state = State::new(sample(8));
+        let mut terminal = Terminal::new(TestBackend::new(180, 48)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_at(
+                    frame,
+                    frame.area(),
+                    &mut state,
+                    "localhost",
+                    "demo",
+                    Language::En,
+                    true,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let locate = |needle: &str| {
+            (0..48)
+                .find_map(|y| {
+                    let line: String = (0..126).map(|x| buffer[(x, y)].symbol()).collect();
+                    line.find(needle).map(|x| (x, usize::from(y)))
+                })
+                .unwrap_or_else(|| panic!("missing {needle}"))
+        };
+        let source = locate("ticket-1");
+        let left = locate("comment-0");
+        let right = locate("comment-1");
+        assert!(
+            left.0 < source.0 && right.0 > source.0,
+            "nodes should surround source: {left:?} {source:?} {right:?}"
+        );
+        for id in 0..8 {
+            locate(&format!("comment-{id}"));
+        }
+        state.selected = 7;
+        assert!(text(&mut state, Language::En, 180, 48).contains("comment-7"));
     }
 
     #[test]
