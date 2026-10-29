@@ -4,14 +4,18 @@ One mapping file maps one DuckLake table to a node label (``id`` column) or to
 an edge type (``source``/``target`` columns). The first run loads the table at a
 pinned snapshot; later runs read ``ducklake_table_changes`` from the snapshot
 after the stored cursor up to the target snapshot, collapse every key to its
-final state (upsert or delete) and apply only that. Rerunning a range is
-idempotent, so a failed run is retried by running again.
+final state (upsert or delete) and apply only that. Replaying the same range
+converges only under the single-owner source contract with no newer concurrent
+writes. Failed work retains its lease: resolve prior workers and in-flight
+write outcomes before explicitly breaking the lease and reconciling. A lost
+final release reply may already have advanced the cursor and cleared the lease;
+reconcile that outcome before starting another run.
 
 Work is split into ``--workers`` processes by ``hash(key) % workers``; each
 opens its own read-only DuckLake connection and Bolt driver, so one key is
 always written by one process and processes never contend on the same node.
-Each batch commits atomically; write conflicts are transient and the Neo4j
-driver retries them. The cursor (``ImportCheckpoint {entity_id: source_id}``
+Each batch commits atomically and is attempted once; write conflicts and
+ambiguous failures propagate. The cursor (``ImportCheckpoint {entity_id: source_id}``
 with ``snapshot`` and ``lease`` properties, which the ontology must declare)
 advances only after every partition has committed.
 
@@ -282,10 +286,13 @@ def claim(session, source_id, run_id, break_lease=False):
         state = _cursor(tx, source_id)
         if state["lease"] not in (None, run_id) and not break_lease:
             raise RuntimeError(f"source {source_id!r} is leased by run {state['lease']}; "
-                               "wait for it, or pass --break-lease if that run is dead")
+                               "resolve that run and its in-flight writes before --break-lease")
         tx.run("MERGE (s:ImportCheckpoint {entity_id:$id}) SET s.lease = $run", id=source_id, run=run_id)
         return state["snapshot"]
-    return session.execute_write(work)
+    with session.begin_transaction() as tx:
+        result = work(tx)
+        tx.commit()
+        return result
 
 
 def release(session, source_id, run_id, start, end=None):
@@ -296,7 +303,9 @@ def release(session, source_id, run_id, start, end=None):
             raise RuntimeError(f"source {source_id!r} cursor/lease changed during the run; rerun to reconcile")
         tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) SET s.lease = null, s.snapshot = $snapshot",
                id=source_id, snapshot=start if end is None else end)
-    session.execute_write(work)
+    with session.begin_transaction() as tx:
+        work(tx)
+        tx.commit()
 
 
 def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_size=500,
@@ -337,11 +346,10 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
                 parts = list(pool.map(sync_partition, jobs))
             pruned = _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size) if prune else 0
         except BaseException as error:
-            try:
-                with session() as s:
-                    release(s, source_id, run_id, stored)
-            except Exception as release_error:  # keep the original failure visible
-                error.add_note(f"lease not released ({release_error}); rerun with --break-lease")
+            # A failed worker may still have an in-flight COMMIT. Keep ownership
+            # until its outcome is reconciled; clearing it permits racing runs.
+            if hasattr(error, "add_note"):
+                error.add_note("source lease retained; resolve previous workers and in-flight writes before --break-lease")
             raise
         with session() as s:
             release(s, source_id, run_id, stored, end)
@@ -365,7 +373,7 @@ def main(argv=None):
     parser.add_argument("--prune", action="store_true", help="with --full: delete graph keys absent from the source")
     parser.add_argument("--allow-missing-endpoints", action="store_true",
                         help="skip and count edge rows whose endpoint node does not exist")
-    parser.add_argument("--break-lease", action="store_true", help="take over a lease left by a dead run")
+    parser.add_argument("--break-lease", action="store_true", help="take over only after prior workers and in-flight writes are resolved")
     parser.add_argument("--load", default="ducklake,sqlite", help="DuckDB extensions to LOAD (already installed)")
     parser.add_argument("--init-sql", help="SQL file run before ATTACH, e.g. CREATE SECRET for object storage")
     args = parser.parse_args(argv)

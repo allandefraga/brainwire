@@ -93,19 +93,26 @@ The server accepts concurrent sessions: each connection has its own worker and
 transaction, and transactions commit with optimistic conflict detection. Two
 transactions that touch the same node or edge cannot both commit; the loser
 gets `Neo.TransientError.Transaction.Outdated`, and nothing it staged is
-visible. The Neo4j driver's `session.execute_write` (used by `GraphClient`)
-retries transient errors with backoff, by default for up to 30 seconds.
+visible. `GraphClient` uses explicit one-shot transactions and propagates
+failures. Earlier beta helpers used the Neo4j driver's managed `execute_write`,
+which can replay a callback after a lost COMMIT response. Automatic retries
+were removed so an ambiguous write is not silently submitted again.
 
-So any number of writers is *correct*. To make it *fast*:
+Concurrent writers still need bounded admission and workload qualification.
+To reduce contention:
 
 - **Partition by key.** Give each process a disjoint set of identities, for
   example `hash(id) % workers`. Writers that never share a node do not
   conflict. `ducklake_sync.py` does this.
-- **Keep transactions small** (hundreds of rows). A conflict retries the whole
-  batch.
-- **Retry only through `execute_write`** or an equivalent loop on transient
-  errors. Do not retry a write whose outcome is unknown unless it is
-  idempotent; MERGE + SET with source values is.
+- **Keep transactions small** (hundreds of rows). A confirmed conflict rejects
+  the whole batch; retrying it repeats all its work.
+- **Distinguish rejection from uncertainty.** Apply bounded backoff only when
+  the server confirms the transaction was rejected or rolled back and the
+  source operation is still current. A connection failure after COMMIT may
+  hide a successful write: reconcile before retrying. MERGE + SET can overwrite
+  concurrent newer values even when it does not create duplicate nodes. For
+  retained quorum identities, use `write_transaction(..., request_id=...)` and
+  follow the [request lookup contract](quorum-replication.md).
 - **Stay under the connection limit.** The server admits 64 connections by
   default ([connection limits](connection-limits.md)); one driver per process
   with one session in use needs one connection.
@@ -201,13 +208,15 @@ apply only what changed.
    `hash(key) % workers == k`, and writes upserts with `load_nodes`/`load_edges`
    and deletes with `delete_nodes`/`delete_edges` in atomic batches.
 5. After every worker succeeds, advances the cursor to the target snapshot and
-   releases the lease in one transaction. On failure it releases the lease
-   without advancing.
+   releases the lease in one transaction. Failed work retains the lease, even
+   for validation or conflict errors. A lost final release reply may already
+   have advanced the cursor and cleared the lease; reconcile before continuing.
 
-Because each run applies final states, applying the same range twice gives the
-same graph. A failed or killed run is repaired by running again. If a process
-was killed hard, its lease stays; `--break-lease` takes it over, but only use it
-once that run is really gone, because a live old run could still write.
+Replaying a range converges under the single-owner source contract, provided
+there are no concurrent newer writes. Each batch and lease operation is
+attempted once. After failure, resolve previous workers and all in-flight write
+outcomes before explicitly using `--break-lease` and reconciling the graph. A
+client disconnect alone does not prove its server transaction has finished.
 
 ### Row by row or in batches?
 
@@ -237,8 +246,9 @@ a synchronous commit per row; see the measurement below.
   unless its row changes again, so follow up with `--full --prune`.
 - **Reserved columns.** `snapshot_id`, `rowid`, `change_type` and
   `brainwire_rank` cannot be mapped; they come from the change feed.
-- **One run per source.** The lease enforces it. Different tables or graphs run
-  in parallel freely.
+- **One run per source.** The lease coordinates source ownership; it is not a
+  fencing token. Never break it while prior workers or writes may remain active.
+  Independent sources can run in parallel if they do not own overlapping data.
 - **Ownership.** Deletes are physical (`DETACH DELETE` for nodes). Do not point
   two sources at the same label/keys.
 - **Values.** Decimals become floats, dates/times become ISO strings, UUIDs
@@ -277,8 +287,10 @@ batches: row-by-row is roughly 90 times slower. `db check` was clean.
 | Incremental, edges (endpoint moves) | 1,785 upserts, 1,785 deletes | 1.1 |
 | Rerun with no new snapshot | none | 0.4 |
 
-11 transient conflicts (deletes touching neighbours in other partitions) were
-retried automatically. Afterwards every node, property and edge in the graph
+This historical run used managed retries: 11 transient conflicts (deletes
+touching neighbours in other partitions) were retried automatically. Current
+helpers propagate those errors; these timings have not been requalified under
+the one-attempt policy. Afterwards every node, property and edge in the graph
 matched the lake at the target snapshot, the lease was enforced and
 `--break-lease` recovered it. A 20K run also added stray nodes and edges
 directly in the graph; `--full --prune` removed exactly those and the graph

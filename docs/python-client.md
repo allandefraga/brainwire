@@ -39,6 +39,24 @@ for supported clauses and explicit current limits.
 This illustrates the generic mutation API; a source-specific importer can
 apply its own stable identity mapping and schema contract.
 
+## One attempt per write
+
+`GraphClient` CRUD and batch helpers use explicit transactions and make one
+attempt per batch or operation. They do not use the driver's managed
+`execute_write` retries. This changes earlier beta behavior: transient errors
+now propagate to the caller instead of automatically replaying the callback.
+A successful return and `on_batch` notification require an acknowledged COMMIT.
+Callback errors roll back through the transaction context; a failed or lost
+COMMIT response is propagated without a replay or a successful result.
+
+A transport exception after COMMIT submission may mean the write was applied
+even if the exception is not named `CommitOutcomeUnknown`. Reconcile the
+application state before retrying. Stable MERGE identities alone do not make a
+replay safe against concurrent newer changes. On a quorum server, persist a
+request seed before sending and use `write_transaction(..., request_id=...)`
+plus the request lookup contract below. Ordinary convenience calls do not add
+a retained request identity or durable source cursor automatically.
+
 ## Property meanings
 
 | Input | Effect |
@@ -78,7 +96,9 @@ removed_edges = graph.delete_edges("Ticket", "HAS_COMMENT", "TicketComment", [
 
 Rows are an iterable of flat dictionaries with `source_id` and `target_id`.
 Repeated pairs are deduplicated within each batch. Missing endpoints or edges
-count as zero, so replaying an already deleted pair is safe. The result counts
+count as zero. Replaying a confirmed deletion is a no-op only while the source
+state and edge ownership are unchanged; it can delete a concurrently recreated
+edge. The result counts
 deleted physical relationships: if a pair has parallel edges of the selected
 type, **all matching edges are removed**. This differs from `update_edge`, which
 requires exactly one matching relationship and rejects ambiguous parallel edges.
@@ -125,8 +145,9 @@ arguments are the one-based batch number and cumulative **input row** count for
 this call; they are not counts of newly created graph elements. The callback
 runs only after the corresponding transaction commits. If it raises, that
 batch remains committed and the exception propagates. A caller persisting its
-own checkpoint should therefore use stable entity/edge identities so a retry
-can safely replay the committed batch.
+own checkpoint must reconcile the source and graph before replaying a committed
+batch; stable entity/edge identities avoid duplicate records but do not prevent
+stale properties from overwriting concurrent newer values.
 This callback reports progress only; it does not create a durable source cursor
 or make the entire load atomic. For restartable imports, use the importer below.
 
@@ -234,7 +255,7 @@ graph.load_nodes("Ticket", [
 ```
 
 The provided request seed uses the explicit quorum transaction path. Omit it for
-standalone managed transactions. Node mutation and ACL replacement commit together;
+standalone one-shot transactions. Node mutation and ACL replacement commit together;
 ACL authorization/validation failure rolls both back. This API requires an
 unrestricted trusted principal with graph-write and instance-administration grants.
 It does not infer permissions from ordinary properties or make an untrusted caller
@@ -247,8 +268,8 @@ For a replicated server, `write_transaction` sends one explicit transaction with
 an application-retained request seed. This API does not use managed retries,
 discover a leader or swallow uncertain outcomes. Connect to the current leader;
 standalone servers reject the identity metadata. Existing `load_nodes`/CRUD helpers
-keep their existing managed-transaction behavior and do not gain a durable source
-cursor or retained request identity automatically.
+also make only one explicit attempt, but do not gain a durable source cursor or
+retained request identity automatically.
 
 ```python
 from examples.python.client import GraphClient, request_key

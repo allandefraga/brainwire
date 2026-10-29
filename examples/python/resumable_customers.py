@@ -104,6 +104,10 @@ def ingest(driver, database, file, source_id, batch_size=250,
     Reaching the limit pauses cleanly between transactions. Call again with the
     same source and mapping to resume from the graph checkpoint. A returned
     cursor equal to the file size means complete; a smaller cursor means paused.
+    Each transaction is attempted once. A lost commit reply propagates; a new
+    explicit import call reads the durable graph cursor before continuing.
+    Resolve any prior in-flight write before that call; a cursor read alone does
+    not establish that a disconnected transaction has finished.
     """
     if contract_id is not None and (not isinstance(contract_id, str) or not contract_id):
         raise ValueError("contract_id must be a nonempty string or None")
@@ -127,42 +131,35 @@ def ingest(driver, database, file, source_id, batch_size=250,
         if signature(path) != original:
             raise ValueError("source changed during import")
 
-    def commit_batch(batch_target):
-        def apply(tx):
-            check_source()
+    def apply(tx):
+        check_source()
+        checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
+        if checkpoint is None:
+            tx.run(INITIALIZE, source_id=source_id, sha256=digest, contract_id=contract_id).consume()
             checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
-            if checkpoint is None:
-                tx.run(INITIALIZE, source_id=source_id, sha256=digest, contract_id=contract_id).consume()
-                checkpoint = tx.run(CHECKPOINT, source_id=source_id).single()
-            if checkpoint is None or checkpoint["sha256"] != digest:
-                raise ValueError("source ID already refers to a different SHA256")
-            if checkpoint.get("contract_id") != contract_id:
-                raise ValueError("source ID already refers to a different mapping contract")
-            cursor = checkpoint["next_offset"]
-            # A managed-driver retry may follow a committed batch whose reply
-            # was lost. Keep this call pinned so the retry cannot consume the
-            # next source batch before a bounded run returns to its caller.
-            if max_batches is not None and batch_target[0] is not None and cursor >= batch_target[0]:
-                return cursor
-            rows, next_offset = read_batch(
-                path, cursor, original[2],
-                batch_size, batch_bytes, line_bytes, normalize_row=normalize_row,
-            )
-            if max_batches is not None and batch_target[0] is None:
-                batch_target[0] = next_offset
-            check_source()
-            if rows:
-                writer(tx, rows)
-            if next_offset != cursor:
-                tx.run(ADVANCE, source_id=source_id, next_offset=next_offset).consume()
-            check_source()
-            return next_offset
-        return apply
+        if checkpoint is None or checkpoint["sha256"] != digest:
+            raise ValueError("source ID already refers to a different SHA256")
+        if checkpoint.get("contract_id") != contract_id:
+            raise ValueError("source ID already refers to a different mapping contract")
+        cursor = checkpoint["next_offset"]
+        rows, next_offset = read_batch(
+            path, cursor, original[2],
+            batch_size, batch_bytes, line_bytes, normalize_row=normalize_row,
+        )
+        check_source()
+        if rows:
+            writer(tx, rows)
+        if next_offset != cursor:
+            tx.run(ADVANCE, source_id=source_id, next_offset=next_offset).consume()
+        check_source()
+        return next_offset
 
     with driver.session(database=database) as session:
         committed_batches = 0
         while True:
-            offset = session.execute_write(commit_batch([None]))
+            with session.begin_transaction() as tx:
+                offset = apply(tx)
+                tx.commit()
             if offset == original[2]:
                 check_source()
                 return offset

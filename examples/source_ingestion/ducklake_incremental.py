@@ -220,6 +220,7 @@ def head_id(source_id):
 
 
 def initialize_source(driver, database, changes_file, baseline_file, baseline_source_id):
+    """Register the verified baseline once; reconcile an unknown commit before retrying."""
     meta, _, change_signature = validate_artifact(changes_file)
     baseline_digest, baseline_signature = fingerprint(Path(baseline_file))
     with tempfile.TemporaryDirectory(prefix="brainwire-diff-baseline-") as directory, closing(sqlite3.connect(Path(directory) / "baseline.sqlite")) as index:
@@ -240,7 +241,10 @@ def initialize_source(driver, database, changes_file, baseline_file, baseline_so
             return
         tx.run("MERGE (s:ImportCheckpoint {entity_id:$id}) SET s.contract_id=$contract,s.current_version=$version,s.source_identity=$identity,s.snapshot_sha256=$digest", id=head_id(meta["source_id"]), contract=HEAD_CONTRACT, version=meta["from_version"], identity=meta["source_identity"], digest=logical_digest).consume()
     with driver.session(database=database) as session:
-        session.execute_write(register)
+        # A lost COMMIT reply must not silently replay registration.
+        with session.begin_transaction() as tx:
+            register(tx)
+            tx.commit()
 
 
 def ingest_incremental(driver, database, file, batch_size=250, batch_bytes=1 << 20,

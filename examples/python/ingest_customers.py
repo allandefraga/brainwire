@@ -33,14 +33,16 @@ def read_rows(stream):
 
 
 def ingest(driver, database, rows, batch_size=250):
-    """Each batch commits independently; earlier batches survive later errors."""
+    """Attempt each batch once; earlier commits survive later/ambiguous failures."""
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
     rows = iter(rows)
     committed = 0
     with driver.session(database=database) as session:
         while batch := list(islice(rows, batch_size)):
-            session.execute_write(lambda tx: tx.run(QUERY, rows=batch).consume())
+            with session.begin_transaction() as tx:
+                tx.run(QUERY, rows=batch).consume()
+                tx.commit()
             committed += len(batch)
     return committed
 

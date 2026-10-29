@@ -25,6 +25,24 @@ class Transaction:
         self.driver = driver
         self.checkpoints = copy.deepcopy(driver.checkpoints)
         self.customers = copy.deepcopy(driver.customers)
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.closed = True
+
+    def commit(self):
+        failure, self.driver.retry = self.driver.retry, None
+        self.closed = True
+        if failure == "before_commit":
+            raise RuntimeError("rejected before durable commit")
+        self.driver.checkpoints, self.driver.customers = self.checkpoints, self.customers
+        self.driver.commits += 1
+        if self.driver.interrupt or failure == "after_commit":
+            self.driver.interrupt = False
+            raise RuntimeError("stopped after durable commit, before acknowledgement")
 
     def run(self, query, **params):
         if query == importer.CHECKPOINT:
@@ -61,6 +79,9 @@ class Driver:
 
     def __exit__(self, *args):
         return False
+
+    def begin_transaction(self):
+        return Transaction(self)
 
     def execute_write(self, callback):
         tx = Transaction(self)
@@ -143,15 +164,24 @@ class ResumableCustomersTests(unittest.TestCase):
         self.assertEqual(driver.customers, {})
         self.assertEqual(driver.commits, 0)
 
-    def test_retry_before_commit_replays_identical_batch_and_cursor(self):
+    def test_rejection_before_commit_requires_an_explicit_new_import_call(self):
         driver = Driver(retry="before_commit")
+        with self.assertRaisesRegex(RuntimeError, "before durable commit"):
+            self.ingest(driver)
+        self.assertEqual(driver.checkpoints, {})
+        self.assertEqual(driver.customers, {})
+        self.assertEqual(driver.commits, 0)
+        self.assertEqual(len(driver.attempted_batches), 1)
         self.assertEqual(self.ingest(driver), self.path.stat().st_size)
         self.assertEqual(driver.attempted_batches[0], driver.attempted_batches[1])
         self.assertEqual(set(driver.customers), {"0", "1", "2"})
-        self.assertEqual(driver.checkpoints["synthetic-source"]["next_offset"], self.path.stat().st_size)
 
-    def test_lost_ack_retry_reads_durable_checkpoint_and_resume_is_noop(self):
+    def test_lost_ack_propagates_then_new_call_reads_durable_checkpoint(self):
         driver = Driver(retry="after_commit")
+        with self.assertRaisesRegex(RuntimeError, "before acknowledgement"):
+            self.ingest(driver)
+        self.assertEqual([batch[0]["entity_id"] for batch in driver.attempted_batches], ["0"])
+        self.assertEqual(driver.checkpoints["synthetic-source"]["next_offset"], len(self.lines[0]))
         self.ingest(driver)
         self.assertEqual([batch[0]["entity_id"] for batch in driver.attempted_batches], ["0", "1", "2"])
         attempts = copy.deepcopy(driver.attempted_batches)
@@ -185,13 +215,16 @@ class ResumableCustomersTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "max_batches"):
                 self.ingest(Driver(), max_batches=value)
 
-    def test_max_batches_pins_cursor_across_lost_commit_ack_retry(self):
+    def test_max_batches_does_not_hide_unknown_commit_or_advance_next_batch(self):
         driver = Driver(retry="after_commit")
-        offset = self.ingest(driver, max_batches=1)
-        self.assertEqual(offset, len(self.lines[0]))
+        with self.assertRaisesRegex(RuntimeError, "before acknowledgement"):
+            self.ingest(driver, max_batches=1)
         self.assertEqual(set(driver.customers), {"0"})
-        self.assertEqual(driver.checkpoints["synthetic-source"]["next_offset"], offset)
         self.assertEqual(len(driver.attempted_batches), 1)
+        offset = self.ingest(driver, max_batches=1)
+        self.assertEqual(offset, len(self.lines[0]) + len(self.lines[1]))
+        self.assertEqual(set(driver.customers), {"0", "1"})
+        self.assertEqual(driver.checkpoints["synthetic-source"]["next_offset"], offset)
 
     def test_digest_mismatch_rejects_before_customer_changes(self):
         driver = Driver()
@@ -258,9 +291,9 @@ class ResumableCustomersTests(unittest.TestCase):
 
     def test_changed_source_during_callback_and_bad_limits_are_rejected(self):
         class MutatingDriver(Driver):
-            def execute_write(inner, callback):
+            def begin_transaction(inner):
                 self.path.write_bytes(b"changed\n")
-                return super().execute_write(callback)
+                return super().begin_transaction()
 
         driver = MutatingDriver()
         with self.assertRaisesRegex(ValueError, "source changed"):

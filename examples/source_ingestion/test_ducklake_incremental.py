@@ -208,9 +208,20 @@ class IncrementalTests(unittest.TestCase):
                             return self
                         def __exit__(self, *args):
                             return inner.__exit__(*args)
-                        def execute_write(self, callback):
-                            inner.execute_write(callback)
-                            raise RuntimeError('synthetic stop after first committed batch')
+                        def begin_transaction(self, **kwargs):
+                            transaction = inner.begin_transaction(**kwargs)
+                            class Transaction:
+                                def __enter__(self):
+                                    transaction.__enter__()
+                                    return self
+                                def __exit__(self, *args):
+                                    return transaction.__exit__(*args)
+                                def run(self, *args, **kwargs):
+                                    return transaction.run(*args, **kwargs)
+                                def commit(self):
+                                    transaction.commit()
+                                    raise RuntimeError('synthetic stop after first committed batch')
+                            return Transaction()
                     return Session()
             with self.assertRaisesRegex(RuntimeError, 'first committed batch'):
                 delta.ingest_incremental(OneBatch(), 'shadow', self.output, batch_size=2)
@@ -343,12 +354,23 @@ class IncrementalTests(unittest.TestCase):
                             return self
                         def __exit__(self, *args):
                             return inner.__exit__(*args)
-                        def execute_write(self, callback):
-                            result = inner.execute_write(callback)
-                            self.calls += 1
-                            if self.calls == 2:
-                                raise RuntimeError('synthetic lost committed acknowledgement')
-                            return result
+                        def begin_transaction(self, **kwargs):
+                            transaction = inner.begin_transaction(**kwargs)
+                            session = self
+                            class Transaction:
+                                def __enter__(self):
+                                    transaction.__enter__()
+                                    return self
+                                def __exit__(self, *args):
+                                    return transaction.__exit__(*args)
+                                def run(self, *args, **kwargs):
+                                    return transaction.run(*args, **kwargs)
+                                def commit(self):
+                                    transaction.commit()
+                                    session.calls += 1
+                                    if session.calls == 2:
+                                        raise RuntimeError('synthetic lost committed acknowledgement')
+                            return Transaction()
                     return Session()
             with self.assertRaisesRegex(RuntimeError, 'lost committed'):
                 delta.ingest_incremental(LostAck(), 'shadow', self.output, batch_size=1)

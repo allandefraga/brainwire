@@ -149,8 +149,12 @@ class GraphClient:
         self.batch_size, self.batch_bytes = batch_size, batch_bytes
 
     def _write(self, operation):
+        # A lost COMMIT reply is ambiguous; managed retries can replay the write.
         with self.driver.session(database=self.database) as session:
-            return session.execute_write(operation)
+            with session.begin_transaction() as tx:
+                result = operation(tx)
+                tx.commit()
+                return result
 
     def run_cypher(self, query, parameters=None):
         """Run one parameterized Cypher statement and return all records as dicts.

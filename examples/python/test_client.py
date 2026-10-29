@@ -65,6 +65,7 @@ class Driver:
         self.fail_on_write = None
         self.write_count = 0
         self.retry_write = False
+        self.managed_calls = 0
 
     def session(self, *, database):
         self.database = database
@@ -76,7 +77,40 @@ class Driver:
     def __exit__(self, *args):
         pass
 
+    def begin_transaction(self):
+        self.write_count += 1
+        if self.write_count == self.fail_on_write:
+            raise RuntimeError("write failed")
+        captured = []
+        driver = self
+
+        class Tx:
+            closed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                if not self.closed:
+                    self.rollback()
+                self.closed = True
+
+            def run(self, query, **params):
+                captured.append((query, params))
+                return Result(next(driver.counts, len(params.get("rows", [1]))))
+
+            def commit(self):
+                driver.committed.append(captured)
+                self.closed = True
+
+            def rollback(self):
+                captured.clear()
+                self.closed = True
+
+        return Tx()
+
     def execute_write(self, callback):
+        self.managed_calls += 1
         self.write_count += 1
         if self.write_count == self.fail_on_write:
             raise RuntimeError("write failed")
@@ -231,14 +265,16 @@ class ClientTests(unittest.TestCase):
             graph.load_nodes("Ticket", [{"entity_id": "committed"}], on_batch=fail_after_commit)
         self.assertEqual(len(driver.committed), 1)
 
-    def test_load_progress_callback_runs_once_when_managed_transaction_retries(self):
+    def test_load_progress_callback_does_not_use_managed_transaction_retries(self):
         driver = Driver()
         driver.retry_write = True
         graph = GraphClient(driver, "tickets", batch_size=1)
         progress = []
-        graph.load_nodes("Ticket", [{"entity_id": "retry-safe"}],
+        graph.load_nodes("Ticket", [{"entity_id": "once"}],
                          on_batch=lambda batch, total: progress.append((batch, total)))
         self.assertEqual(progress, [(1, 1)])
+        self.assertEqual(driver.write_count, 1)
+        self.assertEqual(driver.managed_calls, 0)
 
     def test_delete_nodes_deduplicates_ids_and_detaches_in_atomic_batches(self):
         driver = Driver([1, 2, 0])
@@ -415,7 +451,7 @@ class ExplicitDriver:
     def __exit__(self, *args):
         self.events.append("session-close")
 
-    def begin_transaction(self, *, metadata):
+    def begin_transaction(self, *, metadata=None):
         self.events.append(("begin", metadata))
         if self.begin_error:
             raise self.begin_error
@@ -448,6 +484,93 @@ class ExplicitDriver:
 
         def close(self):
             self.driver.events.append("tx-close")
+
+
+class RetryableCommitDisconnect(ConnectionError):
+    """A transport failure for which a managed driver would retry its callback."""
+
+
+class RetryingDriver(ExplicitDriver):
+    def __init__(self, *, lose_commit_reply=False):
+        super().__init__()
+        self.lose_commit_reply = lose_commit_reply
+        self.failure = RetryableCommitDisconnect("COMMIT response lost")
+        self.applied = 0
+
+    def begin_transaction(self, *, metadata=None):
+        self.events.append(("begin", metadata))
+        self.tx = self.Tx(self)
+        return self.tx
+
+    def execute_write(self, callback):
+        self.events.append("managed")
+        for attempt in range(2):
+            with self.begin_transaction() as tx:
+                result = callback(tx)
+                try:
+                    tx.commit()
+                except RetryableCommitDisconnect:
+                    continue
+                return result
+        raise self.failure
+
+    class Tx(ExplicitDriver.Tx):
+        def run(self, query, **params):
+            self.driver.events.append(("run", query, params))
+            return Result(len(params.get("rows", [1])))
+
+        def commit(self):
+            self.driver.events.append("commit")
+            self.closed = True
+            self.driver.applied += 1
+            if self.driver.lose_commit_reply and self.driver.applied == 1:
+                raise self.driver.failure
+
+
+class GenericWriteTests(unittest.TestCase):
+    def test_lost_commit_reply_does_not_replay_callback_or_report_success(self):
+        driver = RetryingDriver(lose_commit_reply=True)
+        calls = []
+        with self.assertRaises(RetryableCommitDisconnect) as caught:
+            GraphClient(driver, "tickets")._write(lambda tx: calls.append(tx) or "unacknowledged")
+        self.assertIs(caught.exception, driver.failure)
+        self.assertEqual(calls, [driver.tx])
+        self.assertEqual(driver.applied, 1)
+        self.assertNotIn("managed", driver.events)
+        self.assertEqual(driver.events[-2:], ["tx-close", "session-close"])
+
+    def test_lost_batch_commit_reply_does_not_report_progress_or_replay(self):
+        driver = RetryingDriver(lose_commit_reply=True)
+        progress = []
+        with self.assertRaises(RetryableCommitDisconnect):
+            GraphClient(driver, "tickets").load_nodes("Ticket", [{"entity_id": "one"}],
+                on_batch=lambda batch, count: progress.append((batch, count)))
+        self.assertEqual(progress, [])
+        self.assertEqual(driver.applied, 1)
+        self.assertEqual(len([event for event in driver.events
+                              if isinstance(event, tuple) and event[0] == "run"]), 1)
+        self.assertNotIn("managed", driver.events)
+
+    def test_one_shot_success_returns_callback_value_after_commit(self):
+        driver = RetryingDriver()
+        value = object()
+        result = GraphClient(driver, "tickets")._write(lambda tx: value)
+        self.assertIs(result, value)
+        self.assertEqual(driver.applied, 1)
+        self.assertNotIn("managed", driver.events)
+        self.assertEqual(driver.events[-3:], ["commit", "tx-close", "session-close"])
+
+    def test_callback_error_rolls_back_once_and_preserves_exception(self):
+        driver = RetryingDriver()
+        failure = ValueError("invalid batch")
+        def fail(tx):
+            raise failure
+        with self.assertRaises(ValueError) as caught:
+            GraphClient(driver, "tickets")._write(fail)
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(driver.applied, 0)
+        self.assertEqual(driver.events.count("rollback"), 1)
+        self.assertNotIn("managed", driver.events)
 
 
 class QuorumClientTests(unittest.TestCase):
@@ -554,7 +677,8 @@ class AtomicAclClientTests(unittest.TestCase):
                 self.assertEqual(driver.events.count("commit"), 1)
                 self.assertNotIn("rollback", driver.events)
                 if request_id is None:
-                    self.assertIn("managed", driver.events)
+                    self.assertIn(("begin", None), driver.events)
+                    self.assertNotIn("managed", driver.events)
                 else:
                     self.assertIn(("begin", {"brainwire_request_id": request_id}), driver.events)
                     self.assertNotIn("managed", driver.events)
@@ -588,10 +712,11 @@ class AtomicAclClientTests(unittest.TestCase):
         self.assertIs(caught.exception, failure)
         self.assertEqual(driver.events.count("commit"), 1)
 
-    def test_existing_acl_setter_keeps_managed_api(self):
+    def test_existing_acl_setter_uses_one_shot_transaction(self):
         driver = AclDriver(({"updated": True},))
         self.assertTrue(GraphClient(driver, "tickets").set_node_acl("Ticket", "t-1", {}))
-        self.assertIn("managed", driver.events)
+        self.assertNotIn("managed", driver.events)
+        self.assertIn(("begin", None), driver.events)
         self.assertEqual(len([event for event in driver.events if isinstance(event, tuple) and event[0] == "run"]), 1)
 
 
