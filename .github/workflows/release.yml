@@ -15,55 +15,53 @@ jobs:
   verify:
     uses: ./.github/workflows/ci.yml
 
-  publish:
-    name: Publish source release and container image
+  image:
+    name: Verify Linux ${{ matrix.arch }} image
     needs: verify
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
       packages: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/brainwire
+      ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Match tag to workspace version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           python - <<'PY'
           import os
           import re
           import tomllib
-
           with open("Cargo.toml", "rb") as manifest:
               version = tomllib.load(manifest)["workspace"]["package"]["version"]
-          expected = f"v{version}"
           actual = os.environ["RELEASE_TAG"]
-          semver = re.fullmatch(
-              r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-              r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?",
-              actual,
-          )
-          if not semver:
-              raise SystemExit(f"tag {actual!r} is not a supported SemVer release tag")
-          if semver.group(4):
-              for identifier in semver.group(4).split("."):
-                  if identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0"):
-                      raise SystemExit(f"numeric prerelease identifier {identifier!r} has a leading zero")
-          if actual != expected:
-              raise SystemExit(f"tag {actual!r} does not match workspace version {expected!r}")
+          if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-(?:beta|rc)\.\d+)?", actual):
+              raise SystemExit("unsupported release tag")
+          if actual != f"v{version}":
+              raise SystemExit("tag does not match workspace version")
           PY
           grep -F "newTag: ${RELEASE_TAG}" deploy/kubernetes-release/kustomization.yaml
+          echo "CANDIDATE=$IMAGE_REPOSITORY:$RELEASE_TAG-$GITHUB_SHA-$ARCH" >> "$GITHUB_ENV"
 
-      - name: Set up Docker Buildx
+      - name: Set up native Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Generate image metadata
+      - name: Generate image labels
         id: metadata
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/brainwire
-          tags: |
-            type=ref,event=tag
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
@@ -74,116 +72,153 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for a completed or interrupted publication
-        id: publication
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
-          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/brainwire
+      - name: Check for a previously tested candidate
+        id: candidate
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            release_prerelease="$(gh release view "$RELEASE_TAG" --json isPrerelease --jq '.isPrerelease')"
-            expected_prerelease=false
-            [[ "$RELEASE_TAG" == *-* ]] && expected_prerelease=true
-            test "$release_prerelease" = "$expected_prerelease"
-            mkdir -p .release-check
-            gh release download "$RELEASE_TAG" --pattern release-metadata.txt --dir .release-check
-            grep -Fx "image=$RELEASE_IMAGE" .release-check/release-metadata.txt
-            grep -Fx "source=$GITHUB_SHA" .release-check/release-metadata.txt
-            digest="$(sed -n 's/^digest=//p' .release-check/release-metadata.txt)"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            docker pull "$RELEASE_IMAGE"
-            repository_digest="$(docker image inspect "$RELEASE_IMAGE" --format '{{index .RepoDigests 0}}')"
-            test "$repository_digest" = "$IMAGE_REPOSITORY@$digest"
-            {
-              echo "already_complete=true"
-              echo "resume_from_image=false"
-            } >> "$GITHUB_OUTPUT"
-            echo "Verified previously completed release $RELEASE_TAG ($digest)." >> "$GITHUB_STEP_SUMMARY"
-          elif docker manifest inspect "$RELEASE_IMAGE" >/dev/null 2>&1; then
-            docker pull "$RELEASE_IMAGE"
-            revision="$(docker image inspect "$RELEASE_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
-            test "$revision" = "$GITHUB_SHA" || {
-              echo "Refusing to replace $RELEASE_IMAGE: its source revision is $revision, not $GITHUB_SHA." >&2
+          if docker manifest inspect "$CANDIDATE" >/dev/null 2> candidate-inspect.err; then
+            docker pull --platform "linux/$ARCH" "$CANDIDATE"
+            revision="$(docker image inspect "$CANDIDATE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+            architecture="$(docker image inspect "$CANDIDATE" --format '{{.Architecture}}')"
+            test "$revision" = "$GITHUB_SHA"
+            test "$architecture" = "$ARCH"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            # Do not treat authentication or network errors as an absent image.
+            grep -Eiq 'manifest unknown|no such manifest' candidate-inspect.err || {
+              cat candidate-inspect.err >&2
               exit 1
             }
-            repository_digest="$(docker image inspect "$RELEASE_IMAGE" --format '{{index .RepoDigests 0}}')"
-            digest="${repository_digest##*@}"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            {
-              echo "already_complete=false"
-              echo "resume_from_image=true"
-              echo "digest=$digest"
-            } >> "$GITHUB_OUTPUT"
-            echo "Resuming release creation for the already-tested image $digest." >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "already_complete=false"
-              echo "resume_from_image=false"
-            } >> "$GITHUB_OUTPUT"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build the release image locally
-        if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
+      - name: Build the candidate on its native architecture
+        if: steps.candidate.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           load: true
-          tags: ${{ steps.metadata.outputs.tags }}
+          tags: ${{ env.CANDIDATE }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: false
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install the Bolt acceptance driver
-        if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
         run: python -m pip install neo4j==5.28.4
 
       - name: Verify the exact image and retained-volume recovery
-        if: steps.publication.outputs.already_complete != 'true' && steps.publication.outputs.resume_from_image != 'true'
-        env:
-          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
-        run: >-
-          python crates/server/tests/container_restart.py
-          --image "$RELEASE_IMAGE" --rows 100 --cycles 1
-
-      - name: Publish the verified image and record its digest
-        if: steps.publication.outputs.already_complete != 'true'
-        env:
-          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
-          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/brainwire
-          RESUME_FROM_IMAGE: ${{ steps.publication.outputs.resume_from_image }}
-          RESUMED_DIGEST: ${{ steps.publication.outputs.digest }}
         run: |
-          if [[ "$RESUME_FROM_IMAGE" == "true" ]]; then
-            digest="$RESUMED_DIGEST"
-          else
-            docker push "$RELEASE_IMAGE" 2>&1 | tee image-push.log
-            digest="$(sed -nE 's/.*digest: (sha256:[0-9a-f]+).*/\1/p' image-push.log | tail -n 1)"
+          architecture="$(docker image inspect "$CANDIDATE" --format '{{.Architecture}}')"
+          test "$architecture" = "$ARCH"
+          python crates/server/tests/container_restart.py --image "$CANDIDATE" --rows 100 --cycles 1
+
+      - name: Publish only the verified candidate and record its digest
+        env:
+          ALREADY_EXISTS: ${{ steps.candidate.outputs.exists }}
+        run: |
+          if [[ "$ALREADY_EXISTS" != "true" ]]; then
+            docker push "$CANDIDATE"
           fi
-          test -n "$digest"
+          docker pull --platform "linux/$ARCH" "$CANDIDATE"
+          repository_digest="$(docker image inspect "$CANDIDATE" --format '{{index .RepoDigests 0}}')"
+          test "${repository_digest%@*}" = "$IMAGE_REPOSITORY"
+          digest="${repository_digest##*@}"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          printf 'image=%s\ndigest=%s\nsource=%s\n' \
-            "$RELEASE_IMAGE" "$digest" "$GITHUB_SHA" > release-metadata.txt
+          mkdir -p image-metadata
+          printf '%s\n' "$digest" > "image-metadata/$ARCH.digest"
+
+      - name: Save the tested architecture digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image-${{ matrix.arch }}
+          path: image-metadata/${{ matrix.arch }}.digest
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish multi-architecture release
+    needs: [verify, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/brainwire:${{ github.ref_name }}
+      IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/brainwire
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-image-*
+          path: image-metadata
+          merge-multiple: true
+
+      - name: Create the manifest from tested digests without replacing a release
+        run: |
+          amd64="$(cat image-metadata/amd64.digest)"
+          arm64="$(cat image-metadata/arm64.digest)"
+          [[ "$amd64" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$arm64" =~ ^sha256:[0-9a-f]{64}$ ]]
+          if ! docker manifest inspect "$RELEASE_IMAGE" > manifest.json 2> release-inspect.err; then
+            grep -Eiq 'manifest unknown|no such manifest' release-inspect.err || {
+              cat release-inspect.err >&2
+              exit 1
+            }
+            docker buildx imagetools create --tag "$RELEASE_IMAGE" \
+              "$IMAGE_REPOSITORY@$amd64" "$IMAGE_REPOSITORY@$arm64"
+            docker manifest inspect "$RELEASE_IMAGE" > manifest.json
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path("manifest.json").read_text())
+          actual = {}
+          for item in manifest.get("manifests", []):
+              platform = item.get("platform", {})
+              key = (platform.get("os"), platform.get("architecture"))
+              if key in actual:
+                  raise SystemExit("duplicate architecture in release manifest")
+              actual[key] = item["digest"]
+          expected = {
+              ("linux", arch): Path(f"image-metadata/{arch}.digest").read_text().strip()
+              for arch in ("amd64", "arm64")
+          }
+          if actual != expected:
+              raise SystemExit("release manifest does not match the tested architecture digests; refusing replacement")
+          PY
+          digest="$(docker buildx imagetools inspect "$RELEASE_IMAGE" --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'image=%s\ndigest=%s\nsource=%s\nlinux_amd64=%s\nlinux_arm64=%s\n' \
+            "$RELEASE_IMAGE" "$digest" "$GITHUB_SHA" "$amd64" "$arm64" > release-metadata.txt
           cat release-metadata.txt >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Create GitHub release with the tested image digest
-        if: steps.publication.outputs.already_complete != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Create or verify the GitHub prerelease
         run: |
-          if [[ "$RELEASE_TAG" == *-* ]]; then
-            gh release create "$RELEASE_TAG" \
-              --title "Brainwire $RELEASE_TAG" --generate-notes --prerelease \
-              release-metadata.txt
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            mkdir -p .release-check
+            gh release download "$RELEASE_TAG" --pattern release-metadata.txt --dir .release-check
+            cmp release-metadata.txt .release-check/release-metadata.txt
+            actual="$(gh release view "$RELEASE_TAG" --json isPrerelease --jq '.isPrerelease')"
+            expected=false
+            [[ "$RELEASE_TAG" == *-* ]] && expected=true
+            test "$actual" = "$expected"
+          elif [[ "$RELEASE_TAG" == *-* ]]; then
+            gh release create "$RELEASE_TAG" --title "Brainwire $RELEASE_TAG" \
+              --generate-notes --prerelease release-metadata.txt
           else
-            gh release create "$RELEASE_TAG" \
-              --title "Brainwire $RELEASE_TAG" --generate-notes \
-              release-metadata.txt
+            gh release create "$RELEASE_TAG" --title "Brainwire $RELEASE_TAG" \
+              --generate-notes release-metadata.txt
           fi
