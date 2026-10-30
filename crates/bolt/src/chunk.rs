@@ -123,6 +123,8 @@ pub struct ChunkReader {
     buffer: Vec<u8>,
     offset: usize,
     current: Vec<u8>,
+    /// Capacity charged to the current message (recovery may bypass admission).
+    current_admitted: usize,
     /// Skipping the remaining chunks of a refused message, up to its terminator.
     discarding: bool,
     /// The previous message was refused: admit one small recovery message.
@@ -192,24 +194,96 @@ impl ChunkReader {
                     continue; // NOOP
                 }
                 self.recovering = false;
+                self.current_admitted = 0;
                 return Ok(Some(std::mem::take(&mut self.current)));
             }
             if remaining.len() < 2 + size {
                 return Ok(None);
             }
+            let required = self.current.len() + size;
+            let capacity_before_growth = self.current.capacity();
+            let growing = required > capacity_before_growth;
+            let growth_limit = if self.recovering && required <= CONTROL_MESSAGE_BYTES {
+                max_message_bytes.min(CONTROL_MESSAGE_BYTES)
+            } else {
+                max_message_bytes
+            };
+            let mut capacity = if growing {
+                required
+                    .max(self.current.capacity().saturating_mul(2))
+                    .min(growth_limit)
+            } else {
+                self.current.capacity()
+            };
+            // The old and replacement allocations may coexist during realloc.
+            let extra = if growing {
+                capacity
+            } else {
+                capacity.saturating_sub(self.current_admitted)
+            };
+            let mut charged = false;
+            let mut refusal = None;
             if let Some(lease) = lease.as_deref_mut() {
-                let control = self.recovering && self.current.len() + size <= CONTROL_MESSAGE_BYTES;
-                if lease.grow(size).is_err() && !control {
-                    let (requested, available) = lease.hint(size);
-                    self.current = Vec::new();
-                    self.offset += 2 + size;
-                    self.discarding = true;
-                    self.recovering = true;
-                    return Err(ReadError::IngressExhausted {
-                        requested,
-                        available,
-                    });
+                match lease.grow(extra) {
+                    Ok(()) => charged = true,
+                    Err(_) if self.recovering && required <= CONTROL_MESSAGE_BYTES => {
+                        // Allocate the whole recovery allowance once: repeated
+                        // exempt reallocations could overlap two uncharged buffers.
+                        capacity = max_message_bytes.min(CONTROL_MESSAGE_BYTES);
+                        let overlap = self
+                            .current
+                            .capacity()
+                            .saturating_sub(self.current_admitted);
+                        if growing && overlap.saturating_add(capacity) > CONTROL_MESSAGE_BYTES {
+                            refusal = Some(lease.hint(extra));
+                        }
+                    }
+                    Err(_) => refusal = Some(lease.hint(extra)),
                 }
+            }
+            if refusal.is_none() && growing {
+                if self
+                    .current
+                    .try_reserve_exact(capacity - self.current.len())
+                    .is_err()
+                {
+                    if charged {
+                        lease.as_deref_mut().unwrap().release(extra);
+                    }
+                    refusal = Some((capacity as u64, 0));
+                } else {
+                    let actual = self.current.capacity();
+                    if charged {
+                        // Allocators may grant more capacity than requested.
+                        let lease = lease.as_deref_mut().unwrap();
+                        let overshoot = actual.saturating_sub(capacity);
+                        if lease.grow(overshoot).is_err() {
+                            // Keep the replacement charged until it is discarded.
+                            refusal = Some(lease.hint(overshoot));
+                        } else {
+                            lease.release(self.current_admitted);
+                            self.current_admitted = actual;
+                        }
+                    } else if lease.is_some() {
+                        let overlap = capacity_before_growth.saturating_sub(self.current_admitted);
+                        if overlap.saturating_add(actual) > CONTROL_MESSAGE_BYTES {
+                            refusal = Some((actual as u64, 0));
+                        }
+                    }
+                }
+            } else if charged {
+                self.current_admitted = capacity;
+            }
+            if let Some((requested, available)) = refusal {
+                self.current = Vec::new();
+                self.current_admitted = 0;
+                self.offset += 2 + size;
+                self.discarding = true;
+                self.recovering = true;
+                return Err(ReadError::IngressExhausted {
+                    requested,
+                    available,
+                });
             }
             self.current.extend_from_slice(&remaining[2..2 + size]);
             self.offset += 2 + size;
@@ -440,6 +514,208 @@ mod tests {
             );
             assert_eq!(writer.bytes.len(), MAX_CHUNK + 9);
         }
+    }
+
+    #[test]
+    fn fragmented_payload_reserves_capacity_before_geometric_growth() {
+        use crate::ingress::IngressPool;
+        let pool = IngressPool::new(24);
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        reader.push(&[0, 16]);
+        reader.push(&[7; 16]);
+        assert_eq!(
+            reader.next_message_admitted(100, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(pool.reserved(), 16);
+        reader.push(&[0, 1, 8]);
+        assert_eq!(
+            reader.next_message_admitted(100, Some(&mut lease)),
+            Err(ReadError::IngressExhausted {
+                requested: 48,
+                available: 24
+            })
+        );
+        assert_eq!(reader.current.capacity(), 0);
+        drop(lease);
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn fragmented_payload_releases_old_capacity_after_growth() {
+        use crate::ingress::IngressPool;
+        let pool = IngressPool::new(48);
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        reader.push(&[0, 16]);
+        reader.push(&[7; 16]);
+        assert_eq!(
+            reader.next_message_admitted(100, Some(&mut lease)),
+            Ok(None)
+        );
+        reader.push(&[0, 1, 8]);
+        assert_eq!(
+            reader.next_message_admitted(100, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current.capacity(), 32);
+        assert_eq!(pool.reserved(), 32);
+        reader.push(&[0, 0]);
+        let payload = reader
+            .next_message_admitted(100, Some(&mut lease))
+            .unwrap()
+            .unwrap();
+        assert_eq!(payload.len(), 17);
+        assert_eq!(reader.current_admitted, 0);
+        assert_eq!(pool.reserved(), payload.capacity());
+        drop(payload);
+        drop(lease);
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn one_byte_chunks_use_geometric_capacity_and_account_all_of_it() {
+        use crate::ingress::IngressPool;
+        let pool = IngressPool::new(4096);
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        let mut growths = 0;
+        let mut previous = 0;
+        for _ in 0..1000 {
+            reader.push(&[0, 1, 7]);
+            assert_eq!(
+                reader.next_message_admitted(2048, Some(&mut lease)),
+                Ok(None)
+            );
+            assert_eq!(pool.reserved(), reader.current.capacity());
+            if reader.current.capacity() != previous {
+                growths += 1;
+                previous = reader.current.capacity();
+            }
+        }
+        assert!(
+            growths <= 11,
+            "one-byte chunks must not reallocate every byte"
+        );
+        assert_eq!(reader.current.capacity(), 1024);
+    }
+
+    #[test]
+    fn fragmented_recovery_caps_geometric_slack_at_one_kibibyte() {
+        use crate::ingress::IngressPool;
+        let pool = IngressPool::new(0);
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        reader.allow_recovery_message();
+        reader.push(&[3, 0]);
+        reader.push(&[7; 768]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        reader.push(&[0, 1, 7]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current.capacity(), CONTROL_MESSAGE_BYTES);
+        reader.push(&[0, 255]);
+        reader.push(&[7; 255]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current.len(), CONTROL_MESSAGE_BYTES);
+        assert_eq!(pool.reserved(), 0);
+        reader.push(&[0, 1, 7]);
+        assert!(matches!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Err(ReadError::IngressExhausted { .. })
+        ));
+        assert_eq!(reader.current.capacity(), 0);
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn partially_admitted_recovery_can_bypass_growth_then_resume_admission() {
+        use crate::ingress::IngressPool;
+        let pool = IngressPool::new(1536);
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        reader.allow_recovery_message();
+        reader.push(&[2, 0]);
+        reader.push(&[7; 512]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current_admitted, 512);
+        let mut occupied = pool.lease();
+        occupied.grow(1024).unwrap();
+        reader.push(&[0, 1, 7]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current.capacity(), CONTROL_MESSAGE_BYTES);
+        assert_eq!(reader.current_admitted, 512);
+        assert_eq!(pool.reserved(), 1536);
+        drop(occupied);
+        reader.push(&[0, 1, 7]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current_admitted, CONTROL_MESSAGE_BYTES);
+        assert_eq!(pool.reserved(), CONTROL_MESSAGE_BYTES);
+        reader.push(&[0, 0]);
+        let payload = reader
+            .next_message_admitted(4096, Some(&mut lease))
+            .unwrap()
+            .unwrap();
+        assert_eq!(payload.len(), 514);
+        drop(payload);
+        drop(lease);
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn recovery_capacity_is_bounded_and_can_become_admitted_without_underflow() {
+        use crate::ingress::IngressPool;
+        let pool = IngressPool::new(2048);
+        let mut occupied = pool.lease();
+        occupied.grow(2048).unwrap();
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        reader.allow_recovery_message();
+        reader.push(&[0, 16]);
+        reader.push(&[7; 16]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(reader.current_admitted, 0);
+        drop(occupied);
+        reader.push(&[0, 1, 8]);
+        assert_eq!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(pool.reserved(), CONTROL_MESSAGE_BYTES);
+        assert_eq!(reader.current_admitted, CONTROL_MESSAGE_BYTES);
+        let mut occupied = pool.lease();
+        occupied.grow(1024).unwrap();
+        reader.push(&[4, 0]);
+        reader.push(&[7; 1024]);
+        assert!(matches!(
+            reader.next_message_admitted(4096, Some(&mut lease)),
+            Err(ReadError::IngressExhausted { .. })
+        ));
+        drop(lease);
+        assert_eq!(pool.reserved(), 1024);
+        drop(occupied);
+        assert_eq!(pool.reserved(), 0);
     }
 
     #[test]

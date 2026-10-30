@@ -1,10 +1,42 @@
 # Protected Bolt service connections
 
 The beta can require random service tokens and graph-scoped read/write grants.
-This is not the planned human-password/Argon2 or JWT/JWKS authentication, row/field
-ACLs, user management, online graph administration or native encrypted transport.
-A principal with read access can see the complete allowed graph, including every
-stored tenant. Source-qualified IDs alone do not isolate tenants within a graph.
+This is not the planned human-password/Argon2 or JWT/JWKS authentication, field
+ACLs, online user management or native encrypted transport. The credentials
+generated here have graph-wide visibility, including every stored tenant; they
+do not configure node ACL filtering. Existing trusted policies can restrict
+[node visibility](node-acl.md). Source-qualified IDs alone do not isolate tenants
+within a graph.
+
+## Initialize an admin without a default password
+
+On Linux/macOS (including the Linux image), the native CLI can create the initial
+service credentials without Python:
+
+```sh
+brainwire auth init --directory /secure/path/brainwire-auth --graph default
+```
+
+The parent directory must already exist and be trusted: other users must not
+be able to rename or replace entries there. Choose a fresh path outside your
+checkout. The command creates a private directory (0700) with `policy.json`,
+`admin.json` and `health.json` (0600). Each credential uses a different token
+from 32 random OS bytes. Tokens never appear in command arguments or output;
+there is no `admin/admin` password. Existing directories are refused, so rerunning
+the command cannot silently invalidate clients. If creation fails partway, keep
+the incomplete directory private and retry with a fresh path.
+
+`admin` can read/write **only the selected graph**, inspect process memory and
+stamp ACLs. It does not grant access to every graph. `health` can only read the
+selected graph. Set `BRAINWIRE_SERVER_AUTH_FILE` to the generated `policy.json`
+for the server, and `BRAINWIRE_BOLT_AUTH_FILE` to `admin.json` for your client
+(or `health.json` for readiness probes). Restart the server after changing its
+policy; this command is offline setup, not online user management. Keep mounted
+files readable by the container's UID 10001 with appropriate ownership rather
+than making credentials world-readable; see [protected containers](protected-containers.md).
+
+The multi-role Python generator below remains available when you want separate
+writer/reader/health identities rather than an initial administrator.
 
 ## Create and run a protected local graph
 

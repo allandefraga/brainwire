@@ -1,6 +1,7 @@
 //! Brainwire configuration, synthetic observatory and embedded Cypher CLI.
 
 mod admin;
+mod auth_setup;
 mod client_auth;
 mod cluster;
 mod config;
@@ -31,6 +32,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Create private admin and health service credentials for one graph.
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommands,
+    },
     /// Check whether a local Bolt server accepts sessions and queries.
     Probe {
         /// Bolt listen address to check from this machine or container.
@@ -149,6 +155,17 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthCommands {
+    /// Initialize a new private directory; never overwrites credentials.
+    Init {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long, default_value = "default")]
+        graph: String,
     },
 }
 
@@ -315,6 +332,9 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Auth {
+            command: AuthCommands::Init { directory, graph },
+        } => auth_setup::run(&directory, &graph),
         Commands::Probe {
             address,
             mode,

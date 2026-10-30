@@ -42,7 +42,7 @@ pub struct ConnectionLimits {
     pub max_message_bytes: usize,
     pub max_decoded_message_bytes: usize,
     pub io_timeout: std::time::Duration,
-    /// Shared logical assembled-input and decoded-storage quota for this listener.
+    /// Shared assembled-input capacity and decoded-storage quota for this listener.
     pub ingress_memory_bytes: usize,
 }
 

@@ -1,9 +1,10 @@
 # Run Brainwire in Docker
 
-Use Docker Compose for the first local trial. It builds the server, creates a
-synthetic graph named `demo`, and keeps its files in a named Docker volume.
-You need Docker Engine and Docker Compose. Run the commands below from the
-Brainwire repository root.
+Use Docker Compose for the first local trial. It creates a synthetic graph
+named `demo` and keeps its files in a named Docker volume. You can use a
+published image without compiling Rust, or build from source. You need Docker
+Engine and Docker Compose. Run these commands from a checkout of the matching
+Brainwire release.
 
 This guide uses an unauthenticated demo on host loopback. For shared or real
 data, use the [protected container setup](protected-containers.md) and a
@@ -11,9 +12,43 @@ data, use the [protected container setup](protected-containers.md) and a
 has no TLS. The normal Docker profiles run one database instance;
 [experimental quorum replication](quorum-replication.md) has a separate setup.
 
-## Fastest local start
+## Start from a release image
+
+A source tag can exist before its image. Check the matching GitHub release and
+its workflow before using it. Private images need a one-time login:
 
 ```sh
+docker login ghcr.io
+```
+
+Enter your GitHub username. At the password prompt, use a GitHub personal access
+token with `read:packages`
+and access to the package. Do not enter your GitHub account password. Public
+images do not need this step. Then start the published version:
+
+```sh
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.13.0-beta.1 # brainwire-release-version
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  up --no-build --wait --wait-timeout 900
+```
+
+Images use the exact release tag, for example `v0.13.0-beta.1`. <!-- brainwire-release-version -->
+For reproducible deployment, pin the digest from the release receipt. A private
+GHCR image requires package access in addition to repository access. Keep
+credentials out of shell arguments and source files. If `pull` reports
+`denied` or `unauthorized`, check the token and package access; rebuilding the
+source is the alternative below.
+
+Both commands use the same `BRAINWIRE_IMAGE`: the initializer and server must
+run the same version. This trial publishes only `127.0.0.1:7687`; it does not
+add authentication. Never expose the demo profile to an untrusted Docker
+network or external clients.
+
+## Build from source instead
+
+```sh
+unset BRAINWIRE_IMAGE
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --build --wait --wait-timeout 900
 ```
@@ -34,7 +69,8 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
 ```
 
 The initializer skips an existing `demo` graph. Restarting this Compose project
-with its original volume preserves the graph.
+with its original volume preserves the graph. Use `up --no-build` when managing
+a published image; use `up --build` for a source build.
 
 ## Write and read from Python
 
@@ -111,23 +147,10 @@ A new volume on another machine is a new database, not recovery of this one.
 Keep independent backups; see [checkpoints](checkpoints.md) and
 [termination and recovery](termination-recovery.md).
 
-## Use a published release image
-
-A source tag can exist before its image. Check the matching GitHub release and
-its workflow before using it. After the image has been published:
-
-```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.12.0-beta.1 # brainwire-release-version
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
-  up --no-build --wait --wait-timeout 900
-```
-
-Images use the exact release tag, for example `v0.12.0-beta.1`. <!-- brainwire-release-version -->
-For reproducible deployment, pin the digest from the release receipt. A private
-GHCR image requires `docker login ghcr.io` with a GitHub token authorized to read
-that package. Public images do not require login. Keep credentials out of shell
-arguments and source files.
+For an upgrade, take and verify a backup first, keep the same project/volume,
+then set `BRAINWIRE_IMAGE` to the new exact tag and repeat `pull` and
+`up --no-build`. Check the release notes for volume compatibility. Switching
+back to an older image is not a safe rollback plan after a volume-format change.
 
 ## Start a local demo with one command
 
@@ -201,6 +224,20 @@ Attach the consumer to that network in its own Compose configuration. The demo
 is still unauthenticated; the network itself adds no authentication or encryption.
 Use the [protected profiles](protected-containers.md) before sharing real data.
 
+## Before connecting a real application
+
+Use the [protected container setup](protected-containers.md) to mount a server
+auth policy and a separate health credential; leave the development override
+disabled. Keep the host listener on loopback or an explicitly trusted network.
+For traffic outside that boundary, configure and verify the
+[TLS proxy](protected-transport.md). Native Bolt TLS is not available, and the
+proxy-to-database connection remains plaintext on its internal bridge.
+
+The Compose profiles run one active database on one retained volume. They do
+not provide machine-loss failover. The experimental beta still needs
+representative sustained memory and recovery qualification before it can be
+treated as production-ready. Start with rebuildable data and a tested backup.
+
 ## Health checks and deployment
 
 | Check | What it proves |
@@ -213,6 +250,9 @@ The Dockerfile's built-in health check uses **handshake**. The demo Compose file
 overrides it with **ready**. Configure the appropriate probe and credentials for
 your deployment; a responding listener alone does not establish query readiness.
 Use `--address` if the listener changes and `--timeout-ms` to bound a probe.
+An `unhealthy` status does not itself restart a standalone Docker container;
+`restart: unless-stopped` restarts a stopped process. Check logs and readiness
+after every upgrade instead of relying only on the container being `running`.
 
 [Docker/Compose, Kubernetes and Swarm deployment](orchestrators.md) covers the
 current single-instance templates. Keep the correct persistent volume attached

@@ -37,19 +37,59 @@ for a minimum 64 MiB cache and positive query budgets still applies.
 If neither host memory nor cgroup bounds can be detected, legacy fixed defaults
 remain; inspect `config show` and configure explicit budgets on unsupported hosts.
 
-`memory.limit` (default 90% of the detected capacity) is the process RSS
-ceiling: query reservations and new RUNs are refused near it, and the allocator
-returns idle memory; see [the design](design/process-memory-ceiling.md).
-The other budgets are accounting budgets, **not a hard process RSS limit or an OOM guarantee**.
+`memory.limit` (default 90% of the detected capacity) is a **sampled admission
+threshold**, not a hard process RSS ceiling. On Linux and macOS, the server
+samples RSS at startup and every 100 ms. Crossing 80% of this threshold warns
+and requests an allocator purge; at 95%, new RUNs and query-pool growth are
+refused. A request may be refused earlier when its shared reservations cannot
+fit the sampled headroom. See [the design](design/process-memory-ceiling.md).
+
+The component budgets are accounting budgets. Sampling, admission and
+allocator decay do **not guarantee a global RSS limit or prevent every OOM**.
 RocksDB native allocations, message decoding and encoding, operating system page
 cache, connections and other application allocations consume additional memory.
 A container's memory limit remains the operating system's enforcement mechanism.
 Cgroup discovery tests alone do not certify a workload under a 4 GiB limit;
 validate representative workloads and concurrent clients separately.
 
+## Check the container before increasing load
+
+The Compose demo sets a 2 GiB Docker limit, a 256 MiB cache, 32 MiB memtables
+inside that cache, and a 256 MiB query pool. Ingress and `memory.limit` still
+use detected defaults. Inspect the effective configuration in the running
+container rather than assuming a host configuration file was loaded:
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire config show
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail 100 brainwire
+docker stats --no-stream
+```
+
+`docker stats` reports container accounting; it is not the same number as
+process RSS or live query reservations. Compare it with Brainwire's memory
+logs and the detected capacity in `config show`. Explicit environment values
+win over automatic sizing: lowering only Docker's limit does not shrink a
+previously configured cache. Recreate the container after changing its limits
+or environment, then check the configuration again.
+
+For example, to make the process-admission setting explicit in a separate
+`docker run` deployment, pass `--memory 2g` and
+`--env BRAINWIRE_MEMORY_LIMIT=1536MiB`, alongside your cache, query and ingress
+budgets. This lowers the sampled admission threshold; it does not qualify the
+workload or reserve that amount of RAM. No single setting fixes every large
+batch. Start with bounded batches and a few clients, then measure peak and
+idle memory while increasing the representative load.
+
+A `Neo.TransientError.General.MemoryPressure` refusal means reduce concurrent
+work or batch size. A missing write acknowledgement is different: reconcile
+its outcome before retrying. Container restart after a kernel OOM is recovery,
+not evidence that the load is safe. Sustained 2/4/8 GiB production-load
+qualification remains open for this beta.
+
 ## Shared Bolt input admission
 
-`memory.ingress` limits the combined logical assembled message bytes and
+`memory.ingress` limits the combined assembled-message buffer capacity and
 PackStream decoded-storage charges across all connections to this server,
 including clients that have not authenticated. It is separate from
 `memory.query` and the RocksDB budgets. Unset, it uses one eighth of the detected
@@ -59,8 +99,12 @@ Set `[memory] ingress = "128MiB"` in TOML or
 value and source. Explicit values must be positive and fit the platform address
 size. Message size and decoded-storage caps still apply independently.
 
-Admission occurs before copying an assembled chunk or allocating charged
-PackStream storage. A request that cannot fit returns
+Admission occurs before growing the assembled-message buffer or allocating
+charged PackStream storage. Fragmented input reserves the planned buffer
+capacity, including geometric growth slack. During a reallocation it reserves
+both the old and replacement capacity, then releases the old charge after
+growth succeeds. This can refuse a batch whose logical payload would fit but
+whose temporary allocation overlap would not. A request that cannot fit returns
 `Neo.TransientError.General.MemoryPressure` with `reason=ingress` and a size
 hint before it reaches the engine. A logged-on session stays open: the rest of
 the message is skipped, its transaction is rolled back and RESET recovers it;
@@ -74,7 +118,7 @@ A valid request keeps its admission through synchronous engine handling, even
 if the socket task is cancelled while that worker remains running.
 
 This is a shared accounting ceiling, not a process RSS limit. Socket/read and
-framing buffers, vector capacity slack, allocator overhead, engine parameter
+framing buffers, allocator size-class rounding and overhead, engine parameter
 copies, output encoding, catalog and native RocksDB allocations remain outside
 this budget. An input may need both its encoded size and decoded allocation
 estimate simultaneously, so a payload smaller than `memory.ingress` may still

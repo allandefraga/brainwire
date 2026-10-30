@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.13.0-beta.1 — candidate
+
+Experimental beta for controlled trials. Publication and image availability are
+confirmed by the release workflow; a tag alone does not prove either.
+
+### Added
+
+- `brainwire auth init` creates independent random admin and health credentials
+  and a graph-scoped policy in a new private directory, without printing tokens.
+  Setup is offline; changing the policy requires a restart.
+- The release workflow checks credential creation using the image's unprivileged
+  user on both native architectures. It does not verify host secret mounts.
+
+### Fixed
+
+- Bolt ingress accounts for assembled buffer capacity, including overlapping
+  old and replacement allocations during growth. Small recovery messages remain
+  bounded; real allocator over-allocation is checked after allocation.
+- Docker and memory guides distinguish the sampled admission threshold from a
+  hard RSS limit and describe persistent storage and protected access.
+
+### Limits
+
+- This is not a production qualification: sampled admission and ingress budgets
+  cannot guarantee a global RSS ceiling or prevent OOM. Sustained 2/4/8 GiB
+  workloads, large initial loads and multi-machine recovery remain open. Native
+  Bolt TLS is unavailable. See [current limits](README.md#current-limits).
+
 ## 0.12.0-beta.1 — candidate
 
 Experimental beta for controlled trials. Publication and image availability must

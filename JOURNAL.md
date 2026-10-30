@@ -29,6 +29,29 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-30: v0.13 beta candidate — ingress and onboarding
+
+- **Done:** account Bolt assembled-buffer capacity and its old/new overlap in
+  the shared ingress pool. Recovery remains bounded; allocator rounding and
+  transient over-allocation are not a hard RSS ceiling. Added six regressions.
+- **Done:** `brainwire auth init` creates private graph-scoped admin and health
+  credentials from the OS random source without printing them. Existing paths
+  are refused. Policy changes require a restart; this is not online user
+  management. Reviewed the security and memory changes independently.
+- **Done:** refreshed the README, release-image and memory guides; documented a
+  fail-closed fresh protected Linux Docker setup and created a separate social
+  card. Added image-user credential setup to the release workflow.
+- **Checks:** workspace tests: 947 passed and three ignored; Clippy and format
+  passed. The synthetic concurrent query-memory test passed and checked refusal,
+  rollback and release of reservations. Authentication was exercised with a
+  native server and a client; the health identity could not write.
+- **Pending:** container image build, image-user credential setup, Docker
+  pressure/recovery smoke, CI and release publication. These checks do not prove
+  sustained 2/4/8 GiB qualification, a global RSS cap, native Bolt TLS or
+  multi-machine failover. Keep the repository and historical archive private.
+- **Next:** publish the explicitly experimental candidate only after its gates,
+  then record the workflow outcome and image identity separately.
+
 ## 2026-10-30: v0.12 experimental beta published
 
 - **Release:** `v0.12.0-beta.1` points to sanitized source

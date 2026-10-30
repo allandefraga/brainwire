@@ -2,11 +2,11 @@
   <img src="assets/brainwire-logo.svg" alt="Brainwire" width="360">
 </p>
 
-<h1 align="center">Context is connected.</h1>
+<h1 align="center">Give your context connections.</h1>
 
 <p align="center">
-  <strong>A graph database for the people, documents, decisions and events behind your AI apps.</strong>
-  <br>Write from Python. Connect with Cypher. Keep the relationships on disk.
+  <strong>A Rust graph database for the context behind your AI apps.</strong>
+  <br>Python in. Cypher out. Relationships that stay on disk.
 </p>
 
 <p align="center">
@@ -25,20 +25,22 @@
 </p>
 
 <p align="center">
-  <img src="assets/brainwire-hero-v2.png" alt="Concept artwork of connected graph nodes in green" width="100%">
+  <img src="assets/brainwire-hero-v2.png" alt="Brainwire concept artwork: green graph nodes connected across a dark canvas" width="900">
   <br><sub>Concept artwork · the terminal UI is described below.</sub>
 </p>
 
-Brainwire is an independent graph database written in Rust, with RocksDB storage,
-Cypher queries, Bolt connections and a Python helper. Each named graph has its
-own data and ontology. Build a knowledge graph, connect application records or
-keep structured context for an agent; your application chooses what to ingest
-and how to use it.
+People own projects. Documents explain decisions. Tickets depend on releases.
+Brainwire stores those connections as a graph you can write from Python, query
+with Cypher over Bolt and inspect in your terminal. Rust runs the engine;
+RocksDB persists the data. Each named graph has its own data and ontology.
 
-> **v0.12.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Built for controlled trials.
+Bring application records, build a knowledge graph or keep structured context
+for agents. Your application controls ingestion and decides what to remember.
+
+> **v0.13.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Built for controlled trials.
 > No guaranteed global RSS ceiling. Sustained 2/4/8 GiB qualification remains
 > open. Start with synthetic or rebuildable data and read the
-> [current limits](#current-limits) and [qualification report](PRODUCTION-v0.12.md).
+> [current limits](#current-limits) and the [v0.12 qualification report](PRODUCTION-v0.12.md).
 
 ## What works today
 
@@ -58,22 +60,49 @@ tag when using a release image. For supported query syntax, start with the
 
 ## Quickstart
 
-You need Docker Engine and Docker Compose. From a checkout of this repository:
+**Run a versioned image, write a few records, then explore their connections.**
+You need Git, Docker Engine and Docker Compose. Start with the matching checkout:
 
 ```sh
+git clone --branch v0.13.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+cd brainwire
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.13.0-beta.1 # brainwire-release-version
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  up --no-build --wait --wait-timeout 900
+```
+
+Private repositories require GitHub access; private images also require
+`docker login ghcr.io` with a token authorized to read the package. Public
+images need no registry login. Use a release whose image publication succeeded;
+the [release page](https://github.com/allandefraga/brainwire/releases) records it.
+
+Compose creates the synthetic **`demo`** graph, waits for readiness and serves
+Bolt at **`bolt://127.0.0.1:7687`**. It keeps graph files in a named volume across
+container restarts. If port 7687 is busy, run `export BRAINWIRE_BIND_PORT=17687`
+before starting Compose and use that port in clients.
+
+<details>
+<summary>Prefer to build the image locally?</summary>
+
+From your checkout, use this instead of the image pull/start commands:
+
+```sh
+unset BRAINWIRE_IMAGE
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --build --wait --wait-timeout 900
 ```
 
-Compose builds Brainwire, creates a synthetic graph named `demo` and starts Bolt
-at **`bolt://127.0.0.1:7687`**. Graph files live in a named volume. The first
-build compiles Rust and RocksDB and can take several minutes. If port 7687 is
-busy, prefix the command with `BRAINWIRE_BIND_PORT=17687` and use that port in
-clients.
+The first build compiles Rust and RocksDB and can take several minutes.
+
+</details>
 
 The local demo disables authentication and binds the published port to host
 loopback. Before sharing access, use the [protected container setup](docs/protected-containers.md)
 and [transport guide](docs/protected-transport.md).
+Use `brainwire auth init --directory <new-private-directory> --graph default`
+to generate a graph-scoped admin and health credential. See [authentication](docs/bolt-auth.md)
+for secure file access and restart requirements.
 
 ### Write from Python
 
@@ -225,6 +254,9 @@ work; the [operator checklist](docs/beta-operator-checklist.md) guides a trial.
 
 ## Documentation
 
+**New here?** Follow [Docker](docs/container.md) → [Python](docs/python-client.md)
+→ [Cypher](docs/local-cypher.md) → [TUI](docs/connected-status.md).
+
 | I want to… | Read |
 |---|---|
 | Install and connect | [Docker](docs/container.md) · [Kubernetes / Swarm](docs/orchestrators.md) |
@@ -245,7 +277,7 @@ After the matching release workflow publishes an image and records its digest
 in `release-metadata.txt`, pull it with:
 
 ```sh
-docker pull ghcr.io/allandefraga/brainwire:v0.12.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.13.0-beta.1 # brainwire-release-version
 ```
 
 Private images require `docker login ghcr.io` with a GitHub token that can read
@@ -282,7 +314,7 @@ cargo fmt --all -- --check
 
 ## Release status and license
 
-**Version:** `v0.12.0-beta.1` · experimental beta · production qualification open. <!-- brainwire-release-version -->
+**Version:** `v0.13.0-beta.1` · experimental beta · production qualification open. <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source, including
 commercially, while following its terms. Check the license in the tag you

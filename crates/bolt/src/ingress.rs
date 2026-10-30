@@ -1,4 +1,4 @@
-//! Shared admission for logical assembled input and decoded storage.
+//! Shared admission for assembled input capacity and decoded storage.
 //! Socket buffers, allocator slack and downstream engine copies are separate.
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -47,6 +47,11 @@ impl IngressLease {
             .map_err(|_| Exhausted)?;
         self.bytes = bytes;
         Ok(())
+    }
+    pub(crate) fn release(&mut self, bytes: usize) {
+        assert!(bytes <= self.bytes);
+        self.bytes -= bytes;
+        self.pool.reserved.fetch_sub(bytes, Ordering::AcqRel);
     }
     /// Size hint for a refusal: bytes this message asked for in total, and how many
     /// the shared pool could give it right now (its own share plus what is free).
