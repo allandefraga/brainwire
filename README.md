@@ -1,104 +1,90 @@
 <p align="center">
-  <img src="assets/brainwire-hero.png" alt="An illustration of connected data" width="100%">
-</p>
-<p align="center"><sub>Concept artwork.</sub></p>
-
-<p align="center">
-  <img src="assets/brainwire-logo.svg" alt="Brainwire graph database" width="300">
+  <img src="assets/brainwire-logo.svg" alt="Brainwire" width="360">
 </p>
 
-<h1 align="center">Give your data connections.</h1>
+<h1 align="center">Context is connected.</h1>
 
 <p align="center">
-  A graph database for the people, documents, decisions and events behind your applications.
-  <br>Rust · RocksDB · Cypher · Bolt · Python
+  <strong>A graph database for the people, documents, decisions and events behind your AI apps.</strong>
+  <br>Write from Python. Connect with Cypher. Keep the relationships on disk.
+</p>
+
+<p align="center">
+  <a href="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml"><img src="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-65ff54?style=flat-square" alt="License: Apache-2.0"></a>
+  <a href="#current-limits"><img src="https://img.shields.io/badge/status-experimental_beta-65ff54?style=flat-square" alt="Status: experimental beta"></a>
+  <img src="https://img.shields.io/badge/built_with-Rust-65ff54?style=flat-square" alt="Built with Rust">
 </p>
 
 <p align="center">
   <a href="#quickstart">Run it</a> &nbsp; / &nbsp;
   <a href="#write-from-python">Python</a> &nbsp; / &nbsp;
   <a href="#see-what-the-tui-can-do">Terminal UI</a> &nbsp; / &nbsp;
-  <a href="#documentation">Documentation</a> &nbsp; / &nbsp;
+  <a href="#documentation">Docs</a> &nbsp; / &nbsp;
   <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml"><img src="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-65ff54?style=flat-square" alt="License: Apache-2.0"></a>
-  <a href="#current-limits"><img src="https://img.shields.io/badge/status-beta-65ff54?style=flat-square" alt="Status: beta"></a>
+  <img src="assets/brainwire-hero-v2.png" alt="Concept artwork of connected graph nodes in green" width="100%">
+  <br><sub>Concept artwork · the terminal UI is described below.</sub>
 </p>
 
-Brainwire stores records and their relationships in a durable graph. Write from
-Python, query with Cypher, and inspect a running server from the terminal.
-Each named graph has its own data and ontology. Your application controls
-source ingestion, identity mapping and orchestration.
+Brainwire is an independent graph database written in Rust, with RocksDB storage,
+Cypher queries, Bolt connections and a Python helper. Each named graph has its
+own data and ontology. Build a knowledge graph, connect application records or
+keep structured context for an agent; your application chooses what to ingest
+and how to use it.
 
-> **v0.12.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Use for controlled trials.
-> This beta has no guaranteed process-wide memory ceiling. Sustained 2/4/8 GiB
-> qualification remains open. Review the [current limits](#current-limits),
-> [v0.12 qualification report](PRODUCTION-v0.12.md) and
-> [operator checklist](docs/beta-operator-checklist.md) before using real data.
+> **v0.12.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Built for controlled trials.
+> No guaranteed global RSS ceiling. Sustained 2/4/8 GiB qualification remains
+> open. Start with synthetic or rebuildable data and read the
+> [current limits](#current-limits) and [qualification report](PRODUCTION-v0.12.md).
 
-The capabilities below describe this checkout. For a release image, use the
-documentation from its matching tag; local changes may not be included.
+## What works today
 
-## Choose how to run it
+| Build with | What is available |
+|---|---|
+| **Connected data** | Independent named graphs, ontology catalogs, nodes, edges and property patches |
+| **Familiar queries** | Cypher patterns, `WITH`, `OPTIONAL MATCH`, `UNION`, aggregates and bounded regex support |
+| **Index-backed reads** | Scalar equality/`IN`, string range/prefix access and online index builds |
+| **Durable local state** | Atomic transactions, synchronized RocksDB WAL commits, checks and checkpoints |
+| **Graph algorithms** | Sparse CSR projection, weighted PageRank, shortest path, reachability, WCC/SCC and explainable `knowledge.rank` |
+| **Application ingestion** | Bounded Python upserts, Arrow helpers, resumable JSONL imports and pinned DuckLake snapshot comparison |
+| **Inspection** | CLI and terminal views for ontology, query memory, indexes and a selected node's relationships |
 
-| Option | What it provides | Guide |
-|---|---|---|
-| **Docker Compose** | Builds and starts a persistent local demo | [Quickstart](#quickstart) |
-| **Versioned Docker image** | Runs a published release without compiling | [Container guide](docs/container.md) |
-| **Rust source** | Builds the server, CLI and TUI | [Build locally](#build-it-locally) |
-| **Kubernetes / Swarm** | Single-instance templates with persistent storage | [Deployment guide](docs/orchestrators.md) |
-
-Homebrew and an Electron desktop app are planned; installers are not available.
-The Python helper is installable from this checkout, but is not published on PyPI.
+The capabilities describe this checkout. Read the documentation at the matching
+tag when using a release image. For supported query syntax, start with the
+[Cypher guide](docs/local-cypher.md).
 
 ## Quickstart
 
-Install Docker Engine and Docker Compose, then run this from the repository root:
+You need Docker Engine and Docker Compose. From a checkout of this repository:
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --build --wait --wait-timeout 900
 ```
 
-This creates the synthetic `demo` graph, stores it in a named volume, and starts
-Bolt at `bolt://127.0.0.1:7687`. The first build compiles Rust and RocksDB and
-can take several minutes. Set `BRAINWIRE_BIND_PORT=17687` if port 7687 is busy,
-then use that port in clients.
+Compose builds Brainwire, creates a synthetic graph named `demo` and starts Bolt
+at **`bolt://127.0.0.1:7687`**. Graph files live in a named volume. The first
+build compiles Rust and RocksDB and can take several minutes. If port 7687 is
+busy, prefix the command with `BRAINWIRE_BIND_PORT=17687` and use that port in
+clients.
 
-The demo disables authentication and publishes only on host loopback. Use it
-with synthetic data. For shared environments, follow the
-[protected container setup](docs/protected-containers.md) and
-[transport guide](docs/protected-transport.md).
+The local demo disables authentication and binds the published port to host
+loopback. Before sharing access, use the [protected container setup](docs/protected-containers.md)
+and [transport guide](docs/protected-transport.md).
 
-Useful Docker commands:
+### Write from Python
 
-```sh
-# Check the service and its startup logs.
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml ps
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail 50 brainwire
-
-# Stop the demo and keep its data.
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
-```
-
-Do not add `--volumes` unless you intend to delete the demo database. For a
-plain `docker run`, custom ontology, another container or a versioned image,
-use the [Docker guide](docs/container.md).
-
-## Write from Python
-
-With the demo running, install the helper from this checkout:
+Install the helper from the same checkout:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install .
 ```
 
-The package uses the Neo4j Bolt driver and does not install the database server.
-Run the following with `.venv/bin/python`:
+Run this with `.venv/bin/python`:
 
 ```python
 from brainwire import GraphClient
@@ -117,144 +103,163 @@ with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
     """))
 ```
 
-The demo ontology declares these labels and relationship. For your own data,
-define an ontology before writing. Batch helpers commit each bounded batch
-separately. `None` removes a property; omitted properties stay unchanged.
-After a lost commit response, reconcile the source keys before retrying.
+Expected result: `[{'customer': 'Ada', 'segment': 'beta'}]`.
+The demo ontology declares these labels and the relationship. For your own
+records, define an ontology before writing.
 
-See [Python installation](docs/python-package.md),
-[mutation semantics](docs/python-client.md), and
-[source ingestion](docs/source-ingestion.md) for authentication, lists,
-generators, Arrow inputs and resumable loads.
+For larger reads, consume records incrementally within the same driver context:
 
-## See what the TUI can do
+```python
+from brainwire import GraphClient
+from neo4j import GraphDatabase
 
-The TUI is the `brainwire shell` command. After [building locally](#build-it-locally),
-connect it to the demo populated by the Python example:
+with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+    graph = GraphClient(driver, "demo")
+    with graph.stream_cypher("MATCH (c:Customer) RETURN c.name AS name", fetch_size=200) as rows:
+        for row in rows:
+            print(row["name"])
+```
+
+`stream_cypher` uses a read-only session and closes it when the block ends.
+Its page size does not limit process RSS, and some server plans still materialize
+intermediate results. See [streaming reads](docs/python-client.md).
+
+Each bounded batch commits separately. `None` removes a property; omitted
+properties stay unchanged. After a lost commit response, reconcile source keys
+before retrying. The helper uses the Neo4j Bolt driver and is installable from
+this checkout; a public `pip install brainwire` distribution is not available.
+See [Python setup](docs/python-package.md), [mutation semantics](docs/python-client.md)
+and [source ingestion](docs/source-ingestion.md).
+
+### See what the TUI can do
+
+Open a second terminal and inspect the graph created above:
 
 ```sh
-./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo \
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
+  exec brainwire brainwire shell --connect 127.0.0.1:7687 --graph demo \
   --node-label Customer --entity-id customer-1 \
   --edge-type IN_SEGMENT --target-label Segment
 ```
 
-Use `Tab` or `1–4` to switch between **Ontology**, **Memory**, **Indexes** and
-**Graph**. Press `r` to refresh, `?` for help, and `q` to exit. Add
-`--lang pt-BR` for Portuguese interface text.
+| Control | Action |
+|---|---|
+| `Tab` or `1`–`4` | Switch Ontology, Memory, Indexes and Graph |
+| `r` | Refresh the current view |
+| `?` | Explain the current pane |
+| `q` | Exit |
 
-The connected workspace is read-only. Graph shows a sample of up to 20 outgoing
-relationships for the chosen node and type. Memory shows shared query
-reservations, not process RSS. See the [connected TUI guide](docs/connected-status.md)
-for authentication and the exact controls.
+The connected TUI is read-only. Graph samples up to 20 outgoing relationships
+for the selected node and type; Memory shows shared query reservations. Add
+`--lang pt-BR` for Portuguese interface text. The [connected TUI guide](docs/connected-status.md)
+explains authentication, selection and the available fields.
 
-Other modes:
+For a synthetic visual demo, replace the shell arguments with `shell --demo`.
+The offline `shell --overview` mode inspects local files and requires the server
+to be stopped before opening the same database directory.
 
-- `brainwire shell --demo` opens a synthetic visual demo.
-- `brainwire shell --overview` inspects local files. Stop the server first;
-  RocksDB permits one owner of each database directory.
-
-## Use the command line
-
-The same binary starts the server, administers local graphs and runs offline
-Cypher. Start with:
+### Manage the demo
 
 ```sh
-./target/release/brainwire --help
-./target/release/brainwire config show
-./target/release/brainwire probe --mode ready
+# Check service readiness and recent logs.
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml ps
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail 50 brainwire
+
+# Stop the containers and keep the graph files.
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
 
-`probe` checks the default Bolt address. `config show` explains effective values
-and where they came from. To create a graph or query its files directly, follow
-[the local CLI quickstart](docs/mvp-quickstart.md) and
-[Cypher guide](docs/local-cypher.md). Offline commands need exclusive access;
-use Python over Bolt while the server owns the graph.
+Adding `--volumes` deletes the demo's data. For a plain `docker run`, versioned
+image or custom ontology, see the [Docker guide](docs/container.md).
 
-## What works today
+## Inside this beta
 
-| Area | Available in this checkout |
+**Bounded results.** Bolt sends eligible reads in pages, with memory reservations
+held until the page is sent or discarded. Large eligible label scans stream
+entities in parallel. `RUN` can return before execution finishes, so consume or
+discard the result and check its final response. Other plans can still retain
+node handles or materialize intermediate results; oversized sorts, aggregates
+and `DISTINCT` are refused rather than spilled to disk. Read the
+[streaming scope](docs/design/bolt-result-streaming.md).
+
+**Memory-pressure errors.** Query and ingress budgets, together with sampled
+process/cgroup admission, can reject work under pressure. Python exposes typed
+memory and unknown-commit exceptions. These controls are conservative allocation
+accounting; they do not guarantee a hard global RSS ceiling. See
+[memory defaults](docs/memory-defaults.md) and the [error contract](docs/design/memory-error-contract.md).
+
+**Experimental write outcomes.** A new dedicated volume can opt into authenticated
+write-outcome receipts and `CALL db.requestStatus($seed)`. Receipts are scoped
+to the graph and principal. `not_recorded` never proves rollback or makes a
+retry safe. Existing ordinary graphs are not migrated by enabling the option.
+Read the [request-outcome guide](docs/standalone-requests.md) before using this
+separate storage mode.
+
+## Choose how to run it
+
+| Option | Start here |
 |---|---|
-| Graphs and writes | Independent named graphs, ontology catalogs, atomic local transactions, node/edge creation and deletion, property patches and bounded Python upserts |
-| Queries and indexes | Multi-hop patterns, `WITH`, `OPTIONAL MATCH`, `UNION`, aggregates, scalar equality/`IN`, string range/prefix access and online index builds |
-| Storage | Local RocksDB, synchronized WAL commits, consistency checks, checkpoints and retained-volume restart |
-| Analytics | Sparse CSR projection, degree, weighted PageRank, shortest path, reachability, WCC/SCC and explainable `knowledge.rank` |
-| Ingestion and inspection | Python/Arrow helpers, resumable JSONL import, pinned DuckLake snapshot comparison, CLI and TUI |
+| **Local Docker demo** | [Quickstart](#quickstart) |
+| **Published container image** | [Docker setup](docs/container.md) |
+| **Rust server, CLI and TUI** | [Build locally](#build-it-locally) |
+| **Kubernetes or Swarm** | [Persistent single-instance templates](docs/orchestrators.md) |
 
-The experimental beta adds paged Bolt results, parallel streaming for eligible
-large label scans, shared query/ingress accounting and memory-pressure errors.
-A successful `RUN` can return before execution finishes: consume or discard its
-result and check the final response. Other plans can still retain node handles
-or materialize blocking results; oversized sorts, aggregates and `DISTINCT`
-are refused rather than spilled to disk. See the
-[streaming scope](docs/design/bolt-result-streaming.md) and
-[memory error contract](docs/design/memory-error-contract.md).
-
-For a new dedicated volume, an authenticated opt-in mode can record the outcome
-of an explicit write transaction and expose `CALL db.requestStatus($seed)`.
-The record is scoped to the graph and principal. `not_recorded` does not prove
-rollback or make retry safe; ordinary graphs are not migrated by enabling it.
-Read the [experimental request-outcome guide](docs/standalone-requests.md)
-before using this separate storage mode.
-
-The local Cypher implementation includes a bounded Rust-regex subset of `=~`;
-see [its syntax and memory limits](docs/cypher-regex.md). That subset is not
-full Java regex compatibility. Check the [Cypher guide](docs/local-cypher.md)
-before porting a query.
+Homebrew and an Electron desktop app are planned. Installers are not available.
 
 ## Current limits
 
-| Area | What to plan around |
+| Area | Plan around this |
 |---|---|
-| **Memory** | Query and ingress budgets estimate allocations; sampled process/cgroup admission can refuse new work under pressure. These controls do not enforce a global RSS ceiling, and the sustained 2/4/8 GiB qualification is incomplete. Read [memory defaults](docs/memory-defaults.md) and the [production roadmap](docs/production-readiness-roadmap.md). |
-| **Cypher** | One fixed label per node and immutable `entity_id`. Subqueries, pattern comprehensions and native temporal/spatial types remain unsupported. See [supported Cypher](docs/local-cypher.md). |
-| **Security** | The demo is unauthenticated and published on host loopback. Shared access needs an auth policy and verified encryption boundary; native Bolt TLS is not implemented. See [server security](docs/serve.md). |
-| **Recovery** | Synthetic restart and process-kill tests cover specific paths; they do not qualify power loss, full disks or every restore/upgrade scenario. Experimental request outcomes have additional volume and downgrade limits. See [request outcomes](docs/standalone-requests.md) and [checkpoints](docs/checkpoints.md). |
-| **Time and sources** | Catalog versions are not node/edge history. No native `AS OF` or automatic retention. DuckLake support compares pinned snapshots rather than native CDC. See [temporal data](docs/temporal-data.md) and [DuckLake ingestion](docs/ducklake-incremental.md). |
-| **Scale and ecosystem** | Three-voter quorum is experimental; ordinary deployment templates run one instance. Sharding, native text/vector indexes, a public Python package and an independent sync/async Bolt driver remain open. See [quorum operations](docs/quorum-replication.md) and the [v2 roadmap](ROADMAP-v2.md). |
-| **Performance** | Large ACL scans and cursor workloads need application-specific tests. Recorded benchmarks are synthetic diagnostics, not production SLOs. Start with [BENCHMARKS.md](BENCHMARKS.md). |
+| **Memory** | No guaranteed global RSS ceiling. Sustained 2/4/8 GiB and large initial-load qualification remain open. [Memory guide](docs/memory-defaults.md) |
+| **Cypher** | One fixed label and immutable `entity_id` per node. Subqueries, pattern comprehensions and native temporal/spatial types remain unsupported. [Supported syntax](docs/local-cypher.md) |
+| **Security** | Shared access requires an auth policy and a verified encryption boundary; native Bolt TLS is not implemented. [Server security](docs/serve.md) |
+| **Recovery** | Synthetic restart and process-kill tests cover specific paths. Power loss, full disks and every restore/upgrade scenario are not qualified. The opt-in receipt format has additional volume/downgrade limits. [Recovery guide](docs/checkpoints.md) |
+| **History and sources** | Catalog versions are not node/edge history. No native `AS OF` or automatic retention. DuckLake compares pinned snapshots rather than native CDC. [Temporal data](docs/temporal-data.md) · [DuckLake](docs/ducklake-incremental.md) |
+| **Distributed operation** | Three-voter quorum is experimental. Ordinary deployment templates run one instance. Sharding remains open. [Quorum operations](docs/quorum-replication.md) |
+| **Search and performance** | Native text/vector indexes remain open. Recorded benchmarks are synthetic diagnostics, not production SLOs. [Benchmark conditions and results](BENCHMARKS.md) |
 
 For a first trial, use a rebuildable shadow graph and keep the existing source
 as the authority until integration, security, recovery and workload checks pass.
+The [qualification report](PRODUCTION-v0.12.md) records completed checks and open
+work; the [operator checklist](docs/beta-operator-checklist.md) guides a trial.
 
 ## Documentation
 
-| Task | Guide |
+| I want to… | Read |
 |---|---|
-| Install, configure, restart and connect containers | [Docker](docs/container.md) · [Kubernetes / Swarm](docs/orchestrators.md) |
-| Create graphs and apply an ontology | [Local quickstart](docs/mvp-quickstart.md) · [ontology](docs/connected-ontology.md) |
-| Write, patch, remove and import data | [Python API](docs/python-client.md) · [source ingestion](docs/source-ingestion.md) · [DuckLake sync](docs/parallel-ingestion.md) |
-| Query and inspect | [Cypher](docs/local-cypher.md) · [indexes](docs/indexes.md) · [connected TUI](docs/connected-status.md) · [offline inspector](docs/multi-graph-backoffice.md) |
-| Protect and recover data | [Authentication](docs/bolt-auth.md) · [transport](docs/protected-transport.md) · [checkpoints](docs/checkpoints.md) · [operator checklist](docs/beta-operator-checklist.md) |
-| Evaluate measured results | [Benchmark index](BENCHMARKS.md) · [Neo4j/FalkorDB diagnostic](docs/benchmarks/comparison/README.md) |
+| Install and connect | [Docker](docs/container.md) · [Kubernetes / Swarm](docs/orchestrators.md) |
+| Create graphs and define types | [CLI quickstart](docs/mvp-quickstart.md) · [ontology](docs/connected-ontology.md) |
+| Write, patch, remove and import | [Python API](docs/python-client.md) · [source ingestion](docs/source-ingestion.md) · [DuckLake sync](docs/parallel-ingestion.md) |
+| Query and inspect | [Cypher](docs/local-cypher.md) · [indexes](docs/indexes.md) · [TUI](docs/connected-status.md) · [offline inspector](docs/multi-graph-backoffice.md) |
+| Protect and recover | [Authentication](docs/bolt-auth.md) · [transport](docs/protected-transport.md) · [checkpoints](docs/checkpoints.md) |
+| Evaluate performance | [Benchmark index](BENCHMARKS.md) · [Neo4j/FalkorDB diagnostic](docs/benchmarks/comparison/README.md) |
 
-The Markdown guides in `docs/` are readable on GitHub. `docs-site/` is a separate
-static documentation landing page. Learn how to preview it and what GitHub Pages
-does in the [site guide](docs/github-pages.md). The [documentation index](docs/README.md)
-separates current guides from historical reports.
+Browse the [documentation index](docs/README.md) for current guides and historical
+reports. The Markdown guides work directly on GitHub; `docs-site/` is a separate
+static landing page. The [site guide](docs/github-pages.md) explains previewing it
+and GitHub Pages.
 
 ## Releases and container images
 
-Use the image only after the matching release workflow publishes it and records
-a tested digest in `release-metadata.txt`:
+After the matching release workflow publishes an image and records its digest
+in `release-metadata.txt`, pull it with:
 
 ```sh
 docker pull ghcr.io/allandefraga/brainwire:v0.12.0-beta.1 # brainwire-release-version
 ```
 
 Private images require `docker login ghcr.io` with a GitHub token that can read
-the package. Repository and image visibility are separate settings. See the
+the package. Repository and image visibility are separate settings. Follow the
 [container guide](docs/container.md) for startup and authentication.
 
-Pushes to `main` run CI. Version tags run release checks, build the image and
-verify writes and restart recovery before publication. Beta/RC tags create
-prereleases. A tag alone does not prove that an image exists, and a published
-image does not qualify production. See [releasing](docs/releasing.md) for the
-local helper, versioning and workflow details.
+Pushes to `main` run CI. Version tags run release checks and image recovery tests
+before publication; beta/RC tags create prereleases. A tag alone does not prove
+that an image exists. See [releasing](docs/releasing.md) and [changelog](CHANGELOG.md).
 
 ## Build it locally
 
-Install the Rust toolchain in `rust-toolchain.toml` and native build dependencies
-(Clang/libclang, CMake and pkg-config). From the repository root:
+Install the Rust toolchain in `rust-toolchain.toml` and native prerequisites:
+Clang/libclang, CMake and pkg-config. From the repository root:
 
 ```sh
 cargo fetch --locked
@@ -262,7 +267,12 @@ cargo build --release --locked --offline -p brainwire-server
 ./target/release/brainwire --version
 ```
 
-The resulting binary includes the server, CLI and TUI. To verify a source change:
+The binary includes the server, CLI and TUI. Run `brainwire --help`,
+`brainwire config show` or `brainwire probe --mode ready` to explore it.
+Offline administration needs exclusive access to graph files; use Bolt while
+the server owns them. See the [CLI guide](docs/mvp-quickstart.md).
+
+To verify a source change:
 
 ```sh
 cargo test --workspace --locked --offline
@@ -274,12 +284,16 @@ cargo fmt --all -- --check
 
 **Version:** `v0.12.0-beta.1` · experimental beta · production qualification open. <!-- brainwire-release-version -->
 
-Current source uses [Apache-2.0](LICENSE). You may use, modify and redistribute it,
-including commercially, while following its terms. Check the license in the tag
-you distribute: some older releases predate this license grant. The license does
-not make a private repository or image publicly accessible.
+[Apache-2.0](LICENSE). Use, modify and redistribute the current source, including
+commercially, while following its terms. Check the license in the tag you
+redistribute; some older releases predate this grant. Repository and image
+visibility still control access.
 
-`publish = false` prevents uploading the Rust crates to registries such as
-crates.io. It does not prevent running the source, using Docker images or
-creating GitHub releases. The current release workflow does not publish a Rust
-crate or Python package to a registry.
+<details>
+<summary>What does <code>publish = false</code> mean?</summary>
+
+It prevents uploading the Rust crates to registries such as crates.io. You can
+still run Brainwire, use Docker images and create GitHub releases. The release
+workflow does not publish a Rust crate or Python package to a registry.
+
+</details>

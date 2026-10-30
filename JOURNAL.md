@@ -29,6 +29,30 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-30: experimental beta, memory and publication review
+
+- **Done:** sample process RSS before the first admission decision, avoiding the
+  startup zero-usage window; unavailable samples remain best-effort with a warning.
+  Added read-only `GraphClient.stream_cypher`, which closes its cursor and session
+  and reports late server errors. Updated the README and concept artwork, and
+  added a redacted, scoped publication-audit helper.
+- **Verification:** Rust workspace 938 passed, 3 ignored; Clippy and formatting
+  passed. Python examples ran 103 tests, 6 skipped; a real synthetic Bolt test
+  checked streamed reads, early exit, read-only enforcement and recovery. The
+  publication audit's focused tests passed; it is heuristic, not a full scan.
+- **Release:** the first v0.12 candidate commit passed CI. The user explicitly
+  chose an experimental beta without the sustained 2/4/8 GiB qualification;
+  memory, transport and recovery limitations remain documented.
+- **History:** Allan requested a history rewrite to remove old private identity
+  and client references. A verified private backup of all refs and uncommitted
+  work is in `/private/tmp/brainwire-history-backup-20261030`. Historical
+  tags and release assets need an agreed preservation plan before remote refs
+  change; published image provenance must not be silently misrepresented.
+- **Next:** complete and independently audit the isolated history rewrite,
+  resolve historic releases, re-run CI for the exact sanitized commit, then
+  update main and publish the new beta tag. Keep the repository private until
+  history and external references have been reviewed.
+
 ## 2026-10-30: experimental v0.12 release preparation
 
 - **Decision:** Allan explicitly chose to publish the experimental beta without

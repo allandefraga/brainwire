@@ -141,9 +141,8 @@ docker run -d --name brainwire-local -p 127.0.0.1:7687:7687 -v brainwire-local-d
 
 The named volume keeps the graph when the container stops. For shared or real
 data, follow the [protected container guide](protected-containers.md).
-This bootstrap was smoke-tested with a locally built v0.10.0-beta.1
-candidate and synthetic data. Validate the exact image and environment you use;
-this is not a production or recovery qualification.
+Validate this bootstrap with the exact image and environment you use. A demo
+startup alone does not qualify production operation or recovery.
 
 ## Use your own ontology and a single container
 

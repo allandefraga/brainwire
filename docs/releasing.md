@@ -43,7 +43,7 @@ tag:
 ```sh
 python3 scripts/release.py --apply --prerelease beta
 git show --stat --oneline HEAD
-git show v0.7.0-beta.1 --no-patch
+git describe --tags --exact-match HEAD
 ```
 
 `--apply` requires a clean `main` checkout, updates the workspace version,
@@ -51,6 +51,23 @@ lockfile, both Kubernetes release overlays and marked documentation references,
 runs the release checks, then creates a local commit and tag. It does not push
 or publish. The helper refuses to move
 or reuse an existing tag; publish fixes as a new version.
+
+## Check before making a repository public
+
+After staging the intended files and resolving other changes, run the local
+publication audit with domains or terms appropriate to your own organization:
+
+```sh
+python3 scripts/audit_publication.py --forbid-email-domain example.org
+```
+
+The audit reports categories and counts without printing matched secrets. It
+checks selected credential formats in the Git index and configured author and
+committer emails reachable from HEAD. It does **not** scan historical file
+contents, commit messages, other branches, tags or ignored files, and a pass
+cannot prove there are no leaks. `INCOMPLETE` means the checked scope did not
+cover all intended files; review the output and resolve those gaps first.
+Review repository history and visibility separately before publishing.
 
 ## Publish a reviewed release
 
@@ -81,8 +98,8 @@ publishing source once; each validated push to `main` then deploys the site.
 Build and run the local quickstart without publishing to a registry:
 
 ```sh
-docker build -t brainwire:v0.7.0-beta.1 .
-BRAINWIRE_IMAGE=brainwire:v0.7.0-beta.1 docker compose -p brainwire-demo \
+docker build -t brainwire:local .
+BRAINWIRE_IMAGE=brainwire:local docker compose -p brainwire-demo \
   -f deploy/compose.demo.yaml up --wait --wait-timeout 900
 ```
 
