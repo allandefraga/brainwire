@@ -52,6 +52,9 @@ Allan's current language.
   parser missed jemalloc's actual log prefix. Fixed and reviewed the parser;
   eight tests and its self-check passed, followed by six passing reruns. This
   harness fix and the report were made after the immutable release tag.
+- **Social preview:** added a compact social card under 1 MB and linked it from
+  the README. GitHub only shares a repository preview publicly after the repo
+  itself is public; the repository remains private.
 - **Next:** verify the tag workflow, release metadata and both published image
   digests; keep the release experimental. Qualify real workloads, sustained
   memory, TLS, distributed recovery and host-specific secrets separately.

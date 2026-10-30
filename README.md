@@ -26,7 +26,7 @@
 
 <p align="center">
   <img src="assets/brainwire-hero-v2.png" alt="Brainwire concept artwork: green graph nodes connected across a dark canvas" width="900">
-  <br><sub>Concept artwork · the terminal UI is described below.</sub>
+  <br><sub>Concept artwork · the terminal UI is described below · <a href="assets/brainwire-social-preview-v1.jpg">Social card</a></sub>
 </p>
 
 People own projects. Documents explain decisions. Tickets depend on releases.
