@@ -31,8 +31,12 @@ Allan's current language.
 
 ## 2026-10-30: v0.13 Docker and memory diagnostics
 
-- **Done:** tagged and pushed `v0.13.0-beta.1` at `88fc954`; the tag's
-  GitHub release workflow is in progress. Main CI passed for the same source.
+- **Release:** `v0.13.0-beta.1` at `88fc954` was published as an
+  experimental prerelease. GitHub verified native amd64 and arm64 images,
+  including credential setup and retained-volume restart, then published the
+  manifest. The release receipt matches both tested architecture digests and
+  the source. Manifest: `sha256:a49cf2b6dcb26edae3af8d6d58597c3053196964c8b39623e62c02da85af30d4`.
+  The private repository and image require authorized access.
 - **Checks:** built the Linux arm64 image locally, confirmed unprivileged
   `auth init`, and tested the actual demo Compose startup/write/restart path.
   Protected Compose acceptance passed with synthetic secrets, 1,000 indexed
@@ -55,9 +59,12 @@ Allan's current language.
 - **Social preview:** added a compact social card under 1 MB and linked it from
   the README. GitHub only shares a repository preview publicly after the repo
   itself is public; the repository remains private.
-- **Next:** verify the tag workflow, release metadata and both published image
-  digests; keep the release experimental. Qualify real workloads, sustained
-  memory, TLS, distributed recovery and host-specific secrets separately.
+- **Python:** installing the package from a clean tagged checkout into a new
+  virtual environment succeeded; the installed package passed the documented
+  node/edge upsert, Cypher and streaming examples against a temporary container.
+- **Next:** keep the release experimental. Qualify real workloads, sustained
+  memory, TLS, distributed recovery and host-specific secrets separately. The
+  private archive stays private; public publication needs a separate review.
 
 ## 2026-10-30: v0.13 beta candidate — ingress and onboarding
 
