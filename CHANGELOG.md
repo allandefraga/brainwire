@@ -1,0 +1,88 @@
+# Changelog
+
+## 0.12.0-beta.1 — candidate
+
+Experimental beta for controlled trials. Publication and image availability must
+be confirmed by the release workflow; this file alone does not announce a
+published release. Review the [qualification report](PRODUCTION-v0.12.md) before
+using this version with real data.
+
+### Added
+
+- Cooperative process-memory admission through `memory.limit` and
+  `BRAINWIRE_MEMORY_LIMIT`, with sampled RSS, memory-pressure logging and
+  allocator purge requests. The default threshold is derived from detected
+  capacity. This is an admission guard, not a hard process RSS ceiling. See
+  [memory defaults](docs/memory-defaults.md) and the
+  [process-memory design](docs/design/process-memory-ceiling.md).
+- Experimental standalone write-outcome receipts on new dedicated volumes with
+  `server.request_ledger = true`. Authenticated explicit transactions can supply
+  a request ID, and a fresh autocommit `CALL db.requestStatus($seed)` can inspect
+  its outcome. Graph mutations and the receipt share one synchronous storage
+  batch. See [standalone request outcomes](docs/standalone-requests.md).
+- Python `GraphClient.request_status(seed)` for that experimental endpoint and
+  exported `BrainwireError`, `MemoryPressureError` and
+  `CommitOutcomeUnknownError` exceptions. The helper preserves the original
+  driver exception as its cause and does not retry these failures automatically.
+- Reproducible synthetic diagnostics for allocator behavior, external cgroup
+  pressure and sustained container load. Prepared diagnostics are not completed
+  qualification results.
+
+### Changed
+
+- Eligible scalar reads and large parallel label scans stream bounded result
+  pages over Bolt. RUN can return fields before its first page; an execution
+  error may therefore arrive during PULL after RUN succeeds. Other entity plans
+  can retain all row handles before property materialization. See
+  [result streaming](docs/design/bolt-result-streaming.md).
+- Bolt `PULL -1` writes pages incrementally, retaining each page's memory credit
+  until it is sent or discarded. Finite `DISCARD n` consumes the requested
+  number of rows; full discard cancels a lazy tail. Partial consumption keeps
+  the transaction open.
+- Memory refusals use `Neo.TransientError.General.MemoryPressure` with a terminal
+  machine-readable hint describing the reason, requested/available bytes and
+  rollback. This replaces the older memory-limit, query-pool and ingress-pool
+  error codes. Failed COMMIT distinguishes rollback from
+  `Neo.ClientError.Transaction.CommitOutcomeUnknown`. See the
+  [memory and commit error contract](docs/design/memory-error-contract.md).
+- **Python error compatibility:** the two recognized server codes now become
+  `BrainwireError` subclasses of `RuntimeError`, rather than escaping from the
+  helper as the original Neo4j exception type. Applications catching only
+  `Neo4jError` must update those handlers. Other driver exceptions keep their
+  original types. Parsed memory fields remain unset when the server hint is
+  missing or malformed. See [Python errors](docs/python-client.md).
+- Linux cgroup admission discounts recoverable inactive file cache when
+  estimating the working set, avoiding refusal caused solely by that cache.
+
+### Fixed and verified locally
+
+- Result-page reservations survive queueing, autocommit and response ownership;
+  releasing the final response releases its memory credit.
+- Request-status queries account for all decoded parameters and retain their
+  response reservation through delivery.
+- Regression tests cover finite/full discard, ACL and snapshot behavior,
+  bounded LIMIT reads, memory refusal, rollback, RESET and synthetic restart
+  recovery. Native RSS tests use isolated subprocesses to avoid interference
+  from allocations in concurrent tests.
+
+### Limits and upgrade notes
+
+- Process admission is sampled and cooperative. Native allocations, compaction,
+  socket buffers and other processes can still exceed the estimated headroom.
+  Sustained 2/4/8 GiB qualification, the large initial-load scenario and the
+  reported short-load peak-RSS regression remain open in the qualification
+  report. No performance improvement or OOM guarantee is claimed here.
+- Streaming is partial. Blocking ORDER BY, DISTINCT and aggregation retain
+  intermediate state and refuse oversized work; they do not spill to disk.
+  A PULL already executing cannot be preempted by a later request on the same
+  Bolt connection, and some planning/scans delay the initial fields.
+- The standalone request ledger is disabled by default. It cannot be enabled
+  for an existing ordinary graph, and its format requires the opt-in to reopen.
+  Checkpoint/backup/restore, fork lineage and old-binary downgrade remain
+  unqualified or refused for this experimental format. Use a new dedicated
+  volume. An absent receipt is not proof of rollback or permission to retry.
+- Existing Cypher compatibility, transport and distributed-operation limits
+  continue to apply. See [current limits](README.md#current-limits).
+- The release workflow prepares and checks amd64 and arm64 images. Availability
+  and per-platform digests must be verified after a successful workflow; they
+  are not implied by these notes.

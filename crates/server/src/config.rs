@@ -40,6 +40,8 @@ pub struct ServerSection {
     pub auth_file: Option<PathBuf>,
     /// Root for online `CALL db.checkpoint(name)`; unset disables it.
     pub checkpoint_dir: Option<PathBuf>,
+    /// Experimental standalone request ledger; new graphs only, authenticated.
+    pub request_ledger: bool,
 }
 
 impl Default for ServerSection {
@@ -56,6 +58,7 @@ impl Default for ServerSection {
             shutdown_grace_ms: 8_000,
             auth_file: None,
             checkpoint_dir: None,
+            request_ledger: false,
         }
     }
 }
@@ -69,6 +72,8 @@ pub struct MemorySection {
     pub query: ByteSize,
     /// Shared Bolt assembled-input and decoded-storage admission, separate from query memory.
     pub ingress: ByteSize,
+    /// Process RSS ceiling (docs/design/process-memory-ceiling.md); 0 disables it.
+    pub limit: ByteSize,
 }
 
 impl Default for MemorySection {
@@ -78,6 +83,7 @@ impl Default for MemorySection {
             memtables: ByteSize(1 << 30),
             query: ByteSize(2 << 30),
             ingress: ByteSize(256 << 20),
+            limit: ByteSize(0),
         }
     }
 }
@@ -118,7 +124,7 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 14] = [
+pub(crate) const KEYS: [&str; 16] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -129,10 +135,12 @@ pub(crate) const KEYS: [&str; 14] = [
     "server.shutdown_grace_ms",
     "server.auth_file",
     "server.checkpoint_dir",
+    "server.request_ledger",
     "memory.cache",
     "memory.memtables",
     "memory.query",
     "memory.ingress",
+    "memory.limit",
 ];
 
 /// The minimum block cache: below this, RocksDB has no room left for the
@@ -186,6 +194,8 @@ struct FileServerSection {
     auth_file: Option<PathBuf>,
     #[serde(default)]
     checkpoint_dir: Option<PathBuf>,
+    #[serde(default)]
+    request_ledger: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -199,6 +209,8 @@ struct FileMemorySection {
     query: Option<ByteSize>,
     #[serde(default)]
     ingress: Option<ByteSize>,
+    #[serde(default)]
+    limit: Option<ByteSize>,
 }
 
 /// Looks for `brainwire.toml` in `cwd`, for the implicit lookup `load` itself
@@ -228,11 +240,13 @@ fn load_with_limit(
         config.memory.memtables = ByteSize(limit.bytes / 16);
         config.memory.query = ByteSize(limit.bytes / 8);
         config.memory.ingress = ByteSize((limit.bytes / 8).min(512 << 20));
+        config.memory.limit = ByteSize(limit.bytes / 10 * 9);
         for key in [
             "memory.cache",
             "memory.memtables",
             "memory.query",
             "memory.ingress",
+            "memory.limit",
         ] {
             sources.insert(
                 key,
@@ -314,6 +328,10 @@ fn apply_file(
         config.server.checkpoint_dir = Some(nonblank_path("server.checkpoint_dir", path_value)?);
         sources.insert("server.checkpoint_dir", Source::File(path.to_path_buf()));
     }
+    if let Some(value) = file.server.request_ledger {
+        config.server.request_ledger = value;
+        sources.insert("server.request_ledger", Source::File(path.to_path_buf()));
+    }
     if let Some(v) = file.memory.cache {
         config.memory.cache = v;
         sources.insert("memory.cache", Source::File(path.to_path_buf()));
@@ -329,6 +347,10 @@ fn apply_file(
     if let Some(v) = file.memory.ingress {
         config.memory.ingress = v;
         sources.insert("memory.ingress", Source::File(path.to_path_buf()));
+    }
+    if let Some(v) = file.memory.limit {
+        config.memory.limit = v;
+        sources.insert("memory.limit", Source::File(path.to_path_buf()));
     }
 
     Ok(())
@@ -415,6 +437,15 @@ fn apply_env(
         sources.insert("server.checkpoint_dir", Source::Env(var));
     }
 
+    let var = env_var_name("server.request_ledger");
+    if let Some(value) = env.get(&var) {
+        config.server.request_ledger = value.parse().map_err(|_| ConfigError::BadValue {
+            key: "server.request_ledger".into(),
+            message: "must be true or false".into(),
+        })?;
+        sources.insert("server.request_ledger", Source::Env(var));
+    }
+
     let var = env_var_name("memory.cache");
     if let Some(v) = env.get(&var) {
         config.memory.cache = parse_byte_size(v, "memory.cache")?;
@@ -437,6 +468,12 @@ fn apply_env(
     if let Some(v) = env.get(&var) {
         config.memory.ingress = parse_byte_size(v, "memory.ingress")?;
         sources.insert("memory.ingress", Source::Env(var));
+    }
+
+    let var = env_var_name("memory.limit");
+    if let Some(v) = env.get(&var) {
+        config.memory.limit = parse_byte_size(v, "memory.limit")?;
+        sources.insert("memory.limit", Source::Env(var));
     }
 
     Ok(())
@@ -472,6 +509,11 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if config.server.request_ledger
+        && (config.server.auth_file.is_none() || config.server.checkpoint_dir.is_some())
+    {
+        return Err(ConfigError::Invalid("experimental server.request_ledger requires authentication and disables online checkpoints; use a new, dedicated data directory".into()));
+    }
     if config.memory.ingress.0 == 0 || usize::try_from(config.memory.ingress.0).is_err() {
         return Err(ConfigError::Invalid(
             "memory.ingress must be positive and fit platform address size".into(),
@@ -576,6 +618,10 @@ pub fn default_file() -> String {
          # outside data_dir. Omit to disable online checkpoints.\n\
          # checkpoint_dir = \"/backups\"\n\
          \n\
+         # Experimental request outcome ledger: new stores only, authentication required.\n\
+         # Checkpoints, restore/fork and automatic replay are not qualified.\n\
+         # request_ledger = false\n\
+         \n\
          [memory]\n\
          # Leave these unset for detected host/container defaults. Commented values are legacy examples, not detected defaults.\n\
          # RocksDB block cache. The memtables below are charged inside it.\n\
@@ -585,7 +631,9 @@ pub fn default_file() -> String {
          # Shared server query reservation pool and per-RUN guard (not process RSS).\n\
          # query = \"{query}\"\n\
          # Shared Bolt assembled input and decoded storage (not process RSS).\n\
-         # ingress = \"{ingress}\"\n",
+         # ingress = \"{ingress}\"\n\
+         # Process RSS ceiling: reservations are refused near it; 0 disables. Default 90% of detected memory.\n\
+         # limit = \"{limit}\"\n",
         listen = d.server.listen,
         data_dir = d.server.data_dir.display(),
         default_database = d.server.default_database,
@@ -598,6 +646,7 @@ pub fn default_file() -> String {
         memtables = d.memory.memtables,
         query = d.memory.query,
         ingress = d.memory.ingress,
+        limit = d.memory.limit,
     )
 }
 
@@ -722,6 +771,7 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.io_timeout_ms" => config.server.io_timeout_ms.to_string(),
         "server.query_timeout_ms" => config.server.query_timeout_ms.to_string(),
         "server.shutdown_grace_ms" => config.server.shutdown_grace_ms.to_string(),
+        "server.request_ledger" => config.server.request_ledger.to_string(),
         "server.auth_file" => config
             .server
             .auth_file
@@ -738,6 +788,7 @@ fn value_text(config: &Config, key: &str) -> String {
         "memory.memtables" => config.memory.memtables.to_string(),
         "memory.query" => config.memory.query.to_string(),
         "memory.ingress" => config.memory.ingress.to_string(),
+        "memory.limit" => config.memory.limit.to_string(),
         _ => String::new(),
     }
 }
@@ -971,7 +1022,14 @@ mod tests {
         )
         .unwrap();
         let loaded = load_with_limit(Some(&path), &env(&[]), limit(2 << 30)).unwrap();
-        assert_eq!(loaded.config.memory, MemorySection::default());
+        // The process ceiling is not a legacy field: it follows the detected limit.
+        assert_eq!(
+            loaded.config.memory,
+            MemorySection {
+                limit: ByteSize((2 << 30) / 10 * 9),
+                ..MemorySection::default()
+            }
+        );
         for key in ["memory.cache", "memory.memtables", "memory.query"] {
             assert_eq!(loaded.sources[key], Source::File(path.clone()));
         }
@@ -1378,6 +1436,59 @@ mod tests {
     }
 
     #[test]
+    fn request_ledger_is_explicit_authenticated_and_disables_checkpoints() {
+        assert!(!load(None, &env(&[])).unwrap().config.server.request_ledger);
+        assert!(load(None, &env(&[("BRAINWIRE_SERVER_REQUEST_LEDGER", "true")])).is_err());
+        let loaded = load(
+            None,
+            &env(&[
+                ("BRAINWIRE_SERVER_REQUEST_LEDGER", "true"),
+                ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
+            ]),
+        )
+        .unwrap();
+        assert!(loaded.config.server.request_ledger);
+        assert!(matches!(
+            &loaded.sources["server.request_ledger"],
+            Source::Env(_)
+        ));
+        assert!(load(None, &env(&[("BRAINWIRE_SERVER_REQUEST_LEDGER", "yes")])).is_err());
+        assert!(load(
+            None,
+            &env(&[
+                ("BRAINWIRE_SERVER_REQUEST_LEDGER", "true"),
+                ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
+                ("BRAINWIRE_SERVER_CHECKPOINT_DIR", "/backup")
+            ])
+        )
+        .is_err());
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("config.toml");
+        std::fs::write(
+            &file,
+            "[server]\nrequest_ledger = true\nauth_file = '/run/secrets/policy.json'\n",
+        )
+        .unwrap();
+        assert!(
+            load(Some(&file), &env(&[]))
+                .unwrap()
+                .config
+                .server
+                .request_ledger
+        );
+        assert!(
+            !load(
+                Some(&file),
+                &env(&[("BRAINWIRE_SERVER_REQUEST_LEDGER", "false")])
+            )
+            .unwrap()
+            .config
+            .server
+            .request_ledger
+        );
+    }
+
+    #[test]
     fn env_overrides_every_key() {
         let loaded = load(
             None,
@@ -1392,10 +1503,12 @@ mod tests {
                 ("BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS", "20000"),
                 ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
                 ("BRAINWIRE_SERVER_CHECKPOINT_DIR", "/backups"),
+                ("BRAINWIRE_SERVER_REQUEST_LEDGER", "false"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
                 ("BRAINWIRE_MEMORY_QUERY", "128MiB"),
                 ("BRAINWIRE_MEMORY_INGRESS", "16MiB"),
+                ("BRAINWIRE_MEMORY_LIMIT", "3GiB"),
             ]),
         )
         .unwrap();
@@ -1422,6 +1535,7 @@ mod tests {
         assert_eq!(loaded.config.memory.memtables.0, 64 << 20);
         assert_eq!(loaded.config.memory.query.0, 128 << 20);
         assert_eq!(loaded.config.memory.ingress.0, 16 << 20);
+        assert_eq!(loaded.config.memory.limit.0, 3 << 30);
         for key in KEYS {
             assert!(
                 matches!(&loaded.sources[key], Source::Env(_)),

@@ -177,7 +177,7 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
         Expr::CountStar => {
             return Err(ExecError::Unsupported(
                 "aggregates are only supported in WITH and RETURN items".into(),
-            ))
+            ));
         }
         Expr::List(items) => Val::List(
             items
@@ -401,7 +401,7 @@ pub(super) fn property(base: Val, name: &str, ctx: &Context<'_, '_>) -> Result<V
             return Err(semantic(format!(
                 "property access needs a node, relationship or map, found {}",
                 other.type_name()
-            )))
+            )));
         }
     })
 }
@@ -587,7 +587,7 @@ fn index_value(base: Val, index: Val, ctx: &Context<'_, '_>) -> Result<Val, Exec
                 "cannot index {} with {}",
                 base.type_name(),
                 index.type_name()
-            )))
+            )));
         }
     })
 }

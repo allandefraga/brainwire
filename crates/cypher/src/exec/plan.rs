@@ -824,7 +824,7 @@ impl Planner<'_, '_, '_> {
                 _ => {
                     return Err(semantic(format!(
                         "{var} is not a bound node or relationship"
-                    )))
+                    )));
                 }
             }
             let slot = self.vars.slot(var).expect("scoped variable has a slot");
@@ -1135,7 +1135,7 @@ impl Planner<'_, '_, '_> {
             Expr::Var(name) => {
                 return Err(semantic(format!(
                     "{name} must be a grouping key to be used next to an aggregate"
-                )))
+                )));
             }
             Expr::Prop(base, key) if !base.has_aggregate() => {
                 return Err(semantic(format!(
@@ -1144,7 +1144,7 @@ impl Planner<'_, '_, '_> {
                         Expr::Var(name) => name,
                         _ => "expression".into(),
                     }
-                )))
+                )));
             }
             other => map_children(other, &mut |child| {
                 self.extract_aggregates(child, aggs, scope)
@@ -1178,7 +1178,7 @@ impl Planner<'_, '_, '_> {
                             Some(existing) if *existing != kind && *existing != Kind::Any => {
                                 return Err(semantic(format!(
                                     "{name} is already bound as a different kind"
-                                )))
+                                )));
                             }
                             Some(_) => {}
                             None => {

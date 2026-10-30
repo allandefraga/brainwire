@@ -78,6 +78,52 @@ request seed before sending and use `write_transaction(..., request_id=...)`
 plus the request lookup contract below. Ordinary convenience calls do not add
 a retained request identity or durable source cursor automatically.
 
+## Typed server failures and standalone status
+
+The helper translates two exact server codes into `MemoryPressureError` and
+`CommitOutcomeUnknownError`, both subclasses of `BrainwireError`/`RuntimeError`.
+The original driver error remains in `original_error` and `__cause__`; `code`
+and `message` retain the server values. Other driver and callback exceptions
+are propagated unchanged. Transport disconnects do not become a typed server
+failure merely because they happen near COMMIT.
+
+`MemoryPressureError` exposes `reason`, `requested_bytes`, `available_bytes`
+and `rolled_back`. These fields are populated only when the terminal server
+hint has a recognized reason, unsigned 64-bit sizes and `rolled_back=true`.
+A missing or malformed hint leaves them `None`, so it does not authorize a
+retry. `CommitOutcomeUnknownError.rolled_back` is always `None`. The helper
+never retries either exception automatically.
+
+```python
+from brainwire import MemoryPressureError, CommitOutcomeUnknownError
+
+try:
+    graph.write_transaction(apply_ticket, request_id=seed)
+except MemoryPressureError as error:
+    # Only a verified rollback hint can inform an application retry decision.
+    print(error.reason, error.requested_bytes, error.available_bytes,
+          error.rolled_back)
+    raise
+except CommitOutcomeUnknownError:
+    # Reconcile the retained request and source state before deciding what to do.
+    raise
+```
+
+On an authenticated standalone server with the experimental ledger enabled:
+
+```python
+outcome = graph.request_status(seed)
+# Fields: status, requestId, incarnation, sequence.
+```
+
+`request_status` opens a fresh session and sends an isolated parameterized
+`CALL db.requestStatus($seed)` in autocommit mode. It validates one response row;
+it does not open an explicit or managed transaction, replay an operation or
+turn `not_recorded` into permission to retry. Compare the stored incarnation
+with the application's expected graph identity and follow the
+[standalone outcome contract](standalone-requests.md), including restore and
+fork limitations. This helper is separate from quorum `request_key` lookup.
+
 ## Property meanings
 
 | Input | Effect |
@@ -283,12 +329,13 @@ It does not infer permissions from ordinary properties or make an untrusted call
 an administrator. The [DuckLake sync](parallel-ingestion.md) stamps ACLs from
 mapped `acl_*` columns; the older snapshot/diff importer does not stamp ACLs. See [node ACL](node-acl.md).
 
-## Explicit quorum transaction identity
+## Explicit transaction identity
 
-For a replicated server, `write_transaction` sends one explicit transaction with
-an application-retained request seed. This API does not use managed retries,
-discover a leader or swallow uncertain outcomes. Connect to the current leader;
-standalone servers reject the identity metadata. Existing `load_nodes`/CRUD helpers
+`write_transaction` sends an explicit transaction with an application-retained
+request seed. It works with a quorum leader or an authenticated standalone server
+with the [experimental request ledger](standalone-requests.md) enabled. The helper
+does not retry, discover a leader or swallow uncertain outcomes. Existing
+`load_nodes`/CRUD helpers
 also make only one explicit attempt, but do not gain a durable source cursor or
 retained request identity automatically.
 

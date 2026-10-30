@@ -50,7 +50,7 @@ fn weights(options: &BTreeMap<String, Value>) -> Result<[f64; 5], ExecError> {
             _ => {
                 return Err(semantic(format!(
                     "weight {name} must be a finite non-negative number"
-                )))
+                )));
             }
         };
     }
@@ -151,7 +151,7 @@ fn contributions(
                     } else {
                         "a finite number between 0 and 1"
                     }
-                )))
+                )));
             }
         };
         parts[i] = signal * weights[i];

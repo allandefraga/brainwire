@@ -29,6 +29,125 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-30: experimental v0.12 release preparation
+
+- **Decision:** Allan explicitly chose to publish the experimental beta without
+  waiting for sustained 2/4/8 GiB qualification. Production readiness, a hard
+  RSS ceiling and the original load targets remain open and are documented.
+- **Done:** reproduced and fixed an authenticated Bolt ingress-decode refusal
+  that could prevent RESET under shared-pool contention; the regression failed
+  before the fix and passed afterward. All 135 Bolt library tests passed. Added
+  v0.12 release notes and prepared versioned manifests and deployment templates.
+- **Verification:** the earlier candidate passed 936 workspace tests (three
+  ignored), Clippy and formatting; Python client, release-script and soak
+  harness unit tests passed. Documentation and local-link checks passed.
+  The exact versioned release commit still requires CI before a tag.
+- **Next step:** push the release branch, verify CI for its exact commit, then
+  fast-forward main, tag and verify the release workflow and image manifest.
+  Linux memory soak, power loss, downgrade and production qualification remain
+  open; do not claim they passed. Local disk space limits rebuilding all Rust
+  targets safely without affecting other workloads.
+
+## 2026-10-30: Docker memory-pressure smoke on earlier image
+
+- **Done:** ran the owned synthetic `cgroup_pressure_smoke.py` test with a
+  512 MiB cgroup limit against existing image
+  `sha256:3bd48e84a47a23f7f25e1596e94c3e9ba3d1ebe5bfe6cfa3086e8a21741da9e8`.
+  The server refused work under pressure, rolled back pending writes, preserved
+  an acknowledged node, recovered after relief and passed the offline check.
+  Cgroup OOM counters remained zero and the test removed its own resources.
+- **Receipt:** `/private/tmp/bw-container-smoke-20261030.json`. This earlier
+  image predates the current candidate; the diagnostic does not qualify v0.12,
+  a hard RSS ceiling or sustained 2/4/8 GiB behavior. Kernel logs were not
+  independently verified.
+- **Blockers / next:** only 9.4 GiB disk space was available before this run;
+  do not risk a full Rust/RocksDB image build or delete other workloads' data.
+  Free enough disk, build and identify the exact candidate image, then run
+  the required isolated loads and ingress RESET regression before release.
+
+## 2026-10-30: lightweight memory diagnostic
+
+- **Done:** ran `query_memory.py` with the candidate native debug binary and a
+  temporary synthetic graph. With a 256 KiB shared query budget and 16
+  connections, 14 requests were rejected; reserved bytes fell from 162,703
+  during the test to 177 afterward. Disconnect recovery, deadline rollback,
+  index checks and offline audits passed.
+- **Limit:** this exercises query reservations, not process RSS or an 8 GiB
+  Docker cgroup. The Docker VM had 33 running containers, so no sustained
+  multi-GiB load was added to their host. The v0.12 release gates remain open.
+- **Next step:** run the existing container qualification on a dedicated or
+  otherwise isolated Docker host and investigate the ingress RESET finding.
+
+## 2026-10-30: v0.12 streaming and qualification (in progress)
+
+- **Done:** fixed finite Bolt DISCARD accounting and preserved unlimited cancellation;
+  return RUN fields before the first page for eligible parallel scans; account
+  request-status parameters and retain its output reservation until delivery.
+  Added typed Python errors and a request-status helper without automatic retry.
+- **Verification:** the integrated workspace suite passed 936 tests with 3 ignored;
+  Python examples ran 98 tests with 6 skipped; 74 script tests passed, and
+  local docs and site checks passed. The LIMIT regression covers
+  early termination, ACL and snapshot behavior. RSS tests now run in isolated
+  subprocesses; 30 repeated module runs and 156 server unit tests passed.
+  Review confirmed remaining partial-streaming and cancellation limitations.
+- **Local acceptance:** rebuilt the candidate binary; a synthetic Python/Bolt
+  ingestion, rollback, index and SIGKILL/reopen check passed. A separate
+  unacknowledged-COMMIT SIGKILL exercise passed with both committed and
+  not-committed outcomes. Neither exercise simulates power loss. Updated the
+  ingestion test to force a blocking operator instead of discarding a lazy
+  result before the intended memory-pressure test.
+- **Qualification tooling:** a Linux-only synthetic soak harness prepares 2/4/8
+  GiB, eight-writer/four-reader runs, optional 4M initial rows, kernel/cgroup
+  OOM evidence, checks and scoped cleanup. Its unit tests pass; no soak was run.
+  Power, isolation and kernel evidence are fail-closed and sampled, not continuous.
+- **Blockers:** no sustained qualifying runs, independently verified peak/idle
+  RSS fix, mixed-workload performance, real old-image downgrade or multi-arch CI
+  release. The local host has other running containers and lacks safe isolation;
+  the private repo standard runner lacks headroom for the 8 GiB test. The GHCR
+  credential currently lacks read:packages. Do not claim a hard RSS ceiling.
+- **Review follow-up:** a possible Bolt recovery gap was identified when
+  decoding exceeds the ingress pool: unlike chunk-assembly refusal, the decode
+  path may not enable the recovery-message allowance. This is a code-reading
+  finding, not a reproduced failure; add a deterministic concurrent-pool RESET
+  test and fix if confirmed before release. No runtime change was made for it.
+- **Next step:** review the complete working diff, obtain an isolated Linux host
+  with sufficient memory and verifiable conditions, run the qualifying workloads
+  and mixed-performance/downgrade checks, fix any failures, repeat gates, then
+  publish the requested release only when its stated acceptance criteria pass.
+  No v0.12 push, tag or release has been made.
+
+## 2026-10-29: v0.12 release review (in progress)
+
+- **Done:** preserved the incoming complete patch in `/tmp/bw-pre-v012.patch` and
+  created local branch `release/v0.12`. Reviewed the memory, Bolt and release
+  changes. The multi-architecture workflow and release-gate documentation have
+  separate local commits; they have not been pushed.
+- **Corrections:** avoid retaining the databases forever in the memory sampler;
+  invoke jemalloc's void purge correctly and check its result; obtain native RSS
+  on macOS; prevent the same sampled headroom being spent repeatedly; page Bolt
+  PULL responses on the socket. Admission remains conservative, not a hard RSS
+  ceiling. Lazy output leases now follow pages through the response batch; further concurrent socket and Linux qualification is required.
+- **Verification:** the final workspace suite, Clippy, format, site/link checks,
+  90 Python tests (six skipped), 73 script tests and multi-architecture workflow
+  tests passed. The
+  purge and macOS RSS regressions failed before their fixes and passed after.
+  A synthetic standalone crash/recovery exercise passed. Later changes require
+  another full integrated run.
+- **Experimental integration:** authenticated opt-in standalone writes and
+  scoped status use the atomic receipt. Synthetic Bolt tests cover unknown
+  outcome, quarantine, reconnect and reopen. Restore/fork, downgrade, power
+  loss and real application use remain unqualified.
+- **Open gates:** real process-wide memory qualification including external
+  cgroup pressure, repeat peak/idle RSS
+  measurements, fully lazy parallel entity results and spill/error qualification.
+  The externally supplied measurements were not independently reproduced. The
+  4 GiB pressure run is deferred because other Docker workloads are active and
+  host memory headroom is insufficient for safe, isolated measurement.
+  See `PRODUCTION-v0.12.md`.
+- **Release:** no v0.12 tag, push or image until all mandatory gates pass;
+  then run CI against the release branch before merging/tagging and verify the
+  multi-architecture manifest and per-platform digests.
+
 ## 2026-10-29: memory admission, documentation and logo
 
 - **Done:** add cooperative Linux cgroup pressure admission before RUN, with a
@@ -182,6 +301,24 @@ Allan's current language.
 No line of code before the end of phase 2.
 
 ## Entries
+
+### 2026-10-29 — memory ceiling, one memory refusal, lazy scalar results (uncommitted)
+
+- **Done (working tree only, on top of the uncommitted iterations 1-2):** jemalloc
+  as process allocator with background decay; `memory.limit` sampled admission threshold
+  (default 90% of detected memory; not a hard RSS ceiling) checked by every query-pool reservation and at
+  RUN admission (`docs/design/process-memory-ceiling.md`); one memory refusal code
+  `MemoryPressure` with a `reason`/size hint, sessions that survive an input
+  refusal, COMMIT errors that say rolled back vs unknown
+  (`docs/design/memory-error-contract.md`); lazy production of scalar read
+  results on a producer thread (`docs/design/lazy-executor.md`).
+- **Externally reported, not independently verified:** 30-min workload (8 writers + 4 readers, 2M nodes) at 2/4/8 GiB
+  and a 4M-node run at 8 GiB: no kernel kill, `db check` ok. The previous tree at
+  2 GiB held 1.96 GiB RSS and refused 5,641 RUNs in 10 min; this one peaked at
+  1.18 GiB with no refusal. The external report is not bundled and this run was not reproduced here.
+- **Open:** standalone outcome lookup by request id, spilling, label counters,
+  the P1 Cypher list, P2 operations. Not a production release.
+- **Next step:** review the diff, commit in coherent parts, release a beta.
 
 ### 2026-10-27 — v0.7.0-beta.1 local candidate
 

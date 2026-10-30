@@ -10,11 +10,15 @@ use brainwire_bolt::packstream::PackValue;
 use brainwire_bolt::session::{EngineError, OutputMemory, QueryEngine, QueryResult};
 use brainwire_core::acl::ReadVisibility;
 use brainwire_core::value::Value;
-use brainwire_cypher::{ExecError, Out, QueryAccess, QueryOutput, QueryTransaction};
+use brainwire_cypher::{
+    ExecError, LazyRun, Out, QueryAccess, QueryOutput, QueryStream, QueryTransaction, RunOutput,
+};
 
 use crate::cluster::Replica;
 use crate::databases::Databases;
 use crate::memory_pressure::PressureGuard;
+#[path = "standalone_requests.rs"]
+mod standalone_requests;
 
 enum Command {
     SetAccess(AccessContext, mpsc::Sender<Result<(), EngineError>>),
@@ -24,24 +28,35 @@ enum Command {
         Option<String>,
         Option<ReadVisibility>,
         Option<(Instant, Duration)>,
+        bool, // implicit autocommit RUN, distinct from an explicit BEGIN
         mpsc::Sender<Result<(), EngineError>>,
     ),
+    /// The result and how many of its rows the worker still holds (deferred).
     Run(
         Option<String>,
         String,
         PackValue,
-        mpsc::Sender<Result<QueryResult, EngineError>>,
+        mpsc::Sender<Result<(QueryResult, usize), EngineError>>,
     ),
+    /// Up to n deferred rows of the current result, or drop them unread, and how many
+    /// rows are left (`LAZY_OPEN` while a lazy result is still being produced).
+    Pull(usize, bool, mpsc::Sender<Result<PulledRows, EngineError>>),
     Check(mpsc::Sender<Result<(), EngineError>>),
     Commit(mpsc::Sender<Result<Option<String>, EngineError>>),
     Abort(mpsc::Sender<Result<(), EngineError>>),
 }
+
+/// Rows of one PULL and how many are left (`LAZY_OPEN` while a lazy result runs).
+type PulledRows = (Vec<Vec<PackValue>>, usize, Option<OutputMemory>, usize);
 
 /// One worker owns each connection's scoped storage transaction. The worker's
 /// local database handle outlives its transaction, without unsafe lifetimes.
 pub struct DbEngine {
     sender: mpsc::SyncSender<Command>,
     pressure: Arc<PressureGuard>,
+    deferred: usize,
+    pull_memory: Option<OutputMemory>,
+    last_pull_consumed: Option<usize>,
 }
 
 impl DbEngine {
@@ -116,7 +131,13 @@ impl DbEngine {
                 )
             })
             .map_err(|e| format!("cannot start query worker: {e}"))?;
-        Ok(Self { sender, pressure })
+        Ok(Self {
+            sender,
+            pressure,
+            deferred: 0,
+            pull_memory: None,
+            last_pull_consumed: None,
+        })
     }
 
     fn ask<T>(
@@ -137,11 +158,15 @@ impl QueryEngine for DbEngine {
     }
 
     fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), false, None, None, None, reply))
+        self.ask(|reply| {
+            Command::Begin(db.map(str::to_owned), false, None, None, None, false, reply)
+        })
     }
 
     fn begin_read_only(&mut self, db: Option<&str>) -> Result<(), EngineError> {
-        self.ask(|reply| Command::Begin(db.map(str::to_owned), true, None, None, None, reply))
+        self.ask(|reply| {
+            Command::Begin(db.map(str::to_owned), true, None, None, None, false, reply)
+        })
     }
 
     fn begin_delegated(
@@ -158,6 +183,7 @@ impl QueryEngine for DbEngine {
                 request_id.map(str::to_owned),
                 Some(visibility),
                 None,
+                false,
                 reply,
             )
         })
@@ -176,6 +202,7 @@ impl QueryEngine for DbEngine {
                 request_id.map(str::to_owned),
                 None,
                 None,
+                false,
                 reply,
             )
         })
@@ -199,6 +226,31 @@ impl QueryEngine for DbEngine {
                 request_id.map(str::to_owned),
                 visibility,
                 timeout,
+                false,
+                reply,
+            )
+        })
+    }
+
+    fn begin_autocommit_with_timeout(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+        visibility: Option<ReadVisibility>,
+        timeout: Option<Duration>,
+    ) -> Result<(), EngineError> {
+        let timeout = timeout
+            .filter(|timeout| !timeout.is_zero())
+            .map(|timeout| (Instant::now(), timeout));
+        self.ask(|reply| {
+            Command::Begin(
+                db.map(str::to_owned),
+                read_only,
+                request_id.map(str::to_owned),
+                visibility,
+                timeout,
+                true,
                 reply,
             )
         })
@@ -214,35 +266,65 @@ impl QueryEngine for DbEngine {
         query: &str,
         params: &PackValue,
     ) -> Result<QueryResult, EngineError> {
-        if self.pressure.is_pressured() {
+        self.deferred = 0;
+        self.last_pull_consumed = None;
+        if let Some(refusal) = self.pressure.refusal() {
             // Direct engine callers also must not commit writes from a failed RUN.
             self.ask(Command::Abort)?;
-            return Err(memory_pressure_error());
+            return Err(refusal);
         }
-        self.ask(|reply| {
+        let (result, deferred) = self.ask(|reply| {
             Command::Run(
                 db.map(str::to_owned),
                 query.to_owned(),
                 params.clone(),
                 reply,
             )
-        })
+        })?;
+        self.deferred = deferred;
+        Ok(result)
+    }
+
+    fn deferred_rows(&self) -> usize {
+        self.deferred
+    }
+
+    // Not gated by memory pressure: PULL finishes work already admitted, one page.
+    fn pull(&mut self, n: usize, discard: bool) -> Result<Vec<Vec<PackValue>>, EngineError> {
+        self.last_pull_consumed = None;
+        match self.ask(|reply| Command::Pull(n, discard, reply)) {
+            Ok((rows, remaining, memory, consumed)) => {
+                self.last_pull_consumed = Some(consumed);
+                self.deferred = remaining;
+                self.pull_memory = memory;
+                Ok(rows)
+            }
+            Err(error) => {
+                self.deferred = 0;
+                Err(error)
+            }
+        }
+    }
+
+    fn take_pull_memory(&mut self) -> Option<OutputMemory> {
+        self.pull_memory.take()
+    }
+
+    fn last_pull_consumed(&self) -> Option<usize> {
+        self.last_pull_consumed
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
+        self.deferred = 0;
+        self.last_pull_consumed = None;
         self.ask(Command::Commit)
     }
 
     fn abort(&mut self) -> Result<(), EngineError> {
+        self.deferred = 0;
+        self.last_pull_consumed = None;
         self.ask(Command::Abort)
     }
-}
-
-fn memory_pressure_error() -> EngineError {
-    error(
-        "Neo.TransientError.General.MemoryPressure",
-        "memory pressure admission rejected RUN before execution; reduce load and retry after reconciling transaction state",
-    )
 }
 
 fn forbidden() -> EngineError {
@@ -309,7 +391,7 @@ fn worker(
                 access = next;
                 let _ = reply.send(Ok(()));
             }
-            Command::Begin(name, read_only, request_id, delegated, timeout, reply) => {
+            Command::Begin(name, read_only, request_id, delegated, timeout, autocommit, reply) => {
                 let name = name.as_deref().unwrap_or(&default_database);
                 let visibility = match transaction_visibility(&access, delegated) {
                     Ok(visibility) => visibility,
@@ -328,13 +410,24 @@ fn worker(
                 if read_only {
                     query_access.write = false;
                 }
-                if request_id.is_some() && replica.is_none() {
-                    let _ = reply.send(Err(error(
-                        "Neo.ClientError.Request.Invalid",
-                        "explicit request IDs require replicated serving",
-                    )));
-                    continue;
-                }
+                let standalone_request = if let (Some(seed), None) = (&request_id, &replica) {
+                    match standalone_requests::identified_scope(
+                        &access,
+                        databases.request_ledger_enabled(),
+                        query_access.write,
+                        read_only,
+                        visibility.is_some(),
+                        autocommit,
+                    ) {
+                        Ok(scope) => Some((scope.to_owned(), seed.clone())),
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
                 let seed = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 let caller = match &access {
                     AccessContext::Authenticated(principal) => principal.id.as_str(),
@@ -372,6 +465,19 @@ fn worker(
                     )));
                     continue;
                 };
+                if let Some((scope, seed)) = &standalone_request {
+                    match database.request_receipt(scope, seed) {
+                        Ok(None) => {}
+                        Ok(Some(_)) => {
+                            let _ = reply.send(Err(standalone_requests::already_committed()));
+                            continue;
+                        }
+                        Err(error) => {
+                            let _ = reply.send(Err(standalone_requests::ledger_error(error)));
+                            continue;
+                        }
+                    }
+                }
                 let deadline = match timeout {
                     Some((started, client_timeout)) => {
                         let timeout = databases
@@ -426,23 +532,46 @@ fn worker(
                         }
                     };
                 }
+                if standalone_request.is_some() {
+                    transaction = match transaction.with_identified_write() {
+                        Ok(transaction) => transaction,
+                        Err(error) => {
+                            let _ = reply.send(Err(execution_error(error)));
+                            continue;
+                        }
+                    };
+                }
+                let mut ran_query = false;
                 let _ = reply.send(Ok(()));
+                // The current result's row handles, materialized by PULL pages.
+                let mut stream: Option<QueryStream> = None;
+                // A command that arrived while a lazy result was streaming and ended it.
+                let mut pending: Option<Command> = None;
                 loop {
-                    let command = match deadline {
-                        Some(deadline) => match receiver
-                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                        {
-                            Ok(command) => Some(command),
-                            Err(mpsc::RecvTimeoutError::Timeout) => {
-                                let retained_memory = transaction.rollback_retaining_memory();
-                                drop(transaction);
-                                drop(_writer_permit);
-                                expired_transaction(&receiver, &mut access, None, retained_memory);
-                                break;
-                            }
-                            Err(mpsc::RecvTimeoutError::Disconnected) => None,
-                        },
-                        None => receiver.recv().ok(),
+                    let command = if let Some(command) = pending.take() {
+                        Some(command)
+                    } else {
+                        match deadline {
+                            Some(deadline) => match receiver
+                                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                            {
+                                Ok(command) => Some(command),
+                                Err(mpsc::RecvTimeoutError::Timeout) => {
+                                    let retained_memory = transaction.rollback_retaining_memory();
+                                    drop(transaction);
+                                    drop(_writer_permit);
+                                    expired_transaction(
+                                        &receiver,
+                                        &mut access,
+                                        None,
+                                        retained_memory,
+                                    );
+                                    break;
+                                }
+                                Err(mpsc::RecvTimeoutError::Disconnected) => None,
+                            },
+                            None => receiver.recv().ok(),
+                        }
                     };
                     let Some(command) = command else { break };
                     // A command queued before recv_timeout returned may already be late.
@@ -469,33 +598,149 @@ fn worker(
                                 let _ = reply.send(Err(forbidden()));
                                 continue;
                             }
-                            let result = if pressure.is_pressured() {
-                                Err(memory_pressure_error())
+                            stream = None;
+                            let params = if let Some(refusal) = pressure.refusal() {
+                                Err(refusal)
                             } else {
                                 params_from_pack(&params)
-                            }
-                            .and_then(|params| {
-                                transaction
-                                    .run_with_access(&query, &params, query_access)
-                                    .map_err(execution_error)
-                            })
-                            .and_then(output_to_bolt)
-                            .and_then(|output| {
-                                transaction
-                                    .check_transaction_deadline()
-                                    .map(|()| {
-                                        let mut output = output;
-                                        output.memory = Some(OutputMemory::new(
-                                            transaction.output_memory_lease(),
-                                        ));
-                                        output
-                                    })
-                                    .map_err(execution_error)
-                            });
+                            };
+                            let output = match params {
+                                Err(error) => Err(error),
+                                Ok(params) => {
+                                    if databases.request_ledger_enabled() {
+                                        match standalone_requests::status_query(
+                                            &query,
+                                            &params,
+                                            databases.query_limits().memory_bytes,
+                                        ) {
+                                            Ok(Some(seed)) => {
+                                                let result = transaction
+                                                    .admit_control_request(query.len(), &params)
+                                                    .map_err(execution_error)
+                                                    .and_then(|()| {
+                                                        let lease =
+                                                            transaction.output_memory_lease();
+                                                        // One fixed four-column row: seed <=128 bytes,
+                                                        // UUID, sequence and status, plus transport copies.
+                                                        let output = lease
+                                                            .reserve_output(4096)
+                                                            .map_err(execution_error)?;
+                                                        standalone_requests::status(
+                                                            &access,
+                                                            &database,
+                                                            &seed,
+                                                            autocommit
+                                                                && !ran_query
+                                                                && standalone_request.is_none(),
+                                                        )
+                                                        .map(|mut result| {
+                                                            result.memory = Some(
+                                                                OutputMemory::new((lease, output)),
+                                                            );
+                                                            result
+                                                        })
+                                                    });
+                                                ran_query = true;
+                                                if result.is_err() {
+                                                    transaction.rollback();
+                                                }
+                                                let _ =
+                                                    reply.send(result.map(|result| (result, 0)));
+                                                continue;
+                                            }
+                                            Err(error) => {
+                                                transaction.rollback();
+                                                let _ = reply.send(Err(error));
+                                                continue;
+                                            }
+                                            Ok(None) => {}
+                                        }
+                                    }
+                                    ran_query = true;
+                                    let (back, lazy) = lazy_run(
+                                        transaction,
+                                        &receiver,
+                                        deadline,
+                                        (&query, &params, query_access),
+                                        &reply,
+                                    );
+                                    transaction = back;
+                                    match lazy {
+                                        Lazy::Finished(next) => {
+                                            pending = next;
+                                            continue;
+                                        }
+                                        Lazy::Output(output) => output.map_err(execution_error),
+                                    }
+                                }
+                            };
+                            let result = output
+                                .and_then(|output| match output {
+                                    RunOutput::Ready(output) => {
+                                        output_to_bolt(output).map(|output| (output, None))
+                                    }
+                                    RunOutput::Stream(rows) => Ok((
+                                        QueryResult {
+                                            memory: None,
+                                            fields: rows.fields().to_vec(),
+                                            rows: vec![],
+                                        },
+                                        Some(rows),
+                                    )),
+                                })
+                                .and_then(|(output, rows)| {
+                                    transaction
+                                        .check_transaction_deadline()
+                                        .map(|()| {
+                                            let mut output = output;
+                                            output.memory = Some(OutputMemory::new(
+                                                transaction.output_memory_lease(),
+                                            ));
+                                            let deferred =
+                                                rows.as_ref().map_or(0, |r| r.remaining());
+                                            stream = rows;
+                                            (output, deferred)
+                                        })
+                                        .map_err(execution_error)
+                                });
                             // Conversion errors happen outside QueryTransaction::run;
                             // they must also discard earlier writes and pool reservations.
                             if result.is_err() {
+                                stream = None;
                                 transaction.rollback();
+                            }
+                            let _ = reply.send(result);
+                        }
+                        Command::Pull(n, discard, reply) => {
+                            let result = match stream.as_mut() {
+                                None => Err(error(
+                                    "Neo.ClientError.Request.Invalid",
+                                    "no deferred rows to pull",
+                                )),
+                                Some(rows) if discard => {
+                                    let before = rows.remaining();
+                                    rows.discard(n);
+                                    Ok((vec![], rows.remaining(), None, before - rows.remaining()))
+                                }
+                                Some(rows) => transaction
+                                    .fetch(rows, n)
+                                    .map_err(execution_error)
+                                    .and_then(|rows| {
+                                        output_to_bolt(QueryOutput {
+                                            fields: vec![],
+                                            rows,
+                                        })
+                                    })
+                                    .map(|output| {
+                                        let consumed = output.rows.len();
+                                        (output.rows, rows.remaining(), None, consumed)
+                                    }),
+                            };
+                            if result.is_err() {
+                                stream = None;
+                                transaction.rollback();
+                            } else if stream.as_ref().is_some_and(|rows| rows.remaining() == 0) {
+                                stream = None;
                             }
                             let _ = reply.send(result);
                         }
@@ -549,8 +794,13 @@ fn worker(
                                     Ok(None) => Ok(None),
                                     Err(err) => Err(execution_error(err)),
                                 }
+                            } else if let Some((scope, seed)) = &standalone_request {
+                                transaction.commit_identified(scope, seed).map(|_| None).map_err(|error| match error {
+                                    brainwire_cypher::exec::IdentifiedCommitError::Execution(error) => commit_error(error),
+                                    brainwire_cypher::exec::IdentifiedCommitError::Ledger(error) => standalone_requests::ledger_error(error),
+                                })
                             } else {
-                                transaction.commit().map(|_| None).map_err(execution_error)
+                                transaction.commit().map(|_| None).map_err(commit_error)
                             };
                             let _ = reply.send(result);
                             break;
@@ -560,7 +810,7 @@ fn worker(
                             let _ = reply.send(Ok(()));
                             break;
                         }
-                        Command::Begin(_, _, _, _, _, reply) => {
+                        Command::Begin(_, _, _, _, _, _, reply) => {
                             let _ = reply.send(Err(error(
                                 "Neo.ClientError.Transaction.TransactionStartFailed",
                                 "transaction already active",
@@ -584,6 +834,12 @@ fn worker(
                     "no active transaction",
                 )));
             }
+            Command::Pull(_, _, reply) => {
+                let _ = reply.send(Err(error(
+                    "Neo.ClientError.Transaction.TransactionNotFound",
+                    "no active transaction",
+                )));
+            }
             Command::Commit(reply) => {
                 let _ = reply.send(Err(error(
                     "Neo.ClientError.Transaction.TransactionNotFound",
@@ -592,6 +848,251 @@ fn worker(
             }
         }
     }
+}
+
+/// Output pages are bounded and own their accounting until transport delivery.
+const LAZY_PAGE: usize = 1000;
+const LAZY_OPEN: usize = usize::MAX;
+type LeasedRow = (
+    Vec<PackValue>,
+    brainwire_cypher::exec::QueryOutputLease,
+    usize,
+);
+
+enum Produced {
+    Fields(Vec<String>),
+    Page(Vec<LeasedRow>),
+    Failed(EngineError),
+    Done,
+}
+
+enum Lazy {
+    /// The RUN was answered lazily and its result has ended (consumed, discarded or
+    /// interrupted). Carries the command that interrupted it, if any.
+    Finished(Option<Command>),
+    /// Not a lazy plan (or refused before its fields): the ordinary path's output.
+    Output(Result<RunOutput, ExecError>),
+}
+
+/// What the worker holds of a lazy result between PULLs.
+struct LazyRows {
+    produced: mpsc::Receiver<Produced>,
+    buffer: std::collections::VecDeque<LeasedRow>,
+    bytes: usize,
+    page_limit: usize,
+    open: bool,
+    failure: Option<EngineError>,
+}
+
+impl LazyRows {
+    fn absorb(&mut self, message: Produced) {
+        match message {
+            Produced::Page(rows) => {
+                if let Some((_, lease, _)) = rows.first() {
+                    self.page_limit = self.page_limit.min(lease.output_page_bytes());
+                }
+                self.bytes += rows.iter().map(|(_, _, bytes)| bytes).sum::<usize>();
+                self.buffer.extend(rows);
+            }
+            Produced::Failed(error) => self.failure = Some(error),
+            Produced::Done => self.open = false,
+            Produced::Fields(_) => {}
+        }
+    }
+
+    /// Receives until *n* rows (or a page of bytes) are buffered, the producer ended or
+    /// failed; then looks one message ahead so the last page can say there is no more.
+    fn fill(&mut self, n: usize) {
+        while self.buffer.len() < n
+            && self.bytes < self.page_limit
+            && self.open
+            && self.failure.is_none()
+        {
+            match self.produced.recv() {
+                Ok(message) => self.absorb(message),
+                Err(_) => self.open = false,
+            }
+        }
+        // Lookahead may add a page, so do not repeat it while an earlier page
+        // is still full. Tiny PULLs must not grow this queue on every request.
+        if self.open
+            && self.failure.is_none()
+            && self.bytes < self.page_limit
+            && self.buffer.len() < LAZY_PAGE
+        {
+            if let Ok(message) = self.produced.try_recv() {
+                self.absorb(message);
+            }
+        }
+    }
+
+    /// Up to *n* buffered rows and the remaining count to report.
+    fn take(&mut self, n: usize) -> PulledRows {
+        let mut rows = Vec::new();
+        let mut leases = Vec::new();
+        for (row, lease, bytes) in self.buffer.drain(..n.min(self.buffer.len())) {
+            self.bytes = self.bytes.saturating_sub(bytes);
+            rows.push(row);
+            leases.push(lease);
+        }
+        let finished = self.buffer.is_empty() && !self.open;
+        let memory = (!leases.is_empty()).then(|| OutputMemory::new(leases));
+        let consumed = rows.len();
+        (rows, if finished { 0 } else { LAZY_OPEN }, memory, consumed)
+    }
+}
+
+/// Runs a RUN on a scoped producer thread (docs/design/lazy-executor.md). A plan that
+/// streams answers RUN with its fields and no records; PULL drains the bounded
+/// producer queue (at most two pages). Any other command stops the
+/// producer and is handed back; the transaction always comes back.
+fn lazy_run<'db>(
+    transaction: QueryTransaction<'db>,
+    receiver: &mpsc::Receiver<Command>,
+    deadline: Option<Instant>,
+    (query, params, access): (&str, &BTreeMap<String, Value>, QueryAccess),
+    reply: &mpsc::Sender<Result<(QueryResult, usize), EngineError>>,
+) -> (QueryTransaction<'db>, Lazy) {
+    let lease = transaction.output_memory_lease();
+    let page_limit = lease.output_page_bytes();
+    let cancellation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let producer_cancel = Arc::clone(&cancellation);
+    std::thread::scope(|scope| {
+        let (pages, produced) = mpsc::sync_channel::<Produced>(2);
+        let producer = scope.spawn(move || {
+            let mut transaction = transaction;
+            let header = pages.clone();
+            let mut page = Vec::new();
+            let mut page_bytes = 0;
+            let mut producer_page_limit = page_limit;
+            let mut failed = None;
+            let mut started = false;
+            let result = transaction.run_lazy_leased_with_access(
+                query,
+                params,
+                access,
+                &mut |fields| {
+                    started = true;
+                    header.send(Produced::Fields(fields.to_vec())).is_ok()
+                },
+                producer_cancel,
+                &mut |row, bytes, reservation| {
+                    producer_page_limit = producer_page_limit.min(reservation.output_page_bytes());
+                    match row.into_iter().map(out_to_pack).collect::<Result<_, _>>() {
+                        Ok(row) => page.push((row, reservation, bytes)),
+                        Err(error) => {
+                            failed = Some(error);
+                            return false;
+                        }
+                    }
+                    page_bytes += bytes;
+                    if page.len() < LAZY_PAGE && page_bytes < producer_page_limit {
+                        return true;
+                    }
+                    let full = Produced::Page(std::mem::take(&mut page));
+                    page_bytes = 0;
+                    pages.send(full).is_ok()
+                },
+            );
+            let outcome = match result {
+                Ok(LazyRun::Streamed) => {
+                    if let Some(error) = failed {
+                        transaction.rollback();
+                        let _ = pages.send(Produced::Failed(error));
+                    } else {
+                        if !page.is_empty() {
+                            let _ = pages.send(Produced::Page(page));
+                        }
+                        let _ = pages.send(Produced::Done);
+                    }
+                    None
+                }
+                Ok(LazyRun::Output(output)) => Some(Ok(output)),
+                Err(error) if started => {
+                    let _ = pages.send(Produced::Failed(execution_error(error)));
+                    None
+                }
+                Err(error) => Some(Err(error)),
+            };
+            (transaction, outcome)
+        });
+        let join = |producer: std::thread::ScopedJoinHandle<'_, _>| {
+            producer
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        };
+        let Ok(Produced::Fields(fields)) = produced.recv() else {
+            cancellation.store(true, std::sync::atomic::Ordering::Release);
+            drop(produced);
+            let (transaction, outcome) = join(producer);
+            let output = outcome.unwrap_or_else(|| {
+                Ok(RunOutput::Ready(QueryOutput {
+                    fields: vec![],
+                    rows: vec![],
+                }))
+            });
+            return (transaction, Lazy::Output(output));
+        };
+        let mut lazy = LazyRows {
+            produced,
+            buffer: Default::default(),
+            bytes: 0,
+            page_limit,
+            open: true,
+            failure: None,
+        };
+        // Fields are enough to answer RUN; scanning belongs to PULL. In particular,
+        // a parallel scan with no matches must remain cancellable before its first page.
+        let _ = reply.send(Ok((
+            QueryResult {
+                memory: Some(OutputMemory::new(lease)),
+                fields,
+                rows: vec![],
+            },
+            LAZY_OPEN,
+        )));
+        let interrupted = loop {
+            let command = match deadline {
+                Some(deadline) => receiver
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .ok(),
+                None => receiver.recv().ok(),
+            };
+            let late = deadline.is_some_and(|deadline| Instant::now() >= deadline);
+            match command {
+                Some(Command::Check(check)) if !late => {
+                    let _ = check.send(Ok(()));
+                }
+                Some(Command::Pull(n, discard, pull)) if !late => {
+                    if discard && n == LAZY_OPEN {
+                        let _ = pull.send(Ok((vec![], 0, None, 0)));
+                        break None;
+                    }
+                    lazy.fill(n);
+                    if let Some(error) = lazy.failure.take() {
+                        let _ = pull.send(Err(error));
+                        break None;
+                    }
+                    let (rows, remaining, memory, consumed) = lazy.take(n);
+                    let (rows, memory) = if discard {
+                        (vec![], None)
+                    } else {
+                        (rows, memory)
+                    };
+                    let _ = pull.send(Ok((rows, remaining, memory, consumed)));
+                    if remaining == 0 {
+                        break None;
+                    }
+                }
+                // Cancellation is observed inside scans, even without output.
+                other => break other,
+            }
+        };
+        cancellation.store(true, std::sync::atomic::Ordering::Release);
+        drop(lazy);
+        let (transaction, _) = join(producer);
+        (transaction, Lazy::Finished(interrupted))
+    })
 }
 
 fn timeout_error() -> EngineError {
@@ -626,10 +1127,13 @@ fn expired_transaction(
                 let _ = reply.send(Ok(()));
                 return;
             }
-            Command::Begin(_, _, _, _, _, reply) | Command::Check(reply) => {
+            Command::Begin(_, _, _, _, _, _, reply) | Command::Check(reply) => {
                 let _ = reply.send(Err(timeout_error()));
             }
             Command::Run(_, _, _, reply) => {
+                let _ = reply.send(Err(timeout_error()));
+            }
+            Command::Pull(_, _, reply) => {
                 let _ = reply.send(Err(timeout_error()));
             }
             Command::Commit(reply) => {
@@ -836,17 +1340,60 @@ fn error_code(error: &ExecError) -> &'static str {
         ExecError::Semantic(_) => "Neo.ClientError.Statement.SemanticError",
         ExecError::ParameterMissing(_) => "Neo.ClientError.Statement.ParameterMissing",
         ExecError::ConstraintViolation(_) => "Neo.ClientError.Schema.ConstraintValidationFailed",
-        ExecError::MemoryLimit { .. } => "Neo.ClientError.Statement.MemoryLimitExceeded",
-        ExecError::MemoryPoolExhausted { .. } => {
-            "Neo.TransientError.General.QueryMemoryPoolExhausted"
-        }
+        ExecError::MemoryLimit { .. }
+        | ExecError::MemoryPoolExhausted { .. }
+        | ExecError::ProcessMemoryLimit { .. } => brainwire_bolt::session::MEMORY_REFUSED,
         ExecError::TimedOut => "Neo.ClientError.Statement.ExecutionTimedOut",
         ExecError::Conflict => "Neo.TransientError.Transaction.Outdated",
         ExecError::Graph(_) => "Neo.DatabaseError.General.UnknownError",
     }
 }
 
+/// Only the RocksDB write of the commit batch itself is ambiguous; every other
+/// failure happens before it, so nothing was applied.
+fn commit_error(error: ExecError) -> EngineError {
+    use brainwire_store::{db::StoreError, graph::GraphError, txn::TxnError};
+    let unknown = matches!(
+        &error,
+        ExecError::Graph(
+            GraphError::Store(StoreError::Rocks(_))
+                | GraphError::Txn(TxnError::Store(StoreError::Rocks(_)))
+        )
+    );
+    let mut failure = execution_error(error);
+    if unknown {
+        failure.code = "Neo.ClientError.Transaction.CommitOutcomeUnknown".into();
+        failure.message.push_str(
+            " [brainwire.commit outcome=unknown] the storage write failed; reconcile by key before retrying",
+        );
+    } else {
+        failure
+            .message
+            .push_str(" [brainwire.commit outcome=rolled_back]");
+    }
+    failure
+}
+
 fn execution_error(error: ExecError) -> EngineError {
+    let detail = error.to_string();
+    let hint = |reason, requested: usize, available: usize| {
+        EngineError::memory_refused(reason, requested as u64, available as u64, &detail)
+    };
+    match error {
+        ExecError::MemoryLimit { limit, attempted } => {
+            return hint("statement_limit", attempted, limit);
+        }
+        ExecError::MemoryPoolExhausted {
+            limit,
+            reserved,
+            requested,
+        } => return hint("query_pool", requested, limit.saturating_sub(reserved)),
+        ExecError::ProcessMemoryLimit {
+            requested,
+            available,
+        } => return hint("process_limit", requested, available),
+        _ => {}
+    }
     EngineError {
         code: error_code(&error).into(),
         message: error.to_string(),
@@ -897,6 +1444,16 @@ mod tests {
         (dir, databases, engine, pressured)
     }
 
+    fn read_rows(engine: &mut DbEngine, query: &str, params: &PackValue) -> Vec<Vec<PackValue>> {
+        let mut result = engine.run(None, query, params).unwrap();
+        let mut rows = std::mem::take(&mut result.rows);
+        while engine.deferred_rows() != 0 {
+            rows.extend(engine.pull(1000, false).unwrap());
+            engine.take_pull_memory();
+        }
+        rows
+    }
+
     #[test]
     fn memory_pressure_rejects_run_before_conversion_and_aborts_direct_engine_writes() {
         let (_dir, databases, mut engine, pressured) = pressure_fixture();
@@ -924,10 +1481,7 @@ mod tests {
         pressured.store(false, std::sync::atomic::Ordering::SeqCst);
         engine.begin(None).unwrap();
         assert_eq!(
-            engine
-                .run(None, "RETURN 1", &PackValue::Map(vec![]))
-                .unwrap()
-                .rows,
+            read_rows(&mut engine, "RETURN 1", &PackValue::Map(vec![])),
             vec![vec![PackValue::Int(1)]]
         );
         engine.commit().unwrap();
@@ -1152,6 +1706,65 @@ mod tests {
     }
 
     #[test]
+    fn commit_failures_say_whether_the_transaction_was_rolled_back_or_is_unknown() {
+        let conflict = commit_error(ExecError::Conflict);
+        assert_eq!(conflict.code, "Neo.TransientError.Transaction.Outdated");
+        assert!(conflict
+            .message
+            .ends_with("[brainwire.commit outcome=rolled_back]"));
+        let before_write = commit_error(ExecError::from(brainwire_store::db::StoreError::Corrupt(
+            "commit sequence exhausted".into(),
+        )));
+        assert!(before_write.message.contains("outcome=rolled_back"));
+        let dir = tempfile::tempdir().unwrap();
+        let Err(rocks) = rocksdb::DB::open(&rocksdb::Options::default(), dir.path().join("absent"))
+        else {
+            panic!("opening an absent database without create_if_missing fails");
+        };
+        let write = commit_error(ExecError::from(brainwire_store::txn::TxnError::Store(
+            brainwire_store::db::StoreError::Rocks(rocks),
+        )));
+        assert_eq!(
+            write.code,
+            "Neo.ClientError.Transaction.CommitOutcomeUnknown"
+        );
+        assert!(write.message.contains("outcome=unknown"));
+    }
+
+    #[test]
+    fn a_real_conflicting_commit_reports_rolled_back() {
+        let (_directory, databases, mut first) = scoped_engine_fixture();
+        let mut second = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+        first.set_access(AccessContext::Unrestricted).unwrap();
+        second.set_access(AccessContext::Unrestricted).unwrap();
+        let none = PackValue::Map(vec![]);
+        first.begin(None).unwrap();
+        first
+            .run(
+                None,
+                "MERGE (n:Customer {entity_id:'c'}) SET n.v = 1",
+                &none,
+            )
+            .unwrap();
+        second.begin(None).unwrap();
+        second
+            .run(
+                None,
+                "MERGE (n:Customer {entity_id:'c'}) SET n.v = 2",
+                &none,
+            )
+            .unwrap();
+        first.commit().unwrap();
+        let failure = second.commit().expect_err("second writer conflicts");
+        assert!(
+            failure.message.contains("outcome=rolled_back"),
+            "{}: {}",
+            failure.code,
+            failure.message
+        );
+    }
+
+    #[test]
     fn parameter_conversion_failure_discards_prior_writes_and_reservations() {
         let dir = tempfile::tempdir().unwrap();
         let mut config = crate::config::Config::default();
@@ -1226,9 +1839,11 @@ mod tests {
             .run(None, "RETURN $text", &params)
             .err()
             .expect("pending output must constrain other sessions");
-        assert_eq!(
-            error.code,
-            "Neo.TransientError.General.QueryMemoryPoolExhausted"
+        assert_eq!(error.code, brainwire_bolt::session::MEMORY_REFUSED);
+        assert!(
+            error.message.contains("reason=query_pool"),
+            "{}",
+            error.message
         );
         other.abort().unwrap();
         drop(pending);
@@ -1236,6 +1851,50 @@ mod tests {
         other.begin(None).unwrap();
         other.run(None, "RETURN $text", &params).unwrap();
         other.commit().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn request_status_reservation_survives_autocommit_until_response_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = dir.path().join("data");
+        config.server.request_ledger = true;
+        // Authentication is supplied by protected_session's in-memory policy.
+        config.server.auth_file = Some(dir.path().join("policy.json"));
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        config.memory.query = crate::size::ByteSize(64 << 10);
+        let databases = Arc::new(Databases::open_all(&config).unwrap());
+        let engine = DbEngine::new_protected(Arc::clone(&databases), "default".into()).unwrap();
+        let mut session = protected_session(engine);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        let run = session.handle(Request::Run {
+            query: "CALL db.requestStatus($seed)".into(),
+            params: PackValue::Map(vec![
+                ("seed".into(), PackValue::String("unrecorded".into())),
+                ("unused".into(), PackValue::String("x".repeat(4096))),
+            ]),
+            extra: PackValue::Map(vec![]),
+        });
+        assert!(matches!(run[0], Response::Success(_)), "{run:?}");
+        drop(run);
+        let held = databases.query_pool().usage().reserved_bytes;
+        assert!(held > 4096, "both input and output must be reserved");
+        let pending = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+        });
+        assert!(matches!(&pending[0], Response::Record(row)
+            if row[0] == PackValue::String("not_recorded".into())));
+        assert!(matches!(pending.last(), Some(Response::Success(_))));
+        assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+        drop(session);
+        assert_eq!(
+            databases.query_pool().usage().reserved_bytes,
+            held,
+            "pending response owns its reservation after autocommit and session drop"
+        );
+        drop(pending);
         assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
     }
 
@@ -1278,7 +1937,8 @@ mod tests {
                 if explicit {
                     session.handle(Request::Commit);
                 }
-                assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+                let retained = databases.query_pool().usage().reserved_bytes;
+                assert!(retained > 0);
                 match cleanup {
                     "reset" => {
                         session.handle(Request::Reset);
@@ -1291,9 +1951,10 @@ mod tests {
                     }
                     _ => unreachable!(),
                 }
-                assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+                assert_eq!(databases.query_pool().usage().reserved_bytes, retained);
                 drop(first);
-                assert_eq!(databases.query_pool().usage().reserved_bytes, held);
+                let second_held = databases.query_pool().usage().reserved_bytes;
+                assert!(second_held > 0 && second_held <= retained);
                 drop(second);
                 assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
             }
@@ -1341,9 +2002,11 @@ mod tests {
             .run(None, "RETURN $text", &params)
             .err()
             .expect("shared pool must reject");
-        assert_eq!(
-            error.code,
-            "Neo.TransientError.General.QueryMemoryPoolExhausted"
+        assert_eq!(error.code, brainwire_bolt::session::MEMORY_REFUSED);
+        assert!(
+            error.message.contains("reason=query_pool"),
+            "{}",
+            error.message
         );
         assert!(b.commit().is_err());
         b.abort().unwrap();
@@ -1494,10 +2157,7 @@ mod tests {
             PackValue::List(vec![PackValue::String("bob".into())]),
         )]);
         assert_eq!(
-            engine
-                .run(None, "MATCH (c:Customer) RETURN c.entity_id", &spoof)
-                .unwrap()
-                .rows,
+            read_rows(&mut engine, "MATCH (c:Customer) RETURN c.entity_id", &spoof),
             vec![vec![PackValue::String("alice".into())]]
         );
         assert_eq!(
@@ -1516,14 +2176,11 @@ mod tests {
         assert!(engine.commit().is_err());
         engine.begin(None).unwrap();
         assert_eq!(
-            engine
-                .run(
-                    None,
-                    "MATCH (c:Customer) RETURN c.entity_id",
-                    &PackValue::Map(vec![])
-                )
-                .unwrap()
-                .rows,
+            read_rows(
+                &mut engine,
+                "MATCH (c:Customer) RETURN c.entity_id",
+                &PackValue::Map(vec![])
+            ),
             vec![vec![PackValue::String("bob".into())]]
         );
         engine.commit().unwrap();
@@ -1593,14 +2250,11 @@ mod tests {
             ..Default::default()
         };
         let ids = |engine: &mut DbEngine| {
-            engine
-                .run(
-                    None,
-                    "MATCH (c:Customer) RETURN c.entity_id",
-                    &PackValue::Map(vec![]),
-                )
-                .unwrap()
-                .rows
+            read_rows(
+                engine,
+                "MATCH (c:Customer) RETURN c.entity_id",
+                &PackValue::Map(vec![]),
+            )
         };
 
         engine.set_access(principal(true)).unwrap();
@@ -1649,9 +2303,19 @@ mod tests {
     fn read_only_transaction_disallows_writes_and_acl_stamp_for_admin() {
         let (_directory, _databases, mut engine) = scoped_engine_fixture();
         engine.set_access(AccessContext::Unrestricted).unwrap();
-        for query in ["MERGE (n:Customer {entity_id:'read-write'})", "CALL db.setNodeAcl({label:'Customer',entityId:'read-write',allow:['user']}) YIELD updated RETURN updated"] {
+        for query in [
+            "MERGE (n:Customer {entity_id:'read-write'})",
+            "CALL db.setNodeAcl({label:'Customer',entityId:'read-write',allow:['user']}) YIELD updated RETURN updated",
+        ] {
             engine.begin_read_only(None).unwrap();
-            assert_eq!(engine.run(None, query, &PackValue::Map(vec![])).err().expect("read mode must deny mutation").code, "Neo.ClientError.Security.Forbidden");
+            assert_eq!(
+                engine
+                    .run(None, query, &PackValue::Map(vec![]))
+                    .err()
+                    .expect("read mode must deny mutation")
+                    .code,
+                "Neo.ClientError.Security.Forbidden"
+            );
             engine.abort().unwrap();
         }
         engine.begin_read_only(None).unwrap();
@@ -1696,10 +2360,7 @@ mod tests {
         );
         engine.begin(Some("other")).unwrap();
         assert_eq!(
-            engine
-                .run(None, "RETURN 1", &PackValue::Map(vec![]))
-                .unwrap()
-                .rows,
+            read_rows(&mut engine, "RETURN 1", &PackValue::Map(vec![])),
             vec![vec![PackValue::Int(1)]]
         );
         engine.commit().unwrap();
@@ -2007,13 +2668,19 @@ mod tests {
             .run(None, "RETURN $large", &params)
             .err()
             .expect("guard must reject oversized parameter");
-        assert_eq!(error.code, "Neo.ClientError.Statement.MemoryLimitExceeded");
+        assert_eq!(error.code, brainwire_bolt::session::MEMORY_REFUSED);
+        assert!(
+            error.message.contains("reason=statement_limit")
+                && error.message.contains("rolled_back=true"),
+            "{}",
+            error.message
+        );
         assert!(engine.commit().is_err());
         engine.abort().unwrap();
         assert_eq!(db.stats().unwrap().nodes, 0);
         engine.begin(None).unwrap();
         assert_eq!(
-            engine.run(None, "RETURN 1", &empty).unwrap().rows,
+            read_rows(&mut engine, "RETURN 1", &empty),
             vec![vec![PackValue::Int(1)]]
         );
         engine.commit().unwrap();
@@ -2317,5 +2984,709 @@ mod tests {
                 .unwrap();
             engine.commit().unwrap();
         }
+    }
+
+    // -- deferred result materialization (docs/design/bolt-result-streaming.md) --
+
+    fn streaming_session(
+        query_budget: u64,
+    ) -> (tempfile::TempDir, Arc<Databases>, Session<DbEngine>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.server.data_dir = dir.path().join("data");
+        config.memory.cache = crate::size::ByteSize(64 << 20);
+        config.memory.memtables = crate::size::ByteSize(16 << 20);
+        config.memory.query = crate::size::ByteSize(query_budget);
+        let databases = Arc::new(Databases::open_all(&config).unwrap());
+        let mapping: GraphMapping =
+            serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap();
+        databases
+            .get("default")
+            .unwrap()
+            .apply_ontology(&mapping)
+            .unwrap();
+        let mut session = Session::new(
+            DbEngine::new(Arc::clone(&databases), "default".into()).unwrap(),
+            AuthMode::AllowAll,
+        );
+        session.handle(Request::Hello {
+            extra: PackValue::Map(vec![]),
+        });
+        session.handle(Request::Logon {
+            auth: PackValue::Map(vec![]),
+        });
+        (dir, databases, session)
+    }
+
+    /// `count` customers, each with a `name` of `width` characters, ten per write.
+    fn seed_customers(databases: &Arc<Databases>, count: usize, width: usize) {
+        let mut engine = DbEngine::new(Arc::clone(databases), "default".into()).unwrap();
+        for start in (0..count).step_by(10) {
+            let rows = (start..count.min(start + 10))
+                .map(|i| PackValue::String(format!("c{i}")))
+                .collect();
+            engine.begin(None).unwrap();
+            engine
+                .run(
+                    None,
+                    "UNWIND $ids AS id CREATE (c:Customer {entity_id: id, name: $name})",
+                    &PackValue::Map(vec![
+                        ("ids".into(), PackValue::List(rows)),
+                        ("name".into(), PackValue::String("x".repeat(width))),
+                    ]),
+                )
+                .unwrap();
+            engine.commit().unwrap();
+        }
+    }
+
+    fn pull_n(session: &mut Session<DbEngine>, n: i64) -> (usize, bool, Vec<Response>) {
+        let responses: Vec<Response> = session
+            .handle(Request::Pull {
+                extra: PackValue::Map(vec![("n".into(), PackValue::Int(n))]),
+            })
+            .into_iter()
+            .collect();
+        let records = responses
+            .iter()
+            .filter(|r| matches!(r, Response::Record(_)))
+            .count();
+        let more = matches!(
+            responses.last(),
+            Some(Response::Success(meta)) if meta.iter().any(|(k, v)| k == "has_more" && *v == PackValue::Bool(true))
+        );
+        (records, more, responses)
+    }
+
+    fn run_query(session: &mut Session<DbEngine>, query: &str) -> Vec<Response> {
+        session
+            .handle(Request::Run {
+                query: query.into(),
+                params: PackValue::Map(vec![]),
+                extra: PackValue::Map(vec![]),
+            })
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn a_node_result_is_pulled_in_pages_and_the_last_page_ends_the_stream() {
+        let (_dir, databases, mut session) = streaming_session(64 << 20);
+        seed_customers(&databases, 25, 2_000);
+        assert!(matches!(
+            run_query(&mut session, "MATCH (c:Customer) RETURN c")[0],
+            Response::Success(_)
+        ));
+        // RUN holds row handles, not the 25 x 2 KB of properties.
+        let after_run = databases.query_pool().usage().reserved_bytes;
+        assert!(after_run < 25 * 2_000, "reserved {after_run} at RUN");
+        let (first, more, page) = pull_n(&mut session, 10);
+        assert_eq!((first, more), (10, true));
+        let Response::Record(row) = &page[0] else {
+            panic!("record expected")
+        };
+        assert!(
+            matches!(&row[0], PackValue::Struct { .. }),
+            "a node, materialized"
+        );
+        assert_eq!(pull_n(&mut session, 10).0, 10);
+        let (last, more, page) = pull_n(&mut session, 10);
+        assert_eq!((last, more), (5, false));
+        assert!(
+            matches!(page.last(), Some(Response::Success(meta)) if meta.iter().any(|(k, _)| k == "type"))
+        );
+        assert_eq!(session.state(), brainwire_bolt::session::State::Ready);
+        // auto-commit completed with the last page: nothing stays reserved
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn lazy_run_returns_fields_without_waiting_for_an_initial_page() {
+        let (_directory, databases, session) = streaming_session(4 << 20);
+        drop(session);
+        let mut engine = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+        engine.begin(None).unwrap();
+        let result = engine
+            .run(
+                None,
+                "UNWIND range(1, 5000) AS i RETURN i",
+                &PackValue::Map(vec![]),
+            )
+            .unwrap();
+        assert_eq!(result.fields, ["i"]);
+        assert!(result.rows.is_empty(), "RUN enumerated an initial page");
+        assert_eq!(engine.deferred_rows(), LAZY_OPEN);
+        drop(result);
+        assert_eq!(engine.pull(1, false).unwrap(), [vec![PackValue::Int(1)]]);
+        engine.take_pull_memory();
+        engine.abort().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn finite_discard_crosses_lazy_pages_and_preserves_the_next_row() {
+        let (_directory, databases, mut session) = streaming_session(4 << 20);
+        let result = run_query(&mut session, "UNWIND range(1, 5000) AS i RETURN i");
+        assert!(matches!(result[0], Response::Success(_)), "{result:?}");
+        let response = session.handle(Request::Discard {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(2500))]),
+        });
+        assert!(
+            matches!(response.last(), Some(Response::Success(meta)) if meta.iter().any(|(key,value)| key == "has_more" && *value == PackValue::Bool(true))),
+            "{response:?}"
+        );
+        assert_eq!(session.state(), brainwire_bolt::session::State::Streaming);
+        drop(response);
+        let (count, more, rows) = pull_n(&mut session, 1);
+        assert_eq!((count, more), (1, true));
+        assert_eq!(rows[0], Response::Record(vec![PackValue::Int(2501)]));
+        drop(rows);
+        session.handle(Request::Reset);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert_eq!(session.state(), brainwire_bolt::session::State::Ready);
+    }
+
+    #[test]
+    fn discard_and_reset_drop_deferred_rows_and_release_their_reservation() {
+        let (_dir, databases, mut session) = streaming_session(64 << 20);
+        seed_customers(&databases, 30, 8);
+        run_query(&mut session, "MATCH (c:Customer) RETURN c");
+        assert_eq!(pull_n(&mut session, 4).0, 4);
+        let discarded: Vec<Response> = session
+            .handle(Request::Discard {
+                extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+            })
+            .into_iter()
+            .collect();
+        assert!(!discarded.iter().any(|r| matches!(r, Response::Record(_))));
+        assert_eq!(session.state(), brainwire_bolt::session::State::Ready);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        run_query(&mut session, "MATCH (c:Customer) RETURN c");
+        assert_eq!(pull_n(&mut session, 2).0, 2);
+        assert!(databases.query_pool().usage().reserved_bytes > 0);
+        session.handle(Request::Reset);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn a_node_result_larger_than_the_query_budget_streams_within_it() {
+        // 200 nodes of ~4 KB each: materialized at once they need several times the
+        // 400 KB budget, which refused the RUN; a 10-row page fits.
+        let budget = 400_000;
+        let (_dir, databases, mut session) = streaming_session(budget);
+        seed_customers(&databases, 200, 4_000);
+        let run = run_query(&mut session, "MATCH (c:Customer) RETURN c");
+        assert!(
+            matches!(run[0], Response::Success(_)),
+            "RUN refused: {:?}",
+            run[0]
+        );
+        let mut records = 0;
+        loop {
+            let (got, more, page) = pull_n(&mut session, 10);
+            assert!(
+                !page.iter().any(|r| matches!(r, Response::Failure { .. })),
+                "{page:?}"
+            );
+            records += got;
+            if !more {
+                break;
+            }
+        }
+        assert_eq!(records, 200);
+        let peak = databases.query_pool().usage().peak_bytes;
+        assert!(peak <= budget as usize, "peak {peak}");
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn streamed_pages_keep_the_delegated_visibility() {
+        use brainwire_core::acl::{NodeAcl, ReadVisibility};
+        use brainwire_store::graph::{find_by_entity_id, set_node_acl};
+        let (_directory, databases, mut engine) = scoped_engine_fixture();
+        engine.set_access(AccessContext::Unrestricted).unwrap();
+        engine.begin(None).unwrap();
+        engine
+            .run(
+                None,
+                "UNWIND range(1, 12) AS i CREATE (:Customer {entity_id: 'n' + toString(i)})",
+                &PackValue::Map(vec![]),
+            )
+            .unwrap();
+        engine.commit().unwrap();
+        let database = databases.get("default").unwrap();
+        let mut tx = database.begin();
+        for i in 1..=12 {
+            let id = find_by_entity_id(&tx, &format!("n{i}"), None).unwrap()[0];
+            let owner = if i % 3 == 0 { "bob" } else { "alice" };
+            set_node_acl(
+                &mut tx,
+                id,
+                &NodeAcl {
+                    allow: vec![owner.into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        engine
+            .set_access(AccessContext::Authenticated(
+                brainwire_bolt::auth::Principal {
+                    id: "reader".into(),
+                    graphs: BTreeMap::from([("default".into(), GraphAccess::Read)]),
+                    instance_admin: false,
+                    node_visibility: None,
+                    visibility_delegate: true,
+                },
+            ))
+            .unwrap();
+        engine
+            .begin_delegated(
+                None,
+                true,
+                None,
+                ReadVisibility {
+                    principals: vec!["bob".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let result = engine
+            .run(None, "MATCH (c:Customer) RETURN c", &PackValue::Map(vec![]))
+            .unwrap();
+        // Entity rows: handles, materialized page by page (any rows at RUN count too).
+        let mut rows = result.rows;
+        while engine.deferred_rows() > 0 {
+            rows.extend(engine.pull(3, false).unwrap());
+        }
+        let mut seen = vec![];
+        for row in rows {
+            let PackValue::Struct { fields, .. } = &row[0] else {
+                panic!("node expected")
+            };
+            let PackValue::Map(props) = &fields[2] else {
+                panic!("properties expected")
+            };
+            assert!(!props.iter().any(|(k, _)| k.starts_with("acl_")));
+            let entity = props.iter().find(|(k, _)| k == "entity_id").unwrap();
+            seen.push(entity.1.clone());
+        }
+        assert_eq!(engine.deferred_rows(), 0);
+        seen.sort_by_key(|v| format!("{v:?}"));
+        assert_eq!(
+            seen,
+            ["n12", "n3", "n6", "n9"].map(|s| PackValue::String(s.into()))
+        );
+        engine.commit().unwrap();
+    }
+
+    #[test]
+    fn small_pulls_do_not_accumulate_prefetched_pages() {
+        let (_dir, databases, session) = streaming_session(10_000);
+        drop(session);
+        let database = databases.get("default").unwrap();
+        let transaction = QueryTransaction::begin_with_limits(
+            &database,
+            brainwire_cypher::ExecutionLimits {
+                memory_bytes: 10_000,
+                timeout: None,
+            },
+        )
+        .unwrap();
+        let lease = transaction.output_memory_lease();
+        let (send, produced) = mpsc::channel();
+        for _ in 0..20 {
+            let page = (0..3)
+                .map(|_| {
+                    (
+                        vec![PackValue::Int(1)],
+                        lease.reserve_output(100).unwrap(),
+                        100,
+                    )
+                })
+                .collect();
+            send.send(Produced::Page(page)).unwrap();
+        }
+        send.send(Produced::Done).unwrap();
+        drop(send);
+        let mut lazy = LazyRows {
+            produced,
+            buffer: Default::default(),
+            bytes: 0,
+            page_limit: 300,
+            open: true,
+            failure: None,
+        };
+        for _ in 0..60 {
+            lazy.fill(1);
+            assert!(
+                lazy.bytes <= 600,
+                "prefetch grew while consuming one row: {}",
+                lazy.bytes
+            );
+            let (rows, _, memory, _) = lazy.take(1);
+            assert_eq!(rows.len(), 1);
+            drop(memory);
+        }
+        lazy.fill(1);
+        assert!(!lazy.open);
+    }
+
+    // -- lazy results (docs/design/lazy-executor.md) --
+
+    #[test]
+    fn a_large_parallel_entity_result_can_be_pulled_and_discarded_with_bounded_memory() {
+        if std::thread::available_parallelism().map_or(1, |n| n.get()) < 2 {
+            return;
+        }
+        let budget = 8 << 20;
+        let (_directory, databases, mut session) = streaming_session(budget);
+        let database = databases.get("default").unwrap();
+        for start in (0..60_000).step_by(5_000) {
+            brainwire_cypher::execute(&database, &format!("UNWIND range({start}, {}) AS i CREATE (:Customer {{entity_id:'parallel-' + i, name:'item'}})", start + 4_999), &BTreeMap::new()).unwrap();
+        }
+        // A no-match parallel RUN returns fields before PULL enumerates its result,
+        // so RESET can cancel the producer even though it has emitted no records.
+        let empty_query = "MATCH (n:Customer) WHERE n.name = 'missing' RETURN n";
+        let mut direct = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+        direct.begin(None).unwrap();
+        let header = direct
+            .run(None, empty_query, &PackValue::Map(vec![]))
+            .unwrap();
+        assert!(header.rows.is_empty());
+        assert_eq!(
+            direct.deferred_rows(),
+            LAZY_OPEN,
+            "RUN enumerated the empty parallel scan before reporting its fields"
+        );
+        drop(header);
+        direct.abort().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        drop(direct);
+        let header = run_query(&mut session, empty_query);
+        assert!(matches!(header[0], Response::Success(_)), "{header:?}");
+        session.handle(Request::Reset);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert!(matches!(
+            run_query(&mut session, empty_query)[0],
+            Response::Success(_)
+        ));
+        assert_eq!(
+            (pull_n(&mut session, -1).0, session.state()),
+            (0, brainwire_bolt::session::State::Ready)
+        );
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        let result = run_query(&mut session, "MATCH (n:Customer) RETURN n");
+        assert!(matches!(result[0], Response::Success(_)), "{result:?}");
+        let (count, more, page) = pull_n(&mut session, 1);
+        assert_eq!(count, 1);
+        assert!(more);
+        drop(page);
+        let result = session.handle(Request::Discard {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+        });
+        assert!(
+            matches!(result.last(), Some(Response::Success(_))),
+            "{result:?}"
+        );
+        drop(result);
+        assert_eq!(session.state(), brainwire_bolt::session::State::Ready);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert!(databases.query_pool().usage().peak_bytes <= budget as usize);
+        let result = run_query(&mut session, "MATCH (n:Customer) RETURN n");
+        assert!(matches!(result[0], Response::Success(_)), "{result:?}");
+        let held = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(1))]),
+        });
+        assert!(held.iter().any(|item| matches!(item, Response::Record(_))));
+        let reset = session.handle(Request::Reset);
+        assert!(matches!(reset.last(), Some(Response::Success(_))));
+        drop(reset);
+        assert!(databases.query_pool().usage().reserved_bytes > 0);
+        drop(held);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn parallel_entity_pages_flush_over_bolt_for_large_and_unlimited_pulls() {
+        use std::io::{Read, Write};
+        if std::thread::available_parallelism().map_or(1, |n| n.get()) < 2 {
+            return;
+        }
+        let budget = 4 << 20;
+        let (_directory, databases, session) = streaming_session(budget);
+        drop(session);
+        let database = databases.get("default").unwrap();
+        for start in (0..60_000).step_by(5_000) {
+            brainwire_cypher::execute(&database, &format!("UNWIND range({start}, {}) AS i CREATE (:Customer {{entity_id:'wire-parallel-' + i, name:$name}})", start + 4_999), &BTreeMap::from([("name".into(), Value::Str("x".repeat(200)))])).unwrap();
+        }
+        let (address, listening) = std::sync::mpsc::channel();
+        let (stop, stopping) = tokio::sync::oneshot::channel::<()>();
+        let server_databases = Arc::clone(&databases);
+        let server = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                address.send(listener.local_addr().unwrap()).unwrap();
+                brainwire_bolt::server::serve_until(
+                    listener,
+                    move || DbEngine::new(Arc::clone(&server_databases), "default".into()).unwrap(),
+                    brainwire_bolt::server::ConnectionLimits::default(),
+                    AuthMode::AllowAll,
+                    async {
+                        let _ = stopping.await;
+                    },
+                    Duration::from_secs(2),
+                )
+                .await
+                .unwrap();
+            });
+        });
+        let mut wire =
+            std::net::TcpStream::connect(listening.recv_timeout(Duration::from_secs(5)).unwrap())
+                .unwrap();
+        wire.set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        wire.set_write_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        let mut handshake = [0u8; 20];
+        handshake[..4].copy_from_slice(&brainwire_bolt::handshake::MAGIC);
+        handshake[4..8].copy_from_slice(&[0, 0, 4, 5]);
+        wire.write_all(&handshake).unwrap();
+        let mut version = [0; 4];
+        wire.read_exact(&mut version).unwrap();
+        assert_eq!(version, [0, 0, 4, 5]);
+        fn send(wire: &mut std::net::TcpStream, tag: u8, fields: Vec<PackValue>) {
+            let mut payload = Vec::new();
+            brainwire_bolt::packstream::pack(&PackValue::Struct { tag, fields }, &mut payload);
+            wire.write_all(&brainwire_bolt::chunk::encode_message(&payload))
+                .unwrap();
+        }
+        fn receive(wire: &mut std::net::TcpStream) -> PackValue {
+            let mut payload = Vec::new();
+            loop {
+                let mut size = [0; 2];
+                wire.read_exact(&mut size).unwrap();
+                let size = u16::from_be_bytes(size) as usize;
+                if size == 0 {
+                    if payload.is_empty() {
+                        continue;
+                    }
+                    break;
+                }
+                assert!(payload.len() + size <= 1 << 20);
+                let offset = payload.len();
+                payload.resize(offset + size, 0);
+                wire.read_exact(&mut payload[offset..]).unwrap();
+            }
+            brainwire_bolt::packstream::unpack(&mut payload.as_slice()).unwrap()
+        }
+        for tag in [0x01, 0x6a] {
+            send(&mut wire, tag, vec![PackValue::Map(vec![])]);
+            assert!(matches!(
+                receive(&mut wire),
+                PackValue::Struct { tag: 0x70, .. }
+            ));
+        }
+        send(
+            &mut wire,
+            0x10,
+            vec![
+                PackValue::String("MATCH (n:Customer) RETURN n".into()),
+                PackValue::Map(vec![]),
+                PackValue::Map(vec![]),
+            ],
+        );
+        assert!(matches!(
+            receive(&mut wire),
+            PackValue::Struct { tag: 0x70, .. }
+        ));
+        let mut total = 0;
+        for (n, expected) in [(1000, 1000), (-1, 59_000)] {
+            send(
+                &mut wire,
+                0x3f,
+                vec![PackValue::Map(vec![("n".into(), PackValue::Int(n))])],
+            );
+            let mut records = 0;
+            loop {
+                match receive(&mut wire) {
+                    PackValue::Struct { tag: 0x71, .. } => records += 1,
+                    PackValue::Struct { tag: 0x70, fields } => {
+                        assert_eq!(
+                            fields[0].get("has_more"),
+                            if n == 1000 {
+                                Some(&PackValue::Bool(true))
+                            } else {
+                                None
+                            }
+                        );
+                        break;
+                    }
+                    other => panic!("unexpected wire response: {other:?}"),
+                }
+            }
+            assert_eq!(records, expected);
+            total += records;
+        }
+        assert_eq!(total, 60_000);
+        drop(wire);
+        stop.send(()).unwrap();
+        server.join().unwrap();
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+        assert!(databases.query_pool().usage().peak_bytes <= budget as usize);
+    }
+
+    #[test]
+    fn a_scalar_result_larger_than_the_query_budget_streams_lazily() {
+        // 200 names of 4 KB: the eager path materialized all 800 KB of strings at RUN
+        // and refused it against a 400 KB budget; produced lazily, pages fit.
+        let budget = 400_000;
+        for pull_size in [1, 10] {
+            let (_dir, databases, mut session) = streaming_session(budget);
+            seed_customers(&databases, 200, 4_000);
+            let run = run_query(&mut session, "MATCH (c:Customer) RETURN c.name AS name");
+            assert!(
+                matches!(run[0], Response::Success(_)),
+                "RUN refused: {:?}",
+                run[0]
+            );
+            let mut records = 0;
+            loop {
+                let (got, more, page) = pull_n(&mut session, pull_size);
+                assert!(
+                    !page.iter().any(|r| matches!(r, Response::Failure { .. })),
+                    "{page:?}"
+                );
+                records += got;
+                if !more {
+                    break;
+                }
+            }
+            assert_eq!(records, 200);
+            assert_eq!(session.state(), brainwire_bolt::session::State::Ready);
+            assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+            assert!(databases.query_pool().usage().peak_bytes <= budget as usize);
+        }
+    }
+
+    #[test]
+    fn lazy_page_accounting_survives_reset_until_the_response_is_dropped() {
+        let (_dir, databases, mut session) = streaming_session(400_000);
+        seed_customers(&databases, 200, 4_000);
+        run_query(&mut session, "MATCH (c:Customer) RETURN c.name AS name");
+        let page = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(10))]),
+        });
+        assert!(page.iter().any(|r| matches!(r, Response::Record(_))));
+        session.handle(Request::Reset);
+        let held = databases.query_pool().usage().reserved_bytes;
+        assert!(held >= 10 * 4_000, "response lost its accounting: {held}");
+        drop(page);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn unlimited_direct_pull_refuses_accumulation_and_releases_after_reset() {
+        let (_dir, databases, mut session) = streaming_session(400_000);
+        seed_customers(&databases, 200, 4_000);
+        run_query(&mut session, "MATCH (c:Customer) RETURN c.name AS name");
+        let batch = session.handle(Request::Pull {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+        });
+        assert!(batch.iter().any(|r| matches!(r, Response::Failure { code, .. } if code == brainwire_bolt::session::MEMORY_REFUSED)), "an unconsumed materialized batch must respect the pool");
+        assert!(databases.query_pool().usage().reserved_bytes <= 400_000);
+        session.handle(Request::Reset);
+        drop(batch);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn a_discarded_lazy_result_stops_and_the_transaction_keeps_working() {
+        let (_dir, databases, mut session) = streaming_session(64 << 20);
+        seed_customers(&databases, 2_500, 8);
+        session.handle(Request::Begin {
+            extra: PackValue::Map(vec![]),
+        });
+        run_query(&mut session, "MATCH (c:Customer) RETURN c.entity_id AS id");
+        let (got, more, _) = pull_n(&mut session, 10);
+        assert_eq!((got, more), (10, true));
+        // DISCARD stops the producer mid-result; the transaction goes on writing.
+        session.handle(Request::Discard {
+            extra: PackValue::Map(vec![("n".into(), PackValue::Int(-1))]),
+        });
+        let write = run_query(&mut session, "CREATE (:Customer {entity_id: 'late'})");
+        assert!(matches!(write[0], Response::Success(_)), "{write:?}");
+        assert_eq!(pull_n(&mut session, -1).0, 0);
+        let commit: Vec<Response> = session.handle(Request::Commit).into_iter().collect();
+        assert!(matches!(commit[0], Response::Success(_)), "{commit:?}");
+        run_query(&mut session, "MATCH (c:Customer) RETURN c.entity_id AS id");
+        let mut records = 0;
+        loop {
+            let (got, more, _) = pull_n(&mut session, 1000);
+            records += got;
+            if !more {
+                break;
+            }
+        }
+        assert_eq!(records, 2_501);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn an_error_after_a_lazy_run_answered_fails_the_pull_and_reset_recovers() {
+        let (_dir, databases, mut session) = streaming_session(64 << 20);
+        session.handle(Request::Begin {
+            extra: PackValue::Map(vec![]),
+        });
+        assert!(matches!(
+            run_query(
+                &mut session,
+                "CREATE (:Customer {entity_id:'pending-lazy-error'})"
+            )[0],
+            Response::Success(_)
+        ));
+        assert_eq!(pull_n(&mut session, -1).0, 0);
+        // Once fields exist, even a first-page execution error belongs to PULL.
+        let early = run_query(&mut session, "UNWIND [1, 2, 'a'] AS x RETURN abs(x) AS y");
+        assert!(matches!(early[0], Response::Success(_)), "{early:?}");
+        let (_, _, failure) = pull_n(&mut session, -1);
+        assert!(
+            matches!(failure.last(), Some(Response::Failure { .. })),
+            "{failure:?}"
+        );
+        session.handle(Request::Reset);
+        assert_eq!(
+            databases.get("default").unwrap().stats().unwrap().nodes,
+            0,
+            "PULL failure left prior writes visible"
+        );
+        // After 2,000 good rows the RUN has answered; the error arrives on a PULL.
+        let run = run_query(
+            &mut session,
+            "UNWIND range(1, 2000) + ['a'] AS x RETURN abs(x) AS y",
+        );
+        assert!(matches!(run[0], Response::Success(_)), "{run:?}");
+        let mut failed = false;
+        for _ in 0..10 {
+            let (_, more, page) = pull_n(&mut session, 500);
+            if matches!(page.last(), Some(Response::Failure { .. })) {
+                failed = true;
+                break;
+            }
+            assert!(more, "the stream ended without the error");
+        }
+        assert!(failed);
+        session.handle(Request::Reset);
+        let again = run_query(&mut session, "RETURN 1 AS one");
+        assert!(matches!(again[0], Response::Success(_)), "{again:?}");
+        assert_eq!(pull_n(&mut session, -1).0, 1);
+        assert_eq!(databases.query_pool().usage().reserved_bytes, 0);
     }
 }

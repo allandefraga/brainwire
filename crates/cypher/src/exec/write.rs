@@ -206,7 +206,7 @@ fn write_pattern(
                     return Err(semantic(format!(
                         "expected a node, found {}",
                         other.type_name()
-                    )))
+                    )));
                 }
             }
             continue;
@@ -305,7 +305,7 @@ fn set_items(
                     return Err(semantic(format!(
                         "SET needs a node or relationship, found {}",
                         other.type_name()
-                    )))
+                    )));
                 }
             };
             let mut values = BTreeMap::new();
@@ -326,7 +326,7 @@ fn set_items(
                             return Err(semantic(format!(
                                 "SET needs a map, found {}",
                                 other.type_name()
-                            )))
+                            )));
                         }
                     };
                     if matches!(item, SetPlan::Replace { .. }) {
@@ -446,7 +446,7 @@ fn delete(
                     return Err(ExecError::Semantic(format!(
                         "DELETE needs a node, relationship or path, found {}",
                         other.type_name()
-                    )))
+                    )));
                 }
             }
             Ok(())

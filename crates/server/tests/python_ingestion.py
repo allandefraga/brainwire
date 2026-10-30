@@ -151,11 +151,14 @@ query = "{query_mib}MiB"
                                 try:
                                     with session.begin_transaction() as tx:
                                         tx.run("MATCH (c:Customer {entity_id:'id-0'}) SET c.email='guard-rollback', c.segment=999999").consume()
-                                        tx.run("UNWIND $values AS a UNWIND $values AS b UNWIND $values AS c RETURN a,b,c,$padding", values=list(range(400)), padding="x"*4096).consume()
+                                        # DISTINCT must retain the fanout; consume() may cancel a lazy stream.
+                                        tx.run("UNWIND $values AS a UNWIND $values AS b UNWIND $values AS c RETURN DISTINCT a,b,c,$padding", values=list(range(400)), padding="x"*4096).consume()
                                 except Neo4jError as error:
-                                    assert error.code == "Neo.ClientError.Statement.MemoryLimitExceeded", error
+                                    assert error.code == "Neo.TransientError.General.MemoryPressure", error
+                                    assert "reason=statement_limit" in str(error), error
+                                    assert "rolled_back=true" in str(error), error
                                 else:
-                                    raise AssertionError("fanout must exceed the per-RUN allocation guard")
+                                    raise AssertionError("blocking fanout must exceed the per-RUN allocation guard")
                                 assert count(session,"{email:'guard-rollback'}") == 0
                                 assert count(session,"{segment:999999}") == 0
                                 with session.begin_transaction() as tx:

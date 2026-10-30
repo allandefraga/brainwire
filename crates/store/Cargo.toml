@@ -5,12 +5,17 @@ version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Trusted synthetic tests only; no runtime or network switch enables the hook.
+test-fault-injection = []
+
 [dependencies]
 brainwire-core = { path = "../core" }
 rocksdb.workspace = true
 thiserror.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -2,8 +2,10 @@
 
 `memory.query` / `BRAINWIRE_MEMORY_QUERY` bounds conservative per-RUN accounting
 and the server's shared query reservation pool. All connections and named graphs
-in one server share that pool. The embedded CLI enforces the per-RUN guard;
-library callers opt into pooling with `QueryTransaction::begin_with_pool`.
+in one server share that pool. Embedded transactions use a private pool with a
+transaction high-water reservation; `QueryTransaction::begin_with_pool` opts
+into a caller-supplied shared pool. Private-pool telemetry is not exposed as
+server-wide usage.
 These counters estimate execution allocations, not process RSS or reserved RAM.
 
 Read-only MATCH/UNWIND pipelines process one row at a time for ordinary RETURN
@@ -23,10 +25,12 @@ a client to PULL/DISCARD. Repeated RUNs reuse a reservation instead of adding a
 new independent quota. No transaction can reserve above its per-RUN limit, and
 the sum of pool reservations cannot exceed `memory.query`.
 
-A per-RUN failure uses `Neo.ClientError.Statement.MemoryLimitExceeded`. Pool
-contention uses the Brainwire extension
-`Neo.TransientError.General.QueryMemoryPoolExhausted`; Neo4j Python drivers 5
-and 6 classify it as retryable. Both discard the complete query transaction,
+Every memory refusal uses `Neo.TransientError.General.MemoryPressure` with a
+`[brainwire.memory reason=... requested_bytes=... available_bytes=...
+rolled_back=true]` hint: `statement_limit` for the per-RUN guard, `query_pool`
+for pool contention, `process_limit` near `memory.limit`
+([contract](design/memory-error-contract.md)). Neo4j Python drivers 5 and 6
+classify it as retryable. All discard the complete query transaction,
 including writes and indexes from earlier RUNs. Conversion errors at the Bolt
 boundary also release reservations and discard prior writes. Use the driver's
 managed transaction retry policy where appropriate; an outcome-unknown network

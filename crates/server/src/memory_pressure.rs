@@ -6,6 +6,8 @@ use std::sync::{Arc, OnceLock};
 #[cfg(any(target_os = "linux", test))]
 use crate::config::memory_defaults::visible_memory_groups;
 use crate::config::memory_defaults::MemoryGroup;
+use crate::process_memory::ProcessMemory;
+use brainwire_bolt::session::EngineError;
 
 const PRESSURE_PERCENT: u128 = 95;
 
@@ -26,6 +28,7 @@ pub(crate) struct PressureGuard {
     denied_runs: AtomicUsize,
     unavailable_samples: AtomicUsize,
     probe: Box<dyn Fn() -> PressureStatus + Send + Sync>,
+    process: fn() -> Option<&'static Arc<ProcessMemory>>,
 }
 
 impl PressureGuard {
@@ -40,13 +43,17 @@ impl PressureGuard {
             // Unit tests inject their pressure source, independent of host load.
             #[cfg(any(not(target_os = "linux"), test))]
             let groups = Vec::new();
-            Self::new(move || sample(&groups, |path| std::fs::read_to_string(path).ok()))
+            let mut guard =
+                Self::new(move || sample(&groups, |path| std::fs::read_to_string(path).ok()));
+            Arc::get_mut(&mut guard).expect("new guard").process = crate::process_memory::installed;
+            guard
         }))
     }
 
     fn new(probe: impl Fn() -> PressureStatus + Send + Sync + 'static) -> Arc<Self> {
         Arc::new(Self {
             probe: Box::new(probe),
+            process: || None,
             denied_runs: AtomicUsize::new(0),
             unavailable_samples: AtomicUsize::new(0),
         })
@@ -73,19 +80,35 @@ impl PressureGuard {
         }
     }
 
-    pub(crate) fn is_pressured(&self) -> bool {
-        if matches!(self.status(), PressureStatus::Pressured { .. }) {
-            let count = self
-                .denied_runs
-                .fetch_add(1, Ordering::Relaxed)
-                .saturating_add(1);
-            if should_log(count) {
-                eprintln!("brainwire memory pressure admission: RUN rejected; denied_runs={count}");
-            }
-            true
+    /// The memory refusal for a new RUN, if the process ceiling or a visible cgroup
+    /// is at 95% (docs/design/memory-error-contract.md).
+    pub(crate) fn refusal(&self) -> Option<EngineError> {
+        let refusal = if let Some((rss, cap)) = (self.process)().and_then(|p| p.refusal()) {
+            EngineError::memory_refused(
+                "process_limit",
+                0,
+                cap.saturating_sub(rss),
+                "process memory near memory.limit; RUN rejected before execution",
+            )
+        } else if let PressureStatus::Pressured { current, limit } = self.status() {
+            let cap = (u128::from(limit) * PRESSURE_PERCENT / 100) as u64;
+            EngineError::memory_refused(
+                "cgroup",
+                0,
+                cap.saturating_sub(current),
+                "container memory at 95%; RUN rejected before execution",
+            )
         } else {
-            false
+            return None;
+        };
+        let count = self
+            .denied_runs
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if should_log(count) {
+            eprintln!("brainwire memory pressure admission: RUN rejected; denied_runs={count}");
         }
+        Some(refusal)
     }
 
     #[cfg(test)]
@@ -127,10 +150,18 @@ fn sample(groups: &[MemoryGroup], read: impl Fn(&Path) -> Option<String>) -> Pre
         } else {
             "memory.usage_in_bytes"
         });
-        let Some(current) = read(&used_path).and_then(|s| s.trim().parse::<u64>().ok()) else {
+        let Some(raw_current) = read(&used_path).and_then(|s| s.trim().parse::<u64>().ok()) else {
             unavailable = true;
             continue;
         };
+        // Approximate working set: inactive file cache may be reclaimable, but can
+        // contain pages that cannot be reclaimed immediately. Raw usage can remain
+        // or written (the kernel reclaims cache only at the limit), so admitting on it
+        // refused every RUN of an idle server whose anonymous memory was a third of it.
+        let reclaimable = read(&group.directory.join("memory.stat"))
+            .and_then(|stat| inactive_file(&stat, group.v2))
+            .unwrap_or(0);
+        let current = raw_current.saturating_sub(reclaimable);
         // u128 avoids overflow even at u64::MAX and includes zero-limit pressure.
         if u128::from(current) * 100 >= u128::from(limit) * PRESSURE_PERCENT {
             return PressureStatus::Pressured { current, limit };
@@ -148,6 +179,19 @@ fn sample(groups: &[MemoryGroup], read: impl Fn(&Path) -> Option<String>) -> Pre
             PressureStatus::Available { current, limit }
         })
     }
+}
+
+/// The inactive file cache of a `memory.stat` (hierarchical on v1), if it reports one.
+fn inactive_file(stat: &str, v2: bool) -> Option<u64> {
+    let key = if v2 {
+        "inactive_file"
+    } else {
+        "total_inactive_file"
+    };
+    stat.lines().find_map(|line| {
+        let (name, value) = line.split_once(' ')?;
+        (name == key).then(|| value.trim().parse().ok()).flatten()
+    })
 }
 
 #[cfg(test)]
@@ -312,8 +356,8 @@ mod tests {
     #[test]
     fn unavailable_samples_and_denials_are_observable_separately() {
         let guard = PressureGuard::fixture(|| PressureStatus::Unavailable);
-        assert!(!guard.is_pressured());
-        assert!(!guard.is_pressured());
+        assert!(!guard.refusal().is_some());
+        assert!(!guard.refusal().is_some());
         assert_eq!(
             guard.usage(),
             PressureUsage {
@@ -325,7 +369,7 @@ mod tests {
             current: 99,
             limit: 100,
         });
-        assert!(guard.is_pressured());
+        assert!(guard.refusal().is_some());
         assert_eq!(
             guard.usage(),
             PressureUsage {
@@ -336,11 +380,77 @@ mod tests {
     }
 
     #[test]
+    fn reclaimable_file_cache_is_not_pressure() {
+        // Measured: 2 GiB container, 671 MiB anonymous, 1.33 GiB inactive file cache
+        // after a file write: raw usage 2047 MiB refused every RUN until the file was gone.
+        let v2 = fixture(
+            &[group("/cg", true)],
+            &[
+                ("/cg/memory.max", "100"),
+                ("/cg/memory.current", "99"),
+                (
+                    "/cg/memory.stat",
+                    "anon 33\nfile 66\ninactive_file 65\nactive_file 1\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            v2,
+            PressureStatus::Available {
+                current: 34,
+                limit: 100
+            }
+        );
+        let v1 = fixture(
+            &[group("/cg", false)],
+            &[
+                ("/cg/memory.limit_in_bytes", "100"),
+                ("/cg/memory.usage_in_bytes", "99"),
+                (
+                    "/cg/memory.stat",
+                    "inactive_file 1\ntotal_inactive_file 60\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            v1,
+            PressureStatus::Available {
+                current: 39,
+                limit: 100
+            }
+        );
+        // Anonymous memory and active cache still count; a missing stat counts it all.
+        let anon = fixture(
+            &[group("/cg", true)],
+            &[
+                ("/cg/memory.max", "100"),
+                ("/cg/memory.current", "99"),
+                ("/cg/memory.stat", "anon 97\ninactive_file 2\n"),
+            ],
+        );
+        assert_eq!(
+            anon,
+            PressureStatus::Pressured {
+                current: 97,
+                limit: 100
+            }
+        );
+        assert!(matches!(
+            fixture(
+                &[group("/cg", true)],
+                &[("/cg/memory.max", "100"), ("/cg/memory.current", "99")]
+            ),
+            PressureStatus::Pressured { .. }
+        ));
+    }
+
+    #[test]
     fn injected_guard_rejects_pressure() {
         assert!(PressureGuard::fixture(|| PressureStatus::Pressured {
             current: 95,
             limit: 100
         })
-        .is_pressured());
+        .refusal()
+        .is_some());
     }
 }

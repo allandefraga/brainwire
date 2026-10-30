@@ -20,6 +20,7 @@ pub struct Databases {
     query_pool: Arc<brainwire_cypher::QueryMemoryPool>,
     checkpoint_dir: Option<PathBuf>,
     index_workers: AtomicBool,
+    request_ledger: bool,
 }
 
 /// Runs online index builds and drops of one database in bounded batches.
@@ -59,6 +60,11 @@ pub(crate) fn valid_name(name: &str) -> bool {
 
 impl Databases {
     pub fn open_all(config: &Config) -> Result<Self, String> {
+        if config.server.request_ledger
+            && (config.server.auth_file.is_none() || config.server.checkpoint_dir.is_some())
+        {
+            return Err("experimental request ledger requires authentication and disables online checkpoints".into());
+        }
         if config
             .server
             .data_dir
@@ -74,6 +80,9 @@ impl Databases {
     }
 
     pub(crate) fn open_replica(config: &Config) -> Result<Self, String> {
+        if config.server.request_ledger {
+            return Err("experimental request ledger cannot serve a replica".into());
+        }
         Self::open(config, false)
     }
 
@@ -106,6 +115,7 @@ impl Databases {
             )),
             checkpoint_dir: config.server.checkpoint_dir.clone(),
             index_workers: AtomicBool::new(false),
+            request_ledger: config.server.request_ledger,
         };
         if !discover {
             return Ok(registry);
@@ -138,6 +148,10 @@ impl Databases {
                 spawn_index_worker(name, db);
             }
         }
+    }
+
+    pub(crate) fn request_ledger_enabled(&self) -> bool {
+        self.request_ledger
     }
 
     pub fn query_limits(&self) -> brainwire_cypher::ExecutionLimits {
@@ -188,10 +202,24 @@ impl Databases {
             }
             _ => {}
         }
-        let db = Arc::new(
+        let db = Arc::new(if self.request_ledger {
+            let result = if path.exists() {
+                Database::open_with_request_ledger(&path, &self.resources)
+            } else {
+                Database::create_with_request_ledger(
+                    &path,
+                    &self.resources,
+                    brainwire_store::db::request_ledger::LedgerLimits {
+                        max_entries: 100_000,
+                        max_bytes: 16 << 20,
+                    },
+                )
+            };
+            result.map_err(|e| format!("cannot open experimental request-ledger database {name}; legacy activation/restore is unsupported: {e}"))?
+        } else {
             Database::open(&path, &self.resources)
-                .map_err(|e| format!("cannot open database {name}: {e}"))?,
-        );
+                .map_err(|e| format!("cannot open database {name}: {e}"))?
+        });
         if self.index_workers.load(Ordering::SeqCst) {
             spawn_index_worker(name, &db);
         }

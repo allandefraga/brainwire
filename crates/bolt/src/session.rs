@@ -87,6 +87,25 @@ pub struct EngineError {
     pub message: String,
 }
 
+/// The one memory-refusal code (docs/design/memory-error-contract.md): nothing of the
+/// transaction was applied, so the caller may retry it, smaller or later.
+pub const MEMORY_REFUSED: &str = "Neo.TransientError.General.MemoryPressure";
+
+impl EngineError {
+    /// A memory refusal with its machine-readable size hint. `reason` is one of
+    /// `statement_limit`, `query_pool`, `process_limit`, `cgroup`, `ingress`.
+    pub fn memory_refused(reason: &str, requested: u64, available: u64, detail: &str) -> Self {
+        EngineError {
+            code: MEMORY_REFUSED.into(),
+            message: format!(
+                "{detail}; the transaction was rolled back and may be retried smaller \
+                 [brainwire.memory reason={reason} requested_bytes={requested} \
+                 available_bytes={available} rolled_back=true]"
+            ),
+        }
+    }
+}
+
 fn durable_request_id(extra: &PackValue) -> Result<Option<&str>, Response> {
     if matches!(extra, PackValue::Map(fields) if fields.iter().filter(|(key,_)| key == "tx_metadata").count() > 1)
     {
@@ -241,6 +260,18 @@ pub trait QueryEngine {
             None => self.begin_with_request_id(db, read_only, request_id),
         }
     }
+    /// Begin the implicit transaction of one autocommit RUN. Engines may use
+    /// the distinction to restrict fresh-view administrative/status procedures.
+    fn begin_autocommit_with_timeout(
+        &mut self,
+        db: Option<&str>,
+        read_only: bool,
+        request_id: Option<&str>,
+        visibility: Option<ReadVisibility>,
+        timeout: Option<Duration>,
+    ) -> Result<(), EngineError> {
+        self.begin_with_timeout(db, read_only, request_id, visibility, timeout)
+    }
     /// Check before delivering buffered output from an active transaction.
     fn check_transaction(&mut self) -> Result<(), EngineError> {
         Ok(())
@@ -256,7 +287,35 @@ pub trait QueryEngine {
         query: &str,
         params: &PackValue,
     ) -> Result<QueryResult, EngineError>;
+    /// Rows of the last RUN the engine still holds after its `QueryResult` rows:
+    /// the session asks for them with [`QueryEngine::pull`]. Zero for engines that
+    /// answer RUN with every row.
+    fn deferred_rows(&self) -> usize {
+        0
+    }
+    /// Up to *n* more of the last RUN's deferred rows, or drop *n* of them unread
+    /// when *discard*. Only called while [`QueryEngine::deferred_rows`] is nonzero.
+    /// Transfer accounting for the rows returned by the last pull. It follows
+    /// those rows through the session and ResponseBatch until written or dropped.
+    fn take_pull_memory(&mut self) -> Option<OutputMemory> {
+        None
+    }
+    /// Actual rows consumed by the most recent pull, including discarded rows.
+    /// Lazy engines must report this because their remaining size is unknown.
+    fn last_pull_consumed(&self) -> Option<usize> {
+        None
+    }
+    fn pull(&mut self, _n: usize, _discard: bool) -> Result<Vec<Vec<PackValue>>, EngineError> {
+        Err(EngineError {
+            code: "Neo.ClientError.Request.Invalid".into(),
+            message: "engine has no deferred rows".into(),
+        })
+    }
 }
+
+/// Deferred rows the session asks the engine for at once: the memory one PULL
+/// materializes, whatever the client's `n`.
+const PULL_PAGE: usize = 1000;
 
 /// Answers `RETURN <integer> [AS <name>]` only. The Cypher plan replaces it.
 pub struct StubEngine;
@@ -327,7 +386,13 @@ pub struct Session<E: QueryEngine> {
     engine: E,
     state: State,
     rows: VecDeque<Vec<PackValue>>,
+    /// Rows of the current result the engine still holds (`QueryEngine::pull`).
+    deferred: usize,
     output_memory: Option<OutputMemory>,
+    pull_memory: Option<OutputMemory>,
+    response_memory: Vec<OutputMemory>,
+    /// Socket transport yields after one real engine page, even below PULL_PAGE.
+    transport_page: bool,
     db: Option<String>,
     pending: bool,
     auth: AuthMode,
@@ -350,7 +415,11 @@ impl<E: QueryEngine> Session<E> {
             engine,
             state: State::Connected,
             rows: VecDeque::new(),
+            deferred: 0,
             output_memory: None,
+            pull_memory: None,
+            response_memory: Vec::new(),
+            transport_page: false,
             db: None,
             pending: false,
             auth,
@@ -363,7 +432,9 @@ impl<E: QueryEngine> Session<E> {
 
     fn cleanup(&mut self) -> Result<(), EngineError> {
         self.rows.clear();
+        self.deferred = 0;
         self.output_memory.take();
+        self.pull_memory.take();
         if self.pending {
             self.engine.abort()?;
             self.pending = false;
@@ -390,6 +461,15 @@ impl<E: QueryEngine> Session<E> {
                 vec![Self::engine_failure(error)]
             }
         }
+    }
+
+    /// A request refused before it reached the engine (input memory): the session fails
+    /// like any statement failure, rolling back its transaction, and RESET recovers it.
+    pub fn refuse(&mut self, error: EngineError) -> Vec<Response> {
+        if self.state == State::Failed {
+            return vec![Response::Ignored];
+        }
+        self.fail(Self::engine_failure(error))
     }
 
     fn defunct(&mut self, response: Response) -> Vec<Response> {
@@ -450,7 +530,7 @@ impl<E: QueryEngine> Session<E> {
         }
     }
 
-    fn begin(&mut self, extra: &PackValue) -> Result<(), Response> {
+    fn begin(&mut self, extra: &PackValue, autocommit: bool) -> Result<(), Response> {
         self.db = Self::database(extra)?;
         if matches!(extra, PackValue::Map(fields) if fields.iter().filter(|(name, _)| name == "mode").count() > 1)
         {
@@ -467,15 +547,24 @@ impl<E: QueryEngine> Session<E> {
         let timeout = transaction_timeout(extra)?;
         // A failed begin may still own partially initialized engine state.
         self.pending = true;
-        self.engine
-            .begin_with_timeout(
+        let result = if autocommit {
+            self.engine.begin_autocommit_with_timeout(
                 self.db.as_deref(),
                 read_only,
                 request_id,
                 visibility,
                 timeout,
             )
-            .map_err(Self::engine_failure)
+        } else {
+            self.engine.begin_with_timeout(
+                self.db.as_deref(),
+                read_only,
+                request_id,
+                visibility,
+                timeout,
+            )
+        };
+        result.map_err(Self::engine_failure)
     }
 
     fn commit(&mut self) -> Result<Option<String>, EngineError> {
@@ -489,6 +578,7 @@ impl<E: QueryEngine> Session<E> {
         match self.engine.run(self.db.as_deref(), query, params) {
             Ok(result) => {
                 self.rows = result.rows.into();
+                self.deferred = self.engine.deferred_rows();
                 self.output_memory = result.memory;
                 self.state = if in_tx {
                     State::TxStreaming
@@ -520,15 +610,84 @@ impl<E: QueryEngine> Session<E> {
             _ => return self.fail(invalid("n must be -1 or a nonnegative integer")),
         };
         let mut out = Vec::new();
-        for _ in 0..n.min(self.rows.len()) {
-            let row = self.rows.pop_front().expect("remaining row");
-            if !discard {
-                out.push(Response::Record(row));
+        let unlimited = n == usize::MAX;
+        let mut left = n;
+        loop {
+            while left > 0 {
+                let Some(row) = self.rows.pop_front() else {
+                    break;
+                };
+                if !discard {
+                    out.push(Response::Record(row));
+                }
+                if !unlimited {
+                    left -= 1;
+                }
+            }
+            if left == 0 || self.deferred == 0 {
+                break;
+            }
+            if self.transport_page && !discard && !out.is_empty() {
+                break;
+            }
+            // Deferred rows are materialized a page at a time; discarded ones never.
+            let ask = if discard {
+                left.min(self.deferred)
+            } else {
+                left.min(self.deferred).min(PULL_PAGE)
+            };
+            let before = self.deferred;
+            match self.engine.pull(ask, discard) {
+                Ok(rows) => {
+                    // The engine says what is left: a lazy result does not know its size.
+                    self.deferred = self.engine.deferred_rows();
+                    if discard {
+                        if !unlimited {
+                            let consumed = self.engine.last_pull_consumed().or_else(|| {
+                                (before != usize::MAX && self.deferred != usize::MAX)
+                                    .then(|| before.checked_sub(self.deferred))
+                                    .flatten()
+                                    .filter(|count| *count <= ask)
+                            });
+                            match consumed {
+                                Some(count)
+                                    if count <= ask && (count > 0 || self.deferred == 0) =>
+                                {
+                                    left -= count
+                                }
+                                _ => {
+                                    return self.fail(Self::engine_failure(EngineError {
+                                        code: "Neo.DatabaseError.General.UnknownError".into(),
+                                        message: "engine did not report discarded row progress"
+                                            .into(),
+                                    }))
+                                }
+                            }
+                        }
+                        self.engine.take_pull_memory();
+                        continue;
+                    }
+                    self.pull_memory = self.engine.take_pull_memory();
+                    if let Some(memory) = &self.pull_memory {
+                        self.response_memory.push(memory.clone());
+                    }
+                    self.rows.extend(rows);
+                }
+                Err(error) => {
+                    out.extend(self.fail(Self::engine_failure(error)));
+                    return out;
+                }
             }
         }
-        let in_tx = self.state == State::TxStreaming;
+        // The response owns leases of delivered rows. Keep a session copy only
+        // while this page still has buffered rows, not into the next PULL.
         if self.rows.is_empty() {
+            self.pull_memory.take();
+        }
+        let in_tx = self.state == State::TxStreaming;
+        if self.rows.is_empty() && self.deferred == 0 {
             self.output_memory.take();
+            self.pull_memory.take();
             let mut pairs = vec![
                 ("type", PackValue::String("r".into())),
                 ("t_last", PackValue::Int(0)),
@@ -554,13 +713,72 @@ impl<E: QueryEngine> Session<E> {
     pub fn handle(&mut self, req: Request) -> ResponseBatch {
         // Retain before PULL: commit or failure may clear Session's own lease.
         let memory = self.output_memory.clone();
+        let previous_page = self.pull_memory.clone();
         let responses = self.handle_inner(req);
-        let memory = if responses.iter().any(|r| matches!(r, Response::Record(_))) {
-            memory
-        } else {
-            None
-        };
+        let pages = std::mem::take(&mut self.response_memory);
+        let memory = responses
+            .iter()
+            .any(|r| matches!(r, Response::Record(_)))
+            .then(|| OutputMemory::new((memory, previous_page, pages)));
         ResponseBatch { responses, memory }
+    }
+
+    /// Bound each transport batch even when the client asks for every remaining row.
+    /// The transport writes this batch before resuming `continuation`; intermediate
+    /// has_more summaries are internal, so one wire PULL still has one summary.
+    pub(crate) fn handle_page(&mut self, mut req: Request) -> (ResponseBatch, Option<Request>) {
+        let remaining = match &mut req {
+            Request::Pull {
+                extra: PackValue::Map(fields),
+            } => {
+                let remaining = match fields
+                    .iter()
+                    .find(|(name, _)| name == "n")
+                    .map(|(_, value)| value)
+                {
+                    None | Some(PackValue::Int(-1)) => usize::MAX,
+                    Some(PackValue::Int(n)) if *n >= 0 => usize::try_from(*n).unwrap_or(usize::MAX),
+                    _ => return (self.handle(req), None),
+                };
+                if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "n") {
+                    *value = PackValue::Int(remaining.min(PULL_PAGE) as i64);
+                } else {
+                    fields.push(("n".into(), PackValue::Int(PULL_PAGE as i64)));
+                }
+                Some(remaining)
+            }
+            _ => None,
+        };
+        if remaining.is_none() {
+            return (self.handle(req), None);
+        }
+        self.transport_page = true;
+        let mut batch = self.handle(req.clone());
+        self.transport_page = false;
+        let delivered = batch
+            .responses
+            .iter()
+            .filter(|r| matches!(r, Response::Record(_)))
+            .count();
+        let more = matches!(batch.responses.last(), Some(Response::Success(extra))
+            if extra.iter().any(|(name, value)| name == "has_more" && value == &PackValue::Bool(true)));
+        if let Some(remaining) = remaining.filter(|n| *n > delivered && more && delivered > 0) {
+            let left = if remaining == usize::MAX {
+                -1
+            } else {
+                (remaining - delivered) as i64
+            };
+            if let Request::Pull {
+                extra: PackValue::Map(fields),
+            } = &mut req
+            {
+                fields.iter_mut().find(|(name, _)| name == "n").unwrap().1 = PackValue::Int(left);
+            }
+            batch.responses.pop();
+            (batch, Some(req))
+        } else {
+            (batch, None)
+        }
     }
 
     fn handle_inner(&mut self, req: Request) -> Vec<Response> {
@@ -643,13 +861,13 @@ impl<E: QueryEngine> Session<E> {
                     extra,
                 },
             ) => {
-                if let Err(response) = self.begin(&extra) {
+                if let Err(response) = self.begin(&extra, true) {
                     return self.fail(response);
                 }
                 self.start_query(&query, &params, false)
             }
             (Ready, Request::Begin { extra }) => {
-                if let Err(response) = self.begin(&extra) {
+                if let Err(response) = self.begin(&extra, false) {
                     return self.fail(response);
                 }
                 self.state = TxReady;
@@ -666,7 +884,7 @@ impl<E: QueryEngine> Session<E> {
                 match Self::database(&extra) {
                     Err(response) => return self.fail(response),
                     Ok(Some(db)) if self.db.as_deref() != Some(db.as_str()) => {
-                        return self.fail(invalid("RUN cannot change the transaction database"))
+                        return self.fail(invalid("RUN cannot change the transaction database"));
                     }
                     _ => {}
                 }
@@ -722,6 +940,301 @@ mod tests {
             self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
+    struct DeferredMemory {
+        remaining: usize,
+        page_size: usize,
+        occupied: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        memory: Option<OutputMemory>,
+    }
+    impl QueryEngine for DeferredMemory {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<QueryResult, EngineError> {
+            self.remaining = 4;
+            Ok(QueryResult {
+                fields: vec!["x".into()],
+                rows: vec![],
+                memory: None,
+            })
+        }
+        fn deferred_rows(&self) -> usize {
+            self.remaining
+        }
+        fn pull(&mut self, n: usize, _: bool) -> Result<Vec<Vec<PackValue>>, EngineError> {
+            let count = n.min(self.remaining).min(self.page_size);
+            self.remaining -= count;
+            self.occupied
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.memory = Some(OutputMemory::new(MemoryOwner(self.occupied.clone())));
+            Ok(vec![vec![PackValue::Int(1)]; count])
+        }
+        fn take_pull_memory(&mut self) -> Option<OutputMemory> {
+            self.memory.take()
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            self.remaining = 0;
+            self.memory.take();
+            Ok(())
+        }
+    }
+
+    struct PagedDiscard {
+        next: usize,
+        consumed: usize,
+        report_progress: bool,
+        initial_row: bool,
+        commits: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl QueryEngine for PagedDiscard {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<QueryResult, EngineError> {
+            self.next = usize::from(self.initial_row);
+            Ok(QueryResult {
+                fields: vec!["x".into()],
+                rows: if self.initial_row {
+                    vec![vec![PackValue::Int(0)]]
+                } else {
+                    vec![]
+                },
+                memory: None,
+            })
+        }
+        fn deferred_rows(&self) -> usize {
+            if self.next < 5 {
+                usize::MAX
+            } else {
+                0
+            }
+        }
+        fn pull(&mut self, n: usize, discard: bool) -> Result<Vec<Vec<PackValue>>, EngineError> {
+            if discard && n == usize::MAX {
+                self.next = 5;
+                self.consumed = 0;
+                return Ok(vec![]);
+            }
+            self.consumed = n.min(1).min(5 - self.next);
+            let row = self.next as i64;
+            self.next += self.consumed;
+            Ok(if discard || self.consumed == 0 {
+                vec![]
+            } else {
+                vec![vec![PackValue::Int(row)]]
+            })
+        }
+        fn last_pull_consumed(&self) -> Option<usize> {
+            self.report_progress.then_some(self.consumed)
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            self.commits
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            self.next = 5;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn finite_discard_consumes_only_requested_lazy_rows_without_early_commit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let commits = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut session = ready(PagedDiscard {
+            next: 0,
+            consumed: 0,
+            report_progress: true,
+            initial_row: false,
+            commits: commits.clone(),
+        });
+        session.handle(run("RETURN x"));
+        session.handle(Request::Discard {
+            extra: map(&[("n", PackValue::Int(0))]),
+        });
+        assert_eq!(commits.load(Ordering::SeqCst), 0);
+        let response = session.handle(Request::Discard {
+            extra: map(&[("n", PackValue::Int(3))]),
+        });
+        assert!(
+            matches!(&response[0], Response::Success(meta) if meta.iter().any(|(key, value)| key == "has_more" && *value == PackValue::Bool(true)))
+        );
+        assert_eq!(session.state(), State::Streaming);
+        assert_eq!(commits.load(Ordering::SeqCst), 0);
+        let next = session.handle(pull(1));
+        assert_eq!(next[0], Response::Record(vec![PackValue::Int(3)]));
+        assert_eq!(commits.load(Ordering::SeqCst), 0);
+        session.handle(pull(-1));
+        assert_eq!(commits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn finite_lazy_discard_fails_closed_without_consumed_count() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let commits = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut session = ready(PagedDiscard {
+            next: 0,
+            consumed: 0,
+            report_progress: false,
+            initial_row: false,
+            commits: commits.clone(),
+        });
+        session.handle(run("RETURN x"));
+        let response = session.handle(Request::Discard {
+            extra: map(&[("n", PackValue::Int(3))]),
+        });
+        assert!(matches!(&response[0], Response::Failure { .. }));
+        assert_eq!(session.state(), State::Failed);
+        assert_eq!(commits.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn unlimited_discard_preserves_cancellation_after_buffered_rows() {
+        let mut session = ready(PagedDiscard {
+            next: 0,
+            consumed: 0,
+            report_progress: true,
+            initial_row: true,
+            commits: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        session.handle(run("RETURN x"));
+        session.handle(Request::Discard {
+            extra: map(&[("n", PackValue::Int(-1))]),
+        });
+        assert_eq!(session.state(), State::Ready);
+        assert_eq!(
+            session.engine.consumed, 0,
+            "unlimited discard enumerated the lazy tail"
+        );
+    }
+
+    #[test]
+    fn finite_discard_above_lazy_cardinality_finishes() {
+        let mut session = ready(PagedDiscard {
+            next: 0,
+            consumed: 0,
+            report_progress: true,
+            initial_row: false,
+            commits: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        session.handle(run("RETURN x"));
+        let response = session.handle(Request::Discard {
+            extra: map(&[("n", PackValue::Int(8))]),
+        });
+        assert!(matches!(&response[0], Response::Success(_)));
+        assert_eq!(session.state(), State::Ready);
+    }
+
+    #[test]
+    fn finite_discard_uses_known_cardinality_for_legacy_engines() {
+        let mut session = ready(DeferredMemory {
+            remaining: 0,
+            page_size: 1,
+            occupied: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            memory: None,
+        });
+        session.handle(run("RETURN x"));
+        session.handle(Request::Discard {
+            extra: map(&[("n", PackValue::Int(2))]),
+        });
+        assert_eq!(session.state(), State::Streaming);
+        assert_eq!(session.engine.remaining, 2);
+        assert_eq!(
+            session
+                .handle(pull(-1))
+                .iter()
+                .filter(|r| matches!(r, Response::Record(_)))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn transport_flushes_small_engine_pages_before_fetching_another() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for requested in [1000, -1] {
+            let occupied = std::sync::Arc::new(AtomicUsize::new(0));
+            let mut session = ready(DeferredMemory {
+                remaining: 0,
+                page_size: 1,
+                occupied: occupied.clone(),
+                memory: None,
+            });
+            session.handle(run("RETURN x"));
+            let mut request = Some(pull(requested));
+            let mut count = 0;
+            let mut summaries = 0;
+            while let Some(next) = request {
+                let (batch, continuation) = session.handle_page(next);
+                let records = batch
+                    .iter()
+                    .filter(|response| matches!(response, Response::Record(_)))
+                    .count();
+                assert_eq!(records, 1, "transport retained multiple engine pages");
+                assert_eq!(occupied.load(Ordering::SeqCst), 1);
+                count += records;
+                summaries += batch
+                    .iter()
+                    .filter(|response| matches!(response, Response::Success(_)))
+                    .count();
+                drop(batch);
+                assert_eq!(occupied.load(Ordering::SeqCst), 0);
+                request = continuation;
+            }
+            assert_eq!(count, 4);
+            assert_eq!(summaries, 1);
+            assert_eq!(session.state(), State::Ready);
+        }
+    }
+
+    #[test]
+    fn consumed_page_credit_belongs_only_to_live_response_batches() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let occupied = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut session = ready(DeferredMemory {
+            remaining: 0,
+            page_size: usize::MAX,
+            occupied: occupied.clone(),
+            memory: None,
+        });
+        session.handle(run("RETURN x"));
+        let first = session.handle(pull(2));
+        assert_eq!(occupied.load(Ordering::SeqCst), 1);
+        drop(first);
+        assert_eq!(
+            occupied.load(Ordering::SeqCst),
+            0,
+            "session retained an empty page"
+        );
+        let second = session.handle(pull(1));
+        let third = session.handle(pull(1));
+        assert_eq!(
+            occupied.load(Ordering::SeqCst),
+            2,
+            "live response batches lost their credits"
+        );
+        session.handle(Request::Reset);
+        assert_eq!(occupied.load(Ordering::SeqCst), 2);
+        drop(second);
+        assert_eq!(occupied.load(Ordering::SeqCst), 1);
+        drop(third);
+        assert_eq!(occupied.load(Ordering::SeqCst), 0);
+    }
+
     struct CommitFailureWithRows(std::sync::Arc<std::sync::atomic::AtomicUsize>);
     impl QueryEngine for CommitFailureWithRows {
         fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {

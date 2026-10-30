@@ -71,7 +71,7 @@ impl Val {
             Val::Node(_) | Val::Rel(_) | Val::Path(_) => {
                 return Err(ExecError::Semantic(
                     "nodes, relationships and paths cannot be used as property values".into(),
-                ))
+                ));
             }
         })
     }

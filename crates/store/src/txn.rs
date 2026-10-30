@@ -84,8 +84,26 @@ impl Committer {
         destination: &std::path::Path,
     ) -> Result<Option<u64>, StoreError> {
         let st = self.lock();
+        if st.unknown_write {
+            return Err(StoreError::Corrupt(
+                "uncertain storage write requires reopen".into(),
+            ));
+        }
         rocksdb::checkpoint::Checkpoint::new(db)?.create_checkpoint(destination)?;
         Ok(st.tracked.then_some(st.seq))
+    }
+
+    pub(crate) fn known_request_read<T>(
+        &self,
+        read: impl FnOnce() -> Result<T, crate::db::request_ledger::LedgerError>,
+    ) -> Result<T, crate::db::request_ledger::LedgerError> {
+        let state = self.lock();
+        if state.unknown_write {
+            return Err(
+                StoreError::Corrupt("uncertain storage write requires reopen".into()).into(),
+            );
+        }
+        read()
     }
 
     /// The one place that locks the committer. A poisoned lock means an
@@ -115,6 +133,10 @@ impl Committer {
 #[derive(Default)]
 struct CommitState {
     seq: u64,
+    // Opt-in identified stores cannot trust RAM after an ambiguous RocksDB error.
+    unknown_write: bool,
+    #[cfg(any(test, feature = "test-fault-injection"))]
+    fail_after_write: Option<StoreError>,
     tracked: bool,
     // BTreeMap, not HashMap: a prefix dependency (`Txn::scan_prefix_for_update`)
     // needs a range scan over "every key of this Cf starting with this
@@ -294,17 +316,24 @@ pub struct Txn<'db> {
 }
 
 impl Database {
+    #[cfg(any(test, feature = "test-fault-injection"))]
+    #[doc(hidden)]
+    pub fn inject_unknown_result_after_next_write(&self, error: StoreError) {
+        self.committer.lock().fail_after_write = Some(error);
+    }
+
     /// Latest durable per-store commit sequence. Missing legacy metadata is
     /// untracked until the first successful write; reads never create a marker.
+    /// An opt-in store with an uncertain write result is untracked until reopen.
     pub fn commit_sequence(&self) -> Option<u64> {
         let st = self.committer.lock();
-        st.tracked.then_some(st.seq)
+        (st.tracked && !st.unknown_write).then_some(st.seq)
     }
 
     pub fn begin(&self) -> Txn<'_> {
         let mut st = self.committer.lock();
         let start_seq = st.seq;
-        let snapshot_commit_sequence = st.tracked.then_some(start_seq);
+        let snapshot_commit_sequence = (st.tracked && !st.unknown_write).then_some(start_seq);
         *st.active.entry(start_seq).or_insert(0) += 1;
         // Taken under the lock, so no commit lands between the sequence and the snapshot.
         let snapshot = self.db.snapshot();
@@ -655,6 +684,11 @@ impl<'db> Txn<'db> {
         limits: crate::replicated_apply::ApplyLimits,
     ) -> Result<Option<crate::replicated_apply::Batch>, crate::replicated_apply::ApplyError> {
         use crate::replicated_apply::{ApplyError, Batch, Mutation};
+        if self.db.committer.lock().unknown_write {
+            return Err(ApplyError::Invalid(
+                "uncertain storage write requires reopen",
+            ));
+        }
         if !self.replicated_ids || !self.replication_valid {
             return Err(ApplyError::Invalid(
                 "replicated IDs must be enabled before writes",
@@ -671,6 +705,13 @@ impl<'db> Txn<'db> {
                 .ok_or(ApplyError::Invalid("apply revision exhausted"))
         })?;
         let mut st = self.db.committer.lock();
+        // A different transaction may have hit an ambiguous write while the
+        // apply ledger was read above. Recheck under the final preparation lock.
+        if st.unknown_write {
+            return Err(ApplyError::Invalid(
+                "uncertain storage write requires reopen",
+            ));
+        }
         if self.has_conflict(&st) {
             return Err(TxnError::Conflict.into());
         }
@@ -694,14 +735,60 @@ impl<'db> Txn<'db> {
         Ok(Some(batch))
     }
 
-    pub fn commit(mut self) -> Result<u64, TxnError> {
-        if self.replicated_ids && !self.writes.is_empty() {
+    pub fn commit(self) -> Result<u64, TxnError> {
+        self.commit_inner(None).map_err(|error| match error {
+            crate::db::request_ledger::LedgerError::Transaction(error) => error,
+            crate::db::request_ledger::LedgerError::Store(error) => TxnError::Store(error),
+            other => TxnError::Store(StoreError::Corrupt(format!(
+                "unexpected request ledger error: {other}"
+            ))),
+        })
+    }
+
+    /// Experimental trusted-storage operation. The fingerprint covers the exact
+    /// staged mutations. The authenticated opt-in server establishes the principal
+    /// scope and graph authorization before calling this trusted storage method.
+    #[doc(hidden)]
+    pub fn commit_identified(
+        self,
+        scope: &str,
+        seed: &str,
+    ) -> Result<crate::db::request_ledger::CommitReceipt, crate::db::request_ledger::LedgerError>
+    {
+        let fingerprint = crate::db::request_ledger::fingerprint(
+            self.writes
+                .iter()
+                .map(|((cf, key), value)| (*cf, key.as_slice(), value.as_deref())),
+        );
+        let request = self.db.prepare_request(scope, seed, fingerprint)?;
+        let incarnation = self
+            .db
+            .request_ledger
+            .expect("validated identified store")
+            .incarnation;
+        let sequence = self.commit_inner(Some(request))?;
+        Ok(crate::db::request_ledger::CommitReceipt {
+            incarnation,
+            sequence,
+        })
+    }
+
+    fn commit_inner(
+        mut self,
+        request: Option<crate::db::request_ledger::PreparedRequest>,
+    ) -> Result<u64, crate::db::request_ledger::LedgerError> {
+        if self.replicated_ids && (!self.writes.is_empty() || request.is_some()) {
             return Err(
                 StoreError::Corrupt("replicated write requires quorum preparation".into()).into(),
             );
         }
         let db = self.db;
         let mut st = db.committer.lock();
+        if st.unknown_write {
+            return Err(
+                StoreError::Corrupt("uncertain storage write requires reopen".into()).into(),
+            );
+        }
         let start = self.start_seq;
         if self
             .writes
@@ -709,18 +796,25 @@ impl<'db> Txn<'db> {
         {
             return Err(StoreError::Corrupt("commit sequence metadata is reserved".into()).into());
         }
+        let mut batch = rocksdb::WriteBatch::default();
+        let next_sequence = if !self.writes.is_empty() || request.is_some() {
+            st.seq
+                .checked_add(1)
+                .ok_or_else(|| StoreError::Corrupt("commit sequence exhausted".into()))?
+        } else {
+            st.seq
+        };
+        if let Some(request) = &request {
+            db.append_request(request, next_sequence, &mut batch)?;
+        }
         let conflict = self.has_conflict(&st);
         if conflict {
             st.release(start, self.writer);
             self.done = true;
-            return Err(TxnError::Conflict);
+            return Err(TxnError::Conflict.into());
         }
-        if !self.writes.is_empty() {
-            let seq = st
-                .seq
-                .checked_add(1)
-                .ok_or_else(|| StoreError::Corrupt("commit sequence exhausted".into()))?;
-            let mut batch = rocksdb::WriteBatch::default();
+        if !self.writes.is_empty() || request.is_some() {
+            let seq = next_sequence;
             for ((cf, key), value) in &self.writes {
                 let handle = db.cf(cf.name())?;
                 match value {
@@ -736,7 +830,17 @@ impl<'db> Txn<'db> {
             batch.put_cf(db.cf("meta")?, COMMIT_SEQUENCE_KEY, marker);
             let mut opts = rocksdb::WriteOptions::default();
             opts.set_sync(true);
-            db.db.write_opt(batch, &opts).map_err(StoreError::from)?;
+            if let Err(error) = db.db.write_opt(batch, &opts) {
+                if db.request_ledger.is_some() {
+                    st.unknown_write = true;
+                }
+                return Err(StoreError::from(error).into());
+            }
+            #[cfg(any(test, feature = "test-fault-injection"))]
+            if let Some(error) = st.fail_after_write.take() {
+                st.unknown_write = true;
+                return Err(error.into());
+            }
             st.seq = seq;
             st.tracked = true;
             // Explicit point/prefix dependencies include the sequence marker.

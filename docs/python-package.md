@@ -32,9 +32,16 @@ every minor driver release is not implied by that dependency range.
 Every bounded batch commits separately. `None` removes a property; omitted
 properties remain unchanged. A lost commit acknowledgment is an unknown outcome:
 the helper does not blindly replay the callback. Reconcile stable source keys
-before retrying. Explicit retained request IDs are supported only by the
-experimental quorum path; standalone servers reject that metadata. See
+before retrying. Explicit retained request IDs require the experimental quorum path or the
+opt-in authenticated [standalone request ledger](standalone-requests.md). See
 [the helper contract](python-client.md) for all mutation and security limits.
+
+Known server memory refusals and unknown-commit codes raise
+`MemoryPressureError` and `CommitOutcomeUnknownError`, preserving the driver
+error as their cause. Other errors keep their original type. The optional
+`request_status(seed)` helper uses the standalone experimental endpoint in a
+fresh autocommit session; an absent receipt never means a safe retry. See the
+[error and status contract](python-client.md#typed-server-failures-and-standalone-status).
 
 For example, Python release version `0.10.0b1` corresponds to Rust/tag
 `0.10.0-beta.1` under PEP 440. The release helper updates both versions together. Existing

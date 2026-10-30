@@ -17,7 +17,7 @@ pub use parser::{parse, ParseError};
 
 pub mod exec;
 pub use exec::{
-    execute, execute_with_limits, ExecError, ExecutionLimits, NodeOut, Out, PathOut,
-    PreparedReplication, QueryAccess, QueryMemoryPool, QueryMemoryUsage, QueryOutput,
-    QueryTransaction, QueryTransactionState, RelationshipOut,
+    execute, execute_with_limits, ExecError, ExecutionLimits, LazyRun, NodeOut, Out, PathOut,
+    PreparedReplication, QueryAccess, QueryMemoryPool, QueryMemoryUsage, QueryOutput, QueryStream,
+    QueryTransaction, QueryTransactionState, RelationshipOut, RunOutput,
 };

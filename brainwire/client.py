@@ -8,8 +8,65 @@ import itertools
 import json
 import math
 import re
+from functools import wraps
+from uuid import UUID
 from collections.abc import Mapping
 
+
+
+class BrainwireError(RuntimeError):
+    """A recognized Brainwire server failure, retaining the driver exception."""
+
+    def __init__(self, original_error):
+        self.original_error = original_error
+        self.code = original_error.code
+        message = getattr(original_error, "message", None)
+        self.message = message if isinstance(message, str) else str(original_error)
+        self.rolled_back = None
+        super().__init__(self.message)
+
+
+class MemoryPressureError(BrainwireError):
+    """Memory refusal; only a valid server hint supplies rollback and size fields."""
+
+    def __init__(self, original_error):
+        super().__init__(original_error)
+        self.reason = self.requested_bytes = self.available_bytes = None
+        hint = re.search(
+            r"\[brainwire\.memory reason=(statement_limit|query_pool|process_limit|cgroup|ingress) "
+            r"requested_bytes=([0-9]{1,20}) available_bytes=([0-9]{1,20}) rolled_back=true\]\Z",
+            self.message,
+        )
+        if hint:
+            requested, available = int(hint[2]), int(hint[3])
+            if requested < 1 << 64 and available < 1 << 64:
+                self.reason, self.requested_bytes, self.available_bytes = hint[1], requested, available
+                self.rolled_back = True
+
+
+class CommitOutcomeUnknownError(BrainwireError):
+    """The server cannot confirm commit outcome; reconcile before any retry."""
+
+
+def _server_errors(operation):
+    @wraps(operation)
+    def invoke(*args, **kwargs):
+        try:
+            return operation(*args, **kwargs)
+        except BrainwireError:
+            raise
+        except Exception as error:
+            code = getattr(error, "code", None)
+            if not isinstance(code, str):
+                raise
+            error_type = {
+                "Neo.TransientError.General.MemoryPressure": MemoryPressureError,
+                "Neo.ClientError.Transaction.CommitOutcomeUnknown": CommitOutcomeUnknownError,
+            }.get(code)
+            if error_type is None:
+                raise
+            raise error_type(error) from error
+    return invoke
 
 
 def _request_id(seed):
@@ -148,6 +205,7 @@ class GraphClient:
         self.driver, self.database = driver, database
         self.batch_size, self.batch_bytes = batch_size, batch_bytes
 
+    @_server_errors
     def _write(self, operation):
         # A lost COMMIT reply is ambiguous; managed retries can replay the write.
         with self.driver.session(database=self.database) as session:
@@ -156,13 +214,14 @@ class GraphClient:
                 tx.commit()
                 return result
 
+    @_server_errors
     def run_cypher(self, query, parameters=None):
         """Run one parameterized Cypher statement and return all records as dicts.
 
         The result is fully consumed before the method returns, so callers do
         not accidentally use a cursor after its session closes. A single
         statement is atomic on the server. This does not retry uncertain writes;
-        use ``write_transaction`` with a request ID for retained quorum retries.
+        use ``write_transaction`` with a request ID where the server supports it.
         """
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a nonempty string")
@@ -173,6 +232,7 @@ class GraphClient:
         with self.driver.session(database=self.database) as session:
             return session.run(query, dict(parameters)).data()
 
+    @_server_errors
     def checkpoint(self, name):
         """Create an online native checkpoint of this graph; return its receipt.
 
@@ -193,11 +253,14 @@ class GraphClient:
             ).data()[0]
         return {"graph": self.database, **row, "ontology_version": version}
 
+    @_server_errors
     def write_transaction(self, operation, *, request_id):
-        """Run once with a retained request seed on a quorum server's current leader.
+        """Run once with a retained request seed on a supported server.
 
-        Standalone servers reject this metadata. No managed retry or leader routing
-        occurs; AlreadyCommitted/CommitOutcomeUnknown propagate to the caller.
+        This requires a quorum leader or an authenticated standalone server with
+        its experimental request ledger enabled. No managed retry or leader routing
+        occurs; AlreadyCommitted propagates and a recognized unknown-outcome
+        server code raises CommitOutcomeUnknownError with the driver cause.
         Return the callback's value only after an acknowledged explicit commit.
         Materialize query results inside operation before its transaction closes.
         """
@@ -207,6 +270,35 @@ class GraphClient:
                 result = operation(tx)
                 tx.commit()
                 return result
+
+    def request_status(self, request_id):
+        """Read a standalone experimental outcome using a fresh autocommit call.
+
+        Requires the server's authenticated request-ledger mode. The returned
+        incarnation describes the current graph history; ``not_recorded`` is
+        not confirmation of rollback or permission to replay a write.
+        """
+        _request_id(request_id)
+        rows = self.run_cypher("CALL db.requestStatus($seed)", {"seed": request_id})
+        if len(rows) != 1 or not isinstance(rows[0], dict):
+            raise ValueError("invalid request-status response")
+        row = rows[0]
+        if not {"status", "requestId", "incarnation", "sequence"}.issubset(row):
+            raise ValueError("invalid request-status response")
+        status, sequence = row.get("status"), row.get("sequence")
+        valid_sequence = (isinstance(sequence, str) and sequence.isascii()
+                          and sequence.isdigit() and len(sequence) <= 20
+                          and int(sequence) < 1 << 64)
+        if (row.get("requestId") != request_id
+                or status not in ("committed", "not_recorded")
+                or (status == "committed" and not valid_sequence)
+                or (status == "not_recorded" and sequence is not None)):
+            raise ValueError("invalid request-status response")
+        try:
+            UUID(row["incarnation"])
+        except (KeyError, ValueError, TypeError, AttributeError) as error:
+            raise ValueError("invalid request-status incarnation") from error
+        return {name: row[name] for name in ("status", "requestId", "incarnation", "sequence")}
 
     def upsert_node(self, label, entity_id, properties=None):
         return self.load_nodes(label, [{"entity_id": _entity(entity_id), **_properties({} if properties is None else properties)}])

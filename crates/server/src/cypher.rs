@@ -99,7 +99,9 @@ fn category(e: &ExecError) -> &'static str {
         ExecError::Semantic(_) => "semantic",
         ExecError::ParameterMissing(_) => "parameter",
         ExecError::ConstraintViolation(_) => "constraint",
-        ExecError::MemoryLimit { .. } | ExecError::MemoryPoolExhausted { .. } => "resource",
+        ExecError::MemoryLimit { .. }
+        | ExecError::MemoryPoolExhausted { .. }
+        | ExecError::ProcessMemoryLimit { .. } => "resource",
         ExecError::TimedOut => "timeout",
         ExecError::Conflict => "conflict",
         ExecError::Graph(_) => "storage",

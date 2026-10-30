@@ -11,6 +11,9 @@ use rocksdb::{
     WriteBufferManager, DB,
 };
 
+#[path = "request_ledger.rs"]
+pub mod request_ledger;
+
 /// Reserved metadata key; only the transaction committer may write it.
 pub(crate) const COMMIT_SEQUENCE_KEY: &[u8] = b"commit/sequence";
 
@@ -116,6 +119,7 @@ pub struct Database {
     pub(crate) committer: crate::txn::Committer,
     pub(crate) alloc: crate::alloc::IdAllocator,
     pub(crate) id_block: u64,
+    pub(crate) request_ledger: Option<request_ledger::LedgerState>,
 }
 
 fn family_options(res: &Resources) -> Options {
@@ -136,9 +140,24 @@ fn family_options(res: &Resources) -> Options {
 
 impl Database {
     pub fn open(path: &Path, res: &Resources) -> Result<Database, StoreError> {
+        if path.join("CURRENT").is_file()
+            && DB::list_cf(&Options::default(), path)
+                .is_ok_and(|families| families.iter().any(|name| name == request_ledger::FAMILY))
+        {
+            return Err(StoreError::Catalog("experimental request-ledger format requires explicit authenticated server opt-in; ordinary offline check/backup/restore commands refuse it".into()));
+        }
+        Self::open_config(path, res, false, true)
+    }
+
+    fn open_config(
+        path: &Path,
+        res: &Resources,
+        ledger: bool,
+        create: bool,
+    ) -> Result<Database, StoreError> {
         let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
+        opts.create_if_missing(create);
+        opts.create_missing_column_families(create);
         opts.set_write_buffer_manager(&res.write_buffers);
         // Flushes and compactions run in parallel with ingestion.
         let cpus = std::thread::available_parallelism().map_or(4, |n| n.get()) as i32;
@@ -147,7 +166,9 @@ impl Database {
         opts.set_max_subcompactions(4);
         let families = COLUMN_FAMILIES
             .iter()
-            .map(|name| ColumnFamilyDescriptor::new(*name, family_options(res)));
+            .copied()
+            .chain(ledger.then_some(request_ledger::FAMILY))
+            .map(|name| ColumnFamilyDescriptor::new(name, family_options(res)));
         let db = DB::open_cf_descriptors(&opts, path, families)?;
         let sequence = load_commit_sequence(&db)?;
         Ok(Database {
@@ -155,6 +176,7 @@ impl Database {
             committer: crate::txn::Committer::new(res.config.conflict_history_keys, sequence),
             alloc: crate::alloc::IdAllocator::default(),
             id_block: res.config.id_block,
+            request_ledger: None,
         })
     }
 
@@ -169,6 +191,11 @@ impl Database {
     /// data. Commits are blocked during native checkpoint creation so the
     /// receipt cannot describe a newer or older store state.
     pub fn checkpoint_with_sequence(&self, destination: &Path) -> Result<Option<u64>, StoreError> {
+        if self.request_ledger.is_some() {
+            return Err(StoreError::Checkpoint(
+                "experimental request-ledger checkpoint/restore/fork is not supported".into(),
+            ));
+        }
         let error = |e: std::io::Error| StoreError::Checkpoint(e.to_string());
         let parent = destination
             .parent()
@@ -251,6 +278,7 @@ impl Database {
             committer: crate::txn::Committer::new(conflict_history_keys, sequence),
             alloc: crate::alloc::IdAllocator::default(),
             id_block: StoreConfig::for_tests().id_block,
+            request_ledger: None,
         }
     }
 }

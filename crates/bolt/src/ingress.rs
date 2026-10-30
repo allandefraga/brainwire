@@ -48,6 +48,13 @@ impl IngressLease {
         self.bytes = bytes;
         Ok(())
     }
+    /// Size hint for a refusal: bytes this message asked for in total, and how many
+    /// the shared pool could give it right now (its own share plus what is free).
+    pub(crate) fn hint(&self, extra: usize) -> (u64, u64) {
+        let reserved = self.pool.reserved.load(Ordering::Acquire);
+        let available = self.pool.limit.saturating_sub(reserved) + self.bytes;
+        (self.bytes.saturating_add(extra) as u64, available as u64)
+    }
 }
 impl Drop for IngressLease {
     fn drop(&mut self) {

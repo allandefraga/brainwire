@@ -37,7 +37,10 @@ for a minimum 64 MiB cache and positive query budgets still applies.
 If neither host memory nor cgroup bounds can be detected, legacy fixed defaults
 remain; inspect `config show` and configure explicit budgets on unsupported hosts.
 
-These are accounting budgets, **not a hard process RSS limit or an OOM guarantee**.
+`memory.limit` (default 90% of the detected capacity) is the process RSS
+ceiling: query reservations and new RUNs are refused near it, and the allocator
+returns idle memory; see [the design](design/process-memory-ceiling.md).
+The other budgets are accounting budgets, **not a hard process RSS limit or an OOM guarantee**.
 RocksDB native allocations, message decoding and encoding, operating system page
 cache, connections and other application allocations consume additional memory.
 A container's memory limit remains the operating system's enforcement mechanism.
@@ -58,8 +61,10 @@ size. Message size and decoded-storage caps still apply independently.
 
 Admission occurs before copying an assembled chunk or allocating charged
 PackStream storage. A request that cannot fit returns
-`Neo.TransientError.General.IngressMemoryPoolExhausted` and its connection
-closes before the request reaches the engine. Reduce batch sizes and use bounded
+`Neo.TransientError.General.MemoryPressure` with `reason=ingress` and a size
+hint before it reaches the engine. A logged-on session stays open: the rest of
+the message is skipped, its transaction is rolled back and RESET recovers it;
+an unauthenticated connection closes. Reduce batch sizes and use bounded
 backoff after a confirmed rejection. This error is different from an unknown
 commit outcome; never retry a write blindly after a lost acknowledgement.
 
@@ -108,8 +113,9 @@ and checking the cgroup limit.
 ## Admission under Linux cgroup pressure
 
 New Bolt RUNs are checked before copying query parameters and again before
-execution. If raw controller usage reaches 95% of any finite visible cgroup
-ancestor limit, the RUN fails with
+execution. If the working set (controller usage minus the inactive file cache
+in `memory.stat`, which the kernel reclaims before it OOMs) reaches 95% of any
+finite visible cgroup ancestor limit, the RUN fails with
 `Neo.TransientError.General.MemoryPressure`; uncommitted writes in its
 transaction are rolled back. Reduce concurrent work and reconcile application
 state before retrying. Existing PULL/DISCARD results, COMMIT, ROLLBACK, RESET

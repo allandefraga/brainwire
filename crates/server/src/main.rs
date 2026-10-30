@@ -9,6 +9,7 @@ mod databases;
 mod engine;
 mod memory_pressure;
 mod probe;
+mod process_memory;
 mod remote;
 mod remote_graph;
 mod remote_indexes;

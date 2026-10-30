@@ -21,6 +21,8 @@ Start with a local, synthetic graph. Brainwire is a source beta; check the
 - [Server configuration](serve.md) and [memory budgets](memory-defaults.md).
 - [Authentication](bolt-auth.md), [protected containers](protected-containers.md)
   and [encrypted transport](protected-transport.md).
+- [Experimental standalone request outcomes](standalone-requests.md): authenticated,
+  opt-in request identity and fresh status lookup on new dedicated volumes.
 - [Checkpoints and recovery](checkpoints.md), [transactions](transactions.md)
   and [shutdown](termination-recovery.md).
 - [Kubernetes and Swarm](orchestrators.md), plus the separate experimental

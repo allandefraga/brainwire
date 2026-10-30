@@ -35,6 +35,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "poolReservedBytes",
             "poolPeakBytes",
             "poolRejections",
+            "processHeadroomBytes",
         ]),
         "graph.project" => Ok(&[
             "nodeCount",
@@ -589,19 +590,21 @@ pub(super) fn run(
     if name == "db.memory" {
         let values = match ctx.budget.pool_usage() {
             Some(usage) => [
-                usage.limit_bytes,
-                usage.reserved_bytes,
-                usage.peak_bytes,
-                usage.rejections,
+                Some(usage.limit_bytes),
+                Some(usage.reserved_bytes),
+                Some(usage.peak_bytes),
+                Some(usage.rejections),
+                usage.process_headroom_bytes,
             ]
             .into_iter()
-            .map(|n| {
-                i64::try_from(n)
+            .map(|n| match n {
+                None => Ok(value(Value::Null)),
+                Some(n) => i64::try_from(n)
                     .map(|n| value(Value::Int(n)))
-                    .map_err(|_| semantic("memory counter exceeds Cypher integer capacity"))
+                    .map_err(|_| semantic("memory counter exceeds Cypher integer capacity")),
             })
             .collect::<Result<Vec<_>, _>>()?,
-            None => vec![value(Value::Null); 4],
+            None => vec![value(Value::Null); 5],
         };
         return Ok(vec![bind(values)?]);
     }

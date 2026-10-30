@@ -1,53 +1,100 @@
 # Standalone durable transaction request identity
 
-Status: design candidate only. No implementation or production guarantee is
-provided by this document. Scope is one protected server, one independently
-persisted graph, and explicit Bolt write transactions.
+Status: an experimental storage prototype and opt-in authenticated standalone
+server integration are implemented. They are disabled by default. See the
+[experimental operator guide](../standalone-requests.md). Upgrade from existing
+graphs, supported old-binary downgrade, ENOSPC/power loss and restore/fork remain
+qualification gates; no production or automatic logical retry guarantee is
+provided. The scope is one protected server and explicit write transactions.
 
-## v0.12 review: implementation gate
+## Implemented storage-only prototype
 
-The working-tree memory error contract does not implement standalone request
-reconciliation. `engine::Command::Begin` still rejects an explicit
-`brainwire_request_id` when no replica is configured, and standalone COMMIT
-calls `QueryTransaction::commit` without a request identity. There is no
-standalone `db.requestStatus` procedure. `db.commitState` returns a graph-wide
-sequence; concurrent commits and read-only transactions mean that sequence
-cannot identify an uncertain caller's request.
+The opt-in Rust storage methods are hidden from generated documentation.
+The ordinary server and offline tools without explicit opt-in cannot open this
+format; `db check --config` supports the experimental setting, while checkpoint
+creation is refused at the shared storage entry point. The experimental
+server path requires explicit `server.request_ledger = true`, authentication and
+a new dedicated volume:
 
-The smallest safe first delivery is **authenticated explicit transactions only**:
+- `Database::create_with_request_ledger` requires a nonexistent directory and
+  creates a dedicated `request_ledger_v1` column family. It persists a random
+  UUID incarnation, fixed quotas and an entry count synchronously. Creation
+  interrupted before the header persists fails closed on reopen; it does not
+  regenerate identity. Legacy activation is deliberately unsupported.
+- `Database::open_with_request_ledger` requires that family and validates the
+  header and every bounded record against the durable count, quotas and commit
+  sequence. Ordinary `Database::open` rejects the extra family, as does the
+  previous eleven-family RocksDB open policy in a regression test. An actual
+  supported old-binary downgrade rehearsal is still required before enablement.
+- `Txn::commit_identified` hashes the **exact staged mutations**, namespaces a
+  bounded scope/seed by incarnation, and checks duplicates against the current
+  RocksDB view under the committer lock. Graph mutations, the ordinary commit
+  sequence, ledger record and quota counter share one synchronous WriteBatch.
+  Matching duplicates return `AlreadyCommitted`; divergent mutations return
+  `PayloadMismatch`. No-op identified commits persist a ledger record and
+  advance the sequence once. Ordinary transactions retain their previous path.
+- An ambiguous RocksDB write error quarantines the opt-in database. Subsequent
+  commits, replication preparation (including empty preparation), request
+  lookups and checkpoints fail until exclusive close/reopen;
+  `commit_sequence` reports untracked rather than a possibly stale RAM value.
+  A fault-injection test persists the batch but suppresses its successful result,
+  verifies quarantine, and recovers the matching receipt and graph after reopen.
+  This test supplements pre/post-commit process kills; it is not disk-full or
+  power-loss qualification. Low-level graph reads and consumption of an ID
+  already reserved in a cached block can continue; they cannot be durably
+  committed while quarantined. Ordinary non-ledger stores keep their prior policy.
+- The exact-mutation fingerprint is deliberately conservative: a replay that
+  allocates different internal IDs can be rejected as a mismatch even when
+  application intent is similar. It is not a public operation fingerprint or
+  automatic callback replay protocol.
+- `request_receipt` performs a fresh trusted-storage lookup. It accepts a scope
+  only from trusted Rust callers; authentication, graph grants and principal
+  incarnation must be supplied by future server integration. Absence proves
+  neither rollback nor permission to retry. No code currently exposes it to
+  untrusted clients as arbitrary scope input. The experimental engine supplies
+  the authenticated principal ID and selected graph after checking grants.
+- Canonical entry bytes are bounded by persisted entry/byte quotas, with no TTL
+  or automatic eviction. These counts exclude RocksDB format overhead, physical
+  disk exhaustion and process memory. Runtime quota editing is not supported.
 
-1. Implement and test the store-incarnation/ledger format gate and a bounded
-   `commit_identified` operation in the storage layer. A successful graph batch
-   and its committed ledger entry must share the same synchronous WriteBatch.
-   The final duplicate check and quota admission must hold the committer lock.
-2. Propagate the trusted principal, graph incarnation, request seed and operation
-   fingerprint through BEGIN and COMMIT. Reject delegated visibility, read-only
-   identified transactions and external-effect procedures until their ownership
-   and atomicity contracts are defined. A shared anonymous principal is not a
-   safe request namespace.
-3. Expose an authorized, fresh-view lookup returning `committed` or
-   `not_recorded`. It must not accept an arbitrary caller identity, reveal
-   another principal's request, or describe `not_recorded` as a safe retry.
-4. Before enabling the feature, prove concurrent duplicate suppression,
-   payload-mismatch rejection, crash/reopen atomicity, quota rejection without
-   mutation, ACL isolation, upgrade/downgrade rejection and checkpoint/restore
-   identity behavior. Then connect explicit Python reconciliation without
-   managed callback replay.
+Focused tests cover concurrent duplicate attempts, payload mismatch, no-op
+records, quota rejection, MVCC conflict, invalid identities, retained-volume
+reopen, corrupt/missing headers, storage write refusal and process kill before
+or after commit. The kill test does not inject a crash inside RocksDB's WAL
+write, simulate power loss, or qualify checkpoints/restore/fork semantics.
+Copying an opt-in volume preserves its incarnation; do not treat independent
+clones or restored histories as safe retry targets. The server integration
+remains disabled until the remaining gates below are proved.
 
-These steps cross store open/format handling, transaction execution, procedure
-classification, authenticated server dispatch and the client. A storage-only
-marker, a lookup bolted onto `db.commitState`, or a separate post-commit ledger
-write would expose a misleading API and is not a safe partial implementation.
-Until these gates pass, retain `CommitOutcomeUnknown` and reconcile owned
-application state with a fresh authorized read; never infer rollback from a
-lost acknowledgement or automatically repeat a non-idempotent mutation.
+## v0.12 integration and remaining gates
+
+The experimental engine accepts an explicit request ID only with the opt-in
+setting, an authenticated graph writer and no static/delegated visibility.
+It attaches an immutable identified-write capability before RUN and rejects all
+CALL procedures across every UNION branch before executing any clause.
+BEGIN checks a fresh receipt; COMMIT still performs the authoritative duplicate
+check under the store committer lock. `AlreadyCommitted` remains an error.
+
+The status endpoint recognizes an isolated `CALL db.requestStatus(seed)` from its
+AST. It accepts no principal argument and requires a fresh autocommit transaction.
+The engine supplies the principal and selected graph from trusted session state;
+static/delegated visibility is denied. The status view is current, not the
+transaction's older storage snapshot. It returns no query text or fingerprints.
+The narrow first endpoint intentionally refuses composition and explicit BEGIN.
+
+The current experiment does not activate legacy stores, expose CLI export/restore,
+permit online checkpoints, provide principal-incarnation lifecycle management,
+or implement a semantic operation fingerprint and automatic callback replay.
+Before broader enablement, qualify real supported old binaries, existing-volume
+migration, power loss/disk-full and checkpoint/restore lineage. A reused static
+principal ID inherits its prior namespace; operators must use a new ID for a
+new identity. Copying a volume does not create an independent safe retry history.
 
 ## Problem and observed call paths
 
 The current Bolt parser accepts `tx_metadata.brainwire_request_id` as a bounded
-ASCII identifier (`crates/bolt/src/session.rs::durable_request_id`). The server
-rejects an explicit ID outside replicated serving
-(`crates/server/src/engine.rs`, `Command::Begin`). Replicated serving namespaces
+ASCII identifier (`crates/bolt/src/session.rs::durable_request_id`). The server rejects an explicit ID outside replicated serving unless the new
+experimental standalone opt-in is active (`engine.rs`, `Command::Begin`). Replicated serving namespaces
 the seed by cluster, graph and caller, performs a quorum barrier and looks up
 previous outcomes (`crates/server/src/cluster.rs::Replica::{request_key,begin}`).
 Its commit path can report an unknown outcome and directs operators to the

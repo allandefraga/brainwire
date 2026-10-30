@@ -210,8 +210,11 @@ with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r` removes the matched
 relationship, preserves endpoint nodes and respects graph write authorization.
 
 Some read pipelines process intermediate rows incrementally; writes and the
-final result remain materialized. This is not demand-driven Bolt execution for
-every query. `memory.query` enforces conservative accounting rather than a
+final result remain materialized. Over Bolt, a read that returns nodes,
+relationships or paths keeps them as handles and materializes their properties
+one PULL page at a time ([design](design/bolt-result-streaming.md)); the row set
+itself is still computed before RUN answers. This is not demand-driven Bolt
+execution for every query. `memory.query` enforces conservative accounting rather than a
 hard RSS ceiling. Optional graph-scoped authorization and connected
 ontology/memory/index inspection are implemented. The durable Bolt server
 uses the same executor and store.

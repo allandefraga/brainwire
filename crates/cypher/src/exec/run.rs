@@ -56,7 +56,7 @@ pub(super) struct Env<'a> {
 }
 
 impl<'a> Env<'a> {
-    fn ctx<'t, 'db>(&'t self, txn: &'t Txn<'db>) -> Context<'t, 'db> {
+    pub(super) fn ctx<'t, 'db>(&'t self, txn: &'t Txn<'db>) -> Context<'t, 'db> {
         Context {
             txn,
             catalog: self.catalog,
@@ -77,6 +77,18 @@ pub(super) fn execute(
     env: &Env<'_>,
     plan: &Plan,
 ) -> Result<(QueryOutput, bool), ExecError> {
+    let (fields, rows, wrote) = execute_rows(txn, env, plan)?;
+    let output = output_rows(&env.ctx(txn), env.budget, fields, rows)?;
+    Ok((output, wrote))
+}
+
+/// Run every part and keep the projected rows, entities as handles (`NodeId`,
+/// `Relationship`): what `execute` holds before it reads any node's properties.
+pub(super) fn execute_rows(
+    txn: &mut Txn<'_>,
+    env: &Env<'_>,
+    plan: &Plan,
+) -> Result<(Vec<String>, Vec<Row>, bool), ExecError> {
     let mut wrote = false;
     let mut rows: Vec<Row> = vec![];
     let mut seen: Option<HashSet<Key>> = None;
@@ -101,26 +113,107 @@ pub(super) fn execute(
             rows.push(projected);
         }
     }
-    let ctx = env.ctx(txn);
+    Ok((plan.parts[0].columns.clone(), rows, wrote))
+}
+
+/// The one part of a plan that can run lazily: write-free, no UNION, and no operator
+/// that needs every row first (aggregation, ORDER BY, DISTINCT, SKIP/LIMIT, writes,
+/// catalog procedures). Its rows can go to the client as they are produced.
+pub(super) fn lazy_part(plan: &Plan) -> Option<&Part> {
+    let [part] = plan.parts.as_slice() else {
+        return None;
+    };
+    (!part.columns.is_empty() && !part.ops.iter().any(|op| op.blocking() || op.is_write()))
+        .then_some(part)
+}
+
+/// Runs a [`lazy_part`] and hands each output row, materialized under the read
+/// visibility, to *sink* as soon as it exists; nothing is retained. *sink* returns
+/// false to stop. Time inside *sink* (a consumer waiting for PULL) is not charged to
+/// the RUN deadline. Sequential: the parallel scan would collect every row first.
+pub(super) fn stream_part(
+    ctx: &Context<'_, '_>,
+    env: &Env<'_>,
+    part: &Part,
+    sink: &mut dyn FnMut(Vec<Out>, usize) -> bool,
+) -> Result<(), ExecError> {
+    *env.cache.0.borrow_mut() = None;
+    let outputs = output_slots(&part.outputs);
+    let row = vec![Val::Null; env.vars.len()];
+    finish(stream(ctx, &part.ops, row, &mut |row| {
+        let row = project_output(row, &outputs);
+        let out = row
+            .into_iter()
+            .map(|value| graph::out(ctx, value))
+            .collect::<Result<Vec<_>, _>>()?;
+        let bytes = Budget::output_bytes(&out);
+        // Materialized output exists during the callback even when it is streamed.
+        // Output retained by the sink takes its own lease before this scope ends.
+        let _output_scope = ctx.budget.scope();
+        ctx.budget.charge(bytes)?;
+        let waited = std::time::Instant::now();
+        let more = sink(out, bytes);
+        ctx.budget.extend_deadline(waited.elapsed());
+        if more {
+            Ok(())
+        } else {
+            Err(Flow::Stop)
+        }
+    }))
+}
+
+/// Sequential lazy rows with owned output accounting. Only the callback owns
+/// retained rows; it must keep the supplied lease until delivery or discard.
+pub(super) fn stream_part_leased(
+    ctx: &Context<'_, '_>,
+    env: &Env<'_>,
+    part: &Part,
+    sink: &mut dyn FnMut(Vec<Out>, usize, QueryOutputLease) -> bool,
+) -> Result<(), ExecError> {
+    let mut error = None;
+    stream_part(
+        ctx,
+        env,
+        part,
+        &mut |row, bytes| match ctx.budget.output_lease(bytes) {
+            Ok(lease) => sink(row, bytes, lease),
+            Err(failed) => {
+                error = Some(failed);
+                false
+            }
+        },
+    )?;
+    error.map_or(Ok(()), Err)
+}
+
+/// Materialize *rows* (read each entity's record and properties) as output, charging
+/// what is retained. The deferred path calls it one PULL page at a time.
+pub(super) fn output_rows(
+    ctx: &Context<'_, '_>,
+    budget: &Budget<'_>,
+    fields: Vec<String>,
+    rows: impl IntoIterator<Item = Row>,
+) -> Result<QueryOutput, ExecError> {
+    let rows = rows.into_iter();
     let mut output = QueryOutput {
-        fields: plan.parts[0].columns.clone(),
-        rows: Vec::with_capacity(rows.len()),
+        fields,
+        rows: Vec::with_capacity(rows.size_hint().0),
     };
     for row in rows {
         let row: Vec<Out> = row
             .into_iter()
-            .map(|value| graph::out(&ctx, value))
+            .map(|value| graph::out(ctx, value))
             .collect::<Result<_, _>>()?;
-        env.budget.output(&row)?;
+        budget.output(&row)?;
         output.rows.push(row);
     }
-    env.budget.check_deadline()?;
-    Ok((output, wrote))
+    budget.check_deadline()?;
+    Ok(output)
 }
 
 // Terminal output no longer needs working slots. Move each final occurrence
 // so large strings/lists are not duplicated while compacting the output row.
-fn output_slots(outputs: &[usize]) -> Vec<(usize, bool)> {
+pub(super) fn output_slots(outputs: &[usize]) -> Vec<(usize, bool)> {
     let mut seen = HashSet::new();
     let mut slots: Vec<_> = outputs
         .iter()
@@ -131,7 +224,7 @@ fn output_slots(outputs: &[usize]) -> Vec<(usize, bool)> {
     slots
 }
 
-fn project_output(mut row: Row, outputs: &[(usize, bool)]) -> Row {
+pub(super) fn project_output(mut row: Row, outputs: &[(usize, bool)]) -> Row {
     outputs
         .iter()
         .map(|&(slot, last)| {
@@ -1423,7 +1516,7 @@ fn expand_from(
                 "expected a node, found {}",
                 other.type_name()
             ))
-            .into())
+            .into());
         }
     };
     if expand.rel_bound {

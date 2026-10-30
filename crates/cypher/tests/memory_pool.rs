@@ -174,3 +174,40 @@ fn result_lease_survives_commit_prepare_rollback_and_drop_without_double_charge(
         assert_eq!(pool.usage().reserved_bytes, 0);
     }
 }
+
+#[test]
+fn process_headroom_refuses_growth_the_pool_alone_would_admit() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let pool = Arc::new(QueryMemoryPool::new(1 << 20));
+    let headroom = Arc::new(std::sync::atomic::AtomicUsize::new(1000));
+    let source = Arc::clone(&headroom);
+    pool.set_process_headroom(move || source.load(std::sync::atomic::Ordering::Relaxed));
+    let limits = ExecutionLimits {
+        memory_bytes: 1 << 20,
+        timeout: None,
+    };
+    let params = BTreeMap::from([("text".into(), Value::Str("x".repeat(3000)))]);
+    let mut tx = QueryTransaction::begin_with_pool(&db, limits, Arc::clone(&pool)).unwrap();
+    let error = tx.run("RETURN $text", &params).unwrap_err();
+    assert!(
+        matches!(error, ExecError::ProcessMemoryLimit { available, requested } if available <= 1000 && requested > available),
+        "{error:?}"
+    );
+    drop(tx);
+    assert_eq!(pool.usage().reserved_bytes, 0);
+    assert_eq!(pool.usage().rejections, 1);
+    headroom.store(1 << 20, std::sync::atomic::Ordering::Relaxed);
+    let mut tx = QueryTransaction::begin_with_pool(&db, limits, Arc::clone(&pool)).unwrap();
+    tx.run("RETURN $text", &params).unwrap();
+    let out = tx
+        .run(
+            "CALL db.memory() YIELD processHeadroomBytes RETURN processHeadroomBytes",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        format!("{:?}", out.rows[0][0]),
+        format!("{:?}", brainwire_cypher::Out::Value(Value::Int(1 << 20)))
+    );
+}

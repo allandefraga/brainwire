@@ -35,6 +35,9 @@ pub fn run(
     let cluster_config = cluster_config
         .map(crate::cluster::ClusterConfig::load)
         .transpose()?;
+    if cluster_config.is_some() && loaded.config.server.request_ledger {
+        return Err("experimental request ledger is standalone only".into());
+    }
     let auth = match &loaded.config.server.auth_file {
         None => {
             eprintln!("warning: development mode, Bolt authentication is disabled; use an isolated network");
@@ -79,19 +82,42 @@ pub fn run(
             databases.start_index_workers();
             (None, databases)
         };
+        if !crate::process_memory::init_allocator() {
+            eprintln!("warning: allocator background decay unavailable; idle memory returns only on activity");
+        }
+        if loaded.config.memory.limit.0 > 0 {
+            let memory = crate::process_memory::ProcessMemory::new(loaded.config.memory.limit.0);
+            crate::process_memory::install(Arc::clone(&memory));
+            let ceiling = Arc::clone(&memory);
+            databases.query_pool().set_process_headroom(move || ceiling.headroom());
+            // The sampler must not keep databases open during graceful shutdown.
+            let observed = Arc::downgrade(&databases);
+            memory.start(move || {
+                let Some(databases) = observed.upgrade() else {
+                    return "databases=closed".to_owned();
+                };
+                let (cache, memtables) = databases.memory_usage();
+                let query = databases.query_pool().usage();
+                format!(
+                    "cache={cache} memtables={memtables} query_reserved={} query_rejections={}",
+                    query.reserved_bytes, query.rejections
+                )
+            });
+        }
         // Registered after the stores open, so a signal during recovery still
         // stops at once (crash-safe), and before the first accept.
         let stop = termination().map_err(|e| format!("cannot install signal handlers: {e}"))?;
         let stores = Arc::clone(&databases);
         let default_name = loaded.config.server.default_database.clone();
         println!(
-            "brainwire serve {} databases={:?} cache={} memtables={} query={} ingress={} (shared query reservations + per-RUN guard; not RSS)",
+            "brainwire serve {} databases={:?} cache={} memtables={} query={} ingress={} limit={} (query reservations refused near the process RSS limit)",
             listener.local_addr().map_err(|e| e.to_string())?,
             databases.names(),
             loaded.config.memory.cache,
             loaded.config.memory.memtables,
             loaded.config.memory.query,
             loaded.config.memory.ingress,
+            loaded.config.memory.limit,
         );
         let open = brainwire_bolt::server::serve_until(
             listener,

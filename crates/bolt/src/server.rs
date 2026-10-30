@@ -16,7 +16,7 @@ use crate::message::{parse_request, Response};
 #[cfg(test)]
 use crate::packstream::{pack, unpack};
 use crate::packstream::{unpack_admitted, PackError};
-use crate::session::{AuthMode, QueryEngine, Session, State};
+use crate::session::{AuthMode, EngineError, QueryEngine, Session, State};
 
 /// Default cap on assembled PackStream payload bytes per Bolt message,
 /// excluding chunk framing and NOOPs. Announced chunks are checked even if
@@ -408,6 +408,36 @@ async fn handle_connection_with_connection_timeouts<
     .await
 }
 
+fn logged_on(state: State) -> bool {
+    matches!(
+        state,
+        State::Ready | State::Streaming | State::TxReady | State::TxStreaming | State::Failed
+    )
+}
+
+fn ingress_refusal(requested: u64, available: u64) -> EngineError {
+    EngineError::memory_refused(
+        "ingress",
+        requested,
+        available,
+        "shared Bolt input memory budget exhausted; request not executed",
+    )
+}
+
+async fn write_refusal<S: AsyncRead + AsyncWrite + Unpin, E: QueryEngine>(
+    stream: &mut S,
+    session: &mut Session<E>,
+    refusal: EngineError,
+    io_timeout: std::time::Duration,
+) -> std::io::Result<()> {
+    let deadline = Some(tokio::time::Instant::now() + io_timeout);
+    for response in session.refuse(refusal) {
+        let value = response.into_value();
+        io_with_deadline(session, deadline, write_packstream_message(stream, &value)).await?;
+    }
+    Ok(())
+}
+
 async fn handle_connection_with_ingress<
     E: QueryEngine + Send + 'static,
     S: AsyncRead + AsyncWrite + Unpin,
@@ -453,11 +483,21 @@ async fn handle_connection_with_ingress<
             {
                 Ok(Some(payload)) => payload,
                 Ok(None) => break,
+                Err(ReadError::IngressExhausted {
+                    requested,
+                    available,
+                }) if logged_on(session.state()) => {
+                    // The reader skips the rest of this message; the session stays usable.
+                    drop(std::mem::replace(&mut ingress, ingress_pool.lease()));
+                    let refusal = ingress_refusal(requested, available);
+                    write_refusal(&mut stream, &mut session, refusal, limits.io_timeout).await?;
+                    continue;
+                }
                 Err(error) => {
                     drop(reader);
                     drop(ingress);
                     session.close();
-                    let message = if error == ReadError::IngressExhausted {
+                    let message = if matches!(error, ReadError::IngressExhausted { .. }) {
                         "shared Bolt input memory budget exhausted; request not executed".to_owned()
                     } else {
                         format!("message larger than {} bytes", limits.max_message_bytes)
@@ -468,8 +508,8 @@ async fn handle_connection_with_ingress<
                             .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
                         write_failure(
                             &mut stream,
-                            if error == ReadError::IngressExhausted {
-                                "Neo.TransientError.General.IngressMemoryPoolExhausted"
+                            if matches!(error, ReadError::IngressExhausted { .. }) {
+                                crate::session::MEMORY_REFUSED
                             } else {
                                 "Neo.ClientError.Request.Invalid"
                             },
@@ -483,6 +523,15 @@ async fn handle_connection_with_ingress<
             let mut input = payload.as_slice();
             let decoded =
                 unpack_admitted(&mut input, limits.max_decoded_message_bytes, &mut ingress);
+            if matches!(decoded, Err(PackError::IngressLimit)) && logged_on(session.state()) {
+                reader.allow_recovery_message();
+                let (requested, available) = ingress.hint(payload.len());
+                drop(payload);
+                drop(std::mem::replace(&mut ingress, ingress_pool.lease()));
+                let refusal = ingress_refusal(requested, available);
+                write_refusal(&mut stream, &mut session, refusal, limits.io_timeout).await?;
+                continue;
+            }
             if matches!(decoded, Err(PackError::IngressLimit)) {
                 drop(payload);
                 drop(reader);
@@ -494,7 +543,7 @@ async fn handle_connection_with_ingress<
                         .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout)),
                     write_failure(
                         &mut stream,
-                        "Neo.TransientError.General.IngressMemoryPoolExhausted",
+                        crate::session::MEMORY_REFUSED,
                         "shared Bolt input memory budget exhausted; request not executed",
                     ),
                 )
@@ -528,37 +577,57 @@ async fn handle_connection_with_ingress<
                 Some(req) => {
                     let response_deadline = authentication_deadline;
                     check_io_deadline(&mut session, response_deadline.or(request_deadline))?;
-                    // RocksDB calls are synchronous. Keep them off Tokio's IO workers.
-                    let admission = std::mem::replace(&mut ingress, ingress_pool.lease());
-                    let (next, responses) = tokio::task::spawn_blocking(move || {
-                        // A cancelled async waiter does not cancel this worker.
-                        let _admission = admission;
-                        let mut session = session;
-                        let responses = session.handle(req);
-                        (session, responses)
-                    })
-                    .await
-                    .map_err(|err| std::io::Error::other(format!("query worker failed: {err}")))?;
-                    session = next;
-                    check_io_deadline(&mut session, response_deadline)?;
-                    // LOGOFF starts a fresh budget before its SUCCESS is written.
-                    if response_deadline.is_none() && session.state() == State::Authentication {
-                        authentication_deadline =
-                            Some(tokio::time::Instant::now() + authentication_timeout);
+                    // Write each bounded page before asking the engine for more. A
+                    // client PULL -1 must not accumulate its entire result in memory.
+                    let mut admission = Some(std::mem::replace(&mut ingress, ingress_pool.lease()));
+                    let mut request = Some(req);
+                    let mut write_deadline = None;
+                    while let Some(req) = request {
+                        // RocksDB calls are synchronous. Keep them off Tokio's IO workers.
+                        let input = admission.take();
+                        let worker_started = tokio::time::Instant::now();
+                        let (next, responses, continuation) =
+                            tokio::task::spawn_blocking(move || {
+                                let _admission = input;
+                                let mut session = session;
+                                let (responses, continuation) = session.handle_page(req);
+                                (session, responses, continuation)
+                            })
+                            .await
+                            .map_err(|err| {
+                                std::io::Error::other(format!("query worker failed: {err}"))
+                            })?;
+                        // Authenticated engine work is excluded from the IO budget,
+                        // including work between pages of the same PULL.
+                        if response_deadline.is_none() {
+                            if let Some(deadline) = write_deadline.as_mut() {
+                                *deadline += worker_started.elapsed();
+                            }
+                        }
+                        session = next;
+                        request = continuation;
+                        check_io_deadline(&mut session, response_deadline)?;
+                        // LOGOFF starts a fresh budget before its SUCCESS is written.
+                        if response_deadline.is_none() && session.state() == State::Authentication {
+                            authentication_deadline =
+                                Some(tokio::time::Instant::now() + authentication_timeout);
+                        }
+                        let deadline = *write_deadline.get_or_insert_with(|| {
+                            authentication_deadline
+                                .unwrap_or_else(|| tokio::time::Instant::now() + limits.io_timeout)
+                        });
+                        for r in responses {
+                            check_io_deadline(&mut session, Some(deadline))?;
+                            let value = r.into_value();
+                            io_with_deadline(
+                                &mut session,
+                                Some(deadline),
+                                write_packstream_message(&mut stream, &value),
+                            )
+                            .await?;
+                        }
+                        check_io_deadline(&mut session, Some(deadline))?;
                     }
-                    let write_deadline = authentication_deadline
-                        .or_else(|| Some(tokio::time::Instant::now() + limits.io_timeout));
-                    for r in responses {
-                        check_io_deadline(&mut session, write_deadline)?;
-                        let value = r.into_value();
-                        io_with_deadline(
-                            &mut session,
-                            write_deadline,
-                            write_packstream_message(&mut stream, &value),
-                        )
-                        .await?;
-                    }
-                    check_io_deadline(&mut session, write_deadline)?;
                     if session.state() == State::Defunct {
                         return Ok(());
                     }
@@ -696,6 +765,253 @@ mod tests {
         }
     }
 
+    struct DeferredOutputEngine {
+        remaining: usize,
+        produced: Arc<std::sync::atomic::AtomicUsize>,
+        commits: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl QueryEngine for DeferredOutputEngine {
+        fn begin(&mut self, _: Option<&str>) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _: Option<&str>,
+            _: &str,
+            _: &PackValue,
+        ) -> Result<crate::session::QueryResult, EngineError> {
+            self.remaining = 2501;
+            Ok(crate::session::QueryResult {
+                fields: vec!["x".into()],
+                rows: vec![],
+                memory: None,
+            })
+        }
+        fn deferred_rows(&self) -> usize {
+            self.remaining
+        }
+        fn pull(&mut self, n: usize, discard: bool) -> Result<Vec<Vec<PackValue>>, EngineError> {
+            assert!(n <= 1000);
+            let count = n.min(self.remaining);
+            let first = 2501 - self.remaining;
+            self.remaining -= count;
+            self.produced
+                .fetch_add(count, std::sync::atomic::Ordering::SeqCst);
+            Ok(if discard {
+                vec![]
+            } else {
+                (first..first + count)
+                    .map(|i| {
+                        vec![
+                            PackValue::Int(i as i64),
+                            PackValue::String("x".repeat(2048)),
+                        ]
+                    })
+                    .collect()
+            })
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            self.commits
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(None)
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            self.remaining = 0;
+            Ok(())
+        }
+    }
+
+    struct LeasedDeferredOutput {
+        inner: DeferredOutputEngine,
+        occupied: Arc<std::sync::atomic::AtomicUsize>,
+        memory: Option<crate::session::OutputMemory>,
+    }
+    impl QueryEngine for LeasedDeferredOutput {
+        fn begin(&mut self, db: Option<&str>) -> Result<(), EngineError> {
+            self.inner.begin(db)
+        }
+        fn run(
+            &mut self,
+            db: Option<&str>,
+            query: &str,
+            params: &PackValue,
+        ) -> Result<crate::session::QueryResult, EngineError> {
+            self.inner.run(db, query, params)
+        }
+        fn deferred_rows(&self) -> usize {
+            self.inner.deferred_rows()
+        }
+        fn pull(&mut self, n: usize, discard: bool) -> Result<Vec<Vec<PackValue>>, EngineError> {
+            let rows = self.inner.pull(n, discard)?;
+            if !rows.is_empty() {
+                self.occupied
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.memory = Some(crate::session::OutputMemory::new(OutputReservation(
+                    self.occupied.clone(),
+                )));
+            }
+            Ok(rows)
+        }
+        fn take_pull_memory(&mut self) -> Option<crate::session::OutputMemory> {
+            self.memory.take()
+        }
+        fn commit(&mut self) -> Result<Option<String>, EngineError> {
+            self.inner.commit()
+        }
+        fn abort(&mut self) -> Result<(), EngineError> {
+            self.memory.take();
+            self.inner.abort()
+        }
+    }
+
+    #[tokio::test]
+    async fn deferred_page_lease_survives_blocked_socket_and_releases_on_termination() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for finish in ["disconnect", "timeout", "cancel"] {
+            let occupied = Arc::new(AtomicUsize::new(0));
+            let (server, mut client) = tokio::io::duplex(128);
+            let task = tokio::spawn(handle_connection_with_connection_timeouts(
+                server,
+                LeasedDeferredOutput {
+                    inner: DeferredOutputEngine {
+                        remaining: 0,
+                        produced: Arc::new(AtomicUsize::new(0)),
+                        commits: Arc::new(AtomicUsize::new(0)),
+                    },
+                    occupied: occupied.clone(),
+                    memory: None,
+                },
+                ConnectionLimits {
+                    io_timeout: std::time::Duration::from_millis(100),
+                    ..ConnectionLimits::default()
+                },
+                AuthMode::AllowAll,
+                DEFAULT_HANDSHAKE_TIMEOUT,
+                DEFAULT_AUTHENTICATION_TIMEOUT,
+                watch::channel(false).1,
+            ));
+            login(&mut client).await;
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("query".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            read_success(&mut client).await;
+            send_request(
+                &mut client,
+                0x3f,
+                vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+            )
+            .await;
+            client.read_u16().await.unwrap();
+            assert_eq!(
+                occupied.load(Ordering::SeqCst),
+                1,
+                "page lease lost before blocked write"
+            );
+            match finish {
+                "disconnect" => {
+                    drop(client);
+                    let _ = task.await.unwrap();
+                }
+                "timeout" => {
+                    assert_eq!(
+                        task.await.unwrap().unwrap_err().kind(),
+                        std::io::ErrorKind::TimedOut
+                    );
+                }
+                "cancel" => {
+                    task.abort();
+                    let _ = task.await;
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                occupied.load(Ordering::SeqCst),
+                0,
+                "page retained after {finish}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unlimited_and_large_pull_write_pages_before_producing_more() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for n in [-1, 2500] {
+            let produced = Arc::new(AtomicUsize::new(0));
+            let commits = Arc::new(AtomicUsize::new(0));
+            let (server, mut client) = tokio::io::duplex(4096);
+            let task = pooled_connection(
+                server,
+                DeferredOutputEngine {
+                    remaining: 0,
+                    produced: produced.clone(),
+                    commits: commits.clone(),
+                },
+                IngressPool::new(4096),
+                std::time::Duration::from_secs(10),
+            );
+            login(&mut client).await;
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("RETURN x".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            read_success(&mut client).await;
+            send_request(
+                &mut client,
+                0x3f,
+                vec![PackValue::Map(vec![("n".into(), PackValue::Int(n))])],
+            )
+            .await;
+            let first = read_message(&mut client).await;
+            assert!(matches!(first, PackValue::Struct { tag: 0x71, .. }));
+            // The unread page fills the tiny socket, so the next page must not
+            // have been produced and no implicit transaction committed yet.
+            assert_eq!(produced.load(Ordering::SeqCst), 1000);
+            assert_eq!(commits.load(Ordering::SeqCst), 0);
+            let count = if n == -1 { 2501 } else { n as usize };
+            for index in 1..count {
+                let value = read_message(&mut client).await;
+                assert!(matches!(value, PackValue::Struct { tag: 0x71, fields }
+                    if matches!(&fields[0], PackValue::List(row) if row[0] == PackValue::Int(index as i64))));
+            }
+            let summary = read_message(&mut client).await;
+            assert!(matches!(summary, PackValue::Struct { tag: 0x70, .. }));
+            if n == -1 {
+                assert_eq!(commits.load(Ordering::SeqCst), 1);
+            } else {
+                assert_eq!(commits.load(Ordering::SeqCst), 0);
+                assert!(matches!(summary, PackValue::Struct { fields, .. }
+                    if fields[0].get("has_more") == Some(&PackValue::Bool(true))));
+                send_request(
+                    &mut client,
+                    0x3f,
+                    vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+                )
+                .await;
+                assert!(matches!(
+                    read_message(&mut client).await,
+                    PackValue::Struct { tag: 0x71, .. }
+                ));
+                read_success(&mut client).await;
+                assert_eq!(commits.load(Ordering::SeqCst), 1);
+            }
+            send_request(&mut client, 0x02, vec![]).await;
+            task.await.unwrap().unwrap();
+        }
+    }
+
     struct InvalidOutputEngine {
         commits: Arc<std::sync::atomic::AtomicUsize>,
         output_released: Arc<std::sync::atomic::AtomicBool>,
@@ -828,10 +1144,7 @@ mod tests {
         bc.write_all(&encode_message(&[0; 64])).await.unwrap();
         let mut failure = Vec::new();
         bc.read_to_end(&mut failure).await.unwrap();
-        assert_eq!(
-            decode_failure(&failure).0,
-            "Neo.TransientError.General.IngressMemoryPoolExhausted"
-        );
+        assert_eq!(decode_failure(&failure).0, crate::session::MEMORY_REFUSED);
         bt.await.unwrap().unwrap();
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(pool.reserved(), 500);
@@ -879,15 +1192,139 @@ mod tests {
             ],
         )
         .await;
-        let mut failure = Vec::new();
-        client.read_to_end(&mut failure).await.unwrap();
-        assert_eq!(
-            decode_failure(&failure).0,
-            "Neo.TransientError.General.IngressMemoryPoolExhausted"
+        // A logged-on session survives the refusal: FAILURE with the size hint,
+        // IGNORED for the pipelined PULL, then RESET recovers and work continues.
+        send_request(&mut client, 0x3F, vec![PackValue::Map(vec![])]).await;
+        let (code, message) = read_failure(&mut client).await;
+        assert_eq!(code, crate::session::MEMORY_REFUSED);
+        assert!(
+            message.contains("reason=ingress") && message.contains("rolled_back=true"),
+            "{message}"
         );
-        task.await.unwrap().unwrap();
+        assert!(matches!(
+            read_message(&mut client).await,
+            PackValue::Struct { tag: 0x7E, .. }
+        ));
         reserved_equals(&pool, 0).await;
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        send_request(&mut client, 0x0F, vec![]).await;
+        read_success(&mut client).await;
+        send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+        read_success(&mut client).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(client);
+        task.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+    }
+
+    #[tokio::test]
+    async fn reset_recovers_decode_refusal_while_another_connection_fills_ingress() {
+        let pool = IngressPool::new(512);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(2048);
+        let task = pooled_connection(
+            server,
+            BeginProbe(calls.clone()),
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        login(&mut client).await;
+        send_request(
+            &mut client,
+            0x10,
+            vec![
+                PackValue::String("RETURN $x".into()),
+                PackValue::Map(vec![(
+                    "x".into(),
+                    PackValue::List(vec![PackValue::Null; 32]),
+                )]),
+                PackValue::Map(vec![]),
+            ],
+        )
+        .await;
+        let (code, _) = read_failure(&mut client).await;
+        assert_eq!(code, crate::session::MEMORY_REFUSED);
+        reserved_equals(&pool, 0).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        // Model another connection taking all of the credit just released by decode.
+        let mut other = pool.lease();
+        other.grow(512).unwrap();
+        send_request(&mut client, 0x0F, vec![]).await;
+        read_success(&mut client).await;
+        assert_eq!(pool.reserved(), 512);
+        drop(other);
+        send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+        read_success(&mut client).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(client);
+        task.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+    }
+
+    #[tokio::test]
+    async fn a_refused_chunked_message_is_skipped_and_reset_passes_a_full_pool() {
+        let pool = IngressPool::new(512);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, mut client) = tokio::io::duplex(4096);
+        let task = pooled_connection(
+            server,
+            BeginProbe(calls.clone()),
+            pool.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        login(&mut client).await;
+        let mut holder = pool.lease();
+        holder.grow(500).unwrap();
+        // Two data chunks: the first is refused, the second must be skipped unread.
+        let mut frame = vec![0, 64];
+        frame.extend_from_slice(&[0xC0; 64]);
+        frame.extend_from_slice(&[0, 64]);
+        frame.extend_from_slice(&[0xC0; 64]);
+        frame.extend_from_slice(&[0, 0]);
+        client.write_all(&frame).await.unwrap();
+        let (code, message) = read_failure(&mut client).await;
+        assert_eq!(code, crate::session::MEMORY_REFUSED);
+        assert!(
+            message.contains("requested_bytes=64 available_bytes=12"),
+            "{message}"
+        );
+        // The pool is still full; the recovery RESET is admitted anyway.
+        send_request(&mut client, 0x0F, vec![]).await;
+        read_success(&mut client).await;
+        drop(holder);
+        send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+        read_success(&mut client).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(client);
+        task.await.unwrap().unwrap();
+        reserved_equals(&pool, 0).await;
+    }
+
+    async fn read_message<S: AsyncRead + Unpin>(client: &mut S) -> PackValue {
+        let mut body = Vec::new();
+        loop {
+            let n = client.read_u16().await.unwrap() as usize;
+            if n == 0 {
+                break;
+            }
+            let start = body.len();
+            body.resize(start + n, 0);
+            client.read_exact(&mut body[start..]).await.unwrap();
+        }
+        unpack(&mut body.as_slice()).unwrap()
+    }
+
+    async fn read_failure<S: AsyncRead + Unpin>(client: &mut S) -> (String, String) {
+        match read_message(client).await {
+            PackValue::Struct { tag: 0x7F, fields } => {
+                let text = |key: &str| match fields[0].get(key) {
+                    Some(PackValue::String(s)) => s.clone(),
+                    other => panic!("expected a string {key}, got {other:?}"),
+                };
+                (text("code"), text("message"))
+            }
+            other => panic!("expected FAILURE, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -936,7 +1373,7 @@ mod tests {
                 let mut failure = Vec::new();
                 b.read_to_end(&mut failure).await.unwrap();
                 let code = decode_failure(&failure).0;
-                if code == "Neo.TransientError.General.IngressMemoryPoolExhausted" {
+                if code == crate::session::MEMORY_REFUSED {
                     break;
                 }
                 // The first connection may not have been scheduled yet.

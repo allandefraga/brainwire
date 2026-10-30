@@ -33,9 +33,11 @@ Python, query with Cypher, and inspect a running server from the terminal.
 Each named graph has its own data and ontology. Your application controls
 source ingestion, identity mapping and orchestration.
 
-> **v0.11.0-beta.1 · source beta.** <!-- brainwire-release-version --> Use for controlled trials.
-> Production qualification is open. Review the [current limits](#current-limits)
-> and [operator checklist](docs/beta-operator-checklist.md) before using real data.
+> **v0.12.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Use for controlled trials.
+> This beta has no guaranteed process-wide memory ceiling. Sustained 2/4/8 GiB
+> qualification remains open. Review the [current limits](#current-limits),
+> [v0.12 qualification report](PRODUCTION-v0.12.md) and
+> [operator checklist](docs/beta-operator-checklist.md) before using real data.
 
 The capabilities below describe this checkout. For a release image, use the
 documentation from its matching tag; local changes may not be included.
@@ -178,6 +180,22 @@ use Python over Bolt while the server owns the graph.
 | Analytics | Sparse CSR projection, degree, weighted PageRank, shortest path, reachability, WCC/SCC and explainable `knowledge.rank` |
 | Ingestion and inspection | Python/Arrow helpers, resumable JSONL import, pinned DuckLake snapshot comparison, CLI and TUI |
 
+The experimental beta adds paged Bolt results, parallel streaming for eligible
+large label scans, shared query/ingress accounting and memory-pressure errors.
+A successful `RUN` can return before execution finishes: consume or discard its
+result and check the final response. Other plans can still retain node handles
+or materialize blocking results; oversized sorts, aggregates and `DISTINCT`
+are refused rather than spilled to disk. See the
+[streaming scope](docs/design/bolt-result-streaming.md) and
+[memory error contract](docs/design/memory-error-contract.md).
+
+For a new dedicated volume, an authenticated opt-in mode can record the outcome
+of an explicit write transaction and expose `CALL db.requestStatus($seed)`.
+The record is scoped to the graph and principal. `not_recorded` does not prove
+rollback or make retry safe; ordinary graphs are not migrated by enabling it.
+Read the [experimental request-outcome guide](docs/standalone-requests.md)
+before using this separate storage mode.
+
 The local Cypher implementation includes a bounded Rust-regex subset of `=~`;
 see [its syntax and memory limits](docs/cypher-regex.md). That subset is not
 full Java regex compatibility. Check the [Cypher guide](docs/local-cypher.md)
@@ -187,9 +205,10 @@ before porting a query.
 
 | Area | What to plan around |
 |---|---|
-| **Memory** | Query and ingress budgets estimate allocations. They do not enforce a global RSS ceiling, and the sustained 2/4/8 GiB qualification is incomplete. Read [memory defaults](docs/memory-defaults.md) and the [production roadmap](docs/production-readiness-roadmap.md). |
+| **Memory** | Query and ingress budgets estimate allocations; sampled process/cgroup admission can refuse new work under pressure. These controls do not enforce a global RSS ceiling, and the sustained 2/4/8 GiB qualification is incomplete. Read [memory defaults](docs/memory-defaults.md) and the [production roadmap](docs/production-readiness-roadmap.md). |
 | **Cypher** | One fixed label per node and immutable `entity_id`. Subqueries, pattern comprehensions and native temporal/spatial types remain unsupported. See [supported Cypher](docs/local-cypher.md). |
-| **Security** | The demo is unauthenticated. Shared access needs an auth policy and verified encryption boundary; native Bolt TLS is not implemented. See [server security](docs/serve.md). |
+| **Security** | The demo is unauthenticated and published on host loopback. Shared access needs an auth policy and verified encryption boundary; native Bolt TLS is not implemented. See [server security](docs/serve.md). |
+| **Recovery** | Synthetic restart and process-kill tests cover specific paths; they do not qualify power loss, full disks or every restore/upgrade scenario. Experimental request outcomes have additional volume and downgrade limits. See [request outcomes](docs/standalone-requests.md) and [checkpoints](docs/checkpoints.md). |
 | **Time and sources** | Catalog versions are not node/edge history. No native `AS OF` or automatic retention. DuckLake support compares pinned snapshots rather than native CDC. See [temporal data](docs/temporal-data.md) and [DuckLake ingestion](docs/ducklake-incremental.md). |
 | **Scale and ecosystem** | Three-voter quorum is experimental; ordinary deployment templates run one instance. Sharding, native text/vector indexes, a public Python package and an independent sync/async Bolt driver remain open. See [quorum operations](docs/quorum-replication.md) and the [v2 roadmap](ROADMAP-v2.md). |
 | **Performance** | Large ACL scans and cursor workloads need application-specific tests. Recorded benchmarks are synthetic diagnostics, not production SLOs. Start with [BENCHMARKS.md](BENCHMARKS.md). |
@@ -219,7 +238,7 @@ Use the image only after the matching release workflow publishes it and records
 a tested digest in `release-metadata.txt`:
 
 ```sh
-docker pull ghcr.io/allandefraga/brainwire:v0.11.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.12.0-beta.1 # brainwire-release-version
 ```
 
 Private images require `docker login ghcr.io` with a GitHub token that can read
@@ -253,7 +272,7 @@ cargo fmt --all -- --check
 
 ## Release status and license
 
-**Version:** `v0.11.0-beta.1` · source beta · production qualification open. <!-- brainwire-release-version -->
+**Version:** `v0.12.0-beta.1` · experimental beta · production qualification open. <!-- brainwire-release-version -->
 
 Current source uses [Apache-2.0](LICENSE). You may use, modify and redistribute it,
 including commercially, while following its terms. Check the license in the tag

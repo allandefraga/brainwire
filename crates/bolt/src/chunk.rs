@@ -13,8 +13,18 @@ pub struct MessageTooLarge;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadError {
     TooLarge,
-    IngressExhausted,
+    /// Refused before copying; carries the size hint (requested, available) and the
+    /// reader skips the rest of this message, so the connection stays usable.
+    IngressExhausted {
+        requested: u64,
+        available: u64,
+    },
 }
+
+/// After a refusal, the next message this small (RESET, ROLLBACK) is admitted even when
+/// the shared pool is still full, so the session can recover.
+/// ponytail: <= 1 KiB per refused connection escapes the pool; connection limits bound it.
+const CONTROL_MESSAGE_BYTES: usize = 1024;
 
 pub fn encode_message(payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(payload.len() + 4 + 2 * (payload.len() / MAX_CHUNK));
@@ -113,9 +123,18 @@ pub struct ChunkReader {
     buffer: Vec<u8>,
     offset: usize,
     current: Vec<u8>,
+    /// Skipping the remaining chunks of a refused message, up to its terminator.
+    discarding: bool,
+    /// The previous message was refused: admit one small recovery message.
+    recovering: bool,
 }
 
 impl ChunkReader {
+    /// Allow the same bounded recovery message after a decode-time refusal.
+    pub(crate) fn allow_recovery_message(&mut self) {
+        self.recovering = true;
+    }
+
     pub fn push(&mut self, bytes: &[u8]) {
         if self.offset != 0 {
             // Compact once per incoming read, rather than per chunk or NOOP.
@@ -151,6 +170,14 @@ impl ChunkReader {
                 return Ok(None);
             }
             let size = u16::from_be_bytes([remaining[0], remaining[1]]) as usize;
+            if self.discarding {
+                if remaining.len() < 2 + size {
+                    return Ok(None);
+                }
+                self.offset += 2 + size;
+                self.discarding = size != 0;
+                continue;
+            }
             if self
                 .current
                 .len()
@@ -164,13 +191,25 @@ impl ChunkReader {
                 if self.current.is_empty() {
                     continue; // NOOP
                 }
+                self.recovering = false;
                 return Ok(Some(std::mem::take(&mut self.current)));
             }
             if remaining.len() < 2 + size {
                 return Ok(None);
             }
             if let Some(lease) = lease.as_deref_mut() {
-                lease.grow(size).map_err(|_| ReadError::IngressExhausted)?;
+                let control = self.recovering && self.current.len() + size <= CONTROL_MESSAGE_BYTES;
+                if lease.grow(size).is_err() && !control {
+                    let (requested, available) = lease.hint(size);
+                    self.current = Vec::new();
+                    self.offset += 2 + size;
+                    self.discarding = true;
+                    self.recovering = true;
+                    return Err(ReadError::IngressExhausted {
+                        requested,
+                        available,
+                    });
+                }
             }
             self.current.extend_from_slice(&remaining[2..2 + size]);
             self.offset += 2 + size;
@@ -419,18 +458,28 @@ mod tests {
         assert_eq!(pool.reserved(), 3);
         assert_eq!(a.next_message_admitted(10, Some(&mut al)).unwrap(), None);
         assert_eq!(pool.reserved(), 3);
-        b.push(&[0, 2, 4, 5, 0, 0]);
+        b.push(&[0, 2, 4, 5, 0, 1, 6, 0, 0]);
         assert_eq!(
             b.next_message_admitted(10, Some(&mut bl)),
-            Err(ReadError::IngressExhausted)
+            Err(ReadError::IngressExhausted {
+                requested: 2,
+                available: 1
+            })
         );
         assert_eq!(pool.reserved(), 3);
-        drop(al);
+        // The refused message is skipped to its terminator, nothing is copied.
+        assert_eq!(b.next_message_admitted(10, Some(&mut bl)).unwrap(), None);
+        assert_eq!(pool.reserved(), 3);
+        // One small recovery message (RESET) passes while the pool is still full.
+        b.push(&[0, 2, 7, 8, 0, 0]);
         assert_eq!(
             b.next_message_admitted(10, Some(&mut bl)).unwrap(),
-            Some(vec![4, 5])
+            Some(vec![7, 8])
         );
-        assert_eq!(pool.reserved(), 2);
+        // The grace is spent: the next one waits for the pool again.
+        b.push(&[0, 2, 9, 9, 0, 0]);
+        assert!(b.next_message_admitted(10, Some(&mut bl)).is_err());
+        drop(al);
         drop(bl);
         assert_eq!(pool.reserved(), 0);
     }

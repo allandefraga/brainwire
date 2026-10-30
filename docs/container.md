@@ -117,13 +117,13 @@ A source tag can exist before its image. Check the matching GitHub release and
 its workflow before using it. After the image has been published:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.11.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.12.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --wait --wait-timeout 900
 ```
 
-Images use the exact release tag, for example `v0.11.0-beta.1`. <!-- brainwire-release-version -->
+Images use the exact release tag, for example `v0.12.0-beta.1`. <!-- brainwire-release-version -->
 For reproducible deployment, pin the digest from the release receipt. A private
 GHCR image requires `docker login ghcr.io` with a GitHub token authorized to read
 that package. Public images do not require login. Keep credentials out of shell

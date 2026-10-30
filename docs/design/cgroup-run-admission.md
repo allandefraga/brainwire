@@ -28,7 +28,13 @@ remain available so pressure does not prevent completing or freeing work.
 
 Discovery reuses the capacity parser's validated visible ancestry, captured
 once per process; a cgroup migration needs a process restart to rediscover it.
-Use raw controller usage, without subtracting reclaimable file cache. A parent
+Use the working set: controller usage minus `inactive_file` (`total_inactive_file`
+on v1) from `memory.stat`. Raw usage sits near the limit once files were read or
+written, since the kernel reclaims page cache only at the limit: measured on a
+2 GiB container with 671 MiB anonymous memory, raw usage stayed at 2047 MiB and
+every RUN was refused until the cached file was deleted. A missing `memory.stat`
+counts the raw usage (conservative). tmpfs/shmem is not reclaimable and still
+counts. A parent
 can be pressured by neighbors while the leaf is not. Reading only the smallest
 maximum would miss that condition.
 

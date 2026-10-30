@@ -211,7 +211,7 @@ query = "256KiB"
                                 tx.run("RETURN $text",text="x"*16000).consume()
                                 outcome = "held"
                             except Neo4jError as error:
-                                assert error.code == "Neo.TransientError.General.QueryMemoryPoolExhausted",error
+                                assert error.code == "Neo.TransientError.General.MemoryPressure",error
                                 assert error.is_retryable(),error
                                 outcome = "rejected"
                             finally:
@@ -231,7 +231,7 @@ query = "256KiB"
                                     during = dict(session.run(MEMORY).single())
                                 except Neo4jError as error:
                                     # Telemetry is an ordinary query and also respects a full pool.
-                                    assert error.code == "Neo.TransientError.General.QueryMemoryPoolExhausted",error
+                                    assert error.code == "Neo.TransientError.General.MemoryPressure",error
                                     during = {"status":"pool_exhausted"}
                                 else:
                                     assert 0 < during["poolReservedBytes"] <= 256*1024
