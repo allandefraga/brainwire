@@ -109,7 +109,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          previous_tag="$(git describe --first-parent --tags --match 'v[0-9]*' --abbrev=0 HEAD^)"
+          previous_tag="$(git describe --first-parent --tags --match 'v[0-9]*' --match 'clean/v[0-9]*' --abbrev=0 HEAD^)"
           previous_revision="$(git rev-parse "${previous_tag}^{commit}")"
           candidate_revision="$(git rev-parse HEAD)"
           old_source="$(mktemp -d "${RUNNER_TEMP}/brainwire-old-source.XXXXXX")"

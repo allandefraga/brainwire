@@ -116,8 +116,9 @@ def workspace_version() -> Version:
 
 
 def latest_release_tag(current: Version) -> str:
-    tag = git("describe", "--tags", "--match", "v[0-9]*", "--abbrev=0")
-    if tag != f"v{current}":
+    tag = git("describe", "--first-parent", "--tags", "--match", "v[0-9]*",
+              "--match", "clean/v[0-9]*", "--abbrev=0")
+    if tag.removeprefix("clean/") != f"v{current}":
         raise RuntimeError(
             f"Cargo says {current}, but the nearest release tag is {tag}; reconcile versions first"
         )

@@ -29,6 +29,21 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-30: sanitized-history release preparation
+
+- **Done:** preserved a verified private Git bundle, worktree patch, untracked
+  files, release metadata and nine release assets. Built an isolated sanitized
+  history; its current tree is unchanged, `git fsck` passed, and independent
+  scanning found no configured private identifiers in reachable objects or
+  paths. Compared 203 rewritten commits and found only planned replacements.
+- **Tags and CI:** prepared 13 local `clean/v*` aliases; CI and the release
+  helper recognize these aliases without firing the release workflow for them.
+  Both use first-parent selection. Regression tests and actionlint passed.
+- **Pending:** user choice on preservation of historical releases and tags,
+  remote archive and any destructive reference updates. No historical remote
+  tag has been changed. Re-run CI for the final sanitized commit before main
+  and the v0.12 beta tag. A local rewrite cannot remove old clones or caches.
+
 ## 2026-10-30: experimental beta, memory and publication review
 
 - **Done:** sample process RSS before the first admission decision, avoiding the

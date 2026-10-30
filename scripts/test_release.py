@@ -1,5 +1,8 @@
 import unittest
 import os
+import re
+import shlex
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -47,6 +50,76 @@ class SemVerTests(unittest.TestCase):
             self.assertEqual(release.python_version(Version.parse(source)), expected)
         with self.assertRaises(ValueError):
             release.python_version(Version.parse("1.0.0-custom"))
+
+
+class ReleaseTagTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.command("init", "--initial-branch=main")
+        self.command("config", "user.name", "Example Maintainer")
+        self.command("config", "user.email", "maintainer@example.test")
+        self.command("config", "commit.gpgSign", "false")
+        self.command("config", "tag.gpgSign", "false")
+        self.commit("initial source")
+        self.command("tag", "-a", "clean/v0.11.0-beta.1", "-m", "sanitized baseline")
+        self.root_patch = patch.object(release, "ROOT", self.root)
+        self.root_patch.start()
+        self.addCleanup(self.root_patch.stop)
+
+    def command(self, *args):
+        return subprocess.run(["git", "-C", str(self.root), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def commit(self, message):
+        self.command("commit", "--allow-empty", "-m", message)
+
+    def test_clean_baseline_keeps_complete_ref_for_message_range(self):
+        self.commit("feat: next candidate")
+        tag = release.latest_release_tag(Version.parse("0.11.0-beta.1"))
+        self.assertEqual(tag, "clean/v0.11.0-beta.1")
+        self.assertEqual(release.unreleased_messages(tag), ["feat: next candidate"])
+
+    def test_new_normal_release_can_follow_clean_baseline(self):
+        self.commit("release source")
+        self.command("tag", "-a", "v0.12.0-beta.1", "-m", "new release")
+        self.commit("fix: subsequent work")
+        self.assertEqual(release.latest_release_tag(Version.parse("0.12.0-beta.1")),
+                         "v0.12.0-beta.1")
+
+    def test_clean_baseline_still_requires_matching_workspace_version(self):
+        self.commit("next source")
+        with self.assertRaisesRegex(RuntimeError, "reconcile versions"):
+            release.latest_release_tag(Version.parse("0.12.0-beta.1"))
+
+    def test_release_helper_ignores_a_nearer_side_branch_tag(self):
+        self.command("switch", "-c", "side")
+        self.commit("side source")
+        self.command("tag", "-a", "v9.0.0", "-m", "unrelated side release")
+        self.command("switch", "main")
+        self.commit("main source")
+        self.command("merge", "--no-ff", "side", "-m", "merge side")
+        self.commit("candidate source")
+        self.assertEqual(release.latest_release_tag(Version.parse("0.11.0-beta.1")),
+                         "clean/v0.11.0-beta.1")
+
+    def test_upgrade_selection_keeps_first_parent_with_clean_tags(self):
+        self.command("switch", "-c", "side")
+        self.commit("side source")
+        self.command("tag", "-a", "clean/v9.0.0", "-m", "unrelated side release")
+        self.command("switch", "main")
+        self.commit("main source")
+        self.command("merge", "--no-ff", "side", "-m", "merge side")
+        self.commit("candidate source")
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
+        script = workflow.read_text(encoding="utf-8")
+        match = re.search(r'previous_tag="\$\((git describe [^\n]+)\)"', script)
+        self.assertIsNotNone(match)
+        command = shlex.split(match.group(1))
+        selected = subprocess.run(command, cwd=self.root, capture_output=True,
+                                  text=True, check=True).stdout.strip()
+        self.assertEqual(selected, "clean/v0.11.0-beta.1")
 
 
 class ReleaseFileTests(unittest.TestCase):
