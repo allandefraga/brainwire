@@ -29,6 +29,34 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-30: v0.12 experimental beta published
+
+- **Release:** `v0.12.0-beta.1` points to sanitized source
+  `a246714da781757b044cacb7a038907f7264f03f`. The release workflow completed
+  successfully, including workspace checks, volume upgrade, native amd64 and
+  arm64 image tests and manifest publication. The matching release's
+  `release-metadata.txt` records the source and tested image digests.
+- **History:** the original 13 version tags and nine release records/assets
+  were preserved and verified in the separate private history archive, then
+  removed from the primary remote. Thirteen `clean/v*` aliases and the new beta
+  tag remain. An independent scan of a fresh remote clone found no configured
+  old identity/term in reachable refs, objects or paths, and no credential
+  candidates for the selected patterns. This is not proof of total erasure:
+  caches, external clones, other local branches and private packages require
+  separate review before making the project public.
+- **Checks:** 938 Rust tests passed with three ignored; Clippy and formatting
+  passed. Python acceptance passed with driver 5.28.8 and 6.4.1, including
+  streaming reads, read-only enforcement, rollback and process-kill recovery.
+  These are synthetic checks, not a power-loss or production-load guarantee.
+- **Open:** sampled admission is not a hard RSS ceiling; sustained 2/4/8 GiB,
+  large-load qualification, production deployment and a comparable benchmark
+  remain outstanding. Native Bolt TLS is not available. Both repositories
+  remain private; review old package visibility and GitHub cached references
+  before any public announcement.
+- **Next:** run the release image with the documented protected setup or the
+  local synthetic demo; qualify memory, failover, real-source workloads and
+  public distribution separately.
+
 ## 2026-10-30: sanitized-history release preparation
 
 - **Done:** preserved a verified private Git bundle, worktree patch, untracked
