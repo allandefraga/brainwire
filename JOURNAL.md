@@ -43,6 +43,11 @@ Allan's current language.
   required sustained 2/4/8 GiB workload, a hard RSS guarantee or host-kernel
   OOM verification. Six short allocator diagnostics and their caveats are in
   [the report](docs/benchmarks/2026-10-30-v013-memory.md).
+- **Larger synthetic load:** 100,000 nodes with repeated 4,096-byte payloads
+  completed in a 4 GiB container, then idled for 60 seconds. Peak process RSS
+  was 223.1 MiB and final idle RSS was 194.8 MiB; count and offline audit passed.
+  The fixture is highly compressible and does not qualify sustained production
+  load or predict realistic throughput.
 - **Diagnostic fix:** the first allocator run was inconclusive because the
   parser missed jemalloc's actual log prefix. Fixed and reviewed the parser;
   eight tests and its self-check passed, followed by six passing reruns. This
