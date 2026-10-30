@@ -20,6 +20,9 @@ using this version with real data.
   a request ID, and a fresh autocommit `CALL db.requestStatus($seed)` can inspect
   its outcome. Graph mutations and the receipt share one synchronous storage
   batch. See [standalone request outcomes](docs/standalone-requests.md).
+- Python `GraphClient.stream_cypher(...)` reads records incrementally in a
+  scoped read-only session, without building one list of all rows. Server-side
+  streaming remains limited to eligible query plans.
 - Python `GraphClient.request_status(seed)` for that experimental endpoint and
   exported `BrainwireError`, `MemoryPressureError` and
   `CommitOutcomeUnknownError` exceptions. The helper preserves the original
@@ -56,6 +59,9 @@ using this version with real data.
 
 ### Fixed and verified locally
 
+- Process admission samples RSS at startup before serving requests, avoiding an
+  initial zero-usage window. If sampling is unavailable, admission remains
+  best-effort and emits a warning. It is not a hard RSS limit.
 - Result-page reservations survive queueing, autocommit and response ownership;
   releasing the final response releases its memory credit.
 - Request-status queries account for all decoded parameters and retain their

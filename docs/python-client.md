@@ -17,6 +17,7 @@ For a runnable synthetic demo, use the [README example](../README.md#write-from-
 | Remove known nodes and their incident relationships | `delete_nodes` |
 | Remove selected relationships and keep the nodes | `delete_edges` |
 | Run parameterized Cypher | `run_cypher` |
+| Stream read results page by page | `stream_cypher` |
 
 ## Single records and property patches
 
@@ -59,6 +60,35 @@ for supported clauses and explicit current limits.
 
 This illustrates the generic mutation API; a source-specific importer can
 apply its own stable identity mapping and schema contract.
+
+## Read results incrementally
+
+Use `stream_cypher` for reads that would create a large Python list:
+
+```python
+with graph.stream_cypher(
+    "MATCH (t:Ticket) RETURN t.entity_id AS id, t.subject AS subject",
+    fetch_size=200,
+) as records:
+    for record in records:
+        print(record["id"], record["subject"])
+```
+
+The method requests read-only access and yields one record dictionary at a time.
+The server rejects writes through this method. Keep iteration inside the `with`
+block; exit closes its session and invalidates the iterator, while the supplied
+shared driver stays open. An early exit discards unread results and checks the
+terminal summary. Query and memory errors during iteration or final consumption
+propagate, including the typed failures described below; no retry occurs. An
+exception raised by your own loop is preserved if cleanup also fails.
+
+`fetch_size` is a positive integer controlling the driver's requested page size.
+It does not cap total RSS, each record's size, or allocations in server operators
+that still materialize their results. Your code can still accumulate memory by
+storing every yielded record. Use `run_cypher` or explicit write transactions for
+writes; this streaming helper is for reads.
+
+
 
 ## One attempt per write
 

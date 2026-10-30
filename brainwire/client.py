@@ -9,6 +9,7 @@ import json
 import math
 import re
 from functools import wraps
+from contextlib import contextmanager
 from uuid import UUID
 from collections.abc import Mapping
 
@@ -231,6 +232,55 @@ class GraphClient:
             raise ValueError("parameters must be a mapping")
         with self.driver.session(database=self.database) as session:
             return session.run(query, dict(parameters)).data()
+
+    @contextmanager
+    def stream_cypher(self, query, parameters=None, *, fetch_size=200):
+        """Yield read-only records incrementally inside a ``with`` block.
+
+        ``fetch_size`` bounds the driver's requested pages, not process RSS or
+        eager operators in the server. Leaving normally discards unread records
+        and checks the terminal summary. The iterator is invalid after exit.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a nonempty string")
+        if parameters is None:
+            parameters = {}
+        if not isinstance(parameters, Mapping):
+            raise ValueError("parameters must be a mapping")
+        if type(fetch_size) is not int or fetch_size <= 0:
+            raise ValueError("fetch_size must be a positive integer")
+        session = self.driver.session(
+            database=self.database, fetch_size=fetch_size, default_access_mode="READ"
+        )
+        try:
+            result = _server_errors(session.run)(query, dict(parameters))
+            source = iter(result)
+            fetch = _server_errors(lambda: next(source).data())
+
+            def records():
+                while True:
+                    try:
+                        record = fetch()
+                    except StopIteration:
+                        return
+                    yield record
+
+            rows = records()
+            try:
+                yield rows
+                # Session.close() otherwise swallows some late server errors.
+                _server_errors(result.consume)()
+            finally:
+                rows.close()
+        except BaseException:
+            # Preserve the original query or consumer error if cleanup also fails.
+            try:
+                _server_errors(session.close)()
+            except Exception:
+                pass
+            raise
+        else:
+            _server_errors(session.close)()
 
     @_server_errors
     def checkpoint(self, name):

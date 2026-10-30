@@ -30,10 +30,21 @@ pub(crate) enum Crossing {
 
 impl ProcessMemory {
     pub(crate) fn new(limit: u64) -> Arc<Self> {
+        // Seed admission before the listener accepts work; the sampler may not
+        // run until after the first requests arrive. Unavailable RSS remains
+        // best-effort admission, matching later unavailable samples.
+        let rss = resident_bytes().unwrap_or_else(|| {
+            eprintln!("warning: initial process RSS unavailable; memory admission is best effort");
+            0
+        });
+        Self::with_initial_rss(limit, rss)
+    }
+
+    fn with_initial_rss(limit: u64, rss: u64) -> Arc<Self> {
         Arc::new(Self {
             limit,
-            rss: AtomicU64::new(0),
-            peak: AtomicU64::new(0),
+            rss: AtomicU64::new(rss),
+            peak: AtomicU64::new(rss),
             level: AtomicU8::new(0),
         })
     }
@@ -211,9 +222,22 @@ pub(crate) fn purge() -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn initial_rss_is_sampled_before_new_reservations() {
+        assert!(resident_bytes().unwrap() > 1024);
+        let memory = ProcessMemory::new(1024);
+        assert!(
+            memory.peak() > 1024,
+            "initial RSS must be observed synchronously"
+        );
+        assert_eq!(memory.headroom(), 0);
+        assert!(memory.refusal().is_some());
+    }
+
     #[test]
     fn crossings_log_once_with_hysteresis_and_refuse_at_95_percent() {
-        let memory = ProcessMemory::new(1000);
+        let memory = ProcessMemory::with_initial_rss(1000, 0);
         assert_eq!(memory.record(500), None);
         assert_eq!(memory.headroom(), 450);
         assert_eq!(memory.refusal(), None);

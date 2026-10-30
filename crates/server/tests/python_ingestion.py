@@ -69,6 +69,33 @@ def verify(session, rows):
     ], edges
 
 
+def verify_streaming(driver, expected_rows):
+    graph = GraphClient(driver, "ingestion")
+    query = "MATCH (c:Customer) RETURN c.entity_id AS id"
+    with graph.stream_cypher(query, fetch_size=7) as records:
+        count = 0
+        for record in records:
+            assert isinstance(record["id"], str)
+            count += 1
+    assert count == expected_rows
+    with graph.stream_cypher(query, fetch_size=7) as records:
+        assert isinstance(next(records)["id"], str)
+    assert next(records, None) is None, "iterator must expire when its session closes"
+    try:
+        with graph.stream_cypher(
+            "CREATE (:Customer {entity_id:'stream-read-only-rejected'}) RETURN 1",
+            fetch_size=7,
+        ) as records:
+            list(records)
+    except Neo4jError as error:
+        assert error.code == "Neo.ClientError.Security.Forbidden", error
+    else:
+        raise AssertionError("streaming read mode must reject writes")
+    assert graph.run_cypher(
+        "MATCH (c:Customer {entity_id:'stream-read-only-rejected'}) RETURN count(*) AS n"
+    ) == [{"n": 0}]
+
+
 def run(binary, rows, batch_size, query_mib):
     with tempfile.TemporaryDirectory(prefix="brainwire-python-ingestion-") as temporary:
         root = Path(temporary)
@@ -184,6 +211,7 @@ query = "{query_mib}MiB"
                                 else:
                                     raise AssertionError("missing edge endpoint must fail the batch")
                             verify(session, rows)
+                            verify_streaming(driver, rows - 1)
                             if cycle == 1:
                                 graph = GraphClient(driver, "ingestion", batch_size=250)
                                 cleanup_count = 1000
