@@ -21,8 +21,30 @@ class AllocatorProbeTests(unittest.TestCase):
         self.assertTrue(probe.confirmed(text, 10000))
         self.assertFalse(probe.confirmed(text.replace('10000', '1000garbage'), 1000))
         self.assertFalse(probe.confirmed('Set conf value: dirty_decay_ms:1000', 1000))
-        self.assertTrue(probe.confirmed(text + '\nSet conf value: dirty_decay_ms:1000\nSet conf value: muzzy_decay_ms:1000', 1000))
+        self.assertFalse(probe.confirmed(text + '\nSet conf value: dirty_decay_ms:1000\nSet conf value: muzzy_decay_ms:1000', 1000))
         self.assertTrue(probe.confirmed('Set conf value: dirty_decay_ms:0\nSet conf value: muzzy_decay_ms:0', 0))
+
+    def test_confirmation_accepts_actual_jemalloc_diagnostic_prefix(self):
+        for value in (1000, 10000):
+            with self.subTest(value=value):
+                text = (f'<jemalloc>: -- Set conf value: dirty_decay_ms:{value}\n'
+                        f'<jemalloc>: -- Set conf value: muzzy_decay_ms:{value}')
+                self.assertTrue(probe.confirmed(text, value))
+                self.assertTrue(probe.confirmed(text + '\n' + text, value))
+                self.assertFalse(probe.confirmed(text, value + 1))
+
+    def test_confirmation_rejects_invalid_or_ambiguous_diagnostics(self):
+        valid = ('<jemalloc>: -- Set conf value: dirty_decay_ms:1000\n'
+                 '<jemalloc>: -- Set conf value: muzzy_decay_ms:1000')
+        for text in (valid.replace('1000', '1000garbage'),
+                     valid.replace('Set conf value:', 'not Set conf value:'),
+                     valid.replace('<jemalloc>:', 'other:'),
+                     valid.replace('-- ', '--- '),
+                     '<jemalloc>: -- Set conf value: dirty_decay_ms:1000',
+                     valid + '\n<jemalloc>: -- Set conf value: dirty_decay_ms:10000',
+                     '<jemalloc>: -- Set conf value: dirty_decay_ms:10000\n' + valid):
+            with self.subTest(text=text):
+                self.assertFalse(probe.confirmed(text, 1000))
 
     def test_image_tag_is_resolved_once_and_all_runs_use_that_id(self):
         image_id = 'sha256:' + 'a' * 64

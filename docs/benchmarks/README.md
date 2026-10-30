@@ -14,6 +14,9 @@ successful capacity benchmark.
 
 ## Recent pressure-admission smoke
 
+A [v0.13 local diagnostic](2026-10-30-v013-memory.md) repeats the pressure
+smoke and records a small idle-RSS experiment. Its limits are explicit.
+
 A [512 MiB Linux cgroup test](2026-10-29-cgroup-pressure/README.md) observed
 query rejection, rollback and recovery after synthetic pressure. It is not an
 RSS ceiling or sustained 2/4/8 GiB qualification. The first inconclusive

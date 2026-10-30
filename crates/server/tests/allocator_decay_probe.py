@@ -36,9 +36,13 @@ def confirmed(log, decay_ms):
     values = {}
     for line in log.splitlines():
         match = re.fullmatch(
-            r'(?:<jemalloc>:\s*)?Set conf value:\s*(dirty_decay_ms|muzzy_decay_ms):(-?\d+)\s*',
+            r'(?:<jemalloc>:\s*(?:--\s+)?)?Set conf value:\s*(dirty_decay_ms|muzzy_decay_ms):(-?\d+)\s*',
             line.strip())
         if match:
+            # Multiple config sources may log duplicates; conflicting values
+            # cannot prove which allocator configuration served the workload.
+            if int(match[2]) != decay_ms:
+                return False
             values[match[1]] = int(match[2])
     return all(values.get(key) == decay_ms for key in ('dirty_decay_ms', 'muzzy_decay_ms'))
 
@@ -274,6 +278,10 @@ def self_check():
     assert not confirmed('Set conf value: dirty_decay_ms:1000', 1000)
     assert not confirmed('Set conf value: dirty_decay_ms:10000\nSet conf value: muzzy_decay_ms:10000', 1000)
     assert confirmed('Set conf value: dirty_decay_ms:1000\nSet conf value: muzzy_decay_ms:1000', 1000)
+    actual = '<jemalloc>: -- Set conf value: dirty_decay_ms:1000\n<jemalloc>: -- Set conf value: muzzy_decay_ms:1000'
+    assert confirmed(actual, 1000)
+    assert not confirmed(actual.replace('1000', '1000garbage'), 1000)
+    assert not confirmed(actual + '\n<jemalloc>: -- Set conf value: dirty_decay_ms:10000', 1000)
     assert fixture_rows(1, 2, 'x') == [{'id': 'probe-00000001', 'payload': 'x'}, {'id': 'probe-00000002', 'payload': 'x'}]
     print('self-check PASS; no Docker resources started')
 

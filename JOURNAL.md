@@ -29,6 +29,28 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-30: v0.13 Docker and memory diagnostics
+
+- **Done:** tagged and pushed `v0.13.0-beta.1` at `88fc954`; the tag's
+  GitHub release workflow is in progress. Main CI passed for the same source.
+- **Checks:** built the Linux arm64 image locally, confirmed unprivileged
+  `auth init`, and tested the actual demo Compose startup/write/restart path.
+  Protected Compose acceptance passed with synthetic secrets, 1,000 indexed
+  writes, authorization checks, SIGKILL recovery and offline audit. Five
+  retained-volume restart cycles passed on the same local image.
+- **Memory:** three 512 MiB cgroup-pressure runs passed with refusal, rollback,
+  recovery, audit and no increase in the sampled OOM counters. This is not the
+  required sustained 2/4/8 GiB workload, a hard RSS guarantee or host-kernel
+  OOM verification. Six short allocator diagnostics and their caveats are in
+  [the report](docs/benchmarks/2026-10-30-v013-memory.md).
+- **Diagnostic fix:** the first allocator run was inconclusive because the
+  parser missed jemalloc's actual log prefix. Fixed and reviewed the parser;
+  eight tests and its self-check passed, followed by six passing reruns. This
+  harness fix and the report were made after the immutable release tag.
+- **Next:** verify the tag workflow, release metadata and both published image
+  digests; keep the release experimental. Qualify real workloads, sustained
+  memory, TLS, distributed recovery and host-specific secrets separately.
+
 ## 2026-10-30: v0.13 beta candidate — ingress and onboarding
 
 - **Done:** account Bolt assembled-buffer capacity and its old/new overlap in
