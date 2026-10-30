@@ -18,6 +18,13 @@ def manifest_guard():
 
 
 class MultiarchManifestTests(unittest.TestCase):
+    def test_release_branches_run_ci_before_tagging(self):
+        ci = WORKFLOW.with_name("ci.yml").read_text()
+        self.assertIn('branches: [main, "release/**"]', ci)
+        self.assertIn("  workflow_dispatch:", ci)
+        self.assertIn("python scripts/check_docs_links.py", ci)
+        self.assertIn("python scripts/check_docs_site.py", ci)
+
     def validate(self, entries):
         with tempfile.TemporaryDirectory(prefix="brainwire-manifest-test-") as temporary:
             root = Path(temporary)

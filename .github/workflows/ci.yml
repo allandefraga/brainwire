@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -86,6 +86,11 @@ jobs:
 
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Validate documentation links and site
+        run: |
+          python scripts/check_docs_links.py
+          python scripts/check_docs_site.py
 
       - name: Install Neo4j Bolt driver
         run: python -m pip install neo4j==5.28.4
