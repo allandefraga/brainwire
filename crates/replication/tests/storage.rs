@@ -4,7 +4,8 @@ use brainwire_replication::{
 use openraft::storage::{RaftLogStorage, RaftLogStorageExt, RaftStateMachine};
 use openraft::testing::{StoreBuilder, Suite};
 use openraft::{
-    Entry, EntryPayload, LogId, Membership, RaftLogReader, RaftSnapshotBuilder, StorageError, Vote,
+    Entry, EntryPayload, LogId, Membership, RaftLogReader, RaftSnapshotBuilder, StorageError,
+    StoredMembership, Vote,
 };
 use std::{
     collections::BTreeMap,
@@ -448,4 +449,110 @@ async fn retained_log_capacity_is_atomic_at_boundary_and_can_increase_on_reopen(
     );
     assert_eq!(store.committed().unwrap(), Some(second.log_id));
     assert_eq!(store.last_applied().unwrap(), Some(second.log_id));
+}
+
+#[tokio::test]
+async fn recovery_rejects_membership_marker_divergence_from_applied_history() {
+    for corruption in [
+        "missing",
+        "changed",
+        "stale",
+        "future",
+        "wrong-entry",
+        "no-applied",
+        "no-log-id",
+    ] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        let membership = |index, ids: &[u64]| Entry {
+            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
+            payload: EntryPayload::Membership(Membership::new(
+                vec![ids.iter().copied().collect()],
+                None,
+            )),
+        };
+        let first = membership(0, &[1, 2, 3]);
+        let current = membership(2, &[1, 2, 4]);
+        let pending = membership(4, &[1, 2, 5]);
+        let applied = vec![
+            first.clone(),
+            entry(1, command("first")),
+            current.clone(),
+            entry(3, command("second")),
+        ];
+        let mut retained = applied.clone();
+        retained.push(pending.clone());
+        store.log_store().blocking_append(retained).await.unwrap();
+        store.state_machine().apply(applied).await.unwrap();
+        drop(store);
+
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        match corruption {
+            "missing" => db.delete(b"Mmembership").unwrap(),
+            "no-applied" => db.delete(b"Mapplied").unwrap(),
+            _ => {
+                let (log_id, source) = match corruption {
+                    "changed" => (current.log_id, &first),
+                    "stale" => (first.log_id, &first),
+                    "future" => (pending.log_id, &pending),
+                    "no-log-id" => (current.log_id, &current),
+                    "wrong-entry" => (
+                        LogId::new(openraft::CommittedLeaderId::new(1, 1), 3),
+                        &current,
+                    ),
+                    _ => unreachable!(),
+                };
+                let EntryPayload::Membership(configuration) = &source.payload else {
+                    unreachable!()
+                };
+                let value = StoredMembership::new(
+                    (corruption != "no-log-id").then_some(log_id),
+                    configuration.clone(),
+                );
+                db.put(b"Mmembership", serde_json::to_vec(&value).unwrap())
+                    .unwrap();
+            }
+        }
+        db.flush_wal(true).unwrap();
+        drop(db);
+        assert!(
+            Storage::open(dir.path(), 1024 * 1024, app).is_err(),
+            "accepted {corruption} membership marker"
+        );
+    }
+}
+
+#[tokio::test]
+async fn recovery_preserves_applied_membership_and_ignores_pending_membership() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    assert_eq!(store.membership().unwrap(), StoredMembership::default());
+    let configuration = Membership::new(vec![[1, 2, 3].into_iter().collect()], None);
+    let first = Entry {
+        log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 0),
+        payload: EntryPayload::Membership(configuration.clone()),
+    };
+    let pending = Entry {
+        log_id: LogId::new(openraft::CommittedLeaderId::new(2, 2), 2),
+        payload: EntryPayload::Membership(Membership::new(
+            vec![[1, 2, 4].into_iter().collect()],
+            None,
+        )),
+    };
+    let applied = vec![first.clone(), entry(1, command("one"))];
+    let mut retained = applied.clone();
+    retained.push(pending);
+    store.log_store().blocking_append(retained).await.unwrap();
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    assert_eq!(store.membership().unwrap(), StoredMembership::default());
+    store.state_machine().apply(applied).await.unwrap();
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app).unwrap();
+    assert_eq!(
+        store.membership().unwrap(),
+        StoredMembership::new(Some(first.log_id), configuration)
+    );
 }

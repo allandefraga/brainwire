@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.13.0-beta.2 — candidate
+
+Experimental beta for controlled trials. Image publication must be verified in
+the release workflow; the tag alone does not guarantee availability.
+
+### Fixed
+
+- Avoid deep-cloning node and relationship properties while estimating the
+  memory needed to return a path. The accounting estimate is unchanged, but
+  this estimation no longer makes those transient allocations.
+- On opening a replicated store, compare the persisted membership with the
+  latest membership entry actually applied in its retained consensus log.
+  A missing, stale or inconsistent marker fails startup instead of restoring
+  a conflicting quorum configuration. Valid new stores and membership entries
+  not yet applied remain supported. No data is rewritten or repaired.
+
+- The log-cap recovery diagnostic recognizes the Python client's typed
+  `CommitOutcomeUnknownError` and still reconciles the request through quorum
+  before any retry.
+
+### Limits and upgrade notes
+
+- The membership check relies on the current retained-log model: snapshots and
+  log purging are unsupported. An inconsistent store requires investigation and
+  recovery from verified backups, not deletion of its metadata.
+- This is not a production qualification. Query accounting and admission do
+  not guarantee a process RSS ceiling, and sustained 2/4/8 GiB load, native
+  Bolt TLS and multi-machine failover remain unqualified. See
+  [current limits](README.md#current-limits).
+
 ## 0.13.0-beta.1 — candidate
 
 Experimental beta for controlled trials. Publication and image availability are

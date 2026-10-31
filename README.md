@@ -37,7 +37,7 @@ RocksDB persists the data. Each named graph has its own data and ontology.
 Bring application records, build a knowledge graph or keep structured context
 for agents. Your application controls ingestion and decides what to remember.
 
-> **v0.13.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Built for controlled trials.
+> **v0.13.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> Built for controlled trials.
 > No guaranteed global RSS ceiling. Sustained 2/4/8 GiB qualification remains
 > open. Start with synthetic or rebuildable data and read the
 > [current limits](#current-limits) and the [v0.12 qualification report](PRODUCTION-v0.12.md).
@@ -64,9 +64,9 @@ tag when using a release image. For supported query syntax, start with the
 You need Git, Docker Engine and Docker Compose. Start with the matching checkout:
 
 ```sh
-git clone --branch v0.13.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.13.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.13.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.13.0-beta.2 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --wait --wait-timeout 900
@@ -277,7 +277,7 @@ After the matching release workflow publishes an image and records its digest
 in `release-metadata.txt`, pull it with:
 
 ```sh
-docker pull ghcr.io/allandefraga/brainwire:v0.13.0-beta.1 # brainwire-release-version
+docker pull ghcr.io/allandefraga/brainwire:v0.13.0-beta.2 # brainwire-release-version
 ```
 
 Private images require `docker login ghcr.io` with a GitHub token that can read
@@ -314,7 +314,7 @@ cargo fmt --all -- --check
 
 ## Release status and license
 
-**Version:** `v0.13.0-beta.1` · experimental beta · production qualification open. <!-- brainwire-release-version -->
+**Version:** `v0.13.0-beta.2` · experimental beta · production qualification open. <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source, including
 commercially, while following its terms. Check the license in the tag you

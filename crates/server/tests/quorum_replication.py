@@ -282,6 +282,7 @@ def run(binary, rows, log_cap_recovery=False):
     from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from examples.python.client import GraphClient, request_key as build_request_key
+    from brainwire import CommitOutcomeUnknownError
     if not 4 <= rows <= 500 or rows % 2:
         raise ValueError("rows must be even and between 4 and 500")
     max_log_bytes = (1 << 20) if log_cap_recovery else MAX_LOG_BYTES
@@ -697,7 +698,7 @@ def run(binary, rows, log_cap_recovery=False):
                         capacity_write(seed)
                         acknowledged.append(seed)
                         assert not cannot_fit_quorum, "proposal acknowledged despite insufficient retained-log quorum capacity"
-                    except (Neo4jError, ServiceUnavailable, SessionExpired, OSError) as error:
+                    except (CommitOutcomeUnknownError, Neo4jError, ServiceUnavailable, SessionExpired, OSError) as error:
                         # A failed response never establishes whether COMMIT became durable.
                         assert cannot_fit_quorum, "write failed before the objective raw-payload capacity bound"
                         uncertain = seed

@@ -77,6 +77,8 @@ impl Storage {
             application,
             max_log_bytes,
         }));
+        let applied = result.last_applied()?;
+        let mut applied_membership = StoredMembership::default();
         let mut bytes = 0u64;
         let mut previous: Option<u64> = None;
         for item in result.0.db.iterator(IteratorMode::Start) {
@@ -100,15 +102,25 @@ impl Storage {
             bytes = bytes
                 .checked_add(v.len() as u64)
                 .ok_or_else(|| error("log bytes overflow"))?;
+            if applied.is_some_and(|last| e.log_id.index <= last.index) {
+                if let EntryPayload::Membership(membership) = e.payload {
+                    applied_membership = StoredMembership::new(Some(e.log_id), membership);
+                }
+            }
         }
         if bytes > max_log_bytes || result.read::<u64>(BYTES)?.unwrap_or(0) != bytes {
             return Err(error("retained log cap or accounting mismatch"));
         }
-        if let Some(applied) = result.last_applied()? {
+        if let Some(applied) = applied {
             let retained: Option<Entry<TypeConfig>> = result.read(&key(applied.index))?;
             if retained.as_ref().map(|e| e.log_id) != Some(applied) {
                 return Err(error("applied marker has no matching retained log"));
             }
+        }
+        // With no snapshots or purging, applied membership must agree with
+        // retained history; never restore a missing, stale or altered marker.
+        if result.membership()? != applied_membership {
+            return Err(error("applied membership does not match retained log"));
         }
         if let Some(committed) = result.committed()? {
             let retained: Option<Entry<TypeConfig>> = result.read(&key(committed.index))?;

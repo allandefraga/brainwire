@@ -29,6 +29,29 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-10-31: v0.13.0-beta.2 memory and quorum candidate
+
+- **Memory:** path-output accounting now borrows node and relationship fields
+  instead of deep-cloning their properties before admission. A regression test
+  measured 132,376 transient allocated bytes before the change and zero after;
+  the estimate itself remains unchanged. This is not a global RSS limit.
+- **Replication:** opening a Raft store verifies that its membership marker
+  equals the last applied membership in its retained log. New stores and
+  unapplied membership entries remain valid; inconsistent metadata fails closed
+  without rewriting data. Purge and snapshots remain unsupported.
+- **Diagnostic:** the log-cap acceptance now recognizes the client's typed
+  commit-outcome-unknown error and keeps the capacity check, quorum lookup and
+  stable request-id reconciliation. The previous harness failed twice before
+  reaching recovery because it missed this exception.
+- **Checks:** 950 Rust workspace tests passed, three ignored; targeted RED/GREEN
+  tests and an independent review passed. The exact candidate passed 18 synthetic
+  loopback quorum checks including the 1 MiB log-cap/restart scenario, request
+  outcome reconciliation and cleanup. These are not multi-machine qualification.
+  Python tests: 97 passed, six skipped. Workspace Clippy and formatting passed; release remains to verify.
+- **Next:** finish Clippy and release gates, then record the published image
+  identity. Continue sustained 2/4/8 GiB memory and multi-machine failover
+  qualification; this release remains experimental.
+
 ## 2026-10-30: v0.13 Docker and memory diagnostics
 
 - **Release:** `v0.13.0-beta.1` at `88fc954` was published as an

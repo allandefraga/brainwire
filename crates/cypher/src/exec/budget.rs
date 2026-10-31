@@ -528,25 +528,30 @@ impl<'a> Budget<'a> {
                 .iter()
                 .fold(0usize, |sum, out| sum.saturating_add(Self::out_bytes(out)))
     }
+    fn node_payload_bytes(node: &NodeOut) -> usize {
+        node.label.len().saturating_add(map_bytes(&node.props))
+    }
+    fn relationship_payload_bytes(relationship: &RelationshipOut) -> usize {
+        relationship
+            .rel_type
+            .len()
+            .saturating_add(relationship.element_id.len())
+            .saturating_add(map_bytes(&relationship.props))
+    }
     fn out_bytes(out: &Out) -> usize {
         size_of::<Out>().saturating_add(match out {
             Out::Value(v) => value_bytes(v),
-            Out::Node(n) => n.label.len().saturating_add(map_bytes(&n.props)),
-            Out::Relationship(r) => r
-                .rel_type
-                .len()
-                .saturating_add(r.element_id.len())
-                .saturating_add(map_bytes(&r.props)),
-            Out::Path(p) => p
-                .nodes
-                .iter()
-                .map(|n| Self::out_bytes(&Out::Node(n.clone())))
-                .chain(
-                    p.rels
-                        .iter()
-                        .map(|r| Self::out_bytes(&Out::Relationship(r.clone()))),
-                )
-                .fold(0usize, usize::saturating_add),
+            Out::Node(n) => Self::node_payload_bytes(n),
+            Out::Relationship(r) => Self::relationship_payload_bytes(r),
+            Out::Path(p) => {
+                p.nodes
+                    .iter()
+                    .map(|n| size_of::<Out>().saturating_add(Self::node_payload_bytes(n)))
+                    .chain(p.rels.iter().map(|r| {
+                        size_of::<Out>().saturating_add(Self::relationship_payload_bytes(r))
+                    }))
+                    .fold(0usize, usize::saturating_add)
+            }
             Out::List(items) => items
                 .iter()
                 .map(Self::out_bytes)
@@ -593,6 +598,79 @@ pub(super) fn value_bytes(value: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::alloc::{GlobalAlloc, Layout, System};
+
+    thread_local! {
+        static ACCOUNTING_ALLOCATED: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    struct AccountingAllocator;
+
+    fn track_allocation(bytes: usize) {
+        // Const TLS needs no allocation; teardown can make it unavailable.
+        let _ = ACCOUNTING_ALLOCATED.try_with(|counter| {
+            if let Some(total) = counter.get() {
+                counter.set(Some(total.saturating_add(bytes)));
+            }
+        });
+    }
+
+    unsafe impl GlobalAlloc for AccountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            track_allocation(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            track_allocation(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            track_allocation(size);
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ACCOUNTING_ALLOCATOR: AccountingAllocator = AccountingAllocator;
+
+    #[test]
+    fn path_output_accounting_borrows_properties_without_allocating() {
+        let node = NodeOut {
+            id: NodeId(1),
+            label: "Document".into(),
+            props: BTreeMap::from([("body".into(), Value::Str("n".repeat(64 << 10)))]),
+        };
+        let rel = RelationshipOut {
+            id: 2,
+            element_id: "relationship-2".into(),
+            start: NodeId(1),
+            end: NodeId(1),
+            rel_type: "REFERENCES".into(),
+            props: BTreeMap::from([("body".into(), Value::Str("r".repeat(64 << 10)))]),
+        };
+        let expected = size_of::<Vec<Out>>()
+            + size_of::<Out>()
+            + Budget::out_bytes(&Out::Node(node.clone()))
+            + Budget::out_bytes(&Out::Relationship(rel.clone()));
+        let row = [Out::Path(PathOut {
+            nodes: vec![node],
+            rels: vec![rel],
+        })];
+        ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+        let estimated = Budget::output_bytes(&row);
+        let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+        assert_eq!(
+            estimated, expected,
+            "path accounting must preserve its byte estimate"
+        );
+        assert_eq!(
+            allocated, 0,
+            "estimating path output must not clone its properties"
+        );
+    }
 
     #[test]
     fn regex_cache_credit_is_exact_and_worker_starts_empty() {
