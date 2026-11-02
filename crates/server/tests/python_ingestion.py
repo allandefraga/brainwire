@@ -113,6 +113,7 @@ default_database = "ingestion"
 cache = "64MiB"
 memtables = "4MiB"
 query = "{query_mib}MiB"
+limit = "2GiB"
 ''')
         ontology = root / "ontology.json"
         ontology.write_text(json.dumps({"version": "1", "nodes": [{
@@ -154,6 +155,12 @@ query = "{query_mib}MiB"
                     with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
                         driver.verify_connectivity()
                         with driver.session(database="ingestion") as session:
+                            memory = session.run(
+                                "CALL db.memory() YIELD processLimitBytes,processRssBytes "
+                                "RETURN processLimitBytes,processRssBytes"
+                            ).single(strict=True)
+                            assert memory["processLimitBytes"] == 2 << 30
+                            assert memory["processRssBytes"] > 0
                             if cycle == 0:
                                 try:
                                     session.run("UNWIND $rows AS row CREATE (c:Customer {entity_id:row.id, email:row.email})", rows=[

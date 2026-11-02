@@ -36,6 +36,8 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "poolPeakBytes",
             "poolRejections",
             "processHeadroomBytes",
+            "processLimitBytes",
+            "processRssBytes",
         ]),
         "graph.project" => Ok(&[
             "nodeCount",
@@ -595,6 +597,8 @@ pub(super) fn run(
                 Some(usage.peak_bytes),
                 Some(usage.rejections),
                 usage.process_headroom_bytes,
+                usage.process_limit_bytes,
+                usage.process_rss_bytes,
             ]
             .into_iter()
             .map(|n| match n {
@@ -604,7 +608,7 @@ pub(super) fn run(
                     .map_err(|_| semantic("memory counter exceeds Cypher integer capacity")),
             })
             .collect::<Result<Vec<_>, _>>()?,
-            None => vec![value(Value::Null); 5],
+            None => vec![value(Value::Null); 7],
         };
         return Ok(vec![bind(values)?]);
     }

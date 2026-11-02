@@ -40,9 +40,19 @@ failure still requires separate handling.
 
 ```cypher
 CALL db.memory()
-YIELD poolLimitBytes, poolReservedBytes, poolPeakBytes, poolRejections
-RETURN poolLimitBytes, poolReservedBytes, poolPeakBytes, poolRejections
+YIELD poolLimitBytes, poolReservedBytes, poolPeakBytes, poolRejections,
+      processLimitBytes, processRssBytes
+RETURN poolLimitBytes, poolReservedBytes, poolPeakBytes, poolRejections,
+       processLimitBytes, processRssBytes
 ```
+
+`processLimitBytes` is the configured `memory.limit` when the process guard is
+installed. `processRssBytes` samples process resident memory when this procedure
+runs; it returns `null` if sampling is unavailable. Both fields are `null` without
+a process guard. On platforms other than Linux/macOS the sample is the available
+allocator estimate, rather than OS-reported RSS. Neither field proves a hard RSS
+ceiling; sampling and pool counters are separate observations. The procedure is
+subject to normal query admission and can itself be refused under memory pressure.
 
 These are process-wide pool counters, not per-graph figures. Each counter is
 atomic, but the row is not one atomic snapshot. Peak and rejection counters last

@@ -11,8 +11,13 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+type ProcessRss = Box<
+    dyn Fn() -> Option<usize> + Send + Sync + std::panic::RefUnwindSafe + std::panic::UnwindSafe,
+>;
+
 /// Shared accounting for transaction high-water reservations, not allocator RSS.
 pub struct QueryMemoryPool {
+    process_memory: std::sync::OnceLock<(usize, ProcessRss)>,
     limit: usize,
     /// Private embedded budgets must not appear as server-wide pool telemetry.
     observable: bool,
@@ -32,10 +37,15 @@ pub struct QueryMemoryUsage {
     pub rejections: usize,
     /// Bytes the process may still grow before its memory ceiling; None without one.
     pub process_headroom_bytes: Option<usize>,
+    /// Configured process guard limit; None without a telemetry provider.
+    pub process_limit_bytes: Option<usize>,
+    /// On-demand process sample; None if unavailable or no provider is installed.
+    pub process_rss_bytes: Option<usize>,
 }
 impl QueryMemoryPool {
     pub fn new(limit_bytes: usize) -> Self {
         Self {
+            process_memory: std::sync::OnceLock::new(),
             limit: limit_bytes,
             observable: true,
             reserved: AtomicUsize::new(0),
@@ -64,6 +74,20 @@ impl QueryMemoryPool {
     ) {
         let _ = self.headroom.set(Box::new(headroom));
     }
+    /// Install process telemetry once. RSS is sampled on demand; None means unavailable.
+    /// This observation does not change admission or establish an RSS guarantee.
+    pub fn set_process_memory(
+        &self,
+        limit: usize,
+        rss: impl Fn() -> Option<usize>
+            + Send
+            + Sync
+            + std::panic::RefUnwindSafe
+            + std::panic::UnwindSafe
+            + 'static,
+    ) {
+        let _ = self.process_memory.set((limit, Box::new(rss)));
+    }
     /// Individual counters are atomic; this telemetry is not one atomic snapshot.
     pub fn usage(&self) -> QueryMemoryUsage {
         QueryMemoryUsage {
@@ -72,6 +96,8 @@ impl QueryMemoryPool {
             peak_bytes: self.peak.load(Ordering::Relaxed),
             rejections: self.rejections.load(Ordering::Relaxed),
             process_headroom_bytes: self.headroom.get().map(|headroom| headroom()),
+            process_limit_bytes: self.process_memory.get().map(|(limit, _)| *limit),
+            process_rss_bytes: self.process_memory.get().and_then(|(_, rss)| rss()),
         }
     }
 }

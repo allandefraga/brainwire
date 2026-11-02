@@ -1299,7 +1299,7 @@ mod embedded_output_tests {
         let directory = tempfile::tempdir().unwrap();
         let database =
             Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
-        let query = "CALL db.memory() YIELD poolLimitBytes,poolReservedBytes,poolPeakBytes,poolRejections,processHeadroomBytes RETURN poolLimitBytes,poolReservedBytes,poolPeakBytes,poolRejections,processHeadroomBytes";
+        let query = "CALL db.memory() YIELD poolLimitBytes,poolReservedBytes,poolPeakBytes,poolRejections,processHeadroomBytes,processLimitBytes,processRssBytes RETURN poolLimitBytes,poolReservedBytes,poolPeakBytes,poolRejections,processHeadroomBytes,processLimitBytes,processRssBytes";
         for limits in [
             ExecutionLimits::default(),
             ExecutionLimits {
@@ -1309,12 +1309,14 @@ mod embedded_output_tests {
         ] {
             let mut transaction = QueryTransaction::begin_with_limits(&database, limits).unwrap();
             let output = transaction.run(query, &BTreeMap::new()).unwrap();
-            assert_eq!(output.rows, vec![vec![Out::Value(Value::Null); 5]]);
+            assert_eq!(output.rows, vec![vec![Out::Value(Value::Null); 7]]);
         }
         let pool = Arc::new(QueryMemoryPool::new(1 << 20));
         let mut transaction =
             QueryTransaction::begin_with_pool(&database, ExecutionLimits::default(), pool).unwrap();
         let output = transaction.run(query, &BTreeMap::new()).unwrap();
         assert_eq!(output.rows[0][0], Out::Value(Value::Int(1 << 20)));
+        assert_eq!(output.rows[0][5], Out::Value(Value::Null));
+        assert_eq!(output.rows[0][6], Out::Value(Value::Null));
     }
 }

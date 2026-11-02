@@ -90,6 +90,10 @@ pub fn run(
             crate::process_memory::install(Arc::clone(&memory));
             let ceiling = Arc::clone(&memory);
             databases.query_pool().set_process_headroom(move || ceiling.headroom());
+            databases.query_pool().set_process_memory(
+                usize::try_from(loaded.config.memory.limit.0).unwrap_or(usize::MAX),
+                || crate::process_memory::resident_bytes().and_then(|rss| usize::try_from(rss).ok()),
+            );
             // The sampler must not keep databases open during graceful shutdown.
             let observed = Arc::downgrade(&databases);
             memory.start(move || {

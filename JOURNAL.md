@@ -29,6 +29,19 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-02: process memory telemetry
+
+- **Done:** expose configured process limit and a best-effort on-demand resident
+  memory sample in `CALL db.memory()`, with null for unavailable values. Existing
+  admission semantics are unchanged. The counters do not establish an RSS cap.
+- **Reference:** HelixDB documents query memory accounting separately from RSS;
+  Brainwire continues to describe the distinction and its own limits explicitly.
+- **Checks:** targeted memory and embedded-visibility tests passed after a red
+  regression; affected-package Clippy and formatting passed. An independent
+  review found no blockers. Release and image publication must be verified.
+- **Next:** verify the candidate release workflow and image publication; qualify
+  sustained 2/4/8 GiB workloads and multi-machine recovery separately.
+
 ## 2026-10-31: v0.13.0-beta.2 memory and quorum candidate
 
 - **Memory:** path-output accounting now borrows node and relationship fields

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0-beta.3 — candidate
+
+### Added
+
+- `CALL db.memory()` reports the configured process memory limit and a
+  best-effort on-demand resident-memory sample. Missing values are `null`.
+  The sample and guard do not guarantee a hard RSS ceiling.
+
+
 ## 0.13.0-beta.2 — candidate
 
 Experimental beta for controlled trials. Image publication must be verified in

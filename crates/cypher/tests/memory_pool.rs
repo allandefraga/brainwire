@@ -211,3 +211,35 @@ fn process_headroom_refuses_growth_the_pool_alone_would_admit() {
         format!("{:?}", brainwire_cypher::Out::Value(Value::Int(1 << 20)))
     );
 }
+
+#[test]
+fn process_memory_telemetry_distinguishes_unavailable_samples() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let pool = Arc::new(QueryMemoryPool::new(1 << 20));
+    let rss = Arc::new(std::sync::atomic::AtomicUsize::new(123_456));
+    let sampled = Arc::clone(&rss);
+    pool.set_process_memory(8 << 20, move || {
+        match sampled.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => None,
+            value => Some(value),
+        }
+    });
+    let query = "CALL db.memory() YIELD processLimitBytes,processRssBytes RETURN processLimitBytes,processRssBytes";
+    let mut tx = QueryTransaction::begin_with_pool(&db, ExecutionLimits::default(), pool).unwrap();
+    let out = tx.run(query, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        out.rows,
+        vec![vec![
+            brainwire_cypher::Out::Value(Value::Int(8 << 20)),
+            brainwire_cypher::Out::Value(Value::Int(123_456))
+        ]]
+    );
+    rss.store(0, std::sync::atomic::Ordering::Relaxed);
+    let out = tx.run(query, &BTreeMap::new()).unwrap();
+    assert_eq!(out.rows[0][1], brainwire_cypher::Out::Value(Value::Null));
+    assert_eq!(
+        out.rows[0][0],
+        brainwire_cypher::Out::Value(Value::Int(8 << 20))
+    );
+}
