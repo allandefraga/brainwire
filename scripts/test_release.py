@@ -129,7 +129,7 @@ class ReleaseFileTests(unittest.TestCase):
         files = updated_files(current, next_candidate)
         readme = files[Path("README.md")]
         self.assertIn(
-            f"docker pull ghcr.io/allandefraga/brainwire:v{next_candidate} # brainwire-release-version",
+            f"export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v{next_candidate} # brainwire-release-version",
             readme,
         )
         # Historical references are preserved whether or not the README uses one.
@@ -178,7 +178,7 @@ class ReleaseFileTests(unittest.TestCase):
 
         readme = second_update[Path("README.md")]
         self.assertIn(
-            f"docker pull ghcr.io/allandefraga/brainwire:v{second_candidate} # brainwire-release-version",
+            f"export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v{second_candidate} # brainwire-release-version",
             readme,
         )
         self.assertIn(
