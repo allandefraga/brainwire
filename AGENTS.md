@@ -5,8 +5,14 @@ is `/Users/fraga/Documents/brainwire`; it has no required sibling checkout.
 
 ## Working agreement
 
-- Keep all work local. Do not push, publish or create a remote PR unless the
-  user explicitly asks.
+- For completed changes, keep `main` current, update the README and relevant
+  documentation in simple language, and create and push a new release tag after
+  the required checks pass. Allan requested this as the default on 2026-11-02;
+  explicit later instructions can override it. Do not publish unfinished or
+  failing work. Remote PRs still require an explicit request.
+- Keep this project independent and organization-agnostic. Do not add customer
+  or organization names, domains, credentials or private integration details to
+  the repository. Use synthetic, generic examples and audit before release.
 - Read `README.md` and the newest `JOURNAL.md` entry before continuing work.
   Record completed work, verification, decisions and the next step in the
   journal before ending a session.

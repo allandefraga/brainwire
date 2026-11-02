@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.14.0-beta.2 — experimental candidate
+
+### Added
+
+- Bounded context evidence with explicitly mapped, application-declared source
+  properties and stable record citation identifiers. Sources are not externally
+  authenticated and identifiers do not represent historical revisions.
+- Diagnostic logging of sampled process-group memory pressure decisions,
+  without changing admission or promising a hard RSS ceiling.
+
+### Fixed
+
+- Install the pinned Bolt driver before Python helper tests in CI.
+- Harden the synthetic comparison runner with pinned images, resource limits,
+  ownership-checked cleanup and recorded runtime settings.
+
+### Limits
+
+- Native full-text/vector indexes and sustained production memory qualification
+  remain open. A previous pressure failure is still under investigation.
+
+
 ## 0.14.0-beta.1 — experimental candidate
 
 This release is intended for controlled trials with rebuildable data.

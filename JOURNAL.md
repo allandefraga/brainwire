@@ -29,6 +29,24 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-02: evidence citations and reproducible comparison
+
+- **Done:** added bounded evidence citations to the Python context helper and
+  tested ACL isolation; added rate-limited cgroup pressure diagnostics without
+  changing admission decisions. Corrected CI dependency installation order.
+- **Measured:** repeated the synthetic three-database comparison with pinned
+  image IDs, equal container CPU and memory limits, restart checks, recorded
+  samples and a chart. The receipt describes important workload and durability
+  differences; it is not a production ranking. A separate 512 MiB pressure
+  smoke passed on the same candidate image; an earlier failure remains open.
+- **Decided:** ship this as an experimental v0.14.0-beta.2, not a native
+  hybrid-search release. Evidence citations identify current records, not
+  historical revisions. Memory accounting is not a global RSS ceiling.
+- **Next step:** investigate the prior pressure failure, qualify sustained
+  memory use and recovery, and implement native indexed hybrid retrieval.
+- **Blockers:** production readiness, distributed failover, and memory ceilings
+  remain unqualified by these tests.
+
 ## 2026-11-02: experimental launch candidate
 
 - Simplify the public-facing README and Python setup; keep the synthetic demo

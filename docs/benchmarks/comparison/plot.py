@@ -3,10 +3,21 @@
 import argparse
 import json
 import pathlib
+import html
+import re
 
 HERE = pathlib.Path(__file__).resolve().parent
 COLORS = {"brainwire": "#36d399", "neo4j": "#67a9ff", "falkordb": "#c49bff"}
 NAMES = {"brainwire": "Brainwire", "neo4j": "Neo4j", "falkordb": "FalkorDB"}
+
+
+
+def resource_caption(data):
+    limits = data.get("limits_per_db_container", {"cpus": 4, "memory": "8g"})
+    memory = str(limits.get("memory", "unknown"))
+    if re.fullmatch(r"[0-9]+g", memory):
+        memory = memory[:-1] + " GiB"
+    return html.escape(f"{limits.get('cpus', 'unknown')} CPU / {memory} cap")
 
 
 def main():
@@ -29,7 +40,7 @@ def main():
     parts = [f'''<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="760" viewBox="0 0 1120 760" role="img" aria-labelledby="title desc">
 <title id="title">Local graph database comparison</title><desc id="desc">Synthetic workload comparison. Lower latency is better; higher ingestion throughput is better.</desc>
 <rect width="1120" height="760" rx="20" fill="#0b1220"/><text x="44" y="56" fill="#f2f6fc" font-family="system-ui,sans-serif" font-size="25" font-weight="700">Same synthetic graph · local Docker run</text>
-<text x="44" y="84" fill="#9eacc0" font-family="system-ui,sans-serif" font-size="14">{nodes:,} nodes · {edges:,} directed edges · 4 CPU / 8 GiB cap · {repeats} read/update repeats</text>
+<text x="44" y="84" fill="#9eacc0" font-family="system-ui,sans-serif" font-size="14">{nodes:,} nodes · {edges:,} directed edges · {resource_caption(data)} · {repeats} read/update repeats</text>
 <text x="44" y="131" fill="#d9e5f5" font-family="system-ui,sans-serif" font-size="17" font-weight="700">Read latency · p95 (ms) · lower is better</text>''']
     latency = [("Indexed point read", "point_read"), ("1-hop, LIMIT 20", "neighborhood_1hop_limit20")]
     max_ms = max(runs[s][key]["p95_ms"] for s in systems for _, key in latency) * 1.15

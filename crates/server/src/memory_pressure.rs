@@ -19,6 +19,21 @@ pub(crate) enum PressureStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CgroupReading {
+    raw_bytes: u64,
+    inactive_file_bytes: u64,
+    effective_bytes: u64,
+    limit_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PressureObservation {
+    status: PressureStatus,
+    reading: Option<CgroupReading>,
+    cache_reading: Option<CgroupReading>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PressureUsage {
     pub denied_runs: usize,
     pub unavailable_samples: usize,
@@ -27,7 +42,8 @@ pub(crate) struct PressureUsage {
 pub(crate) struct PressureGuard {
     denied_runs: AtomicUsize,
     unavailable_samples: AtomicUsize,
-    probe: Box<dyn Fn() -> PressureStatus + Send + Sync>,
+    cache_pressure_admissions: AtomicUsize,
+    probe: Box<dyn Fn() -> PressureObservation + Send + Sync>,
     process: fn() -> Option<&'static Arc<ProcessMemory>>,
 }
 
@@ -43,25 +59,31 @@ impl PressureGuard {
             // Unit tests inject their pressure source, independent of host load.
             #[cfg(any(not(target_os = "linux"), test))]
             let groups = Vec::new();
-            let mut guard =
-                Self::new(move || sample(&groups, |path| std::fs::read_to_string(path).ok()));
+            let mut guard = Self::new(move || {
+                sample_observed(&groups, |path| std::fs::read_to_string(path).ok())
+            });
             Arc::get_mut(&mut guard).expect("new guard").process = crate::process_memory::installed;
             guard
         }))
     }
 
-    fn new(probe: impl Fn() -> PressureStatus + Send + Sync + 'static) -> Arc<Self> {
+    fn new(probe: impl Fn() -> PressureObservation + Send + Sync + 'static) -> Arc<Self> {
         Arc::new(Self {
             probe: Box::new(probe),
             process: || None,
             denied_runs: AtomicUsize::new(0),
             unavailable_samples: AtomicUsize::new(0),
+            cache_pressure_admissions: AtomicUsize::new(0),
         })
     }
 
     pub(crate) fn status(&self) -> PressureStatus {
-        let status = (self.probe)();
-        if status == PressureStatus::Unavailable {
+        self.observe().status
+    }
+
+    fn observe(&self) -> PressureObservation {
+        let observed = (self.probe)();
+        if observed.status == PressureStatus::Unavailable {
             let count = self
                 .unavailable_samples
                 .fetch_add(1, Ordering::Relaxed)
@@ -70,7 +92,7 @@ impl PressureGuard {
                 eprintln!("brainwire memory pressure admission: monitor unavailable; unavailable_samples={count} (reservation controls remain active)");
             }
         }
-        status
+        observed
     }
 
     pub(crate) fn usage(&self) -> PressureUsage {
@@ -83,6 +105,7 @@ impl PressureGuard {
     /// The memory refusal for a new RUN, if the process ceiling or a visible cgroup
     /// is at 95% (docs/design/memory-error-contract.md).
     pub(crate) fn refusal(&self) -> Option<EngineError> {
+        let mut cgroup_reading = None;
         let refusal = if let Some((rss, cap)) = (self.process)().and_then(|p| p.refusal()) {
             EngineError::memory_refused(
                 "process_limit",
@@ -90,30 +113,53 @@ impl PressureGuard {
                 cap.saturating_sub(rss),
                 "process memory near memory.limit; RUN rejected before execution",
             )
-        } else if let PressureStatus::Pressured { current, limit } = self.status() {
-            let cap = (u128::from(limit) * PRESSURE_PERCENT / 100) as u64;
-            EngineError::memory_refused(
-                "cgroup",
-                0,
-                cap.saturating_sub(current),
-                "container memory at 95%; RUN rejected before execution",
-            )
         } else {
-            return None;
+            let observed = self.observe();
+            if let PressureStatus::Pressured { current, limit } = observed.status {
+                cgroup_reading = observed.reading;
+                let cap = (u128::from(limit) * PRESSURE_PERCENT / 100) as u64;
+                EngineError::memory_refused(
+                    "cgroup",
+                    0,
+                    cap.saturating_sub(current),
+                    "container memory at 95%; RUN rejected before execution",
+                )
+            } else {
+                if let (PressureStatus::Available { .. }, Some(reading)) =
+                    (observed.status, observed.cache_reading)
+                {
+                    if u128::from(reading.raw_bytes) * 100
+                        >= u128::from(reading.limit_bytes) * PRESSURE_PERCENT
+                    {
+                        let count = self
+                            .cache_pressure_admissions
+                            .fetch_add(1, Ordering::Relaxed)
+                            .saturating_add(1);
+                        if should_log(count) {
+                            eprintln!("brainwire memory pressure decision: cgroup_allowed_after_inactive_file count={count} {reading:?} (decision-time sequential readings; not an atomic snapshot or RSS ceiling)");
+                        }
+                    }
+                }
+                return None;
+            }
         };
         let count = self
             .denied_runs
             .fetch_add(1, Ordering::Relaxed)
             .saturating_add(1);
         if should_log(count) {
-            eprintln!("brainwire memory pressure admission: RUN rejected; denied_runs={count}");
+            eprintln!("brainwire memory pressure admission: RUN rejected; denied_runs={count}; cgroup_reading={cgroup_reading:?} (decision-time sequential readings; not an atomic snapshot)");
         }
         Some(refusal)
     }
 
     #[cfg(test)]
     pub(crate) fn fixture(probe: impl Fn() -> PressureStatus + Send + Sync + 'static) -> Arc<Self> {
-        Self::new(probe)
+        Self::new(move || PressureObservation {
+            status: probe(),
+            reading: None,
+            cache_reading: None,
+        })
     }
 }
 
@@ -121,8 +167,17 @@ fn should_log(count: usize) -> bool {
     count.is_power_of_two()
 }
 
+#[cfg(test)]
 fn sample(groups: &[MemoryGroup], read: impl Fn(&Path) -> Option<String>) -> PressureStatus {
+    sample_observed(groups, read).status
+}
+
+fn sample_observed(
+    groups: &[MemoryGroup],
+    read: impl Fn(&Path) -> Option<String>,
+) -> PressureObservation {
     let mut worst = None;
+    let mut cache_reading = None;
     let mut unavailable = groups.is_empty();
     for group in groups {
         let max_path = group.directory.join(if group.v2 {
@@ -163,21 +218,53 @@ fn sample(groups: &[MemoryGroup], read: impl Fn(&Path) -> Option<String>) -> Pre
             .unwrap_or(0);
         let current = raw_current.saturating_sub(reclaimable);
         // u128 avoids overflow even at u64::MAX and includes zero-limit pressure.
+        let reading = CgroupReading {
+            raw_bytes: raw_current,
+            inactive_file_bytes: reclaimable,
+            effective_bytes: current,
+            limit_bytes: limit,
+        };
         if u128::from(current) * 100 >= u128::from(limit) * PRESSURE_PERCENT {
-            return PressureStatus::Pressured { current, limit };
+            return PressureObservation {
+                status: PressureStatus::Pressured { current, limit },
+                reading: Some(reading),
+                cache_reading,
+            };
         }
-        if worst.is_none_or(|(prior, cap)| {
-            u128::from(current) * u128::from(cap) > u128::from(prior) * u128::from(limit)
+        if cache_reading.is_none()
+            && u128::from(raw_current) * 100 >= u128::from(limit) * PRESSURE_PERCENT
+        {
+            cache_reading = Some(reading);
+        }
+        if worst.is_none_or(|prior: CgroupReading| {
+            u128::from(current) * u128::from(prior.limit_bytes)
+                > u128::from(prior.effective_bytes) * u128::from(limit)
         }) {
-            worst = Some((current, limit));
+            worst = Some(reading);
         }
     }
     if unavailable {
-        PressureStatus::Unavailable
+        PressureObservation {
+            status: PressureStatus::Unavailable,
+            reading: None,
+            cache_reading: None,
+        }
     } else {
-        worst.map_or(PressureStatus::Unavailable, |(current, limit)| {
-            PressureStatus::Available { current, limit }
-        })
+        worst.map_or(
+            PressureObservation {
+                status: PressureStatus::Unavailable,
+                reading: None,
+                cache_reading: None,
+            },
+            |reading| PressureObservation {
+                status: PressureStatus::Available {
+                    current: reading.effective_bytes,
+                    limit: reading.limit_bytes,
+                },
+                reading: Some(reading),
+                cache_reading,
+            },
+        )
     }
 }
 
@@ -377,6 +464,150 @@ mod tests {
                 unavailable_samples: 0
             }
         );
+    }
+
+    #[test]
+    fn concurrent_cache_admission_diagnostics_preserve_decisions_and_do_not_resample() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sampled = Arc::clone(&calls);
+        let guard = PressureGuard::new(move || {
+            sampled.fetch_add(1, Ordering::Relaxed);
+            PressureObservation {
+                status: PressureStatus::Available {
+                    current: 89,
+                    limit: 100,
+                },
+                reading: Some(CgroupReading {
+                    raw_bytes: 99,
+                    inactive_file_bytes: 10,
+                    effective_bytes: 89,
+                    limit_bytes: 100,
+                }),
+                cache_reading: Some(CgroupReading {
+                    raw_bytes: 99,
+                    inactive_file_bytes: 10,
+                    effective_bytes: 89,
+                    limit_bytes: 100,
+                }),
+            }
+        });
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let guard = Arc::clone(&guard);
+                scope.spawn(move || {
+                    for _ in 0..100 {
+                        assert!(guard.refusal().is_none());
+                    }
+                });
+            }
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 800);
+        assert_eq!(guard.cache_pressure_admissions.load(Ordering::Relaxed), 800);
+        assert_eq!(guard.usage().denied_runs, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 800);
+        let unavailable = PressureGuard::fixture(|| PressureStatus::Unavailable);
+        assert!(unavailable.refusal().is_none());
+        assert_eq!(
+            unavailable
+                .cache_pressure_admissions
+                .load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn cache_discount_diagnostic_survives_a_different_worst_cgroup() {
+        let groups = [group("/cg/child", true), group("/cg", true)];
+        let files = BTreeMap::from([
+            (PathBuf::from("/cg/child/memory.max"), "100".to_owned()),
+            (PathBuf::from("/cg/child/memory.current"), "99".to_owned()),
+            (
+                PathBuf::from("/cg/child/memory.stat"),
+                "inactive_file 90\n".to_owned(),
+            ),
+            (PathBuf::from("/cg/memory.max"), "100".to_owned()),
+            (PathBuf::from("/cg/memory.current"), "90".to_owned()),
+        ]);
+        let observed = sample_observed(&groups, |path| files.get(path).cloned());
+        assert_eq!(
+            observed.status,
+            PressureStatus::Available {
+                current: 90,
+                limit: 100
+            }
+        );
+        assert_eq!(observed.reading.unwrap().raw_bytes, 90);
+        assert_eq!(
+            observed.cache_reading,
+            Some(CgroupReading {
+                raw_bytes: 99,
+                inactive_file_bytes: 90,
+                effective_bytes: 9,
+                limit_bytes: 100,
+            })
+        );
+        let guard = PressureGuard::new(move || observed);
+        assert!(guard.refusal().is_none());
+        assert_eq!(guard.cache_pressure_admissions.load(Ordering::Relaxed), 1);
+
+        for parent in [Some("95"), None] {
+            let observed = sample_observed(&groups, |path| {
+                if path == Path::new("/cg/memory.current") {
+                    parent.map(str::to_owned)
+                } else {
+                    files.get(path).cloned()
+                }
+            });
+            let guard = PressureGuard::new(move || observed);
+            assert_eq!(guard.refusal().is_some(), parent.is_some());
+            assert_eq!(guard.cache_pressure_admissions.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn observations_preserve_the_exact_inputs_used_for_the_decision() {
+        let groups = [group("/cg", true)];
+        let files = BTreeMap::from([
+            (PathBuf::from("/cg/memory.max"), "100".to_owned()),
+            (PathBuf::from("/cg/memory.current"), "99".to_owned()),
+            (
+                PathBuf::from("/cg/memory.stat"),
+                "inactive_file 10\n".to_owned(),
+            ),
+        ]);
+        let observed = sample_observed(&groups, |p| files.get(p).cloned());
+        assert_eq!(
+            observed.status,
+            PressureStatus::Available {
+                current: 89,
+                limit: 100
+            }
+        );
+        assert_eq!(
+            observed.reading,
+            Some(CgroupReading {
+                raw_bytes: 99,
+                inactive_file_bytes: 10,
+                effective_bytes: 89,
+                limit_bytes: 100,
+            })
+        );
+        let absent = sample_observed(&groups, |_| None);
+        assert_eq!(absent.status, PressureStatus::Unavailable);
+        assert_eq!(absent.reading, None);
+        let missing_stat = sample_observed(&groups, |p| {
+            (!p.ends_with("memory.stat"))
+                .then(|| files.get(p).cloned())
+                .flatten()
+        });
+        assert_eq!(
+            missing_stat.status,
+            PressureStatus::Pressured {
+                current: 99,
+                limit: 100
+            }
+        );
+        assert_eq!(missing_stat.reading.unwrap().inactive_file_bytes, 0);
     }
 
     #[test]

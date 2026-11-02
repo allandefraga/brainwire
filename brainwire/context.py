@@ -1,4 +1,5 @@
 """Bounded read-only evidence retrieval over a caller-authenticated GraphClient."""
+import hashlib
 import json
 
 from .client import identifier
@@ -76,6 +77,58 @@ class ContextClient:
         query = (f'MATCH (n:{label}) WHERE n.entity_id IN $ids '
                  f'RETURN {self._projection(names)} LIMIT $limit')
         return self._read(query, {'ids': ids, 'limit': limit}, label, names, limit, max_bytes)
+
+    def evidence(self, label, entity_ids, *, source_fields, properties=(),
+                 limit=20, max_bytes=65536):
+        """Read known records with explicit, reported source fields in one transaction.
+
+        source_fields maps id/title/url/hash/recorded_at to declared properties.
+        Citations identify current graph records; they do not authenticate the
+        reported source or preserve historical revisions.
+        """
+        names = _options(properties, limit, max_bytes)
+        allowed = {'id', 'title', 'url', 'hash', 'recorded_at'}
+        if not isinstance(source_fields, dict) or not source_fields or \
+                any(key not in allowed for key in source_fields):
+            raise ValueError('source_fields must map id/title/url/hash/recorded_at to properties')
+        fields = {key: identifier(source_fields[key]) for key in sorted(source_fields)}
+        if len(set(fields.values())) != len(fields):
+            raise ValueError('source_fields must map to distinct properties')
+        requested = list(dict.fromkeys([*names, *fields.values()]))
+        if len(requested) > 16:
+            raise ValueError('requested and source properties must fit 16 names')
+        # Read source fields through the same authorized snapshot as the records.
+        rows = self.nodes(label, entity_ids, properties=requested,
+                          limit=limit, max_bytes=1 << 20)['records']
+        result = {'graph': self.graph.database, 'limit': limit, 'records': [], 'sources': []}
+        seen = set()
+        for row in rows:
+            identity = _entity(row['entity_id'])
+            if identity in seen:
+                raise ValueError('evidence record identities must be unique')
+            seen.add(identity)
+            source = {}
+            for key, field in fields.items():
+                value = row['properties'][field]
+                if value is None:
+                    continue
+                if not isinstance(value, str) or len(value) > 4096 or len(value.encode('utf-8')) > 4096:
+                    raise ValueError('reported source values must be strings of at most 4096 UTF-8 bytes')
+                if value.strip():
+                    source[key] = value
+            citation = None
+            if source:
+                key = json.dumps([self.graph.database, row['label'], identity],
+                                 ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+                citation = 'bw:' + hashlib.sha256(key).hexdigest()
+                result['sources'].append({'citation_id': citation,
+                    'record': {'label': row['label'], 'entity_id': identity}, 'source': source})
+            result['records'].append({'label': row['label'], 'entity_id': identity,
+                'properties': {name: row['properties'][name] for name in names},
+                'citation_id': citation})
+        if len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8')) > max_bytes:
+            raise ContextLimitError('evidence context exceeds max_bytes')
+        return result
 
     def search_text(self, label, text, *, field, entity_ids, properties=(),
                     limit=20, max_bytes=65536):

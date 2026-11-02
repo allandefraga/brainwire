@@ -12,7 +12,7 @@ import time
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from neo4j import GraphDatabase
-from brainwire import GraphClient
+from brainwire import ContextClient, GraphClient
 from brainwire.rerank import rerank_context
 from examples.python.create_service_tokens import create
 
@@ -81,6 +81,15 @@ limit = "2GiB"
                             text_property='body',vector_property='embedding',properties=['source_url'])
                         assert [row['entity_id'] for row in result['records']]==[expected], result
                         assert result['records'][0]['properties']=={'source_url':f'source://{expected}'}
+                        evidence = ContextClient(graph).evidence('Document', ['a', 'b'],
+                            source_fields={'url': 'source_url'}, properties=['body'])
+                        visible_evidence = ContextClient(graph).evidence('Document', [expected],
+                            source_fields={'url': 'source_url'}, properties=['body'])
+                        assert evidence == visible_evidence, 'hidden source influenced evidence'
+                        assert len(evidence['sources']) == 1
+                        assert evidence['sources'][0]['source'] == {'url': f'source://{expected}'}
+                        assert evidence['sources'][0]['record']['entity_id'] == expected
+                        assert evidence['records'][0]['citation_id'] == evidence['sources'][0]['citation_id']
                         if role=='reader':
                             visible_only=rerank_context(graph,'Document',['a'],'release',[1.,0.],
                                 text_property='body',vector_property='embedding',properties=['source_url'])
@@ -96,7 +105,8 @@ limit = "2GiB"
                             else: raise AssertionError('visible dimension mismatch accepted')
                 return {'result':'PASS','two_static_acl_identities':True,
                         'hidden_malformed_vector_excluded':True,
-                        'hidden_candidate_score_invariance':True,'synthetic':True}
+                        'hidden_candidate_score_invariance':True,
+                        'hidden_sources_excluded':True,'synthetic':True}
             finally:
                 process.terminate()
                 try: process.wait(timeout=5)

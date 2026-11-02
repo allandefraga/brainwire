@@ -156,6 +156,22 @@ and checking the cgroup limit.
 
 ## Admission under Linux cgroup pressure
 
+Decision logs include the selected cgroup's raw usage, inactive file cache,
+effective working-set estimate and limit when the cgroup check refuses a RUN. If any examined cgroup has raw usage
+at least 95% but subtracting inactive file cache permits admission, a separate
+`cgroup_allowed_after_inactive_file` diagnostic records the first such cgroup's
+inputs, independently of which cgroup has the largest effective usage ratio.
+No admission diagnostic is emitted if another cgroup rejects the RUN or required
+inputs are unavailable. Each stream
+logs at counts 1, 2, 4, 8 and so on. Only numerical memory fields are logged;
+query text and credentials are not included. This reuses the admission reads
+without additional filesystem I/O. Values come from sequential reads at that
+check, not one atomic kernel snapshot. They explain the cgroup check, not whether
+later authorization, query or storage work succeeds. Missing/unreadable required limit or usage
+inputs remain unavailable and do not manufacture an admission sample. Missing
+inactive-file data retains the existing conservative fallback of zero reclaimable bytes. These
+logs do not diagnose older receipts retroactively or establish a global RSS cap.
+
 New Bolt RUNs are checked before copying query parameters and again before
 execution. If the working set (controller usage minus the inactive file cache
 in `memory.stat`, which the kernel reclaims before it OOMs) reaches 95% of any

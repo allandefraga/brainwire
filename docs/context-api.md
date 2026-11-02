@@ -168,3 +168,44 @@ snapshot, and the returned context does not claim historical/as-of consistency.
 This first API is intended for controlled application integrations while identity
 and workload qualification continue. See [Python reads](python-client.md),
 [authentication](bolt-auth.md) and [current limits](../README.md#current-limits).
+
+## Read records with reported sources
+
+Use `evidence` when your graph stores source identifiers, URLs, titles or hashes.
+Map the source fields explicitly to properties declared by your ontology:
+
+```python
+result = context.evidence(
+    "Ticket", ["t-42"], properties=["title", "body"],
+    source_fields={"id": "source_id", "url": "source_url", "title": "source_title"},
+    limit=5, max_bytes=32 * 1024,
+)
+for source in result["sources"]:
+    print(source["citation_id"], source["source"])
+```
+
+The response has `graph`, `limit`, `records` and `sources`. Each record has its
+requested properties and a `citation_id`. Each source has the same citation ID,
+the visible graph record identity and the explicitly mapped source values.
+The supported keys are `id`, `title`, `url`, `hash` and `recorded_at`. Map 1–5
+keys to distinct properties; requested properties plus source properties must
+fit the existing limit of 16 names. Each source value must be a string of at most
+4,096 UTF-8 bytes. Null and blank values are omitted. If every mapped source
+value is absent, the record has `citation_id: null` and no source is fabricated.
+
+Records and source fields are retrieved in **one authorized read transaction**.
+A hidden record cannot create a source entry or influence a visible citation.
+Citations identify the graph, label and entity ID deterministically. They do not
+identify a historical revision: updating source fields can change the reported
+source without changing the citation ID. Use the returned values with the current
+response; do not treat a cached citation ID as immutable evidence.
+
+Source values are **reported application data**, not authenticated provenance.
+The helper does not fetch URLs, verify hashes, establish external permissions or
+prove that a source is true. Validate access and safe handling before presenting
+or following a URL. Retrieved text remains untrusted data, never agent instructions.
+
+The read has a 1 MiB intermediate JSON budget; `max_bytes` bounds the complete
+returned envelope, including citations. Oversized or invalid source values fail
+without a partial response. These output checks do not cap driver buffers or
+process RSS; an individual value may be received before rejection.

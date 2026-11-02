@@ -1,14 +1,48 @@
 # Local comparison: Brainwire, Neo4j and FalkorDB
 
-This is a reproducible diagnostic run, not an audited benchmark or a general
-product ranking. It compares one workload on one developer machine. The raw
-receipt and chart are checked in beside this report:
+These are reproducible synthetic diagnostics on one developer machine. They
+are not audited benchmarks, production guarantees or general product rankings.
+Each receipt identifies its own data, images, settings and timing samples.
 
-- Run: `20261019T115937Z-c6b05d`
-- [Raw JSON receipt](results/20261019T115937Z-c6b05d.json)
-- [Comparison chart](../assets/comparison-20261019.svg)
+## 2026-11-02 diagnostic
 
-![Measured local comparison](../assets/comparison-20261019.svg)
+[Raw JSON receipt](results/20261102T133046Z-fb12c1.json) · [Chart](comparison.svg)
+
+![November 2 local diagnostic](comparison.svg)
+
+| System | Point p50 | Point p95 | One-hop p50 | One-hop p95 | Fresh ingest records/s |
+|---|---:|---:|---:|---:|---:|
+| Brainwire | 0.634 ms | 1.001 ms | 0.667 ms | 0.990 ms | 42,971 |
+| Neo4j Community | 0.828 ms | 1.288 ms | 0.854 ms | 1.264 ms | 14,292 |
+| FalkorDB | 0.279 ms | 0.505 ms | 0.298 ms | 0.408 ms | 53,707 |
+
+One run loaded 10,000 nodes and 20,000 directed edges, with batch size 100.
+There were 1,000 point reads and 500 one-hop reads per system across five
+repeats. Containers ran sequentially in fixed order (Brainwire, Neo4j,
+FalkorDB), each capped at **2 CPU / 4 GiB**, with swap disabled. The host was
+shared with other running services; those services were not stopped. These
+conditions differ from the historical 4 CPU / 8 GiB runs below.
+
+The pins were Neo4j Community `2026.09.0`, FalkorDB server `6.0.0`, Neo4j Python
+`5.28.8` and FalkorDB Python `1.2.2`, using Python `3.14.7` on macOS arm64
+with Docker. The reproduction example below selects Python `3.12`; matching
+this measurement requires Python `3.14.7`. FalkorDB reported Redis `8.10.2`, graph module `60000`, AOF enabled and `appendfsync
+always`; its configured maxmemory was 3 GiB. Brainwire and Neo4j used Bolt;
+FalkorDB used its Redis-compatible protocol. Durability defaults and client
+stacks differ, so this does not establish equivalent durability/performance.
+
+The receipt's Git HEAD is `9952b2b` and the worktree was dirty. It is **not** a
+measurement of that release alone: the Brainwire image records the candidate's
+source-snapshot label `org.brainwire.benchmark-source-sha256` as
+`1dee3ea53144dd8bfea314ad32fce430f97e8008c664d8c0cab551189ad38bb3`.
+The receipt contains the immutable local image IDs. This label is declared build
+metadata, not an independent source audit or qualification of later edits.
+
+All systems passed the fixture's counts, selected-property checks and graceful
+restart check. Memory/CPU values are single post-workload samples, not peak RSS
+or comparable memory-efficiency scores. This small, warm, single-client graph
+excludes concurrent load, ACL overhead, abrupt failures and distributed operation.
+Read the methodology and interpretation limits below before drawing conclusions.
 
 ## New local run: October 29
 
@@ -32,6 +66,11 @@ ranking or a production guarantee. The measurements do not isolate the cost
 of memory-pressure admission. See the methodology and limits below.
 
 ## Historical results: October 19
+
+[Raw JSON receipt](results/20261019T115937Z-c6b05d.json) ·
+[Chart](../assets/comparison-20261019.svg)
+
+![October 19 diagnostic](../assets/comparison-20261019.svg)
 
 All three systems loaded the same 10,000-node, 20,000-edge graph and recovered
 those counts after a graceful restart of the same container with its persistent
@@ -91,7 +130,10 @@ default transaction-log configuration, and FalkorDB used AOF with
 this benchmark candidate. The settings are not equivalent, so the measured
 latency comparison must not be read as equivalent durability/performance tradeoffs.
 
-## Versions and environment
+## Historical environment: October 19
+
+This table describes the October 19 run only. For later runs, use their own
+receipts and report sections above.
 
 | Component | Pin |
 |---|---|
@@ -107,6 +149,37 @@ the exact container images, even if tags move. The Brainwire image is local;
 the receipt records its immutable image ID. The source worktree was dirty, so
 the commit alone does not reproduce that exact candidate.
 
+## Resource and safety controls for new runs
+
+The runner defaults to **2 CPU / 4 GiB per database**, with swap disabled.
+Historical results above used 4 CPU / 8 GiB; new runs with different limits
+must not be presented as identical conditions. `--cpus` accepts 1–4 and
+`--memory-gib` accepts 4 or 8. Heap/cache limits scale with this choice and are
+recorded in the receipt. Database limits do not reserve host memory: inspect
+available capacity first, run one database at a time, and avoid concurrent
+builds. Existing workloads remain running and can affect timings; disclose them.
+
+All selected images must be local. Before creating any resources, the runner
+resolves them to immutable local image IDs. Init and server containers use those
+IDs and the runner checks the server's actual image before connecting. Containers
+and volumes receive a unique run label; cleanup requires the matching label and
+uses verified container IDs. Docker commands have timeouts, Redis socket operations use 60 seconds, and
+Bolt queries carry a cooperative 60-second server deadline. A hung server that
+ignores that deadline is not bounded by this client-side control. Failed runs
+retain receipts, and cleanup errors are failures. Only resources created for that run are removed; images are retained.
+
+The FalkorDB fixture reads `CONFIG GET appendonly`, `appendfsync` and
+`maxmemory` after readiness and after restart. It refuses to time a run unless
+AOF is enabled, fsync is `always` and the memory value matches the requested
+fixture. The receipt records the Redis runtime version and graph-module version,
+plus whitelisted source/revision labels from each resolved image, including
+`org.brainwire.benchmark-source-sha256` when present. Source labels are declared
+build metadata, not an independent proof of reproducibility.
+
+These controls do not make protocols or durability equivalent. The workload is
+still a synthetic diagnostic, not a general performance ranking or an isolated
+host qualification.
+
 ## Reproduce
 
 Install Docker and `uv`, then from the repository root. The runner uses only
@@ -121,7 +194,7 @@ docker pull falkordb/falkordb-server:6.0.0
 docker build --build-arg CARGO_BUILD_JOBS=1 --tag brainwire-benchmark:local .
 BRAINWIRE_IMAGE=brainwire-benchmark:local uv run --python 3.12 --with-requirements docs/benchmarks/comparison/requirements.txt \
   docs/benchmarks/comparison/run.py \
-  --nodes 10000 --batch 100 --repeats 5 --reads 200 \
+  --cpus 2 --memory-gib 4 --nodes 10000 --batch 100 --repeats 5 --reads 200 \
   --neighborhoods 100 --update-batches 20
 ```
 
