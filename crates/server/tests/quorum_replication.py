@@ -645,6 +645,25 @@ def run(binary, rows, log_cap_recovery=False):
                 with client.session(database="pages") as session:
                     identities = [record["node"].element_id for record in session.run("MATCH (p:Page) RETURN p AS node")]
             assert len(identities) == rows + 3 and len(set(identities)) == rows + 3
+            restarted_outcome = json.loads(command(current, "request", "--id", request_key).stdout)
+            assert restarted_outcome == report["request_outcome"], "full restart changed durable request outcome"
+            callbacks_before_restart_retry = len(operation_calls)
+            with driver(current) as client:
+                try:
+                    GraphClient(client, "pages").write_transaction(write_once, request_id=seed)
+                except Neo4jError as error:
+                    assert error.code == "Neo.ClientError.Transaction.RequestAlreadyCommitted", error.code
+                else:
+                    raise AssertionError("full restart lost committed request deduplication")
+            assert len(operation_calls) == callbacks_before_restart_retry, "restart retry reran the callback"
+            assert query(current, "MATCH (p:Page {entity_id:'idempotent'}) RETURN count(*) AS n") == [{"n": 1}]
+            report["request_outcome_after_full_restart"] = restarted_outcome
+            report["request_replay_after_full_restart"] = {
+                "code": "Neo.ClientError.Transaction.RequestAlreadyCommitted",
+                "callback_calls_before": callbacks_before_restart_retry,
+                "callback_calls_after": len(operation_calls),
+                "matching_nodes": 1}
+            report["checks"].append("after all three voters restart, quorum lookup preserves the exact committed request outcome; same-seed replay refuses before invoking the Python callback and retains one node")
             with driver(current) as client:
                 assert GraphClient(client, "pages").upsert_node_with_acl("Page", "atomic-visible",
                     {"title": "atomic"}, {"allow": ["alice"]}, request_id="atomic-acl-success") is True

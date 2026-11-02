@@ -54,6 +54,7 @@ fn store_catalog(db: &Database, catalog: &Catalog) {
 }
 fn node(label: &str, id: u16) -> NodeType {
     NodeType {
+        description: None,
         id: TypeId(id),
         label: label.into(),
         columns: vec![],
@@ -189,6 +190,7 @@ fn rejects_oversized_schema_and_dangling_endpoints() {
     ));
     c = catalog();
     c.edge_types.push(EdgeType {
+        description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
         signatures: vec![(TypeId(1), TypeId(1)); 4097],
@@ -298,6 +300,7 @@ fn caps_count_repeated_endpoints_and_relationship_properties() {
     let mut c = catalog();
     c.node_types[0].label = "x".repeat(200_000);
     c.edge_types.push(EdgeType {
+        description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
         signatures: vec![(TypeId(1), TypeId(1)); 3],
@@ -324,4 +327,64 @@ fn caps_count_repeated_endpoints_and_relationship_properties() {
     store_catalog(&db, &c);
     let error = execute(&db, QUERY, &BTreeMap::new()).unwrap_err();
     assert!(matches!(error, ExecError::Semantic(ref s) if s.contains("string limit")));
+}
+
+#[test]
+fn type_descriptions_survive_reopen_and_are_exposed_as_bounded_schema() {
+    let (dir, db) = open();
+    let mapping: GraphMapping = serde_json::from_value(serde_json::json!({
+        "version":"1", "nodes":[{"label":"Ticket", "description":"A customer request"}],
+        "edges":[{"type":"RELATED", "from":{"label":"Ticket"}, "to":{"label":"Ticket"}, "description":"Related requests"}]
+    })).unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    drop(db);
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    let values = run(&db);
+    let Out::Value(Value::List(nodes)) = &values[1] else {
+        panic!("expected nodes")
+    };
+    let Value::Map(node) = &nodes[0] else {
+        panic!("expected node map")
+    };
+    assert_eq!(node.get("description"), Some(&string("A customer request")));
+    let Out::Value(Value::List(edges)) = &values[2] else {
+        panic!("expected edges")
+    };
+    let Value::Map(edge) = &edges[0] else {
+        panic!("expected edge map")
+    };
+    assert_eq!(edge.get("description"), Some(&string("Related requests")));
+}
+
+#[test]
+fn accumulated_node_and_relationship_descriptions_obey_schema_string_cap() {
+    let (_dir, db) = open();
+    let mut c = catalog();
+    c.node_types = (1..=257)
+        .map(|id| {
+            let mut ty = node(&format!("Type{id}"), id);
+            ty.description = Some("x".repeat(4096));
+            ty
+        })
+        .collect();
+    store_catalog(&db, &c);
+    assert!(execute(&db, QUERY, &BTreeMap::new())
+        .unwrap_err()
+        .to_string()
+        .contains("schema string limit"));
+    c = catalog();
+    c.edge_types = (1..=257)
+        .map(|id| EdgeType {
+            id: EdgeTypeId(id),
+            name: format!("LINK{id}"),
+            description: Some("x".repeat(4096)),
+            signatures: vec![(TypeId(1), TypeId(1))],
+            columns: vec![],
+        })
+        .collect();
+    store_catalog(&db, &c);
+    assert!(execute(&db, QUERY, &BTreeMap::new())
+        .unwrap_err()
+        .to_string()
+        .contains("schema string limit"));
 }

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 /// Five lists of 5000 entries of 256 bytes each (plus JSON quoting/commas) fit with headroom.
 pub const MAX_ACL_BYTES: usize = 8 * 1024 * 1024;
-const MAX_ITEMS: usize = 5000;
-const MAX_TEXT_BYTES: usize = 256;
+pub const MAX_ACL_ITEMS: usize = 5000;
+pub const MAX_ACL_TEXT_BYTES: usize = 256;
 const GRANT_PREFIX: &str = "knowledge-doc:";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,10 +42,10 @@ pub enum AclError {
 }
 
 fn text(value: &str) -> bool {
-    !value.is_empty() && value.len() <= MAX_TEXT_BYTES
+    !value.is_empty() && value.len() <= MAX_ACL_TEXT_BYTES
 }
 fn list(values: &[String]) -> Result<(), AclError> {
-    if values.len() > MAX_ITEMS || values.iter().any(|value| !text(value)) {
+    if values.len() > MAX_ACL_ITEMS || values.iter().any(|value| !text(value)) {
         return Err(AclError::InvalidList);
     }
     Ok(())

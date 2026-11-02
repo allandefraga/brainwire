@@ -93,6 +93,15 @@ fn endpoint(address: &str) -> Result<(String, String, bool), TransportError> {
         if socket.port() == 0 {
             return Err(TransportError::Configuration("peer port must be nonzero"));
         }
+        let destination = socket.ip().to_canonical();
+        if destination.is_unspecified()
+            || destination.is_multicast()
+            || matches!(destination, std::net::IpAddr::V4(ip) if ip.is_broadcast())
+        {
+            return Err(TransportError::Configuration(
+                "peer endpoint must be a unicast destination, not a bind address",
+            ));
+        }
         return Ok((
             socket.to_string(),
             socket.ip().to_string(),
@@ -439,11 +448,21 @@ async fn read_body(stream: &mut Stream, count: usize) -> Result<Vec<u8>, Transpo
     if count > MAX_BODY_BYTES {
         return Err(TransportError::TooLarge);
     }
-    let mut body = vec![0; count];
-    stream
-        .read_exact(&mut body)
-        .await
-        .map_err(|_| TransportError::Unreachable)?;
+    // A peer has not authenticated until its whole envelope arrives. Grow only
+    // after receiving bytes, so a four-byte header cannot reserve an 8 MiB body.
+    let mut body = Vec::new();
+    let mut chunk = [0; 8 << 10];
+    while body.len() < count {
+        let take = (count - body.len()).min(chunk.len());
+        stream
+            .read_exact(&mut chunk[..take])
+            .await
+            .map_err(|_| TransportError::Unreachable)?;
+        // Geometric growth avoids quadratic copies for large valid RPCs.
+        body.try_reserve(take)
+            .map_err(|_| TransportError::TooLarge)?;
+        body.extend_from_slice(&chunk[..take]);
+    }
     Ok(body)
 }
 async fn write_frame(stream: &mut Stream, body: &[u8]) -> Result<(), TransportError> {
@@ -895,6 +914,115 @@ mod tests {
     use super::*;
     use openraft::error::Fatal;
     use openraft::{ErrorSubject, ErrorVerb, StorageError};
+
+    #[test]
+    fn advertised_peer_endpoints_require_unicast_destinations() {
+        for address in [
+            "0.0.0.0:19001",
+            "255.255.255.255:19001",
+            "[::]:19001",
+            "224.0.0.1:19001",
+            "[ff02::1]:19001",
+            "[::ffff:0.0.0.0]:19001",
+            "[::ffff:224.0.0.1]:19001",
+            "[::ffff:255.255.255.255]:19001",
+        ] {
+            assert!(
+                endpoint(address).is_err(),
+                "invalid peer endpoint accepted: {address}"
+            );
+        }
+        for address in [
+            "127.0.0.1:19001",
+            "[::1]:19001",
+            "10.0.0.5:19001",
+            "[::ffff:10.0.0.5]:19001",
+            "[fd00::5]:19001",
+            "brainwire-0.brainwire:19001",
+        ] {
+            assert!(
+                endpoint(address).is_ok(),
+                "valid peer endpoint rejected: {address}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_untrusted_frame_length_does_not_allocate_its_entire_body_up_front() {
+        struct EmptyBody(Arc<std::sync::atomic::AtomicUsize>);
+        impl AsyncRead for EmptyBody {
+            fn poll_read(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+                buffer: &mut tokio::io::ReadBuf<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                self.0
+                    .store(buffer.remaining(), std::sync::atomic::Ordering::Relaxed);
+                std::task::Poll::Ready(Ok(()))
+            }
+        }
+        impl AsyncWrite for EmptyBody {
+            fn poll_write(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+                _: &[u8],
+            ) -> std::task::Poll<std::io::Result<usize>> {
+                unreachable!()
+            }
+            fn poll_flush(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                unreachable!()
+            }
+            fn poll_shutdown(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                unreachable!()
+            }
+        }
+        let requested = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut stream: Stream = Box::new(EmptyBody(Arc::clone(&requested)));
+        assert!(matches!(
+            read_body(&mut stream, MAX_BODY_BYTES).await,
+            Err(TransportError::Unreachable)
+        ));
+        assert!(requested.load(std::sync::atomic::Ordering::Relaxed) <= 16 << 10);
+    }
+
+    #[tokio::test]
+    async fn incremental_peer_frames_preserve_boundaries_limits_and_timeout() {
+        let (mut sender, receiver) = tokio::io::duplex(64 << 10);
+        let payload = vec![42; (24 << 10) + 7];
+        sender.write_all(&payload).await.unwrap();
+        sender.write_all(&[99]).await.unwrap();
+        let mut stream: Stream = Box::new(receiver);
+        assert_eq!(
+            read_body(&mut stream, payload.len()).await.unwrap(),
+            payload
+        );
+        assert_eq!(read_body(&mut stream, 1).await.unwrap(), vec![99]);
+        assert!(matches!(
+            read_body(&mut stream, 0).await,
+            Err(TransportError::Protocol)
+        ));
+        assert!(matches!(
+            read_body(&mut stream, MAX_BODY_BYTES + 1).await,
+            Err(TransportError::TooLarge)
+        ));
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            read_body(&mut stream, MAX_BODY_BYTES)
+        )
+        .await
+        .is_err());
+        drop(sender);
+        assert!(matches!(
+            read_body(&mut stream, 1).await,
+            Err(TransportError::Unreachable)
+        ));
+    }
 
     fn settings(dir: &Path, node: u64, peers: &BTreeMap<u64, BasicNode>) -> TransportSettings {
         let token = dir.join("token");

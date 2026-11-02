@@ -663,6 +663,278 @@ mod tests {
     static ACCOUNTING_ALLOCATOR: AccountingAllocator = AccountingAllocator;
 
     #[test]
+    fn map_projection_does_not_clone_unselected_payloads() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let params = BTreeMap::new();
+        let vars = plan::Vars::default();
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 64 << 10,
+                timeout: None,
+            },
+            None,
+        );
+        let ctx = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: None,
+            param_vals: None,
+            partition: None,
+        };
+        let plan = plan::plan(&parse("WITH {} AS doc RETURN doc{.title}").unwrap(), &ctx).unwrap();
+        let ctx = Context {
+            vars: &plan.vars,
+            ..ctx
+        };
+        let row = vec![val::Val::Map(BTreeMap::from([
+            ("title".into(), val::Val::Str("small".into())),
+            ("body".into(), val::Val::Str("x".repeat(1 << 20))),
+        ]))];
+        let expr = Expr::MapProjection {
+            var: "doc".into(),
+            items: vec![MapItem::Prop("title".into())],
+        };
+        ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+        let value = eval::eval(&expr, &row, &ctx).unwrap();
+        let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+        assert_eq!(
+            value,
+            val::Val::Map(BTreeMap::from([(
+                "title".into(),
+                val::Val::Str("small".into())
+            )]))
+        );
+        assert!(
+            allocated < 64 << 10,
+            "small projection allocated {allocated} bytes from an unrelated 1 MiB property"
+        );
+        let expr = Expr::Index(
+            Box::new(Expr::Var("doc".into())),
+            Box::new(Expr::Literal(Value::Str("title".into()))),
+        );
+        ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+        let result = eval::eval(&expr, &row, &ctx);
+        let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+        assert_eq!(result.unwrap(), val::Val::Str("small".into()));
+        assert!(
+            allocated < 64 << 10,
+            "dynamic map access copied {allocated} bytes"
+        );
+        let list_row = vec![val::Val::List(vec![
+            val::Val::Str("small".into()),
+            val::Val::Str("x".repeat(1 << 20)),
+        ])];
+        for index in [0, -2] {
+            let expr = Expr::Index(
+                Box::new(Expr::Var("doc".into())),
+                Box::new(Expr::Literal(Value::Int(index))),
+            );
+            ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+            let result = eval::eval(&expr, &list_row, &ctx);
+            let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+            assert_eq!(result.unwrap(), val::Val::Str("small".into()));
+            assert!(
+                allocated < 64 << 10,
+                "dynamic list access copied {allocated} bytes"
+            );
+        }
+        for index in [Value::Int(2), Value::Int(-3), Value::Null] {
+            let expr = Expr::Index(
+                Box::new(Expr::Var("doc".into())),
+                Box::new(Expr::Literal(index)),
+            );
+            assert_eq!(eval::eval(&expr, &list_row, &ctx).unwrap(), val::Val::Null);
+        }
+        let invalid = Expr::Index(
+            Box::new(Expr::Var("doc".into())),
+            Box::new(Expr::Literal(Value::Bool(true))),
+        );
+        assert!(matches!(
+            eval::eval(&invalid, &list_row, &ctx),
+            Err(ExecError::Semantic(_))
+        ));
+        let large = Expr::Index(
+            Box::new(Expr::Var("doc".into())),
+            Box::new(Expr::Literal(Value::Int(-1))),
+        );
+        ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+        let denied = eval::eval(&large, &list_row, &ctx);
+        let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+        assert!(matches!(denied, Err(ExecError::MemoryLimit { .. })));
+        assert!(
+            allocated < 64 << 10,
+            "denied list item allocated {allocated} bytes"
+        );
+        for expr in [
+            Expr::Prop(Box::new(Expr::Var("doc".into())), "body".into()),
+            Expr::MapProjection {
+                var: "doc".into(),
+                items: vec![MapItem::Prop("body".into())],
+            },
+        ] {
+            ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+            let result = eval::eval(&expr, &row, &ctx);
+            let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+            assert!(matches!(result, Err(ExecError::MemoryLimit { .. })));
+            assert!(
+                allocated < 64 << 10,
+                "denied property allocated {allocated} bytes before admission"
+            );
+        }
+        let large_budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 8 << 20,
+                timeout: None,
+            },
+            None,
+        );
+        let ctx = Context {
+            budget: &large_budget,
+            ..ctx
+        };
+        let expr = Expr::Slice(
+            Box::new(Expr::Literal(Value::List(vec![Value::Str(
+                "x".repeat(1 << 20),
+            )]))),
+            Some(Box::new(Expr::Literal(Value::Int(0)))),
+            None,
+        );
+        ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+        let result = eval::eval(&expr, &[], &ctx);
+        let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+        let val::Val::List(items) = result.unwrap() else {
+            panic!("expected a sliced list")
+        };
+        assert_eq!(items.len(), 1);
+        let val::Val::Str(payload) = &items[0] else {
+            panic!("expected string payload")
+        };
+        assert_eq!(payload.len(), 1 << 20);
+        assert!(
+            allocated < (1 << 20) + (64 << 10),
+            "owned slice recopied selected payload: {allocated}"
+        );
+        let narrow = Expr::Slice(
+            Box::new(Expr::Literal(Value::List(vec![Value::Null; 10000]))),
+            Some(Box::new(Expr::Literal(Value::Int(0)))),
+            Some(Box::new(Expr::Literal(Value::Int(1)))),
+        );
+        let val::Val::List(items) = eval::eval(&narrow, &[], &ctx).unwrap() else {
+            panic!("expected list")
+        };
+        assert_eq!(items.len(), 1);
+        assert!(
+            items.capacity() <= 2,
+            "narrow slice retained source capacity {}",
+            items.capacity()
+        );
+        for (from, to, expected) in [
+            (Some(-2), Some(-1), vec![2]),
+            (Some(3), Some(1), vec![]),
+            (None, None, vec![1, 2, 3]),
+            (Some(-99), Some(99), vec![1, 2, 3]),
+        ] {
+            let bound = |value: Option<i64>| value.map(|n| Box::new(Expr::Literal(Value::Int(n))));
+            let expr = Expr::Slice(
+                Box::new(Expr::Literal(Value::List(vec![
+                    Value::Int(1),
+                    Value::Int(2),
+                    Value::Int(3),
+                ]))),
+                bound(from),
+                bound(to),
+            );
+            assert_eq!(
+                eval::eval(&expr, &[], &ctx).unwrap(),
+                val::Val::List(expected.into_iter().map(val::Val::Int).collect())
+            );
+        }
+        for bound in [Value::Null, Value::Bool(true)] {
+            let expr = Expr::Slice(
+                Box::new(Expr::Literal(Value::List(vec![Value::Int(1)]))),
+                Some(Box::new(Expr::Literal(bound.clone()))),
+                None,
+            );
+            let result = eval::eval(&expr, &[], &ctx);
+            if bound == Value::Null {
+                assert_eq!(result.unwrap(), val::Val::Null);
+            } else {
+                assert!(matches!(result, Err(ExecError::Semantic(_))));
+            }
+        }
+    }
+
+    #[test]
+    fn map_projection_admits_selected_fields_cumulatively() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let params = BTreeMap::new();
+        let vars = plan::Vars::default();
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 64 << 10,
+                timeout: None,
+            },
+            None,
+        );
+        let ctx = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: None,
+            param_vals: None,
+            partition: None,
+        };
+        let plan = plan::plan(&parse("WITH {} AS doc RETURN doc{.a,.b}").unwrap(), &ctx).unwrap();
+        let ctx = Context {
+            vars: &plan.vars,
+            ..ctx
+        };
+        let row = vec![val::Val::Map(BTreeMap::from([
+            ("a".into(), val::Val::Str("x".repeat(40 << 10))),
+            ("b".into(), val::Val::Str("y".repeat(40 << 10))),
+        ]))];
+        let expr = Expr::MapProjection {
+            var: "doc".into(),
+            items: vec![MapItem::Prop("a".into()), MapItem::Prop("b".into())],
+        };
+        ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+        let result = eval::eval(&expr, &row, &ctx);
+        let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+        assert!(matches!(result, Err(ExecError::MemoryLimit { .. })));
+        assert!(
+            allocated < 64 << 10,
+            "projection copied more selected fields than admitted: {allocated}"
+        );
+    }
+
+    #[test]
     fn path_output_accounting_borrows_properties_without_allocating() {
         let node = NodeOut {
             id: NodeId(1),

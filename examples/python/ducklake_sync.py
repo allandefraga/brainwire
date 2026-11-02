@@ -321,6 +321,8 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
     """
     if type(workers) is not int or not 1 <= workers <= 64:
         raise ValueError("workers must be 1..64")
+    if type(batch_size) is not int or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer")
     if prune and not full:
         raise ValueError("prune requires full")
     started = time.monotonic()

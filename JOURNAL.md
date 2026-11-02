@@ -29,6 +29,66 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-02: experimental launch candidate
+
+- Simplify the public-facing README and Python setup; keep the synthetic demo
+  labeled and the limitations visible. Prepare v0.14.0-beta.1 for controlled trials.
+- The previous session's work remains part of this candidate. Its failed 512 MiB
+  pressure run and the limitations in the entry below remain unresolved; a
+  successful smoke does not erase that failure or prove production readiness.
+- **Next:** verify the exact candidate, release workflow and image publication;
+  qualify memory under sustained load and multi-machine recovery separately.
+
+## 2026-11-02: agent context, ontology and recovery work in progress
+
+- Added bounded Python context reads, explicit-candidate lexical lookup and
+  experimental local hybrid reranking. This is not indexed ANN or BM25.
+  A two-principal Bolt acceptance verifies hidden candidates do not affect
+  returned results or scores. Output caps are not process RSS caps.
+- Added optional ontology descriptions, with old catalog read compatibility;
+  downgrade and mixed-version clusters remain unqualified.
+- Projection accounting avoids cloning unselected map properties. Tests cover
+  large unselected values and admission before selected-value copies.
+- Replication startup rejects missing retained-log prefixes and regressing terms;
+  the zero-prefix invariant requires revisiting when purge/snapshots are added.
+- Native client credential files reject special files; Python connect helper
+  closes its driver. Added bounded Python AST extraction, opt-in static import
+  and call candidates with snapshot isolation, and local degree/path/explain
+  commands. Evidence is reported, not authenticated; this is not a complete
+  multi-language dependency graph or a runtime call graph.
+- Replaced README hero artwork with a labeled synthetic animated illustration.
+- Workspace Rust tests and all-target Clippy passed on the integrated Rust diff;
+  further Python, ingestion, packaging and review checks remain in progress.
+- **More:** reject ambiguous delegated visibility fields before JSON conversion,
+  bound replication frame growth, and yield cooperatively during Bolt encoding.
+  Validate zero-field RESET/ROLLBACK and fixed peer endpoints. Index backfill
+  limits items per batch; it is not a byte limit. Add source lease validation.
+- **Evidence:** final workspace verification passed 974 Rust tests, with 3
+  ignored, and Clippy passed. An earlier 988-test run included 14 tests for a
+  standalone tokenizer prototype later removed because it was not integrated.
+  Python discovery ran 160 tests, with 7 skipped (6 DuckLake dependencies and
+  one pattern-syntax case on Python 3.9); harness unit tests passed 12/12.
+  Final server SHA-256 e437091f9eba53a41fdf2c04ffa5693e177498b22a78c864791866d67ebfd12d
+  passed 18 three-process quorum checks after rebuilding, including restart and
+  identified-commit reconciliation without callback replay. Bolt integration
+  passed for code graph snapshots and two-principal context reranking, with
+  matching pre/post binary hashes. A two-file CLI demo found the call path and
+  marked the inferred edge. These are synthetic local tests, not multi-machine
+  qualification.
+- **Container diagnostic:** isolated 512 MiB cgroup pressure smoke passed twice
+  and failed once when a RUN was admitted between raw-pressure samples. The
+  failure receipt remains FAIL: the server subtracts inactive file cache, which
+  the original receipt did not measure, so the cause is unknown. A later PASS
+  recorded the working-set estimate separately. No sustained 2/4/8 GiB or
+  kernel OOM qualification was achieved. The image was built mid-session and
+  is not qualified as the exact final checkout.
+- **Caveat:** an asset-generation command reinstalled the same-version local
+  Python package as editable in .venv; pytz was restored to its prior version,
+  but the earlier installation mode could not be verified.
+- **Next:** finish integrated checks; investigate the pressure failure with a
+  decision-point receipt; qualify sustained memory, multi-machine recovery and
+  production access controls. Keep work local.
+
 ## 2026-11-02: process memory telemetry
 
 - **Done:** expose configured process limit and a best-effort on-demand resident

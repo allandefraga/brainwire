@@ -84,6 +84,10 @@ the credential directory outside the repository.
    Each command prints a JSON summary. Rerun the same commands to apply only
    what changed since the stored snapshot.
 
+   `--batch-size` must be a positive integer. Invalid batch sizes are rejected
+   before connecting to Brainwire or acquiring the source lease, so a local
+   configuration mistake does not leave the source locked.
+
 4. Check the result with Cypher as `reader`, for example
    `MATCH (p:Person)-[:WORKS_AT]->(c:Company) RETURN c.segment, count(*)`.
 

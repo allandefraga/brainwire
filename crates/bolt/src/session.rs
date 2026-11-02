@@ -155,9 +155,32 @@ fn delegated_visibility(extra: &PackValue) -> Result<Option<ReadVisibility>, Res
     let Some(value) = metadata.get(VISIBILITY_KEY) else {
         return Ok(None);
     };
-    let PackValue::Map(_) = value else {
+    let PackValue::Map(fields) = value else {
         return Err(invalid("brainwire_visibility must be a map"));
     };
+    // Validate borrowed input before to_json clones it and collapses duplicate keys.
+    if fields.len() > 7 {
+        return Err(invalid("brainwire_visibility is not a valid visibility"));
+    }
+    for (index, (key, value)) in fields.iter().enumerate() {
+        if fields[..index].iter().any(|(previous, _)| previous == key) {
+            return Err(invalid("duplicate visibility field"));
+        }
+        let valid = match key.as_str() {
+            "allow_all" | "deny_all" | "entry_strict" => matches!(value, PackValue::Bool(_)),
+            "allowed_connectors" | "knowledge_grants" if matches!(value, PackValue::Null) => true,
+            "principals" | "allowed_connectors" | "open_connectors" | "knowledge_grants" => {
+                matches!(value, PackValue::List(items)
+                    if items.len() <= brainwire_core::acl::MAX_ACL_ITEMS
+                    && items.iter().all(|item| matches!(item, PackValue::String(text)
+                        if !text.is_empty() && text.len() <= brainwire_core::acl::MAX_ACL_TEXT_BYTES)))
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err(invalid("brainwire_visibility is not a valid visibility"));
+        }
+    }
     let json = value
         .to_json()
         .ok_or_else(|| invalid("brainwire_visibility holds a value that is not JSON"))?;
@@ -1765,6 +1788,50 @@ mod protected_tests {
     }
 
     #[test]
+    fn malformed_visibility_never_reaches_the_engine_and_reset_recovers() {
+        for explicit in [false, true] {
+            let (mut session, trace) = session(required());
+            login(&mut session);
+            let extra = PackValue::Map(vec![(
+                "tx_metadata".into(),
+                PackValue::Map(vec![(
+                    "brainwire_visibility".into(),
+                    PackValue::Map(vec![
+                        ("allow_all".into(), PackValue::Bool(false)),
+                        ("allow_all".into(), PackValue::Bool(true)),
+                    ]),
+                )]),
+            )]);
+            let request = if explicit {
+                Request::Begin { extra }
+            } else {
+                Request::Run {
+                    query: "RETURN 1".into(),
+                    params: empty(),
+                    extra,
+                }
+            };
+            assert!(matches!(
+                session.handle(request)[0],
+                Response::Failure { .. }
+            ));
+            assert_eq!(session.state(), State::Failed);
+            assert!(!trace
+                .lock()
+                .unwrap()
+                .events
+                .iter()
+                .any(|event| matches!(*event, "begin" | "run")));
+            assert!(matches!(
+                session.handle(Request::Reset)[0],
+                Response::Success(_)
+            ));
+            assert_eq!(session.state(), State::Ready);
+            assert!(matches!(session.handle(run())[0], Response::Success(_)));
+        }
+    }
+
+    #[test]
     fn protected_logon_passes_principal_and_reset_preserves_identity() {
         let (mut s, t) = session(required());
         login(&mut s);
@@ -1957,6 +2024,75 @@ mod delegated_visibility_tests {
             "tx_metadata".into(),
             PackValue::Map(vec![("brainwire_visibility".into(), value)]),
         )])
+    }
+
+    #[test]
+    fn duplicate_visibility_fields_are_rejected_before_json_conversion() {
+        for field in ["allow_all", "deny_all", "entry_strict"] {
+            for (first, second) in [(false, true), (true, false)] {
+                let value = PackValue::Map(vec![
+                    (field.into(), PackValue::Bool(first)),
+                    (field.into(), PackValue::Bool(second)),
+                ]);
+                assert!(delegated_visibility(&extra(value)).is_err(), "{field}");
+            }
+        }
+        for field in [
+            "principals",
+            "allowed_connectors",
+            "open_connectors",
+            "knowledge_grants",
+        ] {
+            let value = PackValue::Map(vec![
+                (field.into(), PackValue::List(vec![])),
+                (field.into(), PackValue::List(vec![])),
+            ]);
+            assert!(delegated_visibility(&extra(value)).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn wire_visibility_preserves_defaults_options_and_byte_bounds() {
+        let empty = delegated_visibility(&extra(PackValue::Map(vec![])))
+            .unwrap()
+            .unwrap();
+        assert_eq!(empty, ReadVisibility::default());
+        for field in ["allowed_connectors", "knowledge_grants"] {
+            assert_eq!(
+                delegated_visibility(&extra(PackValue::Map(vec![(
+                    field.into(),
+                    PackValue::Null
+                )])))
+                .unwrap()
+                .unwrap(),
+                empty
+            );
+        }
+        for count in [128, 129] {
+            let value = PackValue::Map(vec![(
+                "principals".into(),
+                PackValue::List(vec![PackValue::String("é".repeat(count))]),
+            )]);
+            assert_eq!(delegated_visibility(&extra(value)).is_ok(), count == 128);
+        }
+        for count in [5000, 5001] {
+            let value = PackValue::Map(vec![(
+                "principals".into(),
+                PackValue::List(vec![PackValue::String("p".into()); count]),
+            )]);
+            assert_eq!(delegated_visibility(&extra(value)).is_ok(), count == 5000);
+        }
+        for invalid in [
+            PackValue::Map(vec![("allow_all".into(), PackValue::Int(1))]),
+            PackValue::Map(vec![("principals".into(), PackValue::Null)]),
+            PackValue::Map(vec![(
+                "principals".into(),
+                PackValue::List(vec![PackValue::Map(vec![])]),
+            )]),
+            PackValue::Map(vec![("unknown".into(), PackValue::List(vec![]))]),
+        ] {
+            assert!(delegated_visibility(&extra(invalid)).is_err());
+        }
     }
 
     #[test]

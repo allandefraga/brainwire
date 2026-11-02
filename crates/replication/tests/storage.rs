@@ -556,3 +556,264 @@ async fn recovery_preserves_applied_membership_and_ignores_pending_membership() 
         StoredMembership::new(Some(first.log_id), configuration)
     );
 }
+
+#[tokio::test]
+async fn recovery_rejects_missing_retained_log_prefix_even_with_matching_accounting() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let entries = vec![entry(0, command("first")), entry(1, command("second"))];
+    store
+        .log_store()
+        .blocking_append(entries.clone())
+        .await
+        .unwrap();
+    drop(store);
+    let db = rocksdb::DB::open_default(dir.path()).unwrap();
+    let mut key = [b'L'; 9];
+    key[1..].copy_from_slice(&0_u64.to_be_bytes());
+    db.delete(key).unwrap();
+    let remaining_bytes = serde_json::to_vec(&entries[1]).unwrap().len() as u64;
+    db.put(b"Mbytes", serde_json::to_vec(&remaining_bytes).unwrap())
+        .unwrap();
+    db.flush_wal(true).unwrap();
+    drop(db);
+    assert!(Storage::open(dir.path(), 1024 * 1024, app).is_err());
+}
+
+#[tokio::test]
+async fn recovery_rejects_term_regression_but_accepts_new_leader_terms() {
+    for last_term in [1, 2, 3] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        let mut entries = vec![entry(0, command("first")), entry(1, command("second"))];
+        entries[0].log_id = LogId::new(openraft::CommittedLeaderId::new(2, 1), 0);
+        entries[1].log_id = LogId::new(
+            openraft::CommittedLeaderId::new(last_term, if last_term > 2 { 2 } else { 1 }),
+            1,
+        );
+        store.log_store().blocking_append(entries).await.unwrap();
+        drop(store);
+        let reopened = Storage::open(dir.path(), 1024 * 1024, app);
+        assert_eq!(reopened.is_ok(), last_term >= 2, "last term {last_term}");
+    }
+}
+
+struct DurableApp {
+    db: rocksdb::DB,
+    fail_after_commit: bool,
+}
+impl Application for DurableApp {
+    fn apply(&self, command: &Command) -> Result<Reply, String> {
+        let key = command.request_id().as_bytes();
+        if let Some(bytes) = self.db.get(key).map_err(|e| e.to_string())? {
+            return serde_json::from_slice(&bytes).map_err(|e| e.to_string());
+        }
+        let effects = self
+            .db
+            .get(b"\0effects")
+            .map_err(|e| e.to_string())?
+            .map(|bytes| u64::from_be_bytes(bytes.try_into().unwrap()))
+            .unwrap_or(0)
+            + 1;
+        let reply = Reply::Applied { revision: effects };
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.put(key, serde_json::to_vec(&reply).unwrap());
+        batch.put(b"\0effects", effects.to_be_bytes());
+        let mut options = rocksdb::WriteOptions::default();
+        options.set_sync(true);
+        self.db
+            .write_opt(batch, &options)
+            .map_err(|e| e.to_string())?;
+        if self.fail_after_commit {
+            return Err("injected interruption after application WAL commit".into());
+        }
+        Ok(reply)
+    }
+}
+
+#[tokio::test]
+async fn durable_application_reopen_reconciles_crash_before_consensus_apply_marker() {
+    let dir = TempDir::new().unwrap();
+    let application_path = dir.path().join("application");
+    let consensus_path = dir.path().join("consensus");
+    let command = command("durable-replay");
+    let committed = entry(0, command.clone());
+    {
+        let app = Arc::new(DurableApp {
+            db: rocksdb::DB::open_default(&application_path).unwrap(),
+            fail_after_commit: true,
+        });
+        let store = Storage::open(&consensus_path, 1024 * 1024, app.clone()).unwrap();
+        let mut logs = store.log_store();
+        logs.blocking_append([committed.clone()]).await.unwrap();
+        logs.save_committed(Some(committed.log_id)).await.unwrap();
+        assert!(store
+            .state_machine()
+            .apply([committed.clone()])
+            .await
+            .is_err());
+        assert_eq!(store.last_applied().unwrap(), None);
+        assert_eq!(store.lookup(command.request_id()).unwrap(), None);
+        assert!(app.db.get(command.request_id()).unwrap().is_some());
+    }
+    // Both independent RocksDB handles are now recreated from durable state.
+    let app = Arc::new(DurableApp {
+        db: rocksdb::DB::open_default(&application_path).unwrap(),
+        fail_after_commit: false,
+    });
+    let store = Storage::open(&consensus_path, 1024 * 1024, app.clone()).unwrap();
+    assert_eq!(store.committed().unwrap(), Some(committed.log_id));
+    assert_eq!(store.last_applied().unwrap(), None);
+    assert_eq!(
+        store
+            .state_machine()
+            .apply([committed.clone()])
+            .await
+            .unwrap(),
+        vec![Reply::Applied { revision: 1 }]
+    );
+    assert_eq!(store.last_applied().unwrap(), Some(committed.log_id));
+    assert_eq!(
+        store.lookup(command.request_id()).unwrap(),
+        Some(Reply::Applied { revision: 1 })
+    );
+    let duplicate = entry(1, command);
+    store
+        .log_store()
+        .blocking_append([duplicate.clone()])
+        .await
+        .unwrap();
+    assert_eq!(
+        store.state_machine().apply([duplicate]).await.unwrap(),
+        vec![Reply::Applied { revision: 1 }]
+    );
+    assert_eq!(app.db.iterator(rocksdb::IteratorMode::Start).count(), 2);
+    assert_eq!(
+        app.db.get(b"\0effects").unwrap().unwrap(),
+        1_u64.to_be_bytes()
+    );
+}
+
+#[cfg(unix)]
+struct CrashAfterApplicationCommit {
+    application: DurableApp,
+    ready: std::path::PathBuf,
+}
+#[cfg(unix)]
+impl Application for CrashAfterApplicationCommit {
+    fn apply(&self, command: &Command) -> Result<Reply, String> {
+        use std::io::Write;
+        self.application.apply(command)?;
+        let mut signal = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(self.ready.with_extension("pending"))
+            .map_err(|e| e.to_string())?;
+        signal
+            .write_all(b"application-committed")
+            .map_err(|e| e.to_string())?;
+        signal.sync_all().map_err(|e| e.to_string())?;
+        std::fs::rename(self.ready.with_extension("pending"), &self.ready)
+            .map_err(|e| e.to_string())?;
+        loop {
+            std::thread::park();
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn crash_recovery_child() {
+    let Some(root) = std::env::var_os("BRAINWIRE_RECOVERY_CHILD_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let app = Arc::new(CrashAfterApplicationCommit {
+        application: DurableApp {
+            db: rocksdb::DB::open_default(root.join("application")).unwrap(),
+            fail_after_commit: false,
+        },
+        ready: root.join("ready"),
+    });
+    let store = Storage::open(root.join("consensus"), 1024 * 1024, app).unwrap();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let committed = entry(0, command("process-crash"));
+        let mut logs = store.log_store();
+        logs.blocking_append([committed.clone()]).await.unwrap();
+        logs.save_committed(Some(committed.log_id)).await.unwrap();
+        store.state_machine().apply([committed]).await.unwrap();
+    });
+    panic!("child must block after application commit");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn process_kill_after_application_commit_recovers_once_from_independent_stores() {
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = TempDir::new().unwrap();
+    let mut child = ChildGuard(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "crash_recovery_child", "--nocapture"])
+            .env("BRAINWIRE_RECOVERY_CHILD_ROOT", root.path())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let ready = root.path().join("ready");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !ready.exists() {
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "child exited before durable signal"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child did not reach durable signal"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(std::fs::read(&ready).unwrap(), b"application-committed");
+    child.0.kill().unwrap();
+    let status = child.0.wait().unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(status.signal(), Some(9));
+    let app = Arc::new(DurableApp {
+        db: rocksdb::DB::open_default(root.path().join("application")).unwrap(),
+        fail_after_commit: false,
+    });
+    let store = Storage::open(root.path().join("consensus"), 1024 * 1024, app.clone()).unwrap();
+    let committed = entry(0, command("process-crash"));
+    assert_eq!(store.committed().unwrap(), Some(committed.log_id));
+    assert_eq!(store.last_applied().unwrap(), None);
+    assert_eq!(store.lookup("process-crash").unwrap(), None);
+    assert_eq!(
+        app.db.get(b"\0effects").unwrap().unwrap(),
+        1_u64.to_be_bytes()
+    );
+    assert_eq!(
+        store
+            .state_machine()
+            .apply([committed.clone()])
+            .await
+            .unwrap(),
+        vec![Reply::Applied { revision: 1 }]
+    );
+    assert_eq!(store.last_applied().unwrap(), Some(committed.log_id));
+    assert_eq!(
+        store.lookup("process-crash").unwrap(),
+        Some(Reply::Applied { revision: 1 })
+    );
+    assert_eq!(
+        app.db.get(b"\0effects").unwrap().unwrap(),
+        1_u64.to_be_bytes()
+    );
+}

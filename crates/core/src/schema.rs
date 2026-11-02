@@ -19,6 +19,8 @@ pub struct GraphMapping {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NodeSpec {
+    #[serde(default)]
+    pub description: Option<String>,
     pub label: String,
     #[serde(default)]
     pub properties: Vec<String>,
@@ -34,6 +36,8 @@ pub struct NodeSpec {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EdgeSpec {
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(rename = "type")]
     pub name: String,
     pub from: EndpointSpec,
@@ -64,6 +68,8 @@ pub struct Column {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeType {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub id: TypeId,
     pub label: String,
     pub columns: Vec<Column>,
@@ -104,6 +110,8 @@ impl NodeType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeType {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub id: EdgeTypeId,
     pub name: String,
     pub signatures: Vec<(TypeId, TypeId)>,
@@ -129,6 +137,8 @@ pub struct Catalog {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SchemaError {
+    #[error("invalid description for {0}: maximum 4096 UTF-8 bytes, no NUL, and one consistent value per type")]
+    BadDescription(String),
     #[error("unknown label {0}")]
     UnknownLabel(String),
     #[error("more than 4095 node types")]
@@ -137,6 +147,20 @@ pub enum SchemaError {
     BadEntityJoin(String),
     #[error("no ids left for {0}")]
     IdSpaceExhausted(String),
+}
+
+fn description<'a>(
+    owner: &str,
+    values: impl Iterator<Item = &'a Option<String>>,
+) -> Result<Option<String>, SchemaError> {
+    let mut resolved: Option<&String> = None;
+    for text in values.flatten() {
+        if text.len() > 4096 || text.contains('\0') || resolved.is_some_and(|prior| prior != text) {
+            return Err(SchemaError::BadDescription(owner.into()));
+        }
+        resolved = Some(text);
+    }
+    Ok(resolved.cloned())
 }
 
 fn is_reserved(name: &str) -> bool {
@@ -223,6 +247,7 @@ impl Catalog {
             let group: Vec<&NodeSpec> =
                 mapping.nodes.iter().filter(|s| s.label == *label).collect();
 
+            let description = description(label, group.iter().map(|spec| &spec.description))?;
             let mut indexed: Vec<String> = Vec::new();
             for spec in &group {
                 for f in spec.er_fields.iter().chain(&spec.indexed_fields) {
@@ -261,6 +286,9 @@ impl Catalog {
                     t.indexed = indexed;
                     t.identifiers = identifiers;
                     t.display_color = display_color;
+                    if description.is_some() {
+                        t.description = description;
+                    }
                 }
                 None => {
                     let next = node_types.iter().map(|t| t.id.0 + 1).max().unwrap_or(1);
@@ -268,6 +296,7 @@ impl Catalog {
                         return Err(SchemaError::TooManyTypes);
                     }
                     node_types.push(NodeType {
+                        description,
                         id: TypeId(next),
                         label: label.clone(),
                         columns: merge_columns(&[], &[], &properties, label)?,
@@ -291,9 +320,20 @@ impl Catalog {
 
         let mut edge_types = prev.edge_types.clone();
         for spec in &mapping.edges {
+            let description = description(
+                &spec.name,
+                mapping
+                    .edges
+                    .iter()
+                    .filter(|s| s.name == spec.name)
+                    .map(|s| &s.description),
+            )?;
             let sig = (type_of(&spec.from.label)?, type_of(&spec.to.label)?);
             match edge_types.iter_mut().find(|t| t.name == spec.name) {
                 Some(t) => {
+                    if description.is_some() {
+                        t.description = description;
+                    }
                     if !t.signatures.contains(&sig) {
                         t.signatures.push(sig);
                     }
@@ -307,6 +347,7 @@ impl Catalog {
                         None => 1,
                     };
                     edge_types.push(EdgeType {
+                        description,
                         id: EdgeTypeId(next),
                         name: spec.name.clone(),
                         signatures: vec![sig],
@@ -442,6 +483,7 @@ mod tests {
         let limit = u32::from(TypeId::MAX) + 1;
         let nodes = (0..limit)
             .map(|i| NodeSpec {
+                description: None,
                 label: format!("Type{i}"),
                 properties: vec![],
                 er_fields: vec![],
@@ -487,6 +529,7 @@ mod tests {
         let previous = Catalog {
             version: 1,
             node_types: vec![NodeType {
+                description: None,
                 id: TypeId(1),
                 label: "Customer".into(),
                 columns: vec![Column {
@@ -506,6 +549,7 @@ mod tests {
         let mapping = GraphMapping {
             version: "2".into(),
             nodes: vec![NodeSpec {
+                description: None,
                 label: "Customer".into(),
                 properties: vec!["old".into(), "new_prop".into()],
                 er_fields: vec![],
@@ -528,6 +572,7 @@ mod tests {
             version: 1,
             node_types: vec![
                 NodeType {
+                    description: None,
                     id: TypeId(1),
                     label: "Customer".into(),
                     columns: vec![],
@@ -539,6 +584,7 @@ mod tests {
                     retired_columns: vec![],
                 },
                 NodeType {
+                    description: None,
                     id: TypeId(2),
                     label: "Company".into(),
                     columns: vec![],
@@ -551,6 +597,7 @@ mod tests {
                 },
             ],
             edge_types: vec![EdgeType {
+                description: None,
                 id: EdgeTypeId(u16::MAX),
                 name: "OLD_EDGE".into(),
                 signatures: vec![(TypeId(1), TypeId(2))],
@@ -562,6 +609,7 @@ mod tests {
             version: "2".into(),
             nodes: vec![
                 NodeSpec {
+                    description: None,
                     label: "Customer".into(),
                     properties: vec![],
                     er_fields: vec![],
@@ -570,6 +618,7 @@ mod tests {
                     display_color: None,
                 },
                 NodeSpec {
+                    description: None,
                     label: "Company".into(),
                     properties: vec![],
                     er_fields: vec![],
@@ -579,6 +628,7 @@ mod tests {
                 },
             ],
             edges: vec![EdgeSpec {
+                description: None,
                 name: "NEW_EDGE".into(),
                 from: EndpointSpec {
                     label: "Customer".into(),
@@ -603,6 +653,7 @@ mod tests {
 
     fn node(label: &str, properties: &[&str], display_color: Option<&str>) -> NodeSpec {
         NodeSpec {
+            description: None,
             label: label.into(),
             properties: properties.iter().map(|s| s.to_string()).collect(),
             er_fields: vec![],
@@ -694,6 +745,7 @@ mod tests {
                 node("Company", &["name"], None),
             ],
             edges: vec![EdgeSpec {
+                description: None,
                 name: "WORKS_AT".into(),
                 from: EndpointSpec {
                     label: "Customer".into(),
@@ -749,5 +801,55 @@ mod tests {
         let second = Catalog::apply(&fixture(), Some(&first)).unwrap();
         let readded = second.node_type("Customer").unwrap().column(&last.name);
         assert_eq!(readded, Some(last.id + 1));
+    }
+    #[test]
+    fn descriptions_are_bounded_persisted_and_backward_compatible() {
+        let mapping: GraphMapping = serde_json::from_value(serde_json::json!({
+            "version":"1", "nodes":[{"label":"Ticket", "description":"A customer request"}],
+            "edges":[{"type":"RELATED", "from":{"label":"Ticket"}, "to":{"label":"Ticket"}, "description":"Related requests"}]
+        })).unwrap();
+        let cat = Catalog::apply(&mapping, None).unwrap();
+        let encoded = serde_json::to_value(&cat).unwrap();
+        assert_eq!(
+            encoded["node_types"][0]["description"],
+            "A customer request"
+        );
+        assert_eq!(encoded["edge_types"][0]["description"], "Related requests");
+        let restored: Catalog = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(restored, cat);
+        let mut legacy = encoded;
+        legacy["node_types"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("description");
+        legacy["edge_types"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("description");
+        assert!(serde_json::from_value::<Catalog>(legacy).is_ok());
+        let oversized: GraphMapping = serde_json::from_value(serde_json::json!({
+            "version":"2", "nodes":[{"label":"Ticket", "description":"x".repeat(4097)}]
+        }))
+        .unwrap();
+        assert!(Catalog::apply(&oversized, Some(&cat)).is_err());
+        let mut conflict = mapping.clone();
+        conflict.nodes.push(conflict.nodes[0].clone());
+        conflict.nodes[1].description = Some("Another meaning".into());
+        assert!(Catalog::apply(&conflict, Some(&cat)).is_err());
+        let mut nul = mapping.clone();
+        nul.edges[0].description = Some("bad\0description".into());
+        assert!(Catalog::apply(&nul, Some(&cat)).is_err());
+        let mut omitted = mapping.clone();
+        omitted.nodes[0].description = None;
+        omitted.edges[0].description = None;
+        let reapplied = Catalog::apply(&omitted, Some(&cat)).unwrap();
+        assert_eq!(
+            reapplied.node_types[0].description,
+            cat.node_types[0].description
+        );
+        assert_eq!(
+            reapplied.edge_types[0].description,
+            cat.edge_types[0].description
+        );
     }
 }

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.14.0-beta.1 — experimental candidate
+
+This release is intended for controlled trials with rebuildable data.
+
+### Added
+
+- A bounded Python context API and local hybrid reranking over explicit candidate IDs.
+  This is not native vector search, ANN or BM25.
+- Python source extraction with source evidence, optional inferred cross-file
+  candidates, and local explain/path tools. Inferred links do not prove runtime calls.
+- Optional ontology descriptions, a simpler Python connection helper and an
+  animated synthetic walkthrough.
+
+### Improved
+
+- Reduce unnecessary Cypher projection and slice allocations and yield during
+  large Bolt response encoding.
+- Reject ambiguous delegated visibility metadata and invalid control message
+  shapes; bound replication frame growth and validate peer configuration.
+- Add replication recovery tests, limit index backfill batch counts, and reject
+  invalid DuckLake batch sizes before acquiring a lease.
+
+### Known limits
+
+- One synthetic 512 MiB pressure run failed; two passed. The failure's cause
+  remains unknown. This is not a global RSS cap or a sustained 2/4/8 GiB test.
+- Quorum is experimental and local fault tests do not qualify multi-machine
+  failover. Native Bolt TLS, native vector/text indexes, historical graph
+  versions and CDC remain open. See README current limits.
+
+
 ## 0.13.0-beta.3 — candidate
 
 ### Added

@@ -1,48 +1,55 @@
-# Install the Python helper locally
+# Use Brainwire from Python
 
-From a checkout of the desired Brainwire tag:
+You need Python 3.9 or newer and a Brainwire checkout. From the checkout, run:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install .
+python3 scripts/setup_python.py
 ```
 
-This installs the `brainwire` Python package and the Neo4j Bolt driver. It does
-not install or start the database server. This is a repository-local package;
-no public PyPI publication or ownership of the PyPI name is claimed. Do not
-substitute `pip install brainwire` until an official distribution is published.
+On Windows, the Python launcher can run the same installer:
+
+```powershell
+py -3 scripts/setup_python.py
+```
+
+This creates a fresh `.venv-brainwire` environment and installs the Python
+client with its Bolt driver, using a current pip inside that new environment. No activation, Rust compiler or additional package
+manager is needed. Downloading dependencies may need internet access. The
+installer leaves existing environments untouched; use `--venv /new/path` to
+choose another location. If setup fails, read the command error and retry with
+a new path after fixing the cause. Python must include `venv` and `pip`.
+
+The database runs separately: follow [Run in Docker](container.md) first.
+The client package is installed from this checkout; a public
+`pip install brainwire` distribution is not available.
+
+Save this as `example.py` and run `.venv-brainwire/bin/python example.py`:
 
 ```python
-from brainwire import GraphClient
-from neo4j import GraphDatabase
+from brainwire import connect
 
-# Local synthetic demo. Shared/remote servers need authenticated access
-# and a verified encrypted boundary described in the deployment guides.
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
-    graph = GraphClient(driver, "demo", batch_size=100)
+with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
     graph.upsert_node("Customer", "customer-1", {"name": "Ada"})
+    print(graph.run_cypher("MATCH (c:Customer) RETURN c.name AS name"))
 ```
 
-The caller creates and closes the driver, chooses credentials and the named
-graph, and handles transport errors. This package wraps the existing synchronous
-helper; it is not an independent Bolt implementation or an async client.
-Supported driver versions are Neo4j Python 5.28 through 6.x. Compatibility with
-every minor driver release is not implied by that dependency range.
+Use `auth=None` only for the local synthetic demo. Shared servers need
+[authentication](bolt-auth.md) and a [protected connection](protected-transport.md).
+`connect` checks connectivity and closes its driver when the block ends. It does
+not prove access to a named graph before the first graph operation.
 
-Every bounded batch commits separately. `None` removes a property; omitted
-properties remain unchanged. A lost commit acknowledgment is an unknown outcome:
-the helper does not blindly replay the callback. Reconcile stable source keys
-before retrying. Explicit retained request IDs require the experimental quorum path or the
-opt-in authenticated [standalone request ledger](standalone-requests.md). See
-[the helper contract](python-client.md) for all mutation and security limits.
+On Windows, use `.venv-brainwire\Scripts\python.exe` to run your file.
+Existing virtual environments can install this checkout with `python -m pip install .`.
+The helper uses the Neo4j Bolt driver; it is a synchronous client.
 
-Known server memory refusals and unknown-commit codes raise
-`MemoryPressureError` and `CommitOutcomeUnknownError`, preserving the driver
-error as their cause. Other errors keep their original type. The optional
-`request_status(seed)` helper uses the standalone experimental endpoint in a
-fresh autocommit session; an absent receipt never means a safe retry. See the
-[error and status contract](python-client.md#typed-server-failures-and-standalone-status).
+## Next steps
 
-For example, Python release version `0.10.0b1` corresponds to Rust/tag
-`0.10.0-beta.1` under PEP 440. The release helper updates both versions together. Existing
-`examples.python.client` imports re-export the same implementation.
+- [Write, patch, remove and stream records](python-client.md).
+- [Read bounded context and rerank candidates for agents](context-api.md).
+- [Build a graph from Python code](code-graph.md).
+- [Import application data](source-ingestion.md).
+
+Each batch commits separately. `None` removes a property; omitted properties
+stay unchanged. A lost commit response has an unknown outcome: reconcile before
+retrying. Read the [error and status contract](python-client.md#typed-server-failures-and-standalone-status)
+before adding retry logic.

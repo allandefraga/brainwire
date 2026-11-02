@@ -54,6 +54,18 @@ def inspect_owned(kind, name, run_id):
     return value
 
 
+def inactive_file_bytes(text):
+    rows = [line.split() for line in text.splitlines()
+            if line.split() and line.split()[0] == 'inactive_file']
+    if len(rows) != 1 or len(rows[0]) != 2:
+        return None
+    raw = rows[0][1]
+    if not raw.isascii() or not raw.isdigit() or len(raw) > 20:
+        return None
+    value = int(raw)
+    return value if value <= (1 << 64) - 1 else None
+
+
 def cgroup(name, current_first=False):
     base = '/sys/fs/cgroup/'
     values = {}
@@ -71,6 +83,20 @@ def cgroup(name, current_first=False):
         else:
             text = result.stdout.strip()
             values[key] = int(text) if text.isdigit() else text
+    inactive = None
+    try:
+        result = command('docker', 'exec', name, 'cat', base + 'memory.stat', check=False, timeout=10)
+        if result.returncode == 0:
+            inactive = inactive_file_bytes(result.stdout)
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # Optional diagnostics cannot replace the original pressure verdict.
+    used = values.get('memory.current')
+    values['memory.stat.inactive_file'] = inactive
+    values['diagnostic_working_set'] = {
+        'bytes': max(0, used - inactive) if type(used) is int and inactive is not None else None,
+        'unit': 'bytes',
+        'source': '/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero',
+        'scope': 'separate point-in-time readings; diagnostic only; not the pressure verdict'}
     return values
 
 
@@ -145,6 +171,77 @@ def stop_events(process):
             process.wait(timeout=5)
 
 
+def finalize(report, run_id, name, volume, created, event_process, events_path):
+    """Verify UUID ownership before each removal; cleanup never hides the failure."""
+    errors = []
+    def attempt(operation, action):
+        try:
+            return action()
+        except Exception as error:
+            errors.append({'operation': operation, 'error_type': type(error).__name__})
+            return None
+
+    report['owned_resources_cleaned'] = False
+    attempt('stop observer', lambda: stop_events(event_process))
+    state = attempt('inspect server evidence', lambda: inspect_owned('container', name, run_id))
+    if state is not None:
+        report.setdefault('cleanup_state', state.get('State', {}))
+        if state.get('State', {}).get('Running'):
+            snapshot = attempt('capture cgroup', lambda: cgroup(state['Id'], current_first=True))
+            if snapshot is not None:
+                report['cleanup_cgroup'] = snapshot
+        def capture_logs():
+            logs = command('docker', 'logs', state['Id'])
+            return [line for line in (logs.stdout + logs.stderr).splitlines()
+                    if 'memory pressure admission' in line][-40:]
+        captured = attempt('capture logs', capture_logs)
+        if captured is not None:
+            report['cleanup_pressure_log_lines'] = captured
+    names = (name, name + '-init', name + '-audit')
+    for resource in names:
+        value = attempt('inspect ' + resource,
+                        lambda resource=resource: inspect_owned('container', resource, run_id))
+        if value is not None:
+            identity = value.get('Id')
+            if not isinstance(identity, str) or not identity:
+                errors.append({'operation': 'identify ' + resource, 'error_type': 'MissingContainerId'})
+                continue
+            attempt('stop ' + resource, lambda identity=identity:
+                    command('docker', 'stop', '--time', '10', identity, check=False, timeout=20))
+            def remove(identity=identity):
+                try:
+                    docker('rm', identity, timeout=20)
+                except Exception:
+                    # --rm containers can disappear while docker stop is finishing.
+                    if inspect_owned('container', identity, run_id) is not None:
+                        raise
+            attempt('remove ' + resource, remove)
+    # A create timeout can occur after Docker creates the volume: only its
+    # UUID ownership label and confirmed absence establish cleanup, not the ACK.
+    value = attempt('inspect volume', lambda: inspect_owned('volume', volume, run_id))
+    if value is not None:
+        attempt('remove volume', lambda: docker('volume', 'rm', volume, timeout=20))
+    resources = [('container', resource) for resource in names] + [('volume', volume)]
+    for kind, resource in resources:
+        value = attempt('verify absence ' + resource,
+                        lambda kind=kind, resource=resource: inspect_owned(kind, resource, run_id))
+        if value is not None:
+            errors.append({'operation': 'verify absence ' + resource, 'error_type': 'ResourceRemaining'})
+    def capture_events():
+        events = []
+        if events_path.exists():
+            for line in events_path.read_text().splitlines():
+                with contextlib.suppress(json.JSONDecodeError):
+                    item = json.loads(line)
+                    events.append({'action': item.get('Action', item.get('status')), 'time': item.get('time')})
+        return events
+    report['cleanup_docker_events'] = attempt('capture events', capture_events) or []
+    if errors:
+        report['cleanup_errors'] = errors
+        report['result'] = 'FAIL'
+    report['owned_resources_cleaned'] = not errors
+
+
 def self_check():
     target, first = pressure_steps(40 * MIB, LIMIT)
     assert target == (LIMIT * 96 + 99) // 100
@@ -180,14 +277,16 @@ def run(args, report):
                       '-e', 'BRAINWIRE_SERVER_DEFAULT_DATABASE=demo',
                       '-e', 'BRAINWIRE_MEMORY_CACHE=64MiB', '-e', 'BRAINWIRE_MEMORY_MEMTABLES=8MiB',
                       '-e', 'BRAINWIRE_MEMORY_QUERY=32MiB', '-e', 'BRAINWIRE_MEMORY_INGRESS=16MiB']
-            docker('run', '--rm', '--name', name + '-init', *common, args.image,
+            docker('run', '--rm', '--name', name + '-init', *common, report['image_id'],
                    'db', 'create', 'demo', '--ontology', '/opt/brainwire/example-schema.json', timeout=120)
             with events_path.open('w') as event_file:
                 event_process = subprocess.Popen(['docker', 'events', '--filter', f'container={name}',
                                                   '--format', '{{json .}}'], stdout=event_file, stderr=subprocess.DEVNULL)
                 docker('run', '-d', '--name', name, *common, '--tmpfs', '/pressure:rw,size=512m,mode=1777',
-                       '-p', '127.0.0.1::7687', args.image, 'serve', '--allow-unauthenticated-remote')
+                       '-p', '127.0.0.1::7687', report['image_id'], 'serve', '--allow-unauthenticated-remote')
                 state = inspect_owned('container', name, run_id)
+                if state is None or state.get('Image') != report['image_id']:
+                    raise RuntimeError('owned server image does not match the inspected local image ID')
                 port = state['NetworkSettings']['Ports']['7687/tcp'][0]['HostPort']
                 uri = f'bolt://127.0.0.1:{port}'
                 with GraphDatabase.driver(uri, auth=None, connection_timeout=5,
@@ -261,7 +360,7 @@ def run(args, report):
                 report['pressure_log_lines'] = [line for line in logs.splitlines() if 'memory pressure admission' in line][-30:]
                 docker('stop', '--time', '30', name, timeout=40)
                 report['offline_audit'] = json.loads(docker('run', '--rm', '--name', name + '-audit',
-                                                          *common, args.image, 'db', 'check', 'demo', '--json', timeout=120))
+                                                          *common, report['image_id'], 'db', 'check', 'demo', '--json', timeout=120))
                 if report['offline_audit'].get('status') != 'ok':
                     raise AssertionError('offline integrity audit failed')
                 stop_events(event_process)
@@ -276,40 +375,7 @@ def run(args, report):
                 raise AssertionError('Docker event stream reported OOM')
             report['result'] = 'PASS'
         finally:
-            report['owned_resources_cleaned'] = False
-            stop_events(event_process)
-            state = inspect_owned('container', name, run_id)
-            if state is not None:
-                report.setdefault('cleanup_state', state['State'])
-                # Preserve evidence before stopping/removing owned resources,
-                # including on failures or inconclusive pressure transitions.
-                if state['State'].get('Running'):
-                    try:
-                        report['cleanup_cgroup'] = cgroup(name, current_first=True)
-                    except Exception as capture_error:
-                        report.setdefault('evidence_capture_errors', []).append(type(capture_error).__name__)
-                try:
-                    logs = command('docker', 'logs', name)
-                    report['cleanup_pressure_log_lines'] = [line for line in (logs.stdout + logs.stderr).splitlines()
-                                                            if 'memory pressure admission' in line][-40:]
-                except Exception as capture_error:
-                    report.setdefault('evidence_capture_errors', []).append(type(capture_error).__name__)
-                command('docker', 'stop', '--time', '10', name, check=False, timeout=20)
-                command('docker', 'rm', name, check=False, timeout=15)
-            if created and inspect_owned('volume', volume, run_id) is not None:
-                docker('volume', 'rm', volume, timeout=20)
-            if inspect_owned('container', name, run_id) is not None:
-                raise RuntimeError('owned container still exists after cleanup')
-            if created and inspect_owned('volume', volume, run_id) is not None:
-                raise RuntimeError('owned volume still exists after cleanup')
-            if events_path.exists():
-                evidence_events = []
-                for line in events_path.read_text().splitlines():
-                    with contextlib.suppress(json.JSONDecodeError):
-                        item = json.loads(line)
-                        evidence_events.append({'action': item.get('Action', item.get('status')), 'time': item.get('time')})
-                report['cleanup_docker_events'] = evidence_events
-            report['owned_resources_cleaned'] = True
+            finalize(report, run_id, name, volume, created, event_process, events_path)
 
 
 def main():
@@ -333,7 +399,8 @@ def main():
             observed_oom = any(cgroup_events.get(key, 0) for key in ('oom', 'oom_kill', 'oom_group_kill'))
             observed_oom = observed_oom or report.get('cleanup_state', {}).get('OOMKilled', False)
             observed_oom = observed_oom or any(item.get('action') == 'oom' for item in report.get('cleanup_docker_events', []))
-            report['result'] = 'FAIL' if observed_oom else 'INCONCLUSIVE'
+            cleanup_failed = bool(report.get('cleanup_errors')) or report.get('owned_resources_cleaned') is False
+            report['result'] = 'FAIL' if observed_oom or cleanup_failed else 'INCONCLUSIVE'
             report['error_type'] = type(error).__name__
             report['error'] = str(error)
         except Exception as error:

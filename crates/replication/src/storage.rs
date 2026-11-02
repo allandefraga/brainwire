@@ -81,6 +81,7 @@ impl Storage {
         let mut applied_membership = StoredMembership::default();
         let mut bytes = 0u64;
         let mut previous: Option<u64> = None;
+        let mut previous_term = 0;
         for item in result.0.db.iterator(IteratorMode::Start) {
             let (k, v) = item.map_err(error)?;
             if k.first() != Some(&b'L') {
@@ -94,10 +95,16 @@ impl Storage {
             }
             let e: Entry<TypeConfig> = serde_json::from_slice(&v).map_err(error)?;
             if k.as_ref() != key(e.log_id.index)
+                // Without snapshots or purging, every nonempty log retains its origin.
+                || (previous.is_none() && e.log_id.index != 0)
                 || previous.is_some_and(|p| p.checked_add(1) != Some(e.log_id.index))
             {
                 return Err(error("nonconsecutive or corrupt retained log"));
             }
+            if e.log_id.leader_id.term < previous_term {
+                return Err(error("retained log term regressed"));
+            }
+            previous_term = e.log_id.leader_id.term;
             previous = Some(e.log_id.index);
             bytes = bytes
                 .checked_add(v.len() as u64)

@@ -102,6 +102,9 @@ impl ClusterConfig {
             .listen
             .parse()
             .map_err(|_| "cluster listen must be IP:PORT")?;
+        if listener.port() == 0 {
+            return Err("cluster listen port must be nonzero".into());
+        }
         if !listener.ip().is_loopback() && config.tls.is_none() {
             return Err("non-loopback peer listener requires mutual TLS".into());
         }
@@ -712,4 +715,52 @@ pub(crate) fn provision(cluster: &ClusterConfig, config_path: &Path) -> Result<(
         serde_json::json!({"status":"provisioned","cluster_id":cluster.cluster_id,"node_id":cluster.node_id})
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::ClusterConfig;
+
+    #[test]
+    fn static_peer_listener_requires_a_fixed_nonzero_port() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cluster.toml");
+        for (listen, valid) in [
+            ("127.0.0.1:0", false),
+            ("[::1]:0", false),
+            ("127.0.0.1:19001", true),
+            ("[::1]:19001", true),
+        ] {
+            std::fs::write(
+                &path,
+                format!(
+                    r#"
+node_id = 1
+cluster_id = "fixed-ports"
+listen = "{listen}"
+token_file = "not-opened-by-config-load"
+[[peers]]
+id = 1
+address = "127.0.0.1:19001"
+[[peers]]
+id = 2
+address = "127.0.0.1:19002"
+[[peers]]
+id = 3
+address = "127.0.0.1:19003"
+"#
+                ),
+            )
+            .unwrap();
+            let loaded = ClusterConfig::load(&path);
+            if valid {
+                assert!(loaded.is_ok(), "valid listener {listen} rejected");
+            } else {
+                assert_eq!(
+                    loaded.err().as_deref(),
+                    Some("cluster listen port must be nonzero")
+                );
+            }
+        }
+    }
 }

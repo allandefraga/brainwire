@@ -2700,6 +2700,7 @@ mod tests {
         GraphMapping {
             version: "1".into(),
             nodes: vec![NodeSpec {
+                description: None,
                 label: "Customer".into(),
                 properties: properties.iter().map(|s| s.to_string()).collect(),
                 er_fields: vec![],

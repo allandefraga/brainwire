@@ -72,6 +72,9 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             ],
             5,
         )?;
+        if let Some(description) = &ty.description {
+            size.add(&["description", description], 1)?;
+        }
         for column in &ty.columns {
             ctx.budget.check_deadline()?;
             if property(&column.name, true) {
@@ -106,6 +109,9 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
                 ],
                 5,
             )?;
+            if let Some(description) = &ty.description {
+                size.add(&["description", description], 1)?;
+            }
             for column in &ty.columns {
                 ctx.budget.check_deadline()?;
                 if property(&column.name, false) {
@@ -138,11 +144,15 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             ctx.budget.check_deadline()?;
             indexed.push(Value::Str(name.clone()));
         }
-        nodes.push(Value::Map(BTreeMap::from([
+        let mut fields = BTreeMap::from([
             ("label".into(), Value::Str(ty.label.clone())),
             ("properties".into(), Value::List(props)),
             ("indexedFields".into(), Value::List(indexed)),
-        ])));
+        ]);
+        if let Some(description) = &ty.description {
+            fields.insert("description".into(), Value::Str(description.clone()));
+        }
+        nodes.push(Value::Map(fields));
     }
     let mut relationships = Vec::with_capacity(signatures);
     for ty in &ctx.catalog.edge_types {
@@ -156,12 +166,16 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
                     props.push(Value::Str(column.name.clone()));
                 }
             }
-            relationships.push(Value::Map(BTreeMap::from([
+            let mut fields = BTreeMap::from([
                 ("name".into(), Value::Str(ty.name.clone())),
                 ("source".into(), Value::Str(endpoint(ctx, source)?.into())),
                 ("target".into(), Value::Str(endpoint(ctx, target)?.into())),
                 ("properties".into(), Value::List(props)),
-            ])));
+            ]);
+            if let Some(description) = &ty.description {
+                fields.insert("description".into(), Value::Str(description.clone()));
+            }
+            relationships.push(Value::Map(fields));
         }
     }
     let ready = brainwire_store::graph::scalar_indexes_ready(ctx.txn)?;

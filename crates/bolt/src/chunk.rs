@@ -76,7 +76,7 @@ pub(crate) async fn write_packstream_message<W: tokio::io::AsyncWrite + Unpin>(
     // Reject depth/format errors before sending any bytes. Engine work may
     // already have committed, so an encoding failure must close the connection.
     let mut encoded_len = 0usize;
-    for fragment in fragments.by_ref() {
+    for (index, fragment) in fragments.by_ref().enumerate() {
         let fragment = fragment
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         encoded_len = encoded_len
@@ -87,6 +87,10 @@ pub(crate) async fn write_packstream_message<W: tokio::io::AsyncWrite + Unpin>(
                     "encoded response size overflow",
                 )
             })?;
+        // Timers and cancellation need a poll point even when no IO occurs yet.
+        if index % 1024 == 1023 {
+            tokio::task::yield_now().await;
+        }
     }
     fragments.rewind(value);
     let mut frame = Vec::new();
@@ -94,7 +98,7 @@ pub(crate) async fn write_packstream_message<W: tokio::io::AsyncWrite + Unpin>(
         .try_reserve_exact(encoded_len.min(MAX_CHUNK) + 4)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::OutOfMemory, error))?;
     frame.extend_from_slice(&[0, 0]);
-    for fragment in fragments {
+    for (index, fragment) in fragments.enumerate() {
         let fragment = fragment
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         let mut data = fragment.as_slice();
@@ -105,9 +109,13 @@ pub(crate) async fn write_packstream_message<W: tokio::io::AsyncWrite + Unpin>(
             if frame.len() == MAX_CHUNK + 2 {
                 frame[..2].copy_from_slice(&(MAX_CHUNK as u16).to_be_bytes());
                 stream.write_all(&frame).await?;
+                tokio::task::yield_now().await;
                 frame.clear();
                 frame.extend_from_slice(&[0, 0]);
             }
+        }
+        if index % 1024 == 1023 {
+            tokio::task::yield_now().await;
         }
     }
     let payload_len = frame.len() - 2;
@@ -368,6 +376,62 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn packstream_preflight_can_be_cancelled_before_large_output() {
+        use crate::packstream::{pack, PackValue};
+        use std::future::Future;
+        use std::task::Poll;
+        let value = PackValue::List(vec![PackValue::Null; 10_000]);
+        let mut writer = RecordingWriter::default();
+        let mut sending = Box::pin(write_packstream_message(&mut writer, &value));
+        let first = std::future::poll_fn(|cx| Poll::Ready(sending.as_mut().poll(cx))).await;
+        assert!(
+            first.is_pending(),
+            "large preflight must let cancellation and timers run"
+        );
+        drop(sending);
+        assert!(
+            writer.bytes.is_empty(),
+            "cancelled preflight must not send a partial message"
+        );
+        write_packstream_message(&mut writer, &value).await.unwrap();
+        let mut payload = Vec::new();
+        pack(&value, &mut payload);
+        assert_eq!(writer.bytes, encode_message(&payload));
+    }
+
+    #[tokio::test]
+    async fn large_packstream_validation_and_encoding_yield_safely() {
+        use crate::packstream::PackValue;
+        use std::future::Future;
+        use std::task::Poll;
+        let mut values = vec![PackValue::Null; 10_000];
+        values.push(PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::Null; 16],
+        });
+        let mut writer = RecordingWriter::default();
+        assert_eq!(
+            write_packstream_message(&mut writer, &PackValue::List(values))
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(
+            writer.bytes.is_empty(),
+            "late validation failure sent output"
+        );
+        let value = PackValue::String("x".repeat(MAX_CHUNK * 4));
+        let mut sending = Box::pin(write_packstream_message(&mut writer, &value));
+        let first = std::future::poll_fn(|cx| Poll::Ready(sending.as_mut().poll(cx))).await;
+        assert!(first.is_pending(), "ready writer monopolized serialization");
+        drop(sending);
+        // Cancellation after framing starts leaves a partial message: close the connection.
+        assert!(!writer.bytes.is_empty());
+        assert!(writer.bytes.len() <= MAX_CHUNK + 2);
     }
 
     #[tokio::test]

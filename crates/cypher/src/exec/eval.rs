@@ -160,13 +160,7 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
         }
         Expr::Prop(base, name) => match base.as_ref() {
             // Read through a variable without copying the whole map or row value.
-            Expr::Var(variable) => match var(variable, row, ctx)? {
-                Val::Map(map) => map.get(name).cloned().unwrap_or(Val::Null),
-                Val::Node(id) => Val::from(graph::node_property(ctx, *id, name)?),
-                Val::Rel(edge) => Val::from(graph::edge_property(ctx, edge, name)?),
-                Val::Null => Val::Null,
-                other => property(other.clone(), name, ctx)?,
-            },
+            Expr::Var(variable) => borrowed_property(var(variable, row, ctx)?, name, ctx)?,
             base => property(eval(base, row, ctx)?, name, ctx)?,
         },
         Expr::Call {
@@ -255,9 +249,10 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             }
             other => return Err(type_error("a label predicate", &other)),
         },
-        Expr::Index(base, index) => {
-            index_value(eval(base, row, ctx)?, eval(index, row, ctx)?, ctx)?
-        }
+        Expr::Index(base, index) => match base.as_ref() {
+            Expr::Var(name) => borrowed_index(var(name, row, ctx)?, eval(index, row, ctx)?, ctx)?,
+            _ => index_value(eval(base, row, ctx)?, eval(index, row, ctx)?, ctx)?,
+        },
         Expr::Slice(base, from, to) => {
             let base = eval(base, row, ctx)?;
             let bound = |e: &Option<Box<Expr>>| -> Result<Option<Val>, ExecError> {
@@ -363,7 +358,8 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             value
         }
         Expr::MapProjection { var: name, items } => {
-            let base = var(name, row, ctx)?.clone();
+            let _scope = ctx.budget.scope();
+            let base = var(name, row, ctx)?;
             if base.is_null() {
                 return Ok(Val::Null);
             }
@@ -371,15 +367,25 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             for item in items {
                 match item {
                     MapItem::Prop(key) => {
-                        out.insert(key.clone(), property(base.clone(), key, ctx)?);
+                        let value = borrowed_property(base, key, ctx)?;
+                        ctx.budget
+                            .charge(key.len().saturating_add(128).saturating_add(value.bytes()))?;
+                        out.insert(key.clone(), value);
                     }
                     MapItem::AllProps => {
-                        if let Val::Map(all) = properties(&base, ctx)? {
-                            out.extend(all);
+                        if let Val::Map(all) = properties(base, ctx)? {
+                            for (key, value) in all {
+                                ctx.budget.charge(
+                                    key.len().saturating_add(128).saturating_add(value.bytes()),
+                                )?;
+                                out.insert(key, value);
+                            }
                         }
                     }
                     MapItem::Entry(key, e) => {
-                        out.insert(key.clone(), eval(e, row, ctx)?);
+                        let value = eval(e, row, ctx)?;
+                        ctx.budget.charge(key.len().saturating_add(128))?;
+                        out.insert(key.clone(), value);
                     }
                 }
             }
@@ -389,6 +395,27 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
     };
     ctx.budget.charge(value.bytes())?;
     Ok(value)
+}
+
+/// Borrow the owner and admit the selected value before copying its payload.
+fn borrowed_property(base: &Val, name: &str, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
+    match base {
+        Val::Map(map) => match map.get(name) {
+            Some(value) => {
+                let _scope = ctx.budget.scope();
+                ctx.budget.charge(value.bytes())?;
+                Ok(value.clone())
+            }
+            None => Ok(Val::Null),
+        },
+        Val::Node(id) => Ok(Val::from(graph::node_property(ctx, *id, name)?)),
+        Val::Rel(edge) => Ok(Val::from(graph::edge_property(ctx, edge, name)?)),
+        Val::Null => Ok(Val::Null),
+        other => Err(semantic(format!(
+            "property access needs a node, relationship or map, found {}",
+            other.type_name()
+        ))),
+    }
 }
 
 pub(super) fn property(base: Val, name: &str, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
@@ -415,7 +442,11 @@ fn properties(base: &Val, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
             Val::from(Value::Map(props))
         }
         Val::Rel(edge) => Val::from(Value::Map(graph::edge_props(ctx, edge)?)),
-        Val::Map(map) => Val::Map(map.clone()),
+        Val::Map(map) => {
+            let _scope = ctx.budget.scope();
+            ctx.budget.charge(base.bytes())?;
+            Val::Map(map.clone())
+        }
         Val::Null => Val::Null,
         other => return Err(type_error("properties", other)),
     })
@@ -567,6 +598,32 @@ fn float_text(f: f64) -> String {
     }
 }
 
+fn borrowed_index(base: &Val, index: Val, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
+    match (base, index) {
+        (Val::Null, _) | (_, Val::Null) => Ok(Val::Null),
+        (Val::List(items), Val::Int(i)) => {
+            let len = items.len() as i64;
+            let at = if i < 0 { len + i } else { i };
+            if (0..len).contains(&at) {
+                let value = &items[at as usize];
+                let _scope = ctx.budget.scope();
+                ctx.budget.charge(value.bytes())?;
+                Ok(value.clone())
+            } else {
+                Ok(Val::Null)
+            }
+        }
+        (base @ (Val::Map(_) | Val::Node(_) | Val::Rel(_)), Val::Str(key)) => {
+            borrowed_property(base, &key, ctx)
+        }
+        (base, index) => Err(semantic(format!(
+            "cannot index {} with {}",
+            base.type_name(),
+            index.type_name()
+        ))),
+    }
+}
+
 fn index_value(base: Val, index: Val, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
     Ok(match (base, index) {
         (Val::Null, _) | (_, Val::Null) => Val::Null,
@@ -613,7 +670,11 @@ fn slice(base: Val, from: Option<Val>, to: Option<Val>) -> Result<Val, ExecError
     Ok(Val::List(if from >= to {
         vec![]
     } else {
-        items[from as usize..to as usize].to_vec()
+        let count = (to - from) as usize;
+        // Collect may reuse the entire input allocation for a tiny slice.
+        let mut out = Vec::with_capacity(count);
+        out.extend(items.into_iter().skip(from as usize).take(count));
+        out
     }))
 }
 

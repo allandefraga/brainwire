@@ -90,7 +90,10 @@ pub fn parse_request(value: PackValue) -> Result<Request, MessageError> {
             }
         }
         0x02 => Request::Goodbye,
-        0x0F => Request::Reset,
+        0x0F => {
+            expect(0, &fields)?;
+            Request::Reset
+        }
         0x10 => {
             expect(3, &fields)?;
             let extra = map_field(&mut fields, tag)?;
@@ -112,7 +115,10 @@ pub fn parse_request(value: PackValue) -> Result<Request, MessageError> {
             }
         }
         0x12 => Request::Commit,
-        0x13 => Request::Rollback,
+        0x13 => {
+            expect(0, &fields)?;
+            Request::Rollback
+        }
         0x2F => {
             expect(1, &fields)?;
             Request::Discard {
@@ -213,6 +219,27 @@ mod tests {
             parse_request(s(0x02, vec![])).unwrap(),
             Request::Goodbye
         ));
+    }
+
+    #[test]
+    fn reset_and_rollback_require_zero_fields_on_the_wire() {
+        use crate::packstream::unpack;
+        for tag in [0x0F, 0x13] {
+            let canonical = [0xB0, tag];
+            let value = unpack(&mut canonical.as_slice()).unwrap();
+            let request = parse_request(value).unwrap();
+            assert!(matches!(
+                (tag, request),
+                (0x0F, Request::Reset) | (0x13, Request::Rollback)
+            ));
+            for payload in [vec![0xB1, tag, 0xC0], vec![0xB2, tag, 0xC0, 0xA0]] {
+                let value = unpack(&mut payload.as_slice()).unwrap();
+                assert_eq!(
+                    parse_request(value).unwrap_err(),
+                    MessageError::BadFields(tag)
+                );
+            }
+        }
     }
 
     #[test]

@@ -168,6 +168,18 @@ class IngestionTransactionTests(unittest.TestCase):
                 raise
         return value, release
 
+    def test_invalid_batch_size_never_connects_or_claims_a_source_lease(self):
+        for batch_size in (0, -1, True, 1.5, "100"):
+            with self.subTest(batch_size=batch_size), \
+                 mock.patch.object(syncer, "_driver", side_effect=AssertionError("invalid batch opened driver")) as driver, \
+                 mock.patch.object(syncer, "claim") as claim:
+                with self.assertRaisesRegex(ValueError, "batch_size"):
+                    syncer.sync(object(), lake_target="synthetic", uri="bolt://unused",
+                                database="demo", source_id="source", workers=1,
+                                batch_size=batch_size)
+                driver.assert_not_called()
+                claim.assert_not_called()
+
     def test_partition_failure_retains_source_lease(self):
         failure = LostCommitReply("partition outcome unknown")
         with self.assertRaises(LostCommitReply) as error:

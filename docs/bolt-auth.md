@@ -70,6 +70,13 @@ Absent auth_file retains development mode with a startup warning. An explicitly
 empty path, missing/unreadable file, malformed/empty policy or invalid grant fails
 startup; it never falls back to development mode. The policy is read before bind.
 
+Delegated transaction visibility is accepted only through the configured trusted
+reader service. Its wire metadata rejects duplicate or unknown visibility fields,
+wrong field types, oversized lists and overlong UTF-8 strings before copying the
+policy into JSON. Rejection fails the request before engine execution; the client
+must RESET the failed session before continuing. This does not let ordinary
+clients select a different identity or become visibility delegates.
+
 ## Python, health checks and connected inspection
 
 All updated Python examples and native Bolt clients share the credentials-file
@@ -88,6 +95,12 @@ export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/reader.json
 export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/health.json
 ./target/release/brainwire probe --address 127.0.0.1:17687 --mode ready
 ```
+
+Native clients require a regular credentials file no larger than 64 KiB and
+reject malformed credentials without including tokens in errors. Unix clients
+also reject FIFOs and devices without waiting for data. Symlinks to regular
+files remain supported for mounted-secret workflows. Protect the containing
+directory and credentials from other users.
 
 The image `HEALTHCHECK` runs `brainwire probe --mode handshake`, which completes
 only Bolt version negotiation and HELLO and needs no credential, so a protected

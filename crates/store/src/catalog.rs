@@ -238,6 +238,7 @@ pub fn create_label(txn: &mut Txn, label: &str) -> Result<(), GraphError> {
         return Ok(());
     }
     let spec = NodeSpec {
+        description: None,
         label: label.into(),
         properties: vec![],
         er_fields: vec![],
@@ -278,6 +279,7 @@ pub fn create_relationship_type(
         label: label.into(),
     };
     let spec = EdgeSpec {
+        description: None,
         name: name.into(),
         from: endpoint(from),
         to: endpoint(to),
@@ -398,10 +400,11 @@ pub(crate) fn clear_jobs(txn: &mut Txn, prefix: &[u8]) {
 
 impl Database {
     /// Run one bounded batch of a pending online index build or drop in its
-    /// own transaction. Returns false when no job is left. A batch that
-    /// conflicts with a concurrent writer is discarded and retried next call.
+    /// own transaction. Requested batch size is clamped to 1..=INDEX_BATCH.
+    /// Returns false when no job is left. A batch that conflicts with a concurrent
+    /// writer is discarded and retried next call. This bounds items, not RSS.
     pub fn index_step(&self, batch: usize) -> Result<bool, GraphError> {
-        let batch = batch.max(1);
+        let batch = batch.clamp(1, INDEX_BATCH);
         let mut txn = self.begin();
         let mut job = None;
         for tag in [DROP_JOB, BUILD_JOB] {
@@ -521,6 +524,46 @@ mod tests {
             .is_empty());
         assert_eq!(by_name(&db, "even"), Some(4));
         assert_eq!(by_name(&db, "odd"), Some(2));
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn oversized_requested_index_batch_preserves_bounded_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = Resources::new(StoreConfig::for_tests());
+        let db = open(dir.path(), &res);
+        db.apply_ontology(&fixture()).unwrap();
+        let catalog = db.catalog().unwrap().unwrap();
+        let mut txn = db.begin();
+        let props = BTreeMap::from([("name".into(), Value::Str("same".into()))]);
+        for i in 0..=INDEX_BATCH {
+            merge_node(&mut txn, &catalog, "Customer", &format!("c{i}"), &props).unwrap();
+        }
+        txn.commit().unwrap();
+        ddl(&db, |txn| {
+            create_index(txn, "Customer", "name", None, false)
+        });
+        assert!(db.index_step(usize::MAX).unwrap());
+        assert_eq!(
+            by_name(&db, "same"),
+            None,
+            "a caller cannot bypass the background batch ceiling"
+        );
+        // A subsequent bounded transaction completes exactly the remaining row.
+        assert!(db.index_step(usize::MAX).unwrap());
+        assert_eq!(by_name(&db, "same"), Some(INDEX_BATCH + 1));
+        assert!(!db.index_step(usize::MAX).unwrap());
+        check_invariants(&db).unwrap();
+
+        let prefix = index_field_prefix(catalog.node_type("Customer").unwrap().id, "name");
+        ddl(&db, |txn| {
+            drop_index(txn, IndexTarget::Name("index_Customer_name"), false)
+        });
+        assert!(db.index_step(usize::MAX).unwrap());
+        assert_eq!(db.begin().scan_prefix(Cf::Idx, &prefix).unwrap().len(), 1);
+        assert!(db.index_step(usize::MAX).unwrap());
+        assert!(db.begin().scan_prefix(Cf::Idx, &prefix).unwrap().is_empty());
+        assert!(!db.index_step(usize::MAX).unwrap());
         check_invariants(&db).unwrap();
     }
 

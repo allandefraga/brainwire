@@ -9,6 +9,13 @@ not graph sharding or distributed query execution.
 The native operations below are a local three-process pilot. The current
 container/Swarm/Kubernetes single-instance manifests do not provision this group.
 Use independent persistent volumes when packaging these processes yourself.
+Each private peer listener needs a fixed nonzero port matching the intended
+network routing. Port `0` is rejected because an ephemeral port cannot be
+reliably reached through the configured static peer endpoints.
+Advertised peer addresses must be unicast destinations. Wildcard addresses
+(`0.0.0.0`, `::`) are for binding listeners. Multicast IPs and the IPv4 limited
+broadcast address are also rejected as peer destinations. DNS endpoints are syntax-checked; reachability and DNS
+resolution still need verification in the deployment network.
 Omitting `serve --cluster-config` keeps standalone mode.
 
 ## Provision once, then start
