@@ -31,8 +31,8 @@ RETURN a.entity_id, b.entity_id, r.weight`.
 A complete first run, from a source checkout, with a protected server. Keep
 the credential directory outside the repository.
 
-1. Build and start the server. The published beta image predates batch ACL
-   stamping and relationship property reads, so build from this checkout:
+1. Build and start the server from this checkout so the server and Python
+   helper use matching code:
 
    ```sh
    docker build -t brainwire:local .
