@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0-beta.4 — experimental candidate
+
+- Add a Python example for recording explicit timeline milestones as separate
+  event nodes, with deterministic IDs and transactional writes. This is an
+  application-managed model, not automatic graph history.
+- Reject regressing or incomparable Raft votes before persisting them.
+- Relationship `MERGE` still identifies edges by endpoints and type; distinct
+  property-keyed milestones on the same pair may overwrite each other. Existing
+  integrations using that pattern need a model migration and may need to
+  reingest missing events. The example does not change those integrations.
+
+The example and local replication checks do not qualify production recovery,
+multi-machine failover or a process-wide memory limit.
+
 ## 0.15.0-beta.3 — experimental candidate
 
 - Retry a DuckLake sync transaction with bounded backoff only when the server

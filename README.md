@@ -34,13 +34,15 @@ Brainwire stores those connections in named graphs. Write from Python, query
 with Cypher over Bolt and inspect your data in the terminal. Rust runs the engine;
 RocksDB stores the data.
 
-> **v0.15.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.15.0-beta.4 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
 ## What you can build
 
 - **Knowledge graphs:** nodes, edges, properties, ontology descriptions and indexes. Inspect the catalog with `graph.schema()` in Python.
+- **Explicit timelines:** record application-supplied milestones as separate
+  event nodes using the [Python example](docs/temporal-data.md#record-explicit-milestones).
 - **Agent context:** bounded Python reads, source references and experimental text/vector reranking of explicit candidates. Evidence reads stop when the response limit is exceeded.
 - **Code maps:** local Python AST extraction, source references, inferred import/call candidates, paths and explanations.
 - **Graph queries:** supported Cypher, sparse algorithms and explainable metadata ranking.
@@ -60,9 +62,9 @@ Your application chooses the data, permissions and model. See the
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.15.0-beta.4 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.4 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -161,6 +163,9 @@ Start with a rebuildable graph and a tested backup while evaluating this beta.
   Full reconciliation applies missing-key deletions in bounded Python batches.
   Confirmed rolled-back transaction conflicts receive bounded retries.
   Native CDC, historical node/edge revisions and `AS OF` reads are not available.
+  Relationship `MERGE` currently identifies an edge by its endpoints and type:
+  different property maps on the same pair do not create independent events.
+  Use explicit event nodes where multiple milestones must remain distinct.
 - **Security:** authentication and grants are available. Shared deployments need
   a verified encrypted network boundary because native Bolt TLS is not implemented.
 - **Distribution:** an experimental three-voter quorum is available for testing.
@@ -191,7 +196,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.3 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.15.0-beta.4 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

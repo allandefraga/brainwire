@@ -279,6 +279,9 @@ The Raft log rejects a nonzero first index and term regressions before writing
 the batch. This follows the recovery invariants for the current retained log.
 Commit markers must also match a retained log entry and cannot move backwards
 or be cleared after a commit; invalid updates are rejected before persistence.
+Persisted votes likewise cannot regress under the configured OpenRaft vote
+ordering; repeated votes remain valid. This protects new writes and does not
+repair an already damaged vote.
 Snapshots and log purging are not implemented; these checks do not establish
 multi-machine failover readiness or repair an already corrupt log.
 

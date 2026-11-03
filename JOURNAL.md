@@ -29,6 +29,23 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-03: v0.15.0-beta.4 explicit timeline and vote protection
+
+- **Done:** Added an opt-in Python example that records milestones as separate
+  event nodes in a transaction and rejects conflicting sequential replays. Raft
+  storage now rejects regressing or incomparable votes before persistence.
+- **Evidence:** An isolated adapter scenario verified distinct milestones,
+  replay, conflicting concurrent writes, rollback and restart. The existing
+  external writer comparison still missed five relationship milestones; the
+  example does not change that writer. Local replication tests exercise the
+  vote guard. No live application services were changed.
+- **Decision:** Document the relationship `MERGE` identity limitation and use
+  rebuildable data for this experimental release.
+- **Next step:** Design compatible relationship identity and migration, then
+  repeat the full writer comparison and distributed failure qualification.
+- **Blockers:** Automatic historical revisions, a global memory ceiling and
+  qualified multi-machine failover remain unavailable.
+
 ## 2026-11-03: v0.15.0-beta.3 DuckLake conflict handling
 
 - **Finding:** after beta.2 was tagged, the synthetic 10,000-node, four-worker

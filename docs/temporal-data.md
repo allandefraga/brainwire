@@ -13,6 +13,28 @@ nodes as described below.
 
 None of these adds native `AS OF` reads or automatic history retention.
 
+## Record explicit milestones
+
+The [Python example](../examples/python/timeline_demo.py) stores a subject's
+milestones as separate `TimelineEvent` nodes and links each with `HAS_EVENT`.
+An application-supplied key gives each event a stable identity; an identical
+replay is accepted, and a changed replay observed in the transaction is
+rejected. A subject must already exist. Generate a starter ontology with
+`python -m examples.python.timeline_demo --print-ontology`; the example's
+module help shows how to record an event.
+
+The event and link commit together. Conflicts and unknown commit outcomes are
+returned to the caller, who must reconcile before retrying. The example does
+not enforce immutability against other clients, configure ACLs, capture
+changes automatically, update the current subject, or provide `AS OF` and
+retention. Existing data overwritten by earlier writes is not reconstructed.
+
+This model is an explicit application choice. It does not change the existing
+relationship `MERGE` behavior: using the same source, type and target for
+multiple property-keyed milestones can overwrite an earlier milestone.
+Applications using that pattern must migrate their model or wait for a
+compatible relationship identity implementation.
+
 ## What the engine versions today
 
 Brainwire versions an ontology/catalog when its schema changes. Stored rows also

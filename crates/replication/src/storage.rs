@@ -420,6 +420,14 @@ impl RaftLogStorage<TypeConfig> for LogStore {
         let vote = *vote;
         blocking(move || {
             let _guard = s.0.io.lock().map_err(error)?;
+            if s.read::<Vote<u64>>(VOTE)?.is_some_and(|previous| {
+                !matches!(
+                    vote.partial_cmp(&previous),
+                    Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+                )
+            }) {
+                return Err(error("persisted vote cannot regress"));
+            }
             let mut b = WriteBatch::default();
             Storage::put(&mut b, VOTE, &vote)?;
             s.write(b)

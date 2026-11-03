@@ -53,6 +53,36 @@ fn command(id: &str) -> Command {
 }
 
 #[tokio::test]
+async fn vote_updates_cannot_regress_persisted_term_leader_or_commit() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let mut logs = store.log_store();
+    assert_eq!(logs.read_vote().await.unwrap(), None);
+    let initial = Vote::new(3, 2);
+    logs.save_vote(&initial).await.unwrap();
+    logs.save_vote(&initial).await.unwrap();
+    let committed = Vote::new_committed(3, 2);
+    logs.save_vote(&committed).await.unwrap();
+    for invalid in [Vote::new(2, 9), Vote::new(3, 1), initial] {
+        assert!(logs.save_vote(&invalid).await.is_err());
+        assert_eq!(logs.read_vote().await.unwrap(), Some(committed));
+    }
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app).unwrap();
+    let mut logs = store.log_store();
+    assert_eq!(logs.read_vote().await.unwrap(), Some(committed));
+    // OpenRaft's configured leader ordering includes the node ID within a term.
+    let higher_leader = Vote::new(3, 3);
+    logs.save_vote(&higher_leader).await.unwrap();
+    assert_eq!(logs.read_vote().await.unwrap(), Some(higher_leader));
+    let next = Vote::new(4, 1);
+    logs.save_vote(&next).await.unwrap();
+    assert_eq!(logs.read_vote().await.unwrap(), Some(next));
+}
+
+#[tokio::test]
 async fn committed_marker_rejects_missing_mismatched_and_regressing_logs_before_persistence() {
     let dir = TempDir::new().unwrap();
     let app = Arc::new(App::default());
