@@ -13,9 +13,10 @@ reconcile that outcome before starting another run.
 
 Work is split into ``--workers`` processes by ``hash(key) % workers``; each
 opens its own read-only DuckLake connection and Bolt driver, so one key is
-always written by one process and processes never contend on the same node.
-Each batch commits atomically and is attempted once; write conflicts and
-ambiguous failures propagate. The cursor (``ImportCheckpoint {entity_id: source_id}``
+always written by one process. Deletions may still contend on shared edges.
+Each batch commits atomically. Only an explicitly rolled-back transaction
+conflict is retried, with a bounded backoff; ambiguous failures propagate.
+The cursor (``ImportCheckpoint {entity_id: source_id}``
 with ``snapshot`` and ``lease`` properties, which the ontology must declare)
 advances only after every partition has committed.
 
@@ -31,6 +32,7 @@ import decimal
 import json
 import multiprocessing
 import os
+import random
 import re
 import sys
 import tempfile
@@ -38,11 +40,28 @@ import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from examples.python.client import GraphClient
 
 NAME = r"[A-Za-z_][A-Za-z0-9_]{0,127}"
 ACL_OPTIONS = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
 RESERVED_COLUMNS = {"snapshot_id", "rowid", "change_type", "brainwire_rank"}  # added by the change feed
 PRESENT = "change_type IN ('insert', 'update_postimage')"
+
+
+class _ConflictRetryClient(GraphClient):
+    """Retry only a single transaction with a confirmed rolled-back conflict."""
+
+    def _write(self, operation):
+        for attempt in range(8):
+            try:
+                return super()._write(operation)
+            except Exception as error:
+                if (attempt == 7
+                    or getattr(error, "code", None) != "Neo.TransientError.Transaction.Outdated"
+                    or not isinstance(getattr(error, "message", None), str)
+                    or not error.message.endswith("[brainwire.commit outcome=rolled_back]")):
+                    raise
+                time.sleep(random.uniform(0.01, min(0.4, 0.02 * 2 ** attempt)))
 
 
 def _name(value, what):
@@ -254,12 +273,11 @@ def _apply(client, mapping, upserts, deletes, require_endpoints=True):
 
 def sync_partition(job):
     """Worker entry point: stream one hash partition into the graph."""
-    from examples.python.client import GraphClient
     mapping, start, end = job["mapping"], job["start"], job["end"]
     upserted = deleted = skipped = 0
     strict = job.get("require_endpoints", True)
     with lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con, _driver(job["uri"]) as driver:
-        client = GraphClient(driver, job["database"], batch_size=job["batch_size"])
+        client = _ConflictRetryClient(driver, job["database"], batch_size=job["batch_size"])
         upserts, deletes = [], []
         for key, row in read_partition(con, mapping, start, end, job["workers"], job["worker"]):
             (deletes if row is None else upserts).append(key if row is None else row)
@@ -273,14 +291,13 @@ def sync_partition(job):
 
 
 def _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size):
-    from examples.python.client import GraphClient
     if mapping.label:
         query = f"MATCH (n:{mapping.label}) RETURN n.entity_id"
     else:
         query = (f"MATCH (a:{mapping.source_label})-[:{mapping.type}]->(b:{mapping.target_label}) "
                  "RETURN a.entity_id, b.entity_id")
     with driver.session(database=database) as session, lake(lake_target, load=load, init_sql=init_sql) as con:
-        client = GraphClient(driver, database, batch_size=batch_size)
+        client = _ConflictRetryClient(driver, database, batch_size=batch_size)
         keys = (tuple(record.values()) for record in session.run(query))
         deleted = 0
         with contextlib.closing(_stale_key_batches(con, mapping, end, keys, batch_size)) as batches:

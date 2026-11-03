@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0-beta.3 — experimental candidate
+
+- Retry a DuckLake sync transaction with bounded backoff only when the server
+  explicitly confirms an `Outdated` conflict rolled back. Never retry an
+  unknown commit outcome or a lost connection automatically. Failed workers
+  still retain the source lease and do not advance its cursor.
+- A synthetic 10,000-node, four-worker DuckLake/Bolt workload exposed
+  contention between deletions of nodes sharing an edge in beta.2. The same
+  workload passed twice after this fix. This does not qualify all workloads.
+
 ## 0.15.0-beta.2 — experimental candidate
 
 - Sample process RSS at RUN admission as well as periodically, using the higher

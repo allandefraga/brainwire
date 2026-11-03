@@ -162,6 +162,33 @@ class ApplyTest(unittest.TestCase):
 
 
 class PruneBatchTest(unittest.TestCase):
+    def test_failed_worker_retains_lease_and_does_not_advance_cursor(self):
+        class Driver:
+            def session(self, **kwargs):
+                return contextlib.nullcontext(object())
+
+        class FailedPool:
+            def __init__(self, *args, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def map(self, *args):
+                raise RuntimeError("conflict retries exhausted")
+
+        with patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(Driver())), \
+                patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(object())), \
+                patch.object(ducklake_sync, "claim", return_value=1), \
+                patch.object(ducklake_sync, "latest_snapshot", return_value=2), \
+                patch.object(ducklake_sync, "validate"), \
+                patch.object(ducklake_sync, "ProcessPoolExecutor", FailedPool), \
+                patch.object(ducklake_sync, "release") as release:
+            with self.assertRaisesRegex(RuntimeError, "retries exhausted"):
+                ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://localhost:7687",
+                                   database="demo", source_id="test", workers=2)
+            release.assert_not_called()
+
     def test_prune_deletes_each_batch_and_closes_the_source_on_failure(self):
         class Session:
             def __enter__(self):
@@ -197,7 +224,7 @@ class PruneBatchTest(unittest.TestCase):
             with patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(None)), \
                     patch.object(ducklake_sync, "_stale_key_batches", side_effect=batches), \
                     patch.object(ducklake_sync, "_apply", side_effect=apply), \
-                    patch("examples.python.client.GraphClient"):
+                    patch.object(ducklake_sync, "_ConflictRetryClient"):
                 if fail:
                     with self.assertRaisesRegex(RuntimeError, "delete failed"):
                         ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2)
@@ -206,6 +233,33 @@ class PruneBatchTest(unittest.TestCase):
             self.assertEqual(closed, [True])
             self.assertEqual(seen, [[("a",), ("b",)], [("c",)]] if fail else
                              [[("a",), ("b",)], [("c",)], [("d",)]])
+
+    def test_only_confirmed_rolled_back_transaction_conflicts_retry(self):
+        class Error(Exception):
+            def __init__(self, code, message):
+                self.code, self.message = code, message
+
+        conflict = Error("Neo.TransientError.Transaction.Outdated",
+                         "transaction conflict [brainwire.commit outcome=rolled_back]")
+        client = ducklake_sync._ConflictRetryClient(None, "demo")
+        with patch.object(ducklake_sync.GraphClient, "_write", side_effect=[conflict, 7]) as write, \
+                patch.object(ducklake_sync.time, "sleep"):
+            self.assertEqual(client._write(lambda tx: None), 7)
+            self.assertEqual(write.call_count, 2)
+        for error in (OSError("connection lost"),
+                      Error(conflict.code, "transaction conflict"),
+                      Error(conflict.code, "[brainwire.commit outcome=unknown]"),
+                      Error("Neo.ClientError.Transaction.CommitOutcomeUnknown", conflict.message)):
+            with patch.object(ducklake_sync.GraphClient, "_write", side_effect=error) as write, \
+                    patch.object(ducklake_sync.time, "sleep"):
+                with self.assertRaises(type(error)):
+                    client._write(lambda tx: None)
+                self.assertEqual(write.call_count, 1)
+        with patch.object(ducklake_sync.GraphClient, "_write", side_effect=conflict) as write, \
+                patch.object(ducklake_sync.time, "sleep"):
+            with self.assertRaises(Error):
+                client._write(lambda tx: None)
+            self.assertEqual(write.call_count, 8)
 
     def test_stale_keys_are_fetched_in_bounded_batches_and_spool_is_removed(self):
         class Cursor:

@@ -29,6 +29,26 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-03: v0.15.0-beta.3 DuckLake conflict handling
+
+- **Finding:** after beta.2 was tagged, the synthetic 10,000-node, four-worker
+  DuckLake/Bolt acceptance twice hit an `Outdated` transaction conflict during
+  concurrent node deletes. Distinct deleted nodes can share an incident edge.
+- **Fix:** DuckLake sync retries an individual transaction at most eight times
+  with backoff only for `Outdated` with the server's explicit rolled-back
+  outcome. Unknown commit outcomes and connection failures are not retried.
+  Exhausted failures retain the source lease and do not advance its cursor.
+- **Evidence:** the same 10,000-node, four-worker workload passed three times
+  after the fix. A 20,000-node, eight-worker run also passed, including
+  incremental changes, full reconciliation and offline consistency audit.
+  Tests cover the retry filter and failure behavior. This is not sustained-load or
+  multi-machine qualification.
+- **Verification:** the Rust workspace passed 994 tests (3 ignored) on rerun;
+  an earlier run under concurrent Docker builds/load had an authentication
+  deadline test fail, which passed in isolation. Python, documentation and
+  formatting checks passed; the optional DuckLake tests passed with DuckDB.
+  The local beta.3 image passed the synthetic 512 MiB cgroup smoke.
+
 ## 2026-11-03: v0.15.0-beta.2 memory, recovery and ingestion
 
 - **Done:** sample RSS on RUN admission using the higher of the fresh and latest

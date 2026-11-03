@@ -106,8 +106,8 @@ Concurrent writers still need bounded admission and workload qualification.
 To reduce contention:
 
 - **Partition by key.** Give each process a disjoint set of identities, for
-  example `hash(id) % workers`. Writers that never share a node do not
-  conflict. `ducklake_sync.py` does this.
+  example `hash(id) % workers`. `ducklake_sync.py` does this, but deleting
+  different nodes can still contend when they share an incident edge.
 - **Keep transactions small** (hundreds of rows). A confirmed conflict rejects
   the whole batch; retrying it repeats all its work.
 - **Distinguish rejection from uncertainty.** Apply bounded backoff only when
@@ -217,8 +217,10 @@ apply only what changed.
    have advanced the cursor and cleared the lease; reconcile before continuing.
 
 Replaying a range converges under the single-owner source contract, provided
-there are no concurrent newer writes. Each batch and lease operation is
-attempted once. After failure, resolve previous workers and all in-flight write
+there are no concurrent newer writes. A batch retries up to eight times with
+backoff only when the server returns `Transaction.Outdated` and explicitly
+confirms rollback. Network errors, unknown commit outcomes and lease operations
+are not retried automatically. After failure, resolve previous workers and all in-flight write
 outcomes before explicitly using `--break-lease` and reconciling the graph. A
 client disconnect alone does not prove its server transaction has finished.
 

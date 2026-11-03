@@ -4,7 +4,7 @@ members = ["crates/core", "crates/store", "crates/bolt", "crates/server", "crate
 
 [workspace.package]
 edition = "2021"
-version = "0.15.0-beta.2"
+version = "0.15.0-beta.3"
 license = "Apache-2.0"
 publish = false
 
