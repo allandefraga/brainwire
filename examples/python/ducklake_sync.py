@@ -188,23 +188,33 @@ def validate(con, mapping, start, end):
 
 
 def stale_keys(con, mapping, end, keys):
-    """Return the given graph keys that no source row has at snapshot ``end``.
+    """Return graph keys absent from the source snapshot as a materialized list."""
+    return [key for batch in _stale_key_batches(con, mapping, end, keys, 1000) for key in batch]
+
+
+def _stale_key_batches(con, mapping, end, keys, batch_size):
+    """Yield bounded batches of graph keys absent from snapshot ``end``.
 
     Keys are spooled to a temporary JSON-lines file and anti-joined in DuckDB,
-    so the graph key list is not held in Python memory.
+    so pruning does not hold all graph or stale keys in Python memory.
     """
+    if type(batch_size) is not int or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer")
     names = [f"k{i}" for i in range(len(mapping.keys))]
-    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as spool:
-        for key in keys:
-            spool.write(json.dumps(dict(zip(names, key))) + "\n")
+    spool = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
     try:
+        with spool:
+            for key in keys:
+                spool.write(json.dumps(dict(zip(names, key))) + "\n")
         columns = "{" + ", ".join(f"'{name}': 'VARCHAR'" for name in names) + "}"
         source = ", ".join(f'CAST("{column}" AS VARCHAR)' for column in mapping.keys)
         literal = "'" + spool.name.replace("'", "''") + "'"
-        return con.execute(
+        cursor = con.execute(
             f"SELECT {', '.join(names)} FROM read_json({literal}, format = 'newline_delimited', columns = {columns}) "
             f'EXCEPT SELECT {source} FROM lake."{mapping.schema}"."{mapping.table}" AT (VERSION => {int(end)})'
-        ).fetchall()
+        )
+        while batch := cursor.fetchmany(batch_size):
+            yield batch
     finally:
         os.unlink(spool.name)
 
@@ -270,8 +280,13 @@ def _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_si
         query = (f"MATCH (a:{mapping.source_label})-[:{mapping.type}]->(b:{mapping.target_label}) "
                  "RETURN a.entity_id, b.entity_id")
     with driver.session(database=database) as session, lake(lake_target, load=load, init_sql=init_sql) as con:
-        stale = stale_keys(con, mapping, end, (tuple(record.values()) for record in session.run(query)))
-    return _apply(GraphClient(driver, database, batch_size=batch_size), mapping, [], stale)[1]
+        client = GraphClient(driver, database, batch_size=batch_size)
+        keys = (tuple(record.values()) for record in session.run(query))
+        deleted = 0
+        with contextlib.closing(_stale_key_batches(con, mapping, end, keys, batch_size)) as batches:
+            for stale in batches:
+                deleted += _apply(client, mapping, [], stale)[1]
+        return deleted
 
 
 def _cursor(tx, source_id):

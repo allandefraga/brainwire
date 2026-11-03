@@ -3,12 +3,15 @@
 Needs duckdb with cached ducklake/sqlite extensions; skips otherwise:
     uv run --no-project --with duckdb==1.5.5 python -m unittest examples.python.test_ducklake_sync -v
 """
+import contextlib
 import datetime
 import decimal
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from examples.python import ducklake_sync
 from examples.python.ducklake_sync import Mapping, _apply, stale_keys, latest_snapshot, lake, plain, read_partition, validate
 
 try:
@@ -156,6 +159,106 @@ class ApplyTest(unittest.TestCase):
         _apply(client, EDGES, [], [("a", "b")])
         self.assertEqual(client.delete_edges, ("Customer", "FOLLOWS", "Customer",
                                                [{"source_id": "a", "target_id": "b"}]))
+
+
+class PruneBatchTest(unittest.TestCase):
+    def test_prune_deletes_each_batch_and_closes_the_source_on_failure(self):
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def run(self, query):
+                return []
+
+        class Driver:
+            def session(self, **kwargs):
+                return Session()
+
+        for fail in (False, True):
+            closed, seen = [], []
+
+            def batches(*args):
+                try:
+                    yield [("a",), ("b",)]
+                    yield [("c",)]
+                    yield [("d",)]
+                finally:
+                    closed.append(True)
+
+            def apply(client, mapping, upserts, deletes):
+                seen.append(deletes)
+                if fail and len(seen) == 2:
+                    raise RuntimeError("delete failed")
+                return 0, len(deletes)
+
+            with patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(None)), \
+                    patch.object(ducklake_sync, "_stale_key_batches", side_effect=batches), \
+                    patch.object(ducklake_sync, "_apply", side_effect=apply), \
+                    patch("examples.python.client.GraphClient"):
+                if fail:
+                    with self.assertRaisesRegex(RuntimeError, "delete failed"):
+                        ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2)
+                else:
+                    self.assertEqual(ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2), 4)
+            self.assertEqual(closed, [True])
+            self.assertEqual(seen, [[("a",), ("b",)], [("c",)]] if fail else
+                             [[("a",), ("b",)], [("c",)], [("d",)]])
+
+    def test_stale_keys_are_fetched_in_bounded_batches_and_spool_is_removed(self):
+        class Cursor:
+            def __init__(self):
+                self.rows = iter([("a",), ("b",), ("c",), ("d",), ("e",)])
+                self.requests = []
+
+            def execute(self, query):
+                self.spool = Path(query.split("read_json('", 1)[1].split("'", 1)[0])
+                self.assert_spool()
+                return self
+
+            def assert_spool(self):
+                assert self.spool.exists()
+
+            def fetchmany(self, size):
+                self.assert_spool()
+                self.requests.append(size)
+                return [row for _, row in zip(range(size), self.rows)]
+
+            def fetchall(self):
+                raise AssertionError("pruning must not materialize all stale keys")
+
+        cursor = Cursor()
+        batches = list(ducklake_sync._stale_key_batches(cursor, NODES, 1, [("a",)], 2))
+        self.assertEqual(batches, [[("a",), ("b",)], [("c",), ("d",)], [("e",)]])
+        self.assertEqual(cursor.requests, [2, 2, 2, 2])
+        self.assertFalse(cursor.spool.exists())
+        cursor = Cursor()
+        pending = ducklake_sync._stale_key_batches(cursor, NODES, 1, [("a",)], 2)
+        self.assertEqual(next(pending), [("a",), ("b",)])
+        self.assertTrue(cursor.spool.exists())
+        pending.close()
+        self.assertFalse(cursor.spool.exists())
+
+    def test_spool_is_removed_when_source_keys_fail(self):
+        def broken_keys():
+            yield ("a",)
+            raise RuntimeError("source read failed")
+
+        created = []
+        original = tempfile.NamedTemporaryFile
+
+        def track(*args, **kwargs):
+            stream = original(*args, **kwargs)
+            created.append(Path(stream.name))
+            return stream
+
+        with patch.object(ducklake_sync.tempfile, "NamedTemporaryFile", side_effect=track):
+            with self.assertRaisesRegex(RuntimeError, "source read failed"):
+                list(ducklake_sync._stale_key_batches(None, NODES, 1, broken_keys(), 2))
+        self.assertEqual(len(created), 1)
+        self.assertFalse(created[0].exists())
 
 
 class PlainValueTest(unittest.TestCase):

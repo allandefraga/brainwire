@@ -160,6 +160,11 @@ and lists, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IN`, `XOR`, `n:Label`,
 `left`, `right`, `split`; math `abs`, `ceil`, `floor`, `round`, `sqrt`,
 `sign`, `exp`, `log`, `log10`.
 
+`toBooleanList`, `toIntegerList` and `toFloatList` convert each list item using
+the corresponding `...OrNull` conversion. Unconvertible values become `null`;
+a `null` list returns `null`, and a non-list argument is an error. These are
+list conversions, not native vector indexes.
+
 `toBooleanOrNull` accepts booleans, strings and integers; unsupported value types
 and invalid strings return `null`. `toBoolean` retains its stricter type errors.
 

@@ -136,6 +136,10 @@ anonymous/wrong-token rejection; reader write denial;
 1,000 indexed writes; explicit rollback; backend SIGKILL/start with committed
 data/index recovery; and an offline graph audit. JSON receipts identify both
 actual image IDs, the pinned proxy digest, driver version and cleanup result.
+Receipts also record the Python and SSL-library versions. In one local beta.2
+run, Python 3.14 with OpenSSL 3.5 passed these checks, while Python 3.9.6 with
+LibreSSL 2.8.3 could not complete TLS readiness; the cause remains unverified.
+The readiness timeout preserves the last connection error for diagnosis.
 
 The final candidate [driver 5 receipt](benchmarks/2026-10-13-beta/tls-driver5.json)
 and [driver 6 receipt](benchmarks/2026-10-13-beta/tls-driver6.json) passed these

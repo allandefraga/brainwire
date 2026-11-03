@@ -434,6 +434,17 @@ impl RaftLogStorage<TypeConfig> for LogStore {
         let s = self.0.clone();
         blocking(move || {
             let _guard = s.0.io.lock().map_err(error)?;
+            if s.committed()?
+                .is_some_and(|previous| committed.is_none_or(|next| next.index < previous.index))
+            {
+                return Err(error("committed marker cannot regress"));
+            }
+            if let Some(committed) = committed {
+                let retained: Option<Entry<TypeConfig>> = s.read(&key(committed.index))?;
+                if retained.as_ref().map(|entry| entry.log_id) != Some(committed) {
+                    return Err(error("committed marker has no matching retained log"));
+                }
+            }
             let mut b = WriteBatch::default();
             Storage::put(&mut b, COMMITTED, &committed)?;
             s.write(b)

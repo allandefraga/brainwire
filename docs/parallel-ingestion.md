@@ -236,7 +236,10 @@ a synchronous commit per row; see the measurement below.
 - **`--full` alone does not delete.** It upserts every source row but leaves
   graph keys that are absent from the source. Add `--prune` to then delete
   those keys (graph keys are listed in one query, bounded by the server's
-  `memory.query`, and anti-joined against the snapshot in DuckDB). Use
+  `memory.query`, and anti-joined against the snapshot in DuckDB). The Python
+  client fetches and deletes missing IDs in batches, rather than keeping all
+  missing IDs in one list. This does not bound DuckDB's anti-join memory or the
+  server's graph enumeration. Delete batches commit separately. Use
   `--full --prune` when history has expired or the graph may have drifted.
 - **Node deletes remove edges.** Deleting a node also deletes its edges in the
   graph. If a later snapshot brings that key back while its edge rows did not

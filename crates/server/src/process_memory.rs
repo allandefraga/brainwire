@@ -86,9 +86,18 @@ impl ProcessMemory {
         usize::try_from(cap.saturating_sub(self.rss.load(Ordering::Relaxed))).unwrap_or(usize::MAX)
     }
 
-    /// `(rss, refusal threshold)` while RSS is at or above it.
+    /// Check current RSS for each new RUN, preserving a higher sampler reading.
     pub(crate) fn refusal(&self) -> Option<(u64, u64)> {
-        let rss = self.rss.load(Ordering::Relaxed);
+        self.refusal_with_rss(resident_bytes())
+    }
+
+    fn refusal_with_rss(&self, fresh: Option<u64>) -> Option<(u64, u64)> {
+        // On-demand samples must not overwrite the sampler or consume its log
+        // crossings. A lower fresh sample waits for the sampler to confirm relief.
+        if let Some(rss) = fresh {
+            self.peak.fetch_max(rss, Ordering::Relaxed);
+        }
+        let rss = self.rss.load(Ordering::Relaxed).max(fresh.unwrap_or(0));
         let cap = self.threshold(REFUSE_PERCENT);
         (rss >= cap).then_some((rss, cap))
     }
@@ -240,18 +249,34 @@ mod tests {
         let memory = ProcessMemory::with_initial_rss(1000, 0);
         assert_eq!(memory.record(500), None);
         assert_eq!(memory.headroom(), 450);
-        assert_eq!(memory.refusal(), None);
+        assert_eq!(memory.refusal_with_rss(None), None);
         assert_eq!(memory.record(800), Some(Crossing::Warn));
         assert_eq!(memory.record(810), None);
         assert_eq!(memory.record(950), Some(Crossing::Refuse));
-        assert_eq!(memory.refusal(), Some((950, 950)));
+        assert_eq!(memory.refusal_with_rss(None), Some((950, 950)));
         assert_eq!(memory.headroom(), 0);
         // Below 95% but within the hysteresis band: no new crossing on return.
         assert_eq!(memory.record(920), None);
-        assert_eq!(memory.refusal(), None);
+        assert_eq!(memory.refusal_with_rss(None), None);
         assert_eq!(memory.record(950), None);
         assert_eq!(memory.record(700), None);
         assert_eq!(memory.record(800), Some(Crossing::Warn));
+        assert_eq!(memory.peak(), 950);
+    }
+
+    #[test]
+    fn run_admission_observes_fresh_rss_without_replacing_the_sampler() {
+        let memory = ProcessMemory::with_initial_rss(1000, 500);
+        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(memory.peak(), 950);
+        assert_eq!(memory.headroom(), 450);
+        assert_eq!(memory.record(950), Some(Crossing::Refuse));
+        // A low on-demand sample cannot undo a high sampler reading.
+        assert_eq!(memory.refusal_with_rss(Some(500)), Some((950, 950)));
+        assert_eq!(memory.refusal_with_rss(None), Some((950, 950)));
+        assert_eq!(memory.record(500), None);
+        assert_eq!(memory.refusal_with_rss(Some(500)), None);
+        assert_eq!(memory.refusal_with_rss(None), None);
         assert_eq!(memory.peak(), 950);
     }
 

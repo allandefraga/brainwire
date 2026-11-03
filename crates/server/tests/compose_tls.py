@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import platform
 import socket
 import ssl
 import subprocess
@@ -18,6 +19,22 @@ import warnings
 from compose_auth import DATABASE, ROWS, fixture, self_check
 
 PROXY_IMAGE = "haproxy:3.2.24-alpine@sha256:1aca32ee932b96d2a75f1882909325839dd23c138ba9c6fd26e4d88179f30f13"
+
+
+def wait_ready(probe, read, logs):
+    from neo4j.exceptions import ServiceUnavailable
+
+    deadline = time.monotonic() + 90
+    last_error = None
+    while time.monotonic() < deadline:
+        if probe():
+            try:
+                assert read() == [{"ok": 1}]
+                return
+            except ServiceUnavailable as error:
+                last_error = error
+        time.sleep(0.25)
+    raise RuntimeError(logs()) from last_error
 
 
 def run(image, idle_pool=False):
@@ -106,18 +123,12 @@ def run(image, idle_pool=False):
                 raise AssertionError(f"expected {code}")
 
         def ready():
-            deadline = time.monotonic() + 90
-            while time.monotonic() < deadline:
-                probe = compose("exec", "-T", "brainwire", "brainwire", "probe", "--mode", "ready",
-                                "--timeout-ms", "500", check=False, timeout=8)
-                if probe.returncode == 0:
-                    try:
-                        assert query(("reader", tokens["reader"]), "RETURN 1 AS ok") == [{"ok": 1}]
-                        return
-                    except ServiceUnavailable:
-                        pass
-                time.sleep(0.25)
-            raise RuntimeError(compose("logs", "--tail", "50", check=False).stdout)
+            wait_ready(
+                lambda: compose("exec", "-T", "brainwire", "brainwire", "probe", "--mode", "ready",
+                                "--timeout-ms", "500", check=False, timeout=8).returncode == 0,
+                lambda: query(("reader", tokens["reader"]), "RETURN 1 AS ok"),
+                lambda: compose("logs", "--tail", "50", check=False).stdout,
+            )
 
         receipt = None
         try:
@@ -220,6 +231,7 @@ def run(image, idle_pool=False):
             audit = json.loads(compose("run", "--rm", "--no-deps", "brainwire", "db", "check", DATABASE, "--json").stdout)
             assert audit["status"] == "ok"
             receipt = {"result": "PASS", "driverVersion": driver_version, "image": image,
+                       "pythonVersion": platform.python_version(), "opensslVersion": ssl.OPENSSL_VERSION,
                        "imageId": inspections["brainwire"]["Image"], "proxyImage": PROXY_IMAGE,
                        "proxyImageId": inspections["tls"]["Image"], "tlsVersion": tls_version,
                        "project": project, "rows": ROWS, "checks": checks, "audit": audit,

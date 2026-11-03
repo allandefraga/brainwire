@@ -731,6 +731,51 @@ fn call(name: &str, args: &[Expr], row: &[Val], ctx: &Context<'_, '_>) -> Result
     Ok(result)
 }
 
+fn numeric_boolean_conversion(name: &str, value: Val) -> Result<Val, ExecError> {
+    Ok(match name {
+        "tointeger" | "tointegerornull" => match value {
+            Val::Int(i) => Val::Int(i),
+            Val::Float(f) if fits_integer(f) => Val::Int(f.trunc() as i64),
+            Val::Bool(b) => Val::Int(i64::from(b)),
+            Val::Str(s) => s
+                .trim()
+                .parse::<i64>()
+                .ok()
+                .or_else(|| {
+                    s.trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|f| f.is_finite() && f.abs() < 9.2e18)
+                        .map(|f| f.trunc() as i64)
+                })
+                .map(Val::Int)
+                .unwrap_or(Val::Null),
+            Val::Null => Val::Null,
+            _ if name == "tointegerornull" => Val::Null,
+            other => return Err(type_error("toInteger", &other)),
+        },
+        "tofloat" | "tofloatornull" => match value {
+            Val::Int(i) => Val::Float(i as f64),
+            Val::Float(f) => Val::Float(f),
+            Val::Str(s) => s.trim().parse::<f64>().map(Val::Float).unwrap_or(Val::Null),
+            Val::Null => Val::Null,
+            _ if name == "tofloatornull" => Val::Null,
+            other => return Err(type_error("toFloat", &other)),
+        },
+        "toboolean" | "tobooleanornull" => match value {
+            Val::Bool(b) => Val::Bool(b),
+            Val::Str(s) if s.trim().eq_ignore_ascii_case("true") => Val::Bool(true),
+            Val::Str(s) if s.trim().eq_ignore_ascii_case("false") => Val::Bool(false),
+            Val::Str(_) => Val::Null,
+            Val::Int(i) => Val::Bool(i != 0),
+            Val::Null => Val::Null,
+            _ if name == "tobooleanornull" => Val::Null,
+            other => return Err(type_error("toBoolean", &other)),
+        },
+        _ => unreachable!("known numeric/boolean conversion"),
+    })
+}
+
 fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
     let first = || args.first().cloned().unwrap_or(Val::Null);
     let one = |args: &[Val]| arity(name, args, 1, 1);
@@ -858,54 +903,29 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                 other => return Err(type_error("toString", &other)),
             }
         }
-        "tointeger" | "tointegerornull" => {
+        "tointeger" | "tointegerornull" | "tofloat" | "tofloatornull" | "toboolean"
+        | "tobooleanornull" => {
             one(&args)?;
-            match first() {
-                Val::Int(i) => Val::Int(i),
-                Val::Float(f) if fits_integer(f) => Val::Int(f.trunc() as i64),
-                Val::Bool(b) => Val::Int(i64::from(b)),
-                Val::Str(s) => s
-                    .trim()
-                    .parse::<i64>()
-                    .ok()
-                    .or_else(|| {
-                        s.trim()
-                            .parse::<f64>()
-                            .ok()
-                            .filter(|f| f.is_finite() && f.abs() < 9.2e18)
-                            .map(|f| f.trunc() as i64)
-                    })
-                    .map(Val::Int)
-                    .unwrap_or(Val::Null),
-                Val::Null => Val::Null,
-                _ if name == "tointegerornull" => Val::Null,
-                other => return Err(type_error("toInteger", &other)),
-            }
+            numeric_boolean_conversion(name, args.pop().unwrap())?
         }
-        "tofloat" | "tofloatornull" => {
+        "tobooleanlist" | "tointegerlist" | "tofloatlist" => {
             one(&args)?;
-            match first() {
-                Val::Int(i) => Val::Float(i as f64),
-                Val::Float(f) => Val::Float(f),
-                Val::Str(s) => s.trim().parse::<f64>().map(Val::Float).unwrap_or(Val::Null),
+            match args.pop().unwrap() {
                 Val::Null => Val::Null,
-                _ if name == "tofloatornull" => Val::Null,
-                other => return Err(type_error("toFloat", &other)),
-            }
-        }
-        "toboolean" | "tobooleanornull" => {
-            one(&args)?;
-            match first() {
-                Val::Bool(b) => Val::Bool(b),
-                Val::Str(s) => match s.trim().to_ascii_lowercase().as_str() {
-                    "true" => Val::Bool(true),
-                    "false" => Val::Bool(false),
-                    _ => Val::Null,
-                },
-                Val::Int(i) => Val::Bool(i != 0),
-                Val::Null => Val::Null,
-                _ if name == "tobooleanornull" => Val::Null,
-                other => return Err(type_error("toBoolean", &other)),
+                Val::List(mut items) => {
+                    let scalar = match name {
+                        "tobooleanlist" => "tobooleanornull",
+                        "tointegerlist" => "tointegerornull",
+                        _ => "tofloatornull",
+                    };
+                    for item in &mut items {
+                        ctx.budget.check_deadline()?;
+                        let value = std::mem::replace(item, Val::Null);
+                        *item = numeric_boolean_conversion(scalar, value)?;
+                    }
+                    Val::List(items)
+                }
+                other => return Err(type_error(name, &other)),
             }
         }
         "trim" | "ltrim" | "rtrim" => {

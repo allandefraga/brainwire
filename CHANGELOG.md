@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.0-beta.2 — experimental candidate
+
+- Sample process RSS at RUN admission as well as periodically, using the higher
+  available reading. This reduces a sampling gap but does not create a hard
+  process-wide memory ceiling; it adds up to two OS RSS reads per RUN.
+- Reject regressing or log-inconsistent Raft commit markers before persistence.
+- Add `toBooleanList`, `toIntegerList` and `toFloatList` for supported Cypher.
+- Fetch and delete missing DuckLake snapshot keys in bounded Python batches.
+  The DuckDB anti-join and graph enumeration have separate memory needs.
+
+Native Bolt TLS, graph history, CDC, native ANN/BM25, and multi-machine failover
+qualification remain open. Use rebuildable data for controlled beta trials.
+
 ## 0.15.0-beta.1 — experimental candidate
 
 - Consider Linux cgroup v2 `memory.high` as well as `memory.max` when admitting

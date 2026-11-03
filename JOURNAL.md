@@ -29,6 +29,43 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-03: v0.15.0-beta.2 memory, recovery and ingestion
+
+- **Done:** sample RSS on RUN admission using the higher of the fresh and latest
+  periodic reading; reject invalid or regressing Raft commit markers before
+  persistence; add three Cypher list conversions; batch Python-side missing-key
+  deletions during DuckLake full reconciliation.
+- **Evidence:** targeted memory, replication and Cypher tests passed. All 12
+  DuckLake sync tests passed with DuckDB 1.5.5 and cached DuckLake/SQLite
+  extensions, including six real local DuckLake tests. A synthetic end-to-end
+  DuckLake-to-Bolt run with 1,000 source nodes, two workers, incremental
+  changes and full prune passed, including the offline consistency audit.
+  A synthetic 512 MiB cgroup pressure smoke passed on the local arm64 image;
+  a three-process loopback quorum test passed 19 checks, including partition,
+  leader loss and retained-state recovery.
+  A single-host TLS proxy test passed strict CA/hostname verification, negative
+  certificate and plaintext checks, grants and recovery after SIGKILL with
+  Python 3.14/OpenSSL 3.5. Python 3.9.6/LibreSSL 2.8.3 failed TLS readiness
+  with an undiagnosed wrapped error. The proxy-to-backend link was plaintext.
+  The TLS harness now retains the last connection error on timeout and records
+  Python and SSL-library versions; three isolated readiness tests passed.
+- **Checks:** Rust workspace tests passed (994 passed, 3 ignored), as did
+  workspace Clippy and formatting; Python tests ran 174 (7 skipped in the base
+  environment), script tests 101, and documentation checks passed. The separate
+  DuckLake test above used its cached optional dependencies without skips.
+- **Overhead diagnostic:** one sequential Docker Desktop arm64 trial of 300
+  warmed `RETURN 1` auto-commit queries per image measured median 0.6503 ms on
+  beta.1 and 0.6979 ms on the local beta.2 candidate (p95 0.9587 and 1.1905
+  ms). This is a small unpaired synthetic sample, not a controlled performance
+  comparison; repeat with randomized order and representative workloads.
+- **Limits:** on-demand RSS remains cooperative and costs up to two OS reads
+  per RUN. Python batching does not bound DuckDB or server enumeration memory.
+  Native Bolt TLS, CDC, graph history, ANN/BM25, 2/4/8 GiB sustained memory
+  qualification and multi-machine failover remain open.
+- **Next:** measure the admission overhead under representative load, qualify
+  long-running cgroup workloads on a host with verifiable power, and test
+  distributed recovery across real machines.
+
 ## 2026-11-03: v0.15 memory admission and log recovery
 
 - **Done:** cgroup v2 admission considers the lower finite `memory.high` or

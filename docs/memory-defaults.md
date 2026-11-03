@@ -42,7 +42,11 @@ threshold**, not a hard process RSS ceiling. On Linux and macOS, the server
 samples RSS at startup and every 100 ms. Crossing 80% of this threshold warns
 and requests an allocator purge; at 95%, new RUNs and query-pool growth are
 refused. A request may be refused earlier when its shared reservations cannot
-fit the sampled headroom. See [the design](design/process-memory-ceiling.md).
+fit the sampled headroom. RUN admission also samples RSS on demand and uses
+the higher of that sample and the latest periodic sample. If the on-demand
+sample fails, the previous sample remains in use. This adds up to two OS RSS
+reads per RUN; it does not check every allocation or eliminate sampling races.
+See [the design](design/process-memory-ceiling.md).
 
 The component budgets are accounting budgets. Sampling, admission and
 allocator decay do **not guarantee a global RSS limit or prevent every OOM**.

@@ -51,6 +51,51 @@ fn command(id: &str) -> Command {
         batch: vec![1, 2],
     }
 }
+
+#[tokio::test]
+async fn committed_marker_rejects_missing_mismatched_and_regressing_logs_before_persistence() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let mut logs = store.log_store();
+    logs.save_committed(None).await.unwrap();
+    let first = entry(0, command("first"));
+    let second = entry(1, command("second"));
+    assert!(logs.save_committed(Some(first.log_id)).await.is_err());
+    assert_eq!(store.committed().unwrap(), None);
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let mut logs = store.log_store();
+    logs.blocking_append([first.clone(), second.clone()])
+        .await
+        .unwrap();
+    let mut mismatched = second.log_id;
+    mismatched.leader_id.term += 1;
+    assert!(logs.save_committed(Some(mismatched)).await.is_err());
+    assert_eq!(store.committed().unwrap(), None);
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let mut logs = store.log_store();
+    logs.save_committed(Some(first.log_id)).await.unwrap();
+    logs.save_committed(Some(first.log_id)).await.unwrap();
+    logs.save_committed(Some(second.log_id)).await.unwrap();
+    for invalid in [
+        None,
+        Some(first.log_id),
+        Some(mismatched),
+        Some(entry(2, command("missing")).log_id),
+    ] {
+        assert!(logs.save_committed(invalid).await.is_err());
+        assert_eq!(store.committed().unwrap(), Some(second.log_id));
+    }
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app).unwrap();
+    assert_eq!(store.committed().unwrap(), Some(second.log_id));
+    assert!(store.log_store().truncate(second.log_id).await.is_err());
+}
 #[tokio::test]
 async fn durable_vote_log_committed_membership_dedupe_and_conflicting_retry() {
     let dir = TempDir::new().unwrap();
