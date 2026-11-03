@@ -15,19 +15,15 @@ fn property(name: &str, node: bool) -> bool {
 }
 
 fn endpoint<'a>(
-    ctx: &Context<'a, '_>,
+    ctx: &Context<'_, '_>,
+    labels: &BTreeMap<brainwire_core::ids::TypeId, &'a str>,
     id: brainwire_core::ids::TypeId,
 ) -> Result<&'a str, ExecError> {
-    for ty in &ctx.catalog.node_types {
-        ctx.budget.check_deadline()?;
-        if ty.id == id {
-            return Ok(&ty.label);
-        }
-    }
-    Err(
+    ctx.budget.check_deadline()?;
+    labels.get(&id).copied().ok_or_else(|| {
         StoreError::Corrupt("schema found a relationship signature with a missing endpoint".into())
-            .into(),
-    )
+            .into()
+    })
 }
 
 #[derive(Default)]
@@ -57,6 +53,22 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
     ctx.budget.check_deadline()?;
     if ctx.catalog.node_types.len() > MAX_NODE_TYPES {
         return Err(semantic("db.schema exceeds the 4096 node type limit"));
+    }
+    let mut labels = BTreeMap::new();
+    for ty in &ctx.catalog.edge_types {
+        ctx.budget.check_deadline()?;
+        if !ty.signatures.is_empty() {
+            // Cover temporary tree nodes before allocation; labels remain borrowed.
+            ctx.budget.charge(
+                1024usize.saturating_add(ctx.catalog.node_types.len().saturating_mul(128)),
+            )?;
+            for node in &ctx.catalog.node_types {
+                ctx.budget.check_deadline()?;
+                // Match the former linear lookup for malformed duplicate IDs.
+                labels.entry(node.id).or_insert(node.label.as_str());
+            }
+            break;
+        }
     }
     let mut size = Size::default();
     size.add(&["version", "nodes", "relationships", "indexesReady"], 4)?;
@@ -104,8 +116,8 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
                     "target",
                     "properties",
                     &ty.name,
-                    endpoint(ctx, source)?,
-                    endpoint(ctx, target)?,
+                    endpoint(ctx, &labels, source)?,
+                    endpoint(ctx, &labels, target)?,
                 ],
                 5,
             )?;
@@ -168,8 +180,14 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             }
             let mut fields = BTreeMap::from([
                 ("name".into(), Value::Str(ty.name.clone())),
-                ("source".into(), Value::Str(endpoint(ctx, source)?.into())),
-                ("target".into(), Value::Str(endpoint(ctx, target)?.into())),
+                (
+                    "source".into(),
+                    Value::Str(endpoint(ctx, &labels, source)?.into()),
+                ),
+                (
+                    "target".into(),
+                    Value::Str(endpoint(ctx, &labels, target)?.into()),
+                ),
                 ("properties".into(), Value::List(props)),
             ]);
             if let Some(description) = &ty.description {

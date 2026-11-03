@@ -156,6 +156,12 @@ and checking the cgroup limit.
 
 ## Admission under Linux cgroup pressure
 
+The synthetic 512 MiB admission smoke compares the same working-set estimate
+as the server and records raw usage separately for the injection safety limit.
+It only accepts a structured cgroup refusal as a confirmed cgroup rejection;
+missing or different evidence is inconclusive. The previous failed run remains
+unexplained, and this test does not qualify sustained memory use or an RSS cap.
+
 Decision logs include the selected cgroup's raw usage, inactive file cache,
 effective working-set estimate and limit when the cgroup check refuses a RUN. If any examined cgroup has raw usage
 at least 95% but subtracting inactive file cache permits admission, a separate

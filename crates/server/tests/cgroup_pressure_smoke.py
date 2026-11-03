@@ -13,9 +13,13 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from brainwire.client import MemoryPressureError
 
 LABEL = 'brainwire.pressure-smoke'
 MIB = 1 << 20
@@ -96,7 +100,7 @@ def cgroup(name, current_first=False):
         'bytes': max(0, used - inactive) if type(used) is int and inactive is not None else None,
         'unit': 'bytes',
         'source': '/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero',
-        'scope': 'separate point-in-time readings; diagnostic only; not the pressure verdict'}
+        'scope': 'separate point-in-time readings; admission-test estimate, not an atomic runtime sample'}
     return values
 
 
@@ -109,31 +113,40 @@ def pressure_steps(current, limit):
 
 
 def pressured(snapshot):
-    used, cap = snapshot.get('memory.current'), snapshot.get('memory.max')
-    return isinstance(used, int) and isinstance(cap, int) and used * 100 >= cap * 95
+    used = snapshot.get('diagnostic_working_set', {}).get('bytes')
+    cap = snapshot.get('memory.max')
+    if type(used) is not int or type(cap) is not int or used < 0 or cap <= 0:
+        return None
+    return used * 100 >= cap * 95
 
 
 def fill_to_pressure(name, fill, samples):
     snapshot = cgroup(name)
     if snapshot['memory.max'] != LIMIT or not isinstance(snapshot['memory.current'], int):
         raise SmokeInconclusive('finite cgroup-v2 reading disappeared during injection')
-    target, first = pressure_steps(snapshot['memory.current'], LIMIT)
+    current = snapshot.get('diagnostic_working_set', {}).get('bytes')
+    if type(current) is not int:
+        raise SmokeInconclusive('working-set estimate unavailable during injection')
+    target, first = pressure_steps(current, LIMIT)
     if snapshot['memory.current'] > LIMIT * SAFETY_PERCENT // 100:
         raise SmokeInconclusive('usage already above the injection safety margin')
+    if snapshot['memory.current'] + max(0, target - current) > LIMIT * SAFETY_PERCENT // 100:
+        raise SmokeInconclusive('cannot reach working-set target within the raw-usage safety margin')
     if first:
         docker('exec', name, 'dd', 'if=/dev/zero', f'of={fill}', 'bs=1048576',
                f'count={first}', 'oflag=append', 'conv=notrunc', 'status=none', timeout=60)
     for _ in range(40):
         snapshot = cgroup(name)
         samples.append(snapshot)
-        current = snapshot['memory.current']
-        if not isinstance(current, int) or snapshot['memory.max'] != LIMIT:
+        raw = snapshot['memory.current']
+        current = snapshot.get('diagnostic_working_set', {}).get('bytes')
+        if type(raw) is not int or type(current) is not int or snapshot['memory.max'] != LIMIT:
             raise SmokeInconclusive('cgroup reading disappeared or max changed during injection')
-        if current > LIMIT * SAFETY_PERCENT // 100:
+        if raw > LIMIT * SAFETY_PERCENT // 100:
             raise SmokeInconclusive('usage exceeded the injection safety margin')
         if current >= target:
             return snapshot
-        if current + MIB > LIMIT * SAFETY_PERCENT // 100:
+        if raw + MIB > LIMIT * SAFETY_PERCENT // 100:
             raise SmokeInconclusive('refusing another increment with insufficient headroom')
         docker('exec', name, 'dd', 'if=/dev/zero', f'of={fill}', 'bs=1048576',
                'count=1', 'oflag=append', 'conv=notrunc', 'status=none', timeout=10)
@@ -149,16 +162,23 @@ def require_pressure_error(name, operation, checks):
         failure = error
     after = cgroup(name, current_first=True)
     evidence = {'before': before, 'after': after,
+                'pressure_basis': 'memory.current minus inactive_file (matching runtime estimate)',
                 'scope': 'point-in-time samples; no continuous usage guarantee'}
     checks.append(evidence)
     if failure is not None:
         if getattr(failure, 'code', None) != PRESSURE_CODE:
             raise AssertionError(f'expected {PRESSURE_CODE}; got {type(failure).__name__} code={getattr(failure, "code", None)}') from failure
-        evidence.update({'code': failure.code, 'type': type(failure).__name__})
+        parsed = MemoryPressureError(failure)
+        evidence.update({'code': failure.code, 'type': type(failure).__name__,
+                         'reason': parsed.reason, 'rolled_back': parsed.rolled_back})
+        if parsed.reason != 'cgroup' or parsed.rolled_back is not True:
+            raise SmokeInconclusive('memory refusal did not confirm cgroup pressure and rollback in a valid server hint') from failure
         return evidence
-    if not pressured(before) or not pressured(after):
-        raise SmokeInconclusive('RUN was admitted but cgroup usage fell below95% around that RUN')
-    raise AssertionError('RUN admitted with pressure in both bracketing samples; further phase-level investigation required')
+    if before.get('memory.max') != LIMIT or after.get('memory.max') != LIMIT:
+        raise SmokeInconclusive('configured cgroup limit was unavailable or changed around the admitted RUN')
+    if pressured(before) is not True or pressured(after) is not True:
+        raise SmokeInconclusive('RUN admitted without confirmed 95% working-set pressure in both bracketing samples')
+    raise AssertionError('RUN admitted with working-set pressure in both bracketing samples; further phase-level investigation required')
 
 
 def stop_events(process):
@@ -193,7 +213,7 @@ def finalize(report, run_id, name, volume, created, event_process, events_path):
         def capture_logs():
             logs = command('docker', 'logs', state['Id'])
             return [line for line in (logs.stdout + logs.stderr).splitlines()
-                    if 'memory pressure admission' in line][-40:]
+                    if 'memory pressure admission' in line or 'memory pressure decision' in line][-40:]
         captured = attempt('capture logs', capture_logs)
         if captured is not None:
             report['cleanup_pressure_log_lines'] = captured
@@ -260,6 +280,7 @@ def run(args, report):
     event_process = None
     report.update({'run_id': run_id, 'driver': neo4j.__version__, 'image': args.image,
                    'memory_limit_bytes': LIMIT, 'threshold_percent': 95,
+                   'pressure_basis': 'memory.current minus inactive_file; raw usage retained for injection safety',
                    'injection_target_percent': INJECTION_PERCENT, 'injection_safety_percent': SAFETY_PERCENT,
                    'scope': 'synthetic single-container Linux cgroup-v2 RUN admission',
                    'limitations': ['not a global RSS ceiling', 'not sustained 2/4/8 GiB qualification',
@@ -357,7 +378,8 @@ def run(args, report):
                     raise AssertionError('owned server stopped or Docker reports OOMKilled')
                 log_result = command('docker', 'logs', name)
                 logs = log_result.stdout + log_result.stderr
-                report['pressure_log_lines'] = [line for line in logs.splitlines() if 'memory pressure admission' in line][-30:]
+                report['pressure_log_lines'] = [line for line in logs.splitlines()
+                    if 'memory pressure admission' in line or 'memory pressure decision' in line][-30:]
                 docker('stop', '--time', '30', name, timeout=40)
                 report['offline_audit'] = json.loads(docker('run', '--rm', '--name', name + '-audit',
                                                           *common, report['image_id'], 'db', 'check', 'demo', '--json', timeout=120))

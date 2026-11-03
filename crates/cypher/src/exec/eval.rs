@@ -499,6 +499,11 @@ fn float(v: &Val) -> Option<f64> {
     }
 }
 
+fn fits_integer(value: f64) -> bool {
+    // i64::MAX rounds up to 2^63 as f64, so the upper bound must be exclusive.
+    (i64::MIN as f64..-(i64::MIN as f64)).contains(&value)
+}
+
 // Cypher keeps ties towards +infinity at precision zero, and away from zero
 // at positive precision. Splitting the scale avoids overflowing 10^precision.
 fn round_number(x: f64, precision: u32) -> f64 {
@@ -857,7 +862,7 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
             one(&args)?;
             match first() {
                 Val::Int(i) => Val::Int(i),
-                Val::Float(f) if f.is_finite() && f.abs() < 9.2e18 => Val::Int(f.trunc() as i64),
+                Val::Float(f) if fits_integer(f) => Val::Int(f.trunc() as i64),
                 Val::Bool(b) => Val::Int(i64::from(b)),
                 Val::Str(s) => s
                     .trim()

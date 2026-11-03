@@ -214,7 +214,7 @@ class SmokeOwnershipTests(unittest.TestCase):
         self.assertEqual(smoke.inactive_file_bytes('anon 4\ninactive_file 10\n'), 10)
         self.assertEqual(smoke.inactive_file_bytes('inactive_file 0'), 0)
 
-    def test_working_set_diagnostics_do_not_change_pressure_verdict(self):
+    def test_working_set_controls_pressure_verdict(self):
         for stat, expected in [('inactive_file 10', 90), ('anon 12', None),
                                ('inactive_file invalid', None)]:
             def command(*args, **kwargs):
@@ -226,13 +226,78 @@ class SmokeOwnershipTests(unittest.TestCase):
                 sample = smoke.cgroup('owned')
             self.assertEqual(sample['diagnostic_working_set']['bytes'], expected)
             self.assertEqual(sample['diagnostic_working_set']['unit'], 'bytes')
+            self.assertEqual(smoke.pressured(sample), False if expected is not None else None)
+            with patch.object(smoke, 'cgroup', return_value=sample):
+                with self.assertRaises(smoke.SmokeInconclusive):
+                    smoke.require_pressure_error('owned', lambda: None, [])
+
+
+    def test_effective_pressure_above_threshold_still_fails_an_admitted_run(self):
+        for effective in ((smoke.LIMIT * 95 + 99) // 100, smoke.LIMIT):
+            sample = {'memory.max': smoke.LIMIT, 'memory.current': smoke.LIMIT,
+                      'diagnostic_working_set': {'bytes': effective}}
             self.assertTrue(smoke.pressured(sample))
             with patch.object(smoke, 'cgroup', return_value=sample):
                 with self.assertRaisesRegex(AssertionError, 'RUN admitted'):
                     smoke.require_pressure_error('owned', lambda: None, [])
 
+    def test_invalid_or_changed_limits_cannot_fail_an_admitted_run(self):
+        for cap in (0, -1, None, 'max', True):
+            sample = {'memory.max': cap, 'diagnostic_working_set': {'bytes': 100}}
+            self.assertIsNone(smoke.pressured(sample))
+        for capacities in ((smoke.LIMIT, smoke.LIMIT // 2),
+                           (smoke.LIMIT // 2, smoke.LIMIT // 2)):
+            samples = [{'memory.max': cap, 'memory.current': cap,
+                        'diagnostic_working_set': {'bytes': cap}} for cap in capacities]
+            with patch.object(smoke, 'cgroup', side_effect=samples):
+                with self.assertRaises(smoke.SmokeInconclusive):
+                    smoke.require_pressure_error('owned', lambda: None, [])
 
-    def test_unavailable_memory_stat_preserves_raw_samples_and_failure(self):
+    def test_fill_never_crosses_raw_safety_margin_to_offset_cache(self):
+        sample = {'memory.max': smoke.LIMIT, 'memory.current': smoke.LIMIT * 96 // 100,
+                  'diagnostic_working_set': {'bytes': smoke.LIMIT // 2}}
+        with patch.object(smoke, 'cgroup', return_value=sample), \
+             patch.object(smoke, 'docker') as docker:
+            with self.assertRaises(smoke.SmokeInconclusive):
+                smoke.fill_to_pressure('owned', '/owned-fill', [])
+        docker.assert_not_called()
+
+    def test_cgroup_pressure_hint_passes_even_without_external_bracketing_samples(self):
+        class Refused(Exception):
+            code = smoke.PRESSURE_CODE
+            message = ('container pressure [brainwire.memory reason=cgroup requested_bytes=0 '
+                       'available_bytes=0 rolled_back=true]')
+        def operation():
+            raise Refused()
+        with patch.object(smoke, 'cgroup', return_value={}):
+            checks = []
+            evidence = smoke.require_pressure_error('owned', operation, checks)
+        self.assertEqual(evidence['code'], smoke.PRESSURE_CODE)
+        self.assertEqual(evidence['reason'], 'cgroup')
+        self.assertTrue(evidence['rolled_back'])
+        self.assertEqual(len(checks), 1)
+
+    def test_other_memory_limits_or_untrusted_hints_are_inconclusive(self):
+        hint = ('[brainwire.memory reason=cgroup requested_bytes=0 '
+                'available_bytes=0 rolled_back=true]')
+        for message in ('', hint.replace('cgroup', 'query_pool'),
+                        hint.replace('cgroup', 'process_limit'),
+                        hint.replace('cgroup', 'statement_limit'),
+                        hint.replace('cgroup', 'ingress'), hint + ' suffix',
+                        hint.replace('rolled_back=true', 'rolled_back=false'),
+                        hint.replace('requested_bytes=0', f'requested_bytes={1 << 64}')):
+            with self.subTest(message=message):
+                class Refused(Exception):
+                    code = smoke.PRESSURE_CODE
+                failure = Refused()
+                failure.message = message
+                def operation():
+                    raise failure
+                with patch.object(smoke, 'cgroup', return_value={}):
+                    with self.assertRaises(smoke.SmokeInconclusive):
+                        smoke.require_pressure_error('owned', operation, [])
+
+    def test_unavailable_memory_stat_preserves_raw_samples_and_is_inconclusive(self):
         for failure in ('nonzero', OSError('diagnostic unavailable'),
                         subprocess.TimeoutExpired('docker exec', 10)):
             with self.subTest(failure=type(failure).__name__):
@@ -251,9 +316,9 @@ class SmokeOwnershipTests(unittest.TestCase):
                 self.assertEqual(sample['memory.max'], 100)
                 self.assertIsNone(sample['memory.stat.inactive_file'])
                 self.assertIsNone(sample['diagnostic_working_set']['bytes'])
-                self.assertTrue(smoke.pressured(sample))
+                self.assertIsNone(smoke.pressured(sample))
                 with patch.object(smoke, 'cgroup', return_value=sample):
-                    with self.assertRaisesRegex(AssertionError, 'RUN admitted'):
+                    with self.assertRaises(smoke.SmokeInconclusive):
                         smoke.require_pressure_error('owned', lambda: None, [])
 
 

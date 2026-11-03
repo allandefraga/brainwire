@@ -594,6 +594,32 @@ def run(binary, rows, log_cap_recovery=False):
             report["request_outcome"] = outcome
             report["checks"].append("public GraphClient explicit COMMIT acknowledgement intentionally ignored; stable seed retry propagates RequestAlreadyCommitted without rerunning callback; request_key resolves durable outcome without duplicate mutation")
             caught_up()
+            acknowledged_leader = current
+            stop(acknowledged_leader)
+            current = leader(tuple(member for member in (1, 2, 3) if member != acknowledged_leader))
+            assert current != acknowledged_leader
+            promoted_outcome = json.loads(command(current, "request", "--id", request_key).stdout)
+            assert promoted_outcome == outcome, "leader failover changed the committed request outcome"
+            callbacks_before_failover_retry = len(operation_calls)
+            with driver(current) as client:
+                try:
+                    GraphClient(client, "pages").write_transaction(write_once, request_id=seed)
+                except Neo4jError as error:
+                    assert error.code == "Neo.ClientError.Transaction.RequestAlreadyCommitted", error.code
+                else:
+                    raise AssertionError("promoted leader accepted an already committed request")
+            assert len(operation_calls) == callbacks_before_failover_retry, "failover retry reran the callback"
+            assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == before_retry
+            assert query(current, "MATCH (p:Page {entity_id:'idempotent'}) RETURN count(*) AS n") == [{"n": 1}]
+            report["request_replay_after_failover"] = {
+                "acknowledged_leader": acknowledged_leader, "promoted_leader": current,
+                "outcome": promoted_outcome,
+                "code": "Neo.ClientError.Transaction.RequestAlreadyCommitted",
+                "callback_calls_before": callbacks_before_failover_retry,
+                "callback_calls_after": len(operation_calls), "matching_nodes": 1}
+            start(acknowledged_leader)
+            report["request_failover_recovered_status"] = caught_up()
+            report["checks"].append("leader killed after identified COMMIT; promoted majority preserves the exact quorum request outcome and rejects stable-seed replay before callback execution; original voter catches up without duplicate data")
             victim = next(member for member in (1, 2, 3) if member != current)
             data = root / str(victim) / "data"
 

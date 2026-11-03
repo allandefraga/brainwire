@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.14.0-beta.3 — experimental candidate
+
+### Added
+
+- Python `graph.schema()` returns the authorized catalog snapshot, including
+  relationship signatures and index readiness.
+- A synthetic quorum test checks identified-write replay after a synchronized
+  leader is stopped and another voter takes over.
+
+### Improved
+
+- Resolve schema relationship endpoints with a budgeted temporary lookup,
+  avoiding a repeated scan of node types for each signature.
+- Stop reading context evidence as soon as its response byte budget is exceeded.
+- Align the cgroup pressure smoke with the server's working-set estimate and
+  require a validated cgroup refusal before treating a refusal as that evidence.
+- Accept representable float values near signed 64-bit bounds in `toInteger`.
+
+### Limits
+
+- This remains an experimental beta. There is no qualified global RSS ceiling,
+  native full-text/vector index or tested multi-machine failover. A previous
+  pressure-test failure remains unexplained. Decimal strings near integer
+  boundaries retain the existing more restrictive conversion behavior.
+
+
 ## 0.14.0-beta.2 — experimental candidate
 
 ### Added

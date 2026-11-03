@@ -388,3 +388,71 @@ fn accumulated_node_and_relationship_descriptions_obey_schema_string_cap() {
         .to_string()
         .contains("schema string limit"));
 }
+
+#[test]
+fn endpoint_lookup_preserves_sparse_ids_and_first_duplicate_in_catalog_order() {
+    let (_dir, db) = open();
+    let mut c = catalog();
+    c.node_types = vec![node("First", 1), node("Duplicate", 1), node("Last", 4095)];
+    c.edge_types.push(EdgeType {
+        description: None,
+        id: EdgeTypeId(1),
+        name: "LINK".into(),
+        signatures: vec![(TypeId(4095), TypeId(1)), (TypeId(1), TypeId(4095))],
+        columns: vec![],
+    });
+    store_catalog(&db, &c);
+    assert_eq!(
+        run(&db)[2],
+        Out::Value(Value::List(
+            [("Last", "First"), ("First", "Last")]
+                .into_iter()
+                .map(|(source, target)| map(&[
+                    ("name", string("LINK")),
+                    ("source", string(source)),
+                    ("target", string(target)),
+                    ("properties", strings(&[])),
+                ]))
+                .collect()
+        ))
+    );
+    c.edge_types[0].signatures = vec![(TypeId(4095), TypeId(7))];
+    store_catalog(&db, &c);
+    assert!(execute(&db, QUERY, &BTreeMap::new())
+        .unwrap_err()
+        .to_string()
+        .contains("missing endpoint"));
+}
+
+#[test]
+fn dense_schema_preserves_every_relationship_without_scanning_instances() {
+    let (_dir, db) = open();
+    let mut c = catalog();
+    c.node_types = (0..4096).map(|id| node(&format!("Type{id}"), id)).collect();
+    c.edge_types.push(EdgeType {
+        description: None,
+        id: EdgeTypeId(1),
+        name: "LINK".into(),
+        signatures: (0..4096)
+            .map(|id| (TypeId(id), TypeId(4095 - id)))
+            .collect(),
+        columns: vec![],
+    });
+    store_catalog(&db, &c);
+    let output = run(&db);
+    let Out::Value(Value::List(nodes)) = &output[1] else {
+        panic!("expected nodes")
+    };
+    let Out::Value(Value::List(relationships)) = &output[2] else {
+        panic!("expected relationships")
+    };
+    assert_eq!(nodes.len(), 4096);
+    assert_eq!(relationships.len(), 4096);
+    for (id, relationship) in relationships.iter().enumerate() {
+        let Value::Map(fields) = relationship else {
+            panic!("expected relationship map")
+        };
+        assert_eq!(fields["source"], string(&format!("Type{id}")));
+        assert_eq!(fields["target"], string(&format!("Type{}", 4095 - id)));
+    }
+}

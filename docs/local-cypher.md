@@ -160,6 +160,10 @@ and lists, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IN`, `XOR`, `n:Label`,
 `left`, `right`, `split`; math `abs`, `ceil`, `floor`, `round`, `sqrt`,
 `sign`, `exp`, `log`, `log10`.
 
+`toInteger` accepts finite float inputs in the signed 64-bit range. Decimal
+strings near the range boundaries retain more restrictive legacy parsing;
+exact decimal conversion is not supported.
+
 `round(value[, precision])` returns a float and propagates null from either
 argument. With omitted or zero precision, ties round toward positive infinity:
 `round(-2.5) = -2.0`. With positive precision, ties round away from zero:

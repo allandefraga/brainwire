@@ -29,6 +29,33 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-03: schema inspection and pressure diagnostics
+
+- **Done:** expose `graph.schema()` through the authorized Python read path;
+  resolve schema relationship endpoints through a budgeted lookup. Add
+  incremental evidence processing so an oversized response stops early.
+- **Correctness:** accept finite float inputs in the signed 64-bit range for
+  `toInteger`; preserve the existing more restrictive string conversion.
+  Extend the quorum acceptance with a synchronized leader loss after an
+  identified commit and a replay check.
+- **Memory:** align the 512 MiB smoke's observed pressure with the runtime's
+  working-set estimate and require a structured cgroup rejection. The old
+  failed receipt is unavailable and remains unexplained. A Docker daemon was
+  unavailable locally, so the modified smoke was tested without a container.
+- **Measured:** in a synthetic debug-process test of 4,096 types and 4,096
+  signatures, the median including setup/teardown fell from 221.88 ms to
+  100.37 ms across seven sequential samples each on a shared host. This is not
+  an end-to-end or production benchmark.
+- **Verification:** candidate source passed 981 Rust tests (3 ignored),
+  workspace Clippy and formatting, 171 Python tests (7 skipped), 101 script
+  tests, 23 cgroup harness tests, and documentation link/site checks. A 5,000-row
+  synthetic Bolt ingestion/restart test and two-identity context/schema check
+  passed on the final binary. The same binary passed 19 local quorum checks
+  and 20 checks with log-cap recovery; all temporary resources were removed.
+- **Next:** qualify sustained memory under cgroup limits, production ingestion,
+  and quorum recovery across machines; explore durable status for ingestion
+  and index jobs. No global RSS ceiling or production HA claim is established.
+
 ## 2026-11-02: evidence citations and reproducible comparison
 
 - **Done:** added bounded evidence citations to the Python context helper and

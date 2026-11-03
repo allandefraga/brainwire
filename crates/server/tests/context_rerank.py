@@ -77,6 +77,10 @@ limit = "2GiB"
                 for role, expected in [('reader','a'),('health','b')]:
                     with connect(role) as driver:
                         graph=GraphClient(driver,'company')
+                        schema = graph.schema()
+                        assert schema['version'] == 1 and type(schema['indexesReady']) is bool, schema
+                        assert [node['label'] for node in schema['nodes']] == ['Document'], schema
+                        assert schema['relationships'] == [], schema
                         result=rerank_context(graph,'Document',['a','b'],'release',[1.,0.],
                             text_property='body',vector_property='embedding',properties=['source_url'])
                         assert [row['entity_id'] for row in result['records']]==[expected], result
@@ -106,7 +110,8 @@ limit = "2GiB"
                 return {'result':'PASS','two_static_acl_identities':True,
                         'hidden_malformed_vector_excluded':True,
                         'hidden_candidate_score_invariance':True,
-                        'hidden_sources_excluded':True,'synthetic':True}
+                        'hidden_sources_excluded':True,'schema_read_two_identities':True,
+                        'synthetic':True}
             finally:
                 process.terminate()
                 try: process.wait(timeout=5)

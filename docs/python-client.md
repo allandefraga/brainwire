@@ -16,8 +16,27 @@ For a runnable synthetic demo, use the [README example](../README.md#write-from-
 | Load rows in bounded transactions | `load_nodes`, `load_edges` |
 | Remove known nodes and their incident relationships | `delete_nodes` |
 | Remove selected relationships and keep the nodes | `delete_edges` |
+| Inspect the graph schema | `schema` |
 | Run parameterized Cypher | `run_cypher` |
 | Stream read results page by page | `stream_cypher` |
+
+## Inspect the schema
+
+Call `graph.schema()` on a connected `GraphClient` to inspect the catalog in one
+read-only snapshot:
+
+```python
+schema = graph.schema()
+print(schema["version"], schema["indexesReady"])
+for node in schema["nodes"]:
+    print(node["label"], node["properties"])
+for relationship in schema["relationships"]:
+    print(relationship["source"], relationship["name"], relationship["target"])
+```
+
+The result describes allowed types, properties, relationship signatures and
+index readiness. It does not count stored records or determine which individual
+records a user can see. Existing server authorization and schema limits apply.
 
 ## Single records and property patches
 

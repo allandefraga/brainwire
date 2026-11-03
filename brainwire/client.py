@@ -282,6 +282,28 @@ class GraphClient:
         else:
             _server_errors(session.close)()
 
+    def schema(self):
+        """Return the named graph's catalog snapshot through an authorized read.
+
+        Includes version, node types, relationship signatures and index readiness.
+        Describes allowed shapes, not stored instance counts or data visibility.
+        Server catalog/query limits apply; this helper does not scan graph records.
+        """
+        query = ("CALL db.schema() YIELD version, nodes, relationships, indexesReady "
+                 "RETURN version, nodes, relationships, indexesReady")
+        missing = object()
+        with self.stream_cypher(query, fetch_size=1) as rows:
+            row = next(rows, missing)
+            if (not isinstance(row, dict)
+                    or next(rows, missing) is not missing
+                    or type(row.get("version")) is not int or row["version"] < 0
+                    or type(row.get("indexesReady")) is not bool
+                    or any(not isinstance(row.get(name), list)
+                           or any(not isinstance(item, dict) for item in row[name])
+                           for name in ("nodes", "relationships"))):
+                raise ValueError("invalid schema response")
+            return {name: row[name] for name in ("version", "nodes", "relationships", "indexesReady")}
+
     @_server_errors
     def checkpoint(self, name):
         """Create an online native checkpoint of this graph; return its receipt.

@@ -125,6 +125,13 @@ and membership changes before offering them operationally.
 
 ## Reference points, not equivalence claims
 
+- [Apache HugeGraph's architecture](https://hugegraph.apache.org/docs/guides/architectural/)
+  and [operations API](https://hugegraph.apache.org/docs/clients/restful-api/)
+  suggest inspectable schema and long-running import or index jobs with explicit
+  status. Future Brainwire jobs need durable identity, progress and restart
+  semantics before they can be operated reliably. HugeGraph separates local
+  RocksDB from its distributed backend; multiple servers must not open the
+  same Brainwire RocksDB directory as a substitute for replication.
 - [Neo4j clustering architecture](https://neo4j.com/docs/operations-manual/current/clustering/introduction/)
   provides a useful contract for leader-coordinated writes, quorum replication
   and read consistency. Brainwire needs its own evidence for each supported

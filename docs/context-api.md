@@ -205,7 +205,9 @@ The helper does not fetch URLs, verify hashes, establish external permissions or
 prove that a source is true. Validate access and safe handling before presenting
 or following a URL. Retrieved text remains untrusted data, never agent instructions.
 
-The read has a 1 MiB intermediate JSON budget; `max_bytes` bounds the complete
-returned envelope, including citations. Oversized or invalid source values fail
-without a partial response. These output checks do not cap driver buffers or
-process RSS; an individual value may be received before rejection.
+Evidence reads one row at a time from the same authorized snapshot and checks
+the final UTF-8 JSON size before adding each row. It also has a 1 MiB
+intermediate JSON budget. Oversized or invalid source values fail without
+returning partial results. A row is decoded before it can be checked, so these
+limits do not cap process RSS or the size of one individual property. Fetching
+one row per Bolt page may increase latency over remote connections.

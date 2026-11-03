@@ -1,4 +1,5 @@
 import unittest
+from contextlib import contextmanager
 from examples.python.client import GraphClient, request_key
 
 
@@ -156,6 +157,44 @@ class ClientTests(unittest.TestCase):
             with self.subTest(query=query, parameters=parameters), self.assertRaises(ValueError):
                 client.run_cypher(query, parameters)
         self.assertFalse(hasattr(driver, "database"))
+
+    def test_schema_reads_one_catalog_snapshot_and_closes_stream(self):
+        expected = {"version": 3, "nodes": [{"label": "Ticket", "properties": ["entity_id"]}],
+                    "relationships": [], "indexesReady": True}
+        client = GraphClient(Driver(), "research")
+        calls, closed = [], []
+        @contextmanager
+        def stream(query, parameters=None, *, fetch_size):
+            calls.append((query, parameters, fetch_size))
+            try:
+                yield iter([expected])
+            finally:
+                closed.append(True)
+        client.stream_cypher = stream
+        self.assertEqual(client.schema(), expected)
+        self.assertEqual(calls, [("CALL db.schema() YIELD version, nodes, relationships, indexesReady "
+                                "RETURN version, nodes, relationships, indexesReady", None, 1)])
+        self.assertEqual(closed, [True])
+
+    def test_schema_rejects_missing_extra_or_malformed_rows_and_closes(self):
+        valid = {"version": 1, "nodes": [], "relationships": [], "indexesReady": False}
+        invalid = [[], [valid, valid], [{}], [{**valid, "version": True}],
+                   [{**valid, "version": -1}], [{**valid, "nodes": {}}],
+                   [{**valid, "nodes": ["Ticket"]}], [{**valid, "relationships": [None]}],
+                   [{**valid, "indexesReady": "true"}]]
+        for rows in invalid:
+            with self.subTest(rows=rows):
+                client, closed = GraphClient(Driver(), "research"), []
+                @contextmanager
+                def stream(*args, **kwargs):
+                    try:
+                        yield iter(rows)
+                    finally:
+                        closed.append(True)
+                client.stream_cypher = stream
+                with self.assertRaisesRegex(ValueError, "schema response"):
+                    client.schema()
+                self.assertEqual(closed, [True])
 
     def test_mixed_shapes_preserve_duplicate_order_and_bounded_batches(self):
         driver = Driver()

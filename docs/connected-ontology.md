@@ -81,7 +81,10 @@ ontology updates so existing rows still decode. Reserved `acl_` columns are
 excluded. Catalog ordering and canonical identifiers are preserved. Indexed extra
 properties need not be promoted to catalog columns. Timeline stream metadata and
 per-index progress are not returned. Readiness does not imply any instance data
-exists; the TUI says “no declared indexes” when there are none.
+exists; the TUI says “no declared indexes” when there are none. The Python
+helper exposes the same snapshot as `graph.schema()`. Relationship endpoints
+are resolved through a temporary, query-budgeted lookup, so large catalogs
+do not repeatedly scan all node types for each relationship signature.
 
 Development-mode example of the same query through the Python Bolt driver
 on isolated loopback (protected credentials are described below):

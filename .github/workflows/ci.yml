@@ -108,6 +108,12 @@ jobs:
       - name: Verify context evidence and ACL isolation
         run: python crates/server/tests/context_rerank.py --binary target/debug/brainwire
 
+      - name: Verify quorum failover and identified-write recovery
+        timeout-minutes: 10
+        run: >-
+          python crates/server/tests/quorum_replication.py
+          --binary target/debug/brainwire --rows 20
+
       - name: Verify populated volume upgrade from previous release
         shell: bash
         run: |

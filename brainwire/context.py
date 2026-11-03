@@ -97,37 +97,69 @@ class ContextClient:
         requested = list(dict.fromkeys([*names, *fields.values()]))
         if len(requested) > 16:
             raise ValueError('requested and source properties must fit 16 names')
-        # Read source fields through the same authorized snapshot as the records.
-        rows = self.nodes(label, entity_ids, properties=requested,
-                          limit=limit, max_bytes=1 << 20)['records']
+        label = identifier(label)
+        if not isinstance(entity_ids, (list, tuple)) or len(entity_ids) > 100:
+            raise ValueError('entity_ids must be a list or tuple of at most 100 IDs')
+        ids = [_entity(value) for value in entity_ids]
         result = {'graph': self.graph.database, 'limit': limit, 'records': [], 'sources': []}
-        seen = set()
-        for row in rows:
-            identity = _entity(row['entity_id'])
-            if identity in seen:
-                raise ValueError('evidence record identities must be unique')
-            seen.add(identity)
-            source = {}
-            for key, field in fields.items():
-                value = row['properties'][field]
-                if value is None:
-                    continue
-                if not isinstance(value, str) or len(value) > 4096 or len(value.encode('utf-8')) > 4096:
-                    raise ValueError('reported source values must be strings of at most 4096 UTF-8 bytes')
-                if value.strip():
-                    source[key] = value
-            citation = None
-            if source:
-                key = json.dumps([self.graph.database, row['label'], identity],
-                                 ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-                citation = 'bw:' + hashlib.sha256(key).hexdigest()
-                result['sources'].append({'citation_id': citation,
-                    'record': {'label': row['label'], 'entity_id': identity}, 'source': source})
-            result['records'].append({'label': row['label'], 'entity_id': identity,
-                'properties': {name: row['properties'][name] for name in names},
-                'citation_id': citation})
-        if len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8')) > max_bytes:
+        size = len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+        if size > max_bytes:
             raise ContextLimitError('evidence context exceeds max_bytes')
+        if not ids:
+            return result
+
+        query = (f'MATCH (n:{label}) WHERE n.entity_id IN $ids '
+                 f'RETURN {self._projection(requested)} LIMIT $limit')
+        seen = set()
+        intermediate = len(json.dumps({'graph': self.graph.database, 'limit': limit,
+                                       'records': []}, ensure_ascii=False).encode('utf-8'))
+        # One authorized snapshot; avoid accumulating rows after an output refusal.
+        with self.graph.stream_cypher(query, {'ids': ids, 'limit': limit}, fetch_size=1) as rows:
+            for row in rows:
+                if len(result['records']) >= limit:
+                    raise ContextLimitError('context returned more than limit records')
+                values = {name: row[f'p{index}'] for index, name in enumerate(requested)}
+                identity = _entity(row['entity_id'])
+                if identity in seen:
+                    raise ValueError('evidence record identities must be unique')
+                seen.add(identity)
+                original = {'label': label, 'entity_id': identity, 'properties': values}
+                intermediate += len(json.dumps(original, ensure_ascii=False,
+                                               allow_nan=False).encode('utf-8')) + 2
+                if intermediate > 1 << 20:
+                    raise ContextLimitError('context exceeds intermediate limit')
+                source = {}
+                for key, field in fields.items():
+                    value = values[field]
+                    if value is None:
+                        continue
+                    if not isinstance(value, str) or len(value) > 4096 or len(value.encode('utf-8')) > 4096:
+                        raise ValueError('reported source values must be strings of at most 4096 UTF-8 bytes')
+                    if value.strip():
+                        source[key] = value
+                citation = None
+                source_record = None
+                if source:
+                    key = json.dumps([self.graph.database, label, identity],
+                                     ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+                    citation = 'bw:' + hashlib.sha256(key).hexdigest()
+                    source_record = {'citation_id': citation,
+                        'record': {'label': label, 'entity_id': identity}, 'source': source}
+                record = {'label': label, 'entity_id': identity,
+                    'properties': {name: values[name] for name in names}, 'citation_id': citation}
+                size += len(json.dumps(record, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+                if result['records']:
+                    size += 2
+                if source_record is not None:
+                    size += len(json.dumps(source_record, ensure_ascii=False,
+                                           allow_nan=False).encode('utf-8'))
+                    if result['sources']:
+                        size += 2
+                if size > max_bytes:
+                    raise ContextLimitError('evidence context exceeds max_bytes')
+                result['records'].append(record)
+                if source_record is not None:
+                    result['sources'].append(source_record)
         return result
 
     def search_text(self, label, text, *, field, entity_ids, properties=(),
