@@ -183,12 +183,20 @@ logs do not diagnose older receipts retroactively or establish a global RSS cap.
 
 New Bolt RUNs are checked before copying query parameters and again before
 execution. If the working set (controller usage minus the inactive file cache
-in `memory.stat`, which the kernel reclaims before it OOMs) reaches 95% of any
-finite visible cgroup ancestor limit, the RUN fails with
+in `memory.stat`, which may be reclaimable) reaches 95% of any
+finite visible cgroup ancestor admission limit, the RUN fails with
 `Neo.TransientError.General.MemoryPressure`; uncommitted writes in its
 transaction are rolled back. Reduce concurrent work and reconcile application
 state before retrying. Existing PULL/DISCARD results, COMMIT, ROLLBACK, RESET
 and connection cleanup remain available under pressure.
+
+On cgroup v2, the admission limit is the lower finite value of `memory.high`
+and `memory.max` at each visible ancestor. If `memory.high` is missing,
+unreadable, malformed or `max`, the check falls back to `memory.max`. Both
+values are reread on each check. The diagnostic identifies whether `High` or
+`Max` supplied the selected limit. This does not prevent kernel throttling:
+the kernel uses its own accounting, samples are not atomic, and in-flight work
+continues. Startup budget sizing still uses capacity, not `memory.high`.
 
 The process shares one discovered controller ancestry. Limits and current usage
 are reread on each check, but a later cgroup migration needs restart to

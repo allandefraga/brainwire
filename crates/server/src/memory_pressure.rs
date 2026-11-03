@@ -19,7 +19,14 @@ pub(crate) enum PressureStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitSource {
+    Max,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CgroupReading {
+    limit_source: LimitSource,
     raw_bytes: u64,
     inactive_file_bytes: u64,
     effective_bytes: u64,
@@ -122,7 +129,7 @@ impl PressureGuard {
                     "cgroup",
                     0,
                     cap.saturating_sub(current),
-                    "container memory at 95%; RUN rejected before execution",
+                    "cgroup admission threshold at 95% (memory.high or memory.max); RUN rejected before execution",
                 )
             } else {
                 if let (PressureStatus::Available { .. }, Some(reading)) =
@@ -190,16 +197,31 @@ fn sample_observed(
             continue;
         };
         let raw = text.trim();
-        if group.v2 && raw == "max" {
-            continue;
-        }
-        let Ok(limit) = raw.parse::<u64>() else {
+        let mut limit = if group.v2 && raw == "max" {
+            None
+        } else if let Ok(limit) = raw.parse::<u64>() {
+            Some(limit)
+        } else {
             unavailable = true;
             continue;
         };
-        if !group.v2 && limit >= (1_u64 << 60) {
+        if !group.v2 && limit.is_some_and(|limit| limit >= (1_u64 << 60)) {
             continue;
         }
+        let mut limit_source = LimitSource::Max;
+        if group.v2 {
+            // memory.high throttles allocations before memory.max; include it in
+            // cooperative admission, but keep the existing working-set estimate.
+            let high = read(&group.directory.join("memory.high"))
+                .and_then(|text| text.trim().parse::<u64>().ok());
+            if let Some(high) = high.filter(|high| limit.is_none_or(|limit| *high < limit)) {
+                limit = Some(high);
+                limit_source = LimitSource::High;
+            }
+        }
+        let Some(limit) = limit else {
+            continue;
+        };
         let used_path = group.directory.join(if group.v2 {
             "memory.current"
         } else {
@@ -219,6 +241,7 @@ fn sample_observed(
         let current = raw_current.saturating_sub(reclaimable);
         // u128 avoids overflow even at u64::MAX and includes zero-limit pressure.
         let reading = CgroupReading {
+            limit_source,
             raw_bytes: raw_current,
             inactive_file_bytes: reclaimable,
             effective_bytes: current,
@@ -384,6 +407,142 @@ mod tests {
     }
 
     #[test]
+    fn v2_high_admission_uses_the_lower_boundary() {
+        let groups = [group("/cg", true)];
+        for (max, high, used, expected) in [
+            (
+                "1000",
+                Some("100"),
+                "95",
+                PressureStatus::Pressured {
+                    current: 95,
+                    limit: 100,
+                },
+            ),
+            (
+                "max",
+                Some("100"),
+                "95",
+                PressureStatus::Pressured {
+                    current: 95,
+                    limit: 100,
+                },
+            ),
+            (
+                "100",
+                Some("1000"),
+                "95",
+                PressureStatus::Pressured {
+                    current: 95,
+                    limit: 100,
+                },
+            ),
+            (
+                "100",
+                Some("0"),
+                "0",
+                PressureStatus::Pressured {
+                    current: 0,
+                    limit: 0,
+                },
+            ),
+            (
+                "100",
+                Some("max"),
+                "94",
+                PressureStatus::Available {
+                    current: 94,
+                    limit: 100,
+                },
+            ),
+            (
+                "100",
+                None,
+                "94",
+                PressureStatus::Available {
+                    current: 94,
+                    limit: 100,
+                },
+            ),
+            (
+                "100",
+                Some("invalid"),
+                "94",
+                PressureStatus::Available {
+                    current: 94,
+                    limit: 100,
+                },
+            ),
+            ("max", Some("max"), "0", PressureStatus::Unavailable),
+        ] {
+            let mut files = BTreeMap::from([
+                (PathBuf::from("/cg/memory.max"), max.to_owned()),
+                (PathBuf::from("/cg/memory.current"), used.to_owned()),
+            ]);
+            if let Some(high) = high {
+                files.insert(PathBuf::from("/cg/memory.high"), high.to_owned());
+            }
+            let observed = sample_observed(&groups, |p| files.get(p).cloned());
+            assert_eq!(
+                observed.status, expected,
+                "max={max} high={high:?} used={used}"
+            );
+            if let Some(reading) = observed.reading {
+                let uses_high = high
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .is_some_and(|high| max.parse::<u64>().map_or(true, |max| high < max));
+                assert_eq!(
+                    reading.limit_source,
+                    if uses_high {
+                        LimitSource::High
+                    } else {
+                        LimitSource::Max
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn parent_high_pressure_is_resampled_and_cache_is_still_discounted() {
+        let groups = [group("/cg/child", true), group("/cg", true)];
+        let mut files = BTreeMap::from([
+            (PathBuf::from("/cg/child/memory.max"), "1000".to_owned()),
+            (PathBuf::from("/cg/child/memory.current"), "1".to_owned()),
+            (PathBuf::from("/cg/memory.max"), "max".to_owned()),
+            (PathBuf::from("/cg/memory.high"), "100".to_owned()),
+            (PathBuf::from("/cg/memory.current"), "99".to_owned()),
+        ]);
+        assert_eq!(
+            sample(&groups, |p| files.get(p).cloned()),
+            PressureStatus::Pressured {
+                current: 99,
+                limit: 100
+            }
+        );
+        files.insert(PathBuf::from("/cg/memory.high"), "200".to_owned());
+        assert_eq!(
+            sample(&groups, |p| files.get(p).cloned()),
+            PressureStatus::Available {
+                current: 99,
+                limit: 200
+            }
+        );
+        files.insert(PathBuf::from("/cg/memory.high"), "100".to_owned());
+        files.insert(
+            PathBuf::from("/cg/memory.stat"),
+            "inactive_file 10\n".to_owned(),
+        );
+        assert_eq!(
+            sample(&groups, |p| files.get(p).cloned()),
+            PressureStatus::Available {
+                current: 89,
+                limit: 100
+            }
+        );
+    }
+
+    #[test]
     fn v1_uses_usage_and_ignores_unlimited_sentinel() {
         assert_eq!(
             fixture(
@@ -478,12 +637,14 @@ mod tests {
                     limit: 100,
                 },
                 reading: Some(CgroupReading {
+                    limit_source: LimitSource::Max,
                     raw_bytes: 99,
                     inactive_file_bytes: 10,
                     effective_bytes: 89,
                     limit_bytes: 100,
                 }),
                 cache_reading: Some(CgroupReading {
+                    limit_source: LimitSource::Max,
                     raw_bytes: 99,
                     inactive_file_bytes: 10,
                     effective_bytes: 89,
@@ -540,6 +701,7 @@ mod tests {
         assert_eq!(
             observed.cache_reading,
             Some(CgroupReading {
+                limit_source: LimitSource::Max,
                 raw_bytes: 99,
                 inactive_file_bytes: 90,
                 effective_bytes: 9,
@@ -586,6 +748,7 @@ mod tests {
         assert_eq!(
             observed.reading,
             Some(CgroupReading {
+                limit_source: LimitSource::Max,
                 raw_bytes: 99,
                 inactive_file_bytes: 10,
                 effective_bytes: 89,

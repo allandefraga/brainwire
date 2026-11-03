@@ -29,6 +29,30 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-03: v0.15 memory admission and log recovery
+
+- **Done:** cgroup v2 admission considers the lower finite `memory.high` or
+  `memory.max` for each visible ancestor; decision logs identify the source.
+  Raft rejects invalid first indices and regressing terms before persisting a
+  batch. Invalid batch tests verify atomicity, reopen and valid prefix retries.
+- **Decided:** publish as an experimental beta. The cgroup estimate discounts
+  inactive file cache and cannot guarantee an RSS ceiling or prevent kernel
+  throttling. Replication does not yet support snapshots or log purging.
+- **Container checks:** a local v0.15 arm64 image passed the existing synthetic
+  512 MiB cgroup smoke and the demo Compose startup, Bolt write and read after a
+  normal restart. These do not exercise a real `memory.high` deployment or
+  qualify sustained load. Test containers and their volume were removed.
+- **Quorum check:** a synthetic three-process loopback test passed leader loss,
+  partition, retained-state restart and offline digest checks. This does not
+  qualify recovery across hosts or snapshot transfer.
+- **Verification:** workspace tests passed (988 passed, 3 ignored), as did
+  workspace Clippy and formatting, 171 Python tests (7 skipped), 101 script
+  tests, and documentation link and site checks.
+- **Next:** sustained 2/4/8 GiB tests, multi-machine failover and recovery,
+  native transport security and realistic workload qualification.
+- **Blockers:** these tests do not certify production availability or memory
+  safety, and existing corrupt logs are not automatically repaired.
+
 ## 2026-11-03: public beta readiness and Docker access
 
 - **Done:** made the existing GHCR package public with owner confirmation;

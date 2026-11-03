@@ -257,14 +257,29 @@ impl Storage {
         let mut bytes = self.log_bytes()?;
         let mut batch = WriteBatch::default();
         let last = self.last_log()?;
-        if let (Some(first), Some(last)) = (entries.first(), last.as_ref()) {
-            if first.log_id.index > last.log_id.index.saturating_add(1) {
-                return Err(error("append would create log hole"));
+        if let Some(first) = entries.first() {
+            match last.as_ref() {
+                None if first.log_id.index != 0 => {
+                    return Err(error("retained log must start at index zero"));
+                }
+                Some(last) if first.log_id.index > last.log_id.index.saturating_add(1) => {
+                    return Err(error("append would create log hole"));
+                }
+                _ => {}
+            }
+            if let Some(index) = first.log_id.index.checked_sub(1) {
+                let previous: Option<Entry<TypeConfig>> = self.read(&key(index))?;
+                if previous.is_some_and(|e| e.log_id.leader_id.term > first.log_id.leader_id.term) {
+                    return Err(error("append log term regressed"));
+                }
             }
         }
         for pair in entries.windows(2) {
             if pair[0].log_id.index.checked_add(1) != Some(pair[1].log_id.index) {
                 return Err(error("append entries must be consecutive"));
+            }
+            if pair[0].log_id.leader_id.term > pair[1].log_id.leader_id.term {
+                return Err(error("append log term regressed"));
             }
         }
         for entry in entries {

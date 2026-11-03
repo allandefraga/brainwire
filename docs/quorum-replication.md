@@ -275,6 +275,11 @@ promptly. Read [connection limits](connection-limits.md) for client deadlines.
 
 ## Peer TLS, retained volumes and recovery boundaries
 
+The Raft log rejects a nonzero first index and term regressions before writing
+the batch. This follows the recovery invariants for the current retained log.
+Snapshots and log purging are not implemented; these checks do not establish
+multi-machine failover readiness or repair an already corrupt log.
+
 Plaintext peer transport is permitted only on loopback. Non-loopback listener
 or peer addresses require mutual TLS, a shared private peer token, and a CA trusted
 by all voters. Add this to each cluster TOML using that voter's own certificate:

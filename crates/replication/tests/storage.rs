@@ -593,8 +593,21 @@ async fn recovery_rejects_term_regression_but_accepts_new_leader_terms() {
             openraft::CommittedLeaderId::new(last_term, if last_term > 2 { 2 } else { 1 }),
             1,
         );
-        store.log_store().blocking_append(entries).await.unwrap();
+        // Inject persisted corruption, bypassing the append-time invariant checks.
         drop(store);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        let mut bytes = 0_u64;
+        for entry in entries {
+            let value = serde_json::to_vec(&entry).unwrap();
+            bytes += value.len() as u64;
+            let mut key = [b'L'; 9];
+            key[1..].copy_from_slice(&entry.log_id.index.to_be_bytes());
+            db.put(key, value).unwrap();
+        }
+        db.put(b"Mbytes", serde_json::to_vec(&bytes).unwrap())
+            .unwrap();
+        db.flush_wal(true).unwrap();
+        drop(db);
         let reopened = Storage::open(dir.path(), 1024 * 1024, app);
         assert_eq!(reopened.is_ok(), last_term >= 2, "last term {last_term}");
     }
@@ -815,5 +828,68 @@ async fn process_kill_after_application_commit_recovers_once_from_independent_st
     assert_eq!(
         app.db.get(b"\0effects").unwrap().unwrap(),
         1_u64.to_be_bytes()
+    );
+}
+
+#[tokio::test]
+async fn append_rejects_unrecoverable_origin_and_term_regression_atomically() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let mut logs = store.log_store();
+    assert!(logs
+        .blocking_append([entry(1, command("missing-origin"))])
+        .await
+        .is_err());
+    assert_eq!(store.log_bytes().unwrap(), 0);
+    assert!(logs.try_get_log_entries(..).await.unwrap().is_empty());
+
+    let mut first = entry(0, command("first"));
+    first.log_id.leader_id.term = 2;
+    logs.blocking_append([first.clone()]).await.unwrap();
+    logs.save_committed(Some(first.log_id)).await.unwrap();
+    store.state_machine().apply([first.clone()]).await.unwrap();
+    let bytes = store.log_bytes().unwrap();
+    let mut second = entry(1, command("second"));
+    second.log_id.leader_id.term = 3;
+    let mut third = entry(2, command("third"));
+    third.log_id.leader_id.term = 2;
+    for invalid in [
+        vec![entry(1, command("old-term"))],
+        vec![second.clone(), third],
+        vec![first.clone(), entry(1, command("old-term"))],
+    ] {
+        assert!(logs.blocking_append(invalid).await.is_err());
+        assert_eq!(store.log_bytes().unwrap(), bytes);
+        assert_eq!(store.last_applied().unwrap(), Some(first.log_id));
+        assert_eq!(store.committed().unwrap(), Some(first.log_id));
+        assert_eq!(store.lookup("second").unwrap(), None);
+        assert_eq!(
+            logs.try_get_log_entries(..).await.unwrap(),
+            vec![first.clone()]
+        );
+    }
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    assert_eq!(store.log_bytes().unwrap(), bytes);
+    assert_eq!(store.last_applied().unwrap(), Some(first.log_id));
+    assert_eq!(store.committed().unwrap(), Some(first.log_id));
+    let mut logs = store.log_store();
+    assert_eq!(
+        logs.try_get_log_entries(..).await.unwrap(),
+        vec![first.clone()]
+    );
+    logs.blocking_append([first.clone(), second.clone()])
+        .await
+        .unwrap();
+    // An earlier-term identical prefix may be replayed after a higher-term suffix.
+    logs.blocking_append([first.clone()]).await.unwrap();
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app).unwrap();
+    assert_eq!(
+        store.log_store().try_get_log_entries(..).await.unwrap(),
+        vec![first, second]
     );
 }

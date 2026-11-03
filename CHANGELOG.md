@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.0-beta.1 — experimental candidate
+
+- Consider Linux cgroup v2 `memory.high` as well as `memory.max` when admitting
+  new queries; diagnostics identify the selected threshold. This is cooperative
+  admission, not a hard RSS limit or a guarantee against kernel throttling.
+- Reject Raft log entries with a missing origin or regressing terms before
+  persistence, so invalid appends cannot create a log that fails to reopen.
+  Existing corrupt logs are not automatically repaired.
+- Clarify memory accounting and the boundaries of replicated recovery.
+
+Sustained memory qualification, cross-machine failover, snapshots and native
+Bolt TLS remain open. Use rebuildable data for controlled beta trials.
+
 ## 0.14.0-beta.4 — experimental candidate
 
 ### Added
