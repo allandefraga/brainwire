@@ -231,10 +231,31 @@ impl TransportSettings {
                 "invalid token file length/type",
             ));
         }
+        let file = std::fs::File::open(token_file)
+            .map_err(|_| TransportError::Configuration("token file unavailable"))?;
+        let opened_metadata = file
+            .metadata()
+            .map_err(|_| TransportError::Configuration("token file unavailable"))?;
+        if !opened_metadata.is_file() || opened_metadata.len() > 258 {
+            return Err(TransportError::Configuration(
+                "invalid token file length/type",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Check the opened file, including projected-secret symlink targets.
+            if !matches!(
+                opened_metadata.permissions().mode() & 0o7777,
+                0o400 | 0o600 | 0o440 | 0o640
+            ) {
+                return Err(TransportError::Configuration(
+                    "peer token file must use mode 0400, 0600, 0440 or 0640",
+                ));
+            }
+        }
         let mut token = String::new();
-        std::fs::File::open(token_file)
-            .map_err(|_| TransportError::Configuration("token file unavailable"))?
-            .take(259)
+        file.take(259)
             .read_to_string(&mut token)
             .map_err(|_| TransportError::Configuration("invalid token file"))?;
         if token.len() > 258 {

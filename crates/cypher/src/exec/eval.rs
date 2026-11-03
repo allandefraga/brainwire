@@ -893,7 +893,7 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                 other => return Err(type_error("toFloat", &other)),
             }
         }
-        "toboolean" => {
+        "toboolean" | "tobooleanornull" => {
             one(&args)?;
             match first() {
                 Val::Bool(b) => Val::Bool(b),
@@ -904,6 +904,7 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                 },
                 Val::Int(i) => Val::Bool(i != 0),
                 Val::Null => Val::Null,
+                _ if name == "tobooleanornull" => Val::Null,
                 other => return Err(type_error("toBoolean", &other)),
             }
         }

@@ -20,6 +20,7 @@ pub const SCALAR: &[&str] = &[
     "tointeger",
     "tofloat",
     "toboolean",
+    "tobooleanornull",
     "tostringornull",
     "tointegerornull",
     "tofloatornull",

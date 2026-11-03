@@ -122,6 +122,11 @@ impl Fixture {
     ) -> TransportSettings {
         let path = self.dir.path().join("alternate-token");
         std::fs::write(&path, token).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
         TransportSettings::load(node, cluster.into(), self.peers.clone(), &path, tls).unwrap()
     }
 }
@@ -533,6 +538,11 @@ fn nonloopback_requires_tls_and_debug_hides_secret() {
     let dir = TempDir::new().unwrap();
     let token = dir.path().join("token");
     std::fs::write(&token, "0123456789abcdef0123456789abcdef").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let peers = (1..=3)
         .map(|id| {
             (
@@ -548,4 +558,38 @@ fn nonloopback_requires_tls_and_debug_hides_secret() {
     let mut remote = peers;
     remote.get_mut(&2).unwrap().addr = "192.0.2.1:3000".into();
     assert!(TransportSettings::load(1, "test".into(), remote, &token, None).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn token_permissions_allow_private_owner_and_read_only_secret_groups() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let dir = TempDir::new().unwrap();
+    let token = dir.path().join("token");
+    std::fs::write(&token, "0123456789abcdef0123456789abcdef").unwrap();
+    let peers = (1..=3)
+        .map(|id| (id, BasicNode::new(format!("127.0.0.1:{}", 2000 + id))))
+        .collect::<BTreeMap<_, _>>();
+    for mode in [0o400, 0o600, 0o440, 0o640] {
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert!(
+            TransportSettings::load(1, "test".into(), peers.clone(), &token, None).is_ok(),
+            "mode {mode:o}"
+        );
+    }
+    for mode in [
+        0o000, 0o644, 0o604, 0o660, 0o650, 0o700, 0o777, 0o4600, 0o2600, 0o1600,
+    ] {
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert!(
+            TransportSettings::load(1, "test".into(), peers.clone(), &token, None).is_err(),
+            "mode {mode:o}"
+        );
+    }
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o440)).unwrap();
+    let projected = dir.path().join("projected-token");
+    symlink(&token, &projected).unwrap();
+    assert!(TransportSettings::load(1, "test".into(), peers.clone(), &projected, None).is_ok());
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(TransportSettings::load(1, "test".into(), peers, &projected, None).is_err());
 }

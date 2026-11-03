@@ -161,6 +161,9 @@ as the server and records raw usage separately for the injection safety limit.
 It only accepts a structured cgroup refusal as a confirmed cgroup rejection;
 missing or different evidence is inconclusive. The previous failed run remains
 unexplained, and this test does not qualify sustained memory use or an RSS cap.
+The [v0.14.0-beta.4 local candidate receipt](benchmarks/2026-11-03-cgroup-014b4.json)
+records two cgroup refusals with rollback and a successful offline graph audit on
+Linux arm64. It identifies the local image, not the published image digest.
 
 Decision logs include the selected cgroup's raw usage, inactive file cache,
 effective working-set estimate and limit when the cgroup check refuses a RUN. If any examined cgroup has raw usage

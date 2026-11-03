@@ -33,6 +33,11 @@ fn inspect_with_overlap_check(
     }
     let token_file = dir.path().join("token");
     std::fs::write(&token_file, TOKEN).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let listeners = (1..=3)
         .map(|id| (id, TcpListener::bind("127.0.0.1:0").unwrap()))
         .collect::<Vec<_>>();

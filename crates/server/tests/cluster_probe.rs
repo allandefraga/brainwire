@@ -24,6 +24,11 @@ fn probe(
     }
     let token = dir.path().join("token");
     std::fs::write(&token, TOKEN).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let mut listeners = (1..=3)
         .map(|id| (id, TcpListener::bind("127.0.0.1:0").unwrap()))
         .collect::<Vec<_>>();

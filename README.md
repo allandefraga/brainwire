@@ -20,7 +20,7 @@
   <a href="#quickstart">Run it</a> &nbsp; / &nbsp;
   <a href="#write-from-python">Python</a> &nbsp; / &nbsp;
   <a href="#see-what-the-tui-can-do">Terminal UI</a> &nbsp; / &nbsp;
-  <a href="#documentation">Docs</a> &nbsp; / &nbsp;
+  <a href="https://allandefraga.github.io/brainwire/">Docs</a> &nbsp; / &nbsp;
   <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
@@ -34,7 +34,7 @@ Brainwire stores those connections in named graphs. Write from Python, query
 with Cypher over Bolt and inspect your data in the terminal. Rust runs the engine;
 RocksDB stores the data.
 
-> **v0.14.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.14.0-beta.4 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
@@ -54,19 +54,33 @@ Your application chooses the data, permissions and model. See the
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.14.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.14.0-beta.4 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.14.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.14.0-beta.4 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
-This creates the **demo** graph at **bolt://127.0.0.1:7687**. Graph files stay in
+`docker pull` only downloads an image. The Compose command above initializes
+and starts the database, then waits for it to accept queries. Check it with:
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec -T brainwire brainwire probe --mode ready
+```
+
+The **demo** graph is available at **bolt://127.0.0.1:7687**. Graph files stay in
 a Docker volume across restarts. If the port is busy, set
 `BRAINWIRE_BIND_PORT=17687` before starting and use that port in your client.
 
 Choose a published image from the [release page](https://github.com/allandefraga/brainwire/releases).
-Private repositories need GitHub access; private images require
-`docker login ghcr.io` with a token authorized to read the package.
+Public images can be pulled without logging in. If GHCR returns `denied` or
+`unauthorized`, see [image access and troubleshooting](docs/container.md#start-from-a-release-image).
+For startup failures, collect recent logs and [report a reproducible bug](https://github.com/allandefraga/brainwire/issues/new?template=bug_report.yml):
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail 100
+```
+
+Remove credentials and private data before sharing logs.
 
 The demo disables authentication and binds to host loopback. For shared access,
 use [protected containers](docs/protected-containers.md) and
@@ -80,8 +94,8 @@ Install the helper with Python 3.9 or newer (with `venv` and `pip`):
 python3 scripts/setup_python.py
 ```
 
-This creates a new `.venv-brainwire` environment and downloads the client and
-its dependencies. It leaves existing environments untouched; use `--venv` to
+This creates a new `.venv-brainwire` environment, installs this checkout's
+client and downloads its dependencies. It leaves existing environments untouched; use `--venv` to
 choose a different new path. Run this with `.venv-brainwire/bin/python`:
 
 ```python
@@ -128,13 +142,22 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 
 ## Current limits
 
-Use a rebuildable graph while evaluating this experimental database.
+Start with a rebuildable graph and a tested backup while evaluating this beta.
 
-- **Memory:** no guaranteed global RSS ceiling. Sustained 2/4/8 GiB qualification is incomplete; a repeated pressure-admission diagnostic has an unresolved failure.
-- **Queries and search:** Cypher support is bounded; nodes have one fixed label. No native ANN/BM25 indexes. Hybrid reranking uses explicit candidates.
-- **History and ingestion:** no historical node/edge revisions or `AS OF`. DuckLake compares pinned snapshots rather than native CDC.
-- **Security:** shared deployments need authentication and a verified encryption boundary. Native Bolt TLS is not implemented.
-- **Distribution:** three-voter quorum is experimental. Standard Kubernetes/Swarm templates run one instance; sharding and multi-machine failover qualification remain open.
+- **Memory:** query budgets and pressure admission help reject work under load.
+  A [512 MiB synthetic pressure smoke](docs/benchmarks/2026-11-03-cgroup-014b4.json)
+  passed on the local candidate. A hard process-wide RSS ceiling is not guaranteed;
+  sustained 2/4/8 GiB tests are incomplete and an older failure remains unexplained.
+- **Queries and search:** Brainwire supports a [documented Cypher subset](docs/local-cypher.md)
+  and reranks explicit candidates. Nodes have one fixed label; native ANN and
+  BM25 indexes are not yet available.
+- **History and ingestion:** DuckLake synchronization compares pinned snapshots.
+  Native CDC, historical node/edge revisions and `AS OF` reads are not available.
+- **Security:** authentication and grants are available. Shared deployments need
+  a verified encrypted network boundary because native Bolt TLS is not implemented.
+- **Distribution:** an experimental three-voter quorum is available for testing.
+  Standard Kubernetes/Swarm templates run one instance; sharding and failover
+  across machines still need implementation or qualification.
 
 Read [supported Cypher](docs/local-cypher.md), [memory limits](docs/memory-defaults.md),
 [recovery](docs/checkpoints.md), [quorum operation](docs/quorum-replication.md) and
@@ -158,9 +181,18 @@ not available.
 
 ## Release status and license
 
-**v0.14.0-beta.3 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.14.0-beta.4 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.
 Tags run CI and image checks; a container is available after the release
 workflow publishes it. That workflow does not publish packages to crates.io or PyPI.
+
+## Feedback and contributions
+
+Trying Brainwire? Report a [bug](https://github.com/allandefraga/brainwire/issues/new?template=bug_report.yml)
+with the release tag, platform and a small synthetic reproduction, or propose a
+[feature](https://github.com/allandefraga/brainwire/issues/new?template=feature_request.yml).
+See [contributing](CONTRIBUTING.md) for local checks and [security reporting](SECURITY.md)
+for suspected vulnerabilities. Community support is best effort; this beta has
+no production support SLA.

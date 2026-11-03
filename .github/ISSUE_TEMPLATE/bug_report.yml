@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible problem with a published beta or current source.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic data and remove tokens, private queries and customer information.
+        For a vulnerability, follow [SECURITY.md](https://github.com/allandefraga/brainwire/blob/main/SECURITY.md) instead of posting details here.
+  - type: input
+    id: version
+    attributes:
+      label: Brainwire version
+      description: Exact release tag or commit SHA.
+      placeholder: Release tag or full commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and installation
+      description: Operating system, CPU architecture, Docker/Compose or Rust/Python versions, and the installation command.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Commands, a small synthetic ontology and synthetic data that reproduce the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: Include the exact error code or message when available.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove credentials, private data and identifying paths. For Docker startup failures, include Compose status and recent service logs.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no credentials or private application data.
+          required: true

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.14.0-beta.4 — experimental candidate
+
+### Added
+
+- `toBooleanOrNull` for supported boolean, string and integer conversions.
+- Contribution and security reporting guides and structured issue forms.
+- Query-pool utilization and unreserved budget in the connected TUI.
+
+### Security
+
+- On Unix, reject unsafe Raft peer-token file permissions and inspect the opened
+  file before reading. Group-readable secret mounts remain supported.
+
+### Limits
+
+- Memory and multi-machine failover qualification remain open. A 512 MiB
+  pressure smoke passed on the local beta.4 candidate; it does not resolve a
+  prior failure or guarantee a process-wide RSS limit. Native Bolt TLS and
+  vector indexes are not yet available.
+
+
 ## 0.14.0-beta.3 — experimental candidate
 
 ### Added

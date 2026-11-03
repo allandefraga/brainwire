@@ -160,6 +160,9 @@ and lists, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IN`, `XOR`, `n:Label`,
 `left`, `right`, `split`; math `abs`, `ceil`, `floor`, `round`, `sqrt`,
 `sign`, `exp`, `log`, `log10`.
 
+`toBooleanOrNull` accepts booleans, strings and integers; unsupported value types
+and invalid strings return `null`. `toBoolean` retains its stricter type errors.
+
 `toInteger` accepts finite float inputs in the signed 64-bit range. Decimal
 strings near the range boundaries retain more restrictive legacy parsing;
 exact decimal conversion is not supported.

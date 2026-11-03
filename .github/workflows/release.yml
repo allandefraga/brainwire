@@ -209,6 +209,23 @@ jobs:
             "$RELEASE_IMAGE" "$digest" "$GITHUB_SHA" "$amd64" "$arm64" > release-metadata.txt
           cat release-metadata.txt >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify public image is accessible without login
+        if: github.event.repository.private == false
+        run: |
+          anonymous_config="$(mktemp -d "$RUNNER_TEMP/brainwire-anonymous.XXXXXXXX")"
+          trap 'rm -rf "$anonymous_config"' EXIT
+          DOCKER_CONFIG="$anonymous_config" docker manifest inspect "$RELEASE_IMAGE" > anonymous-manifest.json
+          DOCKER_CONFIG="$anonymous_config" docker pull --platform linux/amd64 "$RELEASE_IMAGE"
+          test "$(docker image inspect "$RELEASE_IMAGE" --format '{{.Architecture}}')" = amd64
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected = json.loads(Path("manifest.json").read_text())
+          actual = json.loads(Path("anonymous-manifest.json").read_text())
+          if actual != expected:
+              raise SystemExit("anonymous image manifest differs from the tested release")
+          PY
+
       - name: Create or verify the GitHub prerelease
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then

@@ -103,6 +103,10 @@ Memory fetches `CALL db.memory()` and shows four query-pool counters:
 | PEAK | Highest accounted reservation since server startup |
 | REJECTIONS | Rejected reservation attempts since startup |
 
+RESERVED also shows its percentage of LIMIT and the remaining unreserved query
+budget. This is accounting headroom, not free system memory. If the sample is
+missing or the limit is zero, the percentage is shown as unknown.
+
 These values are not process RSS, host RAM, RocksDB cache or memtable usage.
 A graph name selects the authorized context; it does not make the pool counters
 per-graph. Missing pool telemetry is shown as unknown. Restart resets peak and

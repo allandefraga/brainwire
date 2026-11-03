@@ -1,0 +1,23 @@
+name: Feature request
+description: Explain a workload or capability that would improve Brainwire.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is difficult today?
+      description: Describe the workload and current workaround using generic examples.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired behavior
+      description: Explain the outcome you need and how you would verify it.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Relevant constraints
+      description: Optional scale, memory, latency, compatibility or deployment requirements. Exclude private data.

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installation and usage documentation
+    url: https://github.com/allandefraga/brainwire/tree/main/docs
+    about: Check the installation guides and supported behavior first.
+  - name: Security reporting
+    url: https://github.com/allandefraga/brainwire/blob/main/SECURITY.md
+    about: Keep vulnerability details out of public issues.

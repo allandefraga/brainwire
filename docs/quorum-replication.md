@@ -82,6 +82,11 @@ requires this retained identity and consensus store; it never provisions a
 missing voter automatically. Do not run standalone `db create` against these roots.
 All voters need `server.auth_file`; use the same principal IDs and graph grants
 on each replica. The peer token is separate from Bolt service credentials.
+On Unix, its file must use mode `0400`, `0600`, `0440` or `0640`; for a local
+file, run `chmod 600 "$bw_demo_root/peer-token"`. Group-readable modes are for
+mounted secrets: anyone in that group can use this administrative peer token.
+File modes do not check ownership, directory access or extended ACLs. Protect the
+parent directories and secret mounts as well.
 
 In three terminals, run the following with `i` set to 1, 2 and 3 respectively:
 

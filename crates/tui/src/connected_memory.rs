@@ -43,7 +43,7 @@ impl State {
     }
 }
 
-fn byte_counter(bytes: u64) -> String {
+fn compact_byte_counter(bytes: u64) -> String {
     if bytes < 1024 {
         return format!("{bytes} B");
     }
@@ -54,7 +54,60 @@ fn byte_counter(bytes: u64) -> String {
     } else {
         ("GiB", 1 << 30)
     };
-    format!("{:.2} {unit} ({bytes} B)", bytes as f64 / divisor as f64)
+    format!("{:.2} {unit}", bytes as f64 / divisor as f64)
+}
+
+fn byte_counter(bytes: u64) -> String {
+    let compact = compact_byte_counter(bytes);
+    if bytes < 1024 {
+        compact
+    } else {
+        format!("{compact} ({bytes} B)")
+    }
+}
+
+fn pool_budget(snapshot: &MemorySnapshot, lang: Language) -> (Option<String>, String) {
+    let (Some(limit), Some(reserved)) = (snapshot.pool_limit_bytes, snapshot.pool_reserved_bytes)
+    else {
+        return (
+            None,
+            lang.choose(
+                "orçamento restante desconhecido",
+                "remaining budget unknown",
+            )
+            .into(),
+        );
+    };
+    if limit == 0 {
+        return (
+            None,
+            lang.choose(
+                "orçamento restante desconhecido",
+                "remaining budget unknown",
+            )
+            .into(),
+        );
+    }
+    let percent = reserved as f64 / limit as f64 * 100.0;
+    let utilization = if percent < 10_000.0 {
+        format!("{percent:.1}%")
+    } else {
+        format!("{percent:.1e}%")
+    };
+    let remaining = if let Some(bytes) = limit.checked_sub(reserved) {
+        format!(
+            "{} {}",
+            lang.choose("orçamento restante", "remaining budget"),
+            compact_byte_counter(bytes)
+        )
+    } else {
+        format!(
+            "{} {}",
+            lang.choose("acima do limite em", "over limit by"),
+            compact_byte_counter(reserved - limit)
+        )
+    };
+    (Some(utilization), remaining)
 }
 
 fn render(
@@ -131,15 +184,18 @@ pub(crate) fn render_at(
         lang.choose("PICO", "PEAK"),
         lang.choose("REJEIÇÕES", "REJECTIONS"),
     ];
+    let (utilization, remaining) = pool_budget(&state.snapshot, lang);
+    let reserved_explanation = format!(
+        "{}; {}.",
+        lang.choose("Inclui consulta desta amostra", "Includes sampling query"),
+        remaining
+    );
     let explanations = [
         lang.choose(
             "Limite configurado de reservas do pool compartilhado de consultas.",
             "Configured shared query reservation limit.",
         ),
-        lang.choose(
-            "Reservas contabilizadas agora, incluindo a consulta desta amostra.",
-            "Currently accounted reservations, including this sampling query.",
-        ),
+        reserved_explanation.as_str(),
         lang.choose(
             "Maior reserva contabilizada durante a vida deste servidor.",
             "Peak accounted reservations over this server's lifetime.",
@@ -157,7 +213,7 @@ pub(crate) fn render_at(
         Line::raw(""),
     ];
     for i in 0..4 {
-        let value = values[i]
+        let mut value = values[i]
             .map(|v| {
                 if i == 3 {
                     v.to_string()
@@ -166,6 +222,11 @@ pub(crate) fn render_at(
                 }
             })
             .unwrap_or_else(|| unknown.into());
+        if i == 1 {
+            if let Some(utilization) = &utilization {
+                value.push_str(&format!(" • {utilization}"));
+            }
+        }
         lines.push(Line::from(vec![
             Span::raw(format!(" {}  ", labels[i])),
             Span::styled(
@@ -180,8 +241,8 @@ pub(crate) fn render_at(
         lines.push(Line::raw(format!(" {}", explanations[i])));
     }
     lines.push(Line::raw(lang.choose(
-        " Contabilidade de reservas; não é RSS, RAM total ou cache.",
-        " Reservation accounting; not OS RSS, total RAM or cache.",
+        " Contabilidade de reservas; não é RSS, RAM livre/total ou cache.",
+        " Reservation accounting; not OS RSS, free RAM, total RAM or cache.",
     )));
     frame.render_widget(
         Paragraph::new(lines)
@@ -323,7 +384,7 @@ mod tests {
             text(&state, Language::En, 80, 24)
                 .matches("unknown")
                 .count(),
-            4
+            5
         );
     }
     #[test]
@@ -375,6 +436,79 @@ mod tests {
         assert!(cells.iter().any(|c| c.fg == GREEN));
         assert!(cells.iter().any(|c| c.fg == CYAN));
     }
+    #[test]
+    fn pool_utilization_and_remaining_budget_are_scoped_and_handle_unknowns() {
+        let snapshot = MemorySnapshot {
+            pool_limit_bytes: Some(1000),
+            pool_reserved_bytes: Some(250),
+            pool_peak_bytes: Some(400),
+            pool_rejections: Some(2),
+        };
+        for lang in [Language::En, Language::PtBr] {
+            let mut state = State::new(snapshot.clone());
+            for stale in [false, true] {
+                if stale {
+                    state.refresh(Err("offline".into()));
+                }
+                let rendered = text(&state, lang, 80, 24);
+                assert!(rendered.contains("25.0%"), "{rendered}");
+                assert!(rendered.contains("750 B"), "{rendered}");
+                assert!(
+                    rendered.contains(lang.choose("RAM livre", "free RAM")),
+                    "{rendered}"
+                );
+                assert!(
+                    rendered.contains(lang.choose("consulta desta amostra", "sampling query")),
+                    "{rendered}"
+                );
+                assert!(
+                    rendered.contains("RSS") && rendered.contains("cache"),
+                    "{rendered}"
+                );
+            }
+        }
+        let over = MemorySnapshot {
+            pool_reserved_bytes: Some(1200),
+            ..snapshot.clone()
+        };
+        let rendered = text(&State::new(over), Language::En, 80, 24);
+        assert!(
+            rendered.contains("120.0%") && rendered.contains("over limit by 200 B"),
+            "{rendered}"
+        );
+        for limit in [None, Some(0)] {
+            let unknown = MemorySnapshot {
+                pool_limit_bytes: limit,
+                ..snapshot.clone()
+            };
+            let rendered = text(&State::new(unknown), Language::En, 80, 24);
+            assert!(!rendered.contains('%'), "{rendered}");
+            assert!(rendered.contains("remaining budget unknown"), "{rendered}");
+        }
+        let extreme = MemorySnapshot {
+            pool_limit_bytes: Some(1),
+            pool_reserved_bytes: Some(u64::MAX),
+            ..snapshot.clone()
+        };
+        let mut state = State::new(extreme);
+        state.refresh(Err("offline".into()));
+        for lang in [Language::En, Language::PtBr] {
+            let rendered = text(&state, lang, 80, 24);
+            assert!(rendered.contains("1.8e21%"), "{rendered}");
+            assert!(
+                rendered.contains("RSS") && rendered.contains("cache"),
+                "{rendered}"
+            );
+        }
+        let unknown = MemorySnapshot {
+            pool_reserved_bytes: None,
+            ..snapshot
+        };
+        let rendered = text(&State::new(unknown), Language::En, 80, 24);
+        assert!(!rendered.contains('%'), "{rendered}");
+        assert!(rendered.contains("remaining budget unknown"), "{rendered}");
+    }
+
     #[test]
     fn human_byte_counters_keep_exact_values_in_compact_bilingual_render() {
         assert_eq!(byte_counter(1023), "1023 B");

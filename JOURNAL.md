@@ -29,6 +29,29 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-03: public beta readiness and Docker access
+
+- **Done:** made the existing GHCR package public with owner confirmation;
+  anonymous clone, pull, Compose startup, Bolt read/write and retained-volume
+  restart passed on the published beta.3 image in Docker Desktop arm64.
+  Enabled GitHub Pages and private vulnerability reporting; the newest Pages
+  deployment succeeded and the site responded with HTTP 200.
+- **Code:** show accounted query-pool utilization and unreserved budget in the
+  connected TUI; add `toBooleanOrNull`; reject unsafe Unix modes for the Raft
+  peer-token file while accepting group-readable mounted secrets.
+- **Candidate evidence:** 985 Rust tests passed (3 ignored), Clippy and fmt
+  passed, 171 Python tests ran (7 skipped), 101 script tests and 23 cgroup
+  harness tests passed. The final native binary passed 19 quorum checks, 20
+  log-cap checks, a 5,000-row ingestion/restart and two-principal ACL test.
+  The local beta.4 arm64 image passed the Compose/Bolt/restart test and an
+  isolated 512 MiB cgroup refusal/rollback smoke; the sanitized receipt is in
+  `docs/benchmarks/2026-11-03-cgroup-014b4.json`.
+- **Limits:** this is a local image and synthetic smoke, not sustained 2/4/8 GiB
+  or multi-host failover qualification. The previous pressure failure remains
+  unexplained. A global RSS ceiling and native Bolt TLS remain open.
+- **Next:** verify the public beta.4 release and anonymous pull after CI; qualify
+  larger sustained loads and multi-machine quorum recovery before production.
+
 ## 2026-11-03: schema inspection and pressure diagnostics
 
 - **Done:** expose `graph.schema()` through the authorized Python read path;
