@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.0-beta.7 — experimental candidate
+
+- Apply `TCP_NODELAY` to accepted Raft peer sockets, matching outbound sockets
+  and avoiding a possible Linux delay between the frame header and body.
+  A [local peer diagnostic](docs/benchmarks/2026-11-04-raft-peer.md) records
+  the same test before and after the change; it is not a production SLO.
+- Fix the release-version check for the refreshed documentation layout. The
+  beta.6 tag remains available, but its GitHub verification did not complete.
+
+The keyed-relationship, integration, memory, security and visual improvements
+from beta.6 are included below. Distribution remains experimental.
+
 ## 0.15.0-beta.6 — experimental candidate
 
 - New relationship types can opt in to immutable string merge keys in their

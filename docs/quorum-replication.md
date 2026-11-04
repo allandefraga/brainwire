@@ -275,6 +275,10 @@ promptly. Read [connection limits](connection-limits.md) for client deadlines.
 
 ## Peer TLS, retained volumes and recovery boundaries
 
+Accepted and outbound Raft peer sockets enable `TCP_NODELAY` to reduce delays
+between small frame writes. This does not eliminate network delays or guarantee
+quorum availability.
+
 The Raft log rejects a nonzero first index and leader-identity regressions
 before writing the batch, including a lower node ID in the same term. Recovery
 rejects an existing log that violates this ordering rather than repairing it.

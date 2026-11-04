@@ -867,6 +867,18 @@ async fn dispatch(
     }
 }
 
+async fn accept_peer(listener: &TcpListener) -> Result<Option<TcpStream>, TransportError> {
+    let (stream, _) = listener
+        .accept()
+        .await
+        .map_err(|_| TransportError::Unreachable)?;
+    // Replies split their length and body; Nagle can delay the body past heartbeats.
+    if stream.set_nodelay(true).is_err() {
+        return Ok(None);
+    }
+    Ok(Some(stream))
+}
+
 pub async fn serve(
     listener: TcpListener,
     settings: Arc<TransportSettings>,
@@ -888,8 +900,8 @@ pub async fn serve(
     let mut tasks = JoinSet::new();
     loop {
         tokio::select! {
-            incoming = listener.accept() => {
-                let (stream, _) = incoming.map_err(|_| TransportError::Unreachable)?;
+            incoming = accept_peer(&listener) => {
+                let Some(stream) = incoming? else { continue; };
                 let Ok(permit) = permits.clone().try_acquire_owned() else { drop(stream); continue; };
                 let settings = settings.clone(); let raft = raft.clone(); let storage = storage.clone();
                 tasks.spawn(async move {
@@ -936,6 +948,15 @@ mod tests {
     use openraft::error::Fatal;
     use openraft::{ErrorSubject, ErrorVerb, StorageError};
 
+    #[tokio::test]
+    async fn accepted_peer_disables_nagle_before_protocol_or_tls_wrapping() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connected = TcpStream::connect(listener.local_addr().unwrap());
+        let (accepted, client) = tokio::join!(accept_peer(&listener), connected);
+        let accepted = accepted.unwrap().unwrap();
+        let _client = client.unwrap();
+        assert!(accepted.nodelay().unwrap());
+    }
     #[test]
     fn advertised_peer_endpoints_require_unicast_destinations() {
         for address in [

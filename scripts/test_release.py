@@ -148,7 +148,7 @@ class ReleaseFileTests(unittest.TestCase):
             files[Path("deploy/kubernetes-public-release/kustomization.yaml")],
         )
         self.assertIn(
-            f"DOCUMENTATION / v{next_candidate} <!-- brainwire-release-version -->",
+            f"v{next_candidate} <!-- brainwire-release-version -->",
             files[Path("docs-site/index.html")],
         )
         self.assertIn(

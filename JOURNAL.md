@@ -29,6 +29,23 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.7 release verification follow-up
+
+- **Finding:** The beta.6 GitHub release failed in a quorum read under the
+  Linux runner; its main CI also found a version check tied to old HTML markup.
+- **Fix:** Apply `TCP_NODELAY` to accepted peer connections as well as outbound
+  connections, before protocol/TLS handling. Keep quorum requirements intact.
+  Update the version test for the refreshed documentation markup.
+- **Evidence:** Two local Linux arm64 runs of the same 300-operation quorum
+  test took 26.88/27.01 s before and 1.00/0.76 s after. This is not a
+  multi-machine benchmark or proof of the specific CI refusal's cause.
+- **Verification:** All seven Linux network tests, the local workspace suite,
+  version scripts, 21 local quorum checks and the isolated writer comparison
+  passed. The final image was tested against a preconfigured keyed graph.
+- **Next step:** Verify GitHub CI, image publication and public pull. The exact
+  cause of the original timeout is not proven.
+- **Blockers:** Multi-machine recovery and sustained memory limits remain open.
+
 ## 2026-11-04: v0.15.0-beta.6 keyed relationship identity
 
 - **Done:** Added an explicit, immutable merge-key policy for new relationship

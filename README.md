@@ -27,7 +27,7 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.15.0-beta.6 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.15.0-beta.7 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
@@ -50,9 +50,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.6 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.15.0-beta.7 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.6 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.7 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -196,7 +196,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.6 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.15.0-beta.7 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

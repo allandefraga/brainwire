@@ -22,6 +22,7 @@ qualification above, a comparison, or a performance guarantee.
 | --- | --- |
 | Does a change affect large Bolt responses? | [Response encoding diagnostic](docs/benchmarks/2026-10-29-bolt-response/README.md): compares two local binaries, checks every result and records timings and sampled RSS. |
 | Does pressure admission reject new queries safely? | [Linux cgroup smoke](docs/benchmarks/2026-10-29-cgroup-pressure/README.md): 512 MiB synthetic rollback and recovery, not a production memory qualification. |
+| How does the Raft peer transport behave locally? | [Linux peer diagnostic](docs/benchmarks/2026-11-04-raft-peer.md): two local runs before and after the accepted-socket change, not a multi-machine benchmark. |
 | Does the server remain usable under a container limit? | [Container memory test](scripts/bench_v09_container.md): separate 2, 4 and 8 GiB runs with synthetic writes, reads and ACLs. The existing qualification attempts are incomplete. |
 | How does a small workload compare with Neo4j and FalkorDB? | [Three-database diagnostic](docs/benchmarks/comparison/README.md): runner, raw JSON and charts, with differences in protocol and durability. This needs a fresh run for a new release. |
 | Which other measurements exist? | [Result index](docs/benchmarks/README.md): current diagnostics and dated historical receipts. |
