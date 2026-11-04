@@ -271,6 +271,11 @@ stale properties from overwriting concurrent newer values.
 This callback reports progress only; it does not create a durable source cursor
 or make the entire load atomic. For restartable imports, use the importer below.
 
+When a batch exactly reaches its row or byte limit, the helper commits it and
+invokes the callback before requesting the next normalized row. If the source
+then fails, that completed batch remains committed; an unfinished batch is not
+committed. Arrow sources may already have materialized a bounded source chunk.
+
 `load_edges(source_label, relationship, target_label, rows)` uses the same row
 and byte limits as node batches. Edge rows require `source_id` and `target_id`;
 other fields are relationship properties. Endpoints must already exist. The

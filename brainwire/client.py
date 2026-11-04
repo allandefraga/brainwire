@@ -388,6 +388,7 @@ class GraphClient:
         Bounds count compact UTF-8 JSON input bytes, not Bolt wire bytes/RSS.
         For restartable immutable files use the durable-checkpoint importer instead.
         ``on_batch(batch_number, total_rows)`` runs after each successful commit.
+        A full batch commits before the next normalized row is requested.
         """
         if on_batch is not None and not callable(on_batch):
             raise ValueError("on_batch must be callable")
@@ -436,6 +437,9 @@ class GraphClient:
                 batch, size = [], 0
             batch.append(json.loads(encoded))
             size += len(encoded)
+            if len(batch) == self.batch_size or size == self.batch_bytes:
+                write_batch(batch)
+                batch, size = [], 0
         if batch:
             write_batch(batch)
         return total
@@ -539,6 +543,7 @@ class GraphClient:
         the return value then counts only the edges actually merged.
         Omitted edge properties are preserved and supplied nulls remove properties.
         ``on_batch(batch_number, total_rows)`` runs after each successful commit.
+        A full batch commits before the next normalized row is requested.
         """
         if on_batch is not None and not callable(on_batch):
             raise ValueError("on_batch must be callable")
@@ -588,6 +593,9 @@ class GraphClient:
                 batch, size = [], 0
             batch.append(json.loads(encoded))
             size += len(encoded)
+            if len(batch) == self.batch_size or size == self.batch_bytes:
+                write_batch(batch)
+                batch, size = [], 0
         if batch:
             write_batch(batch)
         return total

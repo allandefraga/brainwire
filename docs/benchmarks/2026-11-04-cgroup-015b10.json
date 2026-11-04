@@ -1,0 +1,4118 @@
+{
+  "result": "PASS",
+  "run_id": "02caca85c80d4bb28a05797590f58992",
+  "driver": "5.28.8",
+  "image": "brainwire-session10:local",
+  "memory_limit_bytes": 536870912,
+  "threshold_percent": 95,
+  "pressure_basis": "memory.current minus inactive_file; raw usage retained for injection safety",
+  "injection_target_percent": 96,
+  "injection_safety_percent": 98,
+  "scope": "synthetic single-container Linux cgroup-v2 RUN admission",
+  "limitations": [
+    "not a global RSS ceiling",
+    "not sustained 2/4/8 GiB qualification",
+    "not power-loss or distributed failover",
+    "raw usage includes tmpfs and file cache",
+    "kernel logs not independently verified"
+  ],
+  "image_id": "sha256:475a1bd6ba86406c8f159e7e7e559ceeece5ed63d4f17054bffa7f77311941e6",
+  "before": {
+    "memory.max": 536870912,
+    "memory.peak": 144220160,
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0,
+      "sock_throttled": 0
+    },
+    "memory.swap.max": 0,
+    "memory.current": 144330752,
+    "memory.stat.inactive_file": 212992,
+    "diagnostic_working_set": {
+      "bytes": 144117760,
+      "unit": "bytes",
+      "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+      "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+    }
+  },
+  "server_protocol": "5.4",
+  "pressure_samples": [
+    {
+      "memory.max": 536870912,
+      "memory.peak": 508485632,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 501469184,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 501182464,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 510926848,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 506474496,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 506187776,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 510926848,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 510267392,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 509980672,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 511021056,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 504741888,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 504455168,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 512102400,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 512679936,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 512393216,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 514666496,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 511471616,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 511184896,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 515747840,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 514629632,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 514342912,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 516296704,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 515563520,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 515276800,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 517787648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 514789376,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 514502656,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 519020544,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 511057920,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 510771200,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 520015872,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 518877184,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 518590464,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    {
+      "memory.max": 536870912,
+      "memory.peak": 528896000,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 518467584,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 518180864,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    }
+  ],
+  "run_pressure_checks": [
+    {
+      "before": {
+        "memory.max": 536870912,
+        "memory.peak": 520015872,
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0,
+          "sock_throttled": 0
+        },
+        "memory.swap.max": 0,
+        "memory.current": 518819840,
+        "memory.stat.inactive_file": 286720,
+        "diagnostic_working_set": {
+          "bytes": 518533120,
+          "unit": "bytes",
+          "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+          "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+        }
+      },
+      "after": {
+        "memory.current": 512339968,
+        "memory.max": 536870912,
+        "memory.peak": 520609792,
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0,
+          "sock_throttled": 0
+        },
+        "memory.swap.max": 0,
+        "memory.stat.inactive_file": 286720,
+        "diagnostic_working_set": {
+          "bytes": 512053248,
+          "unit": "bytes",
+          "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+          "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+        }
+      },
+      "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+      "scope": "point-in-time samples; no continuous usage guarantee",
+      "code": "Neo.TransientError.General.MemoryPressure",
+      "type": "TransientError",
+      "reason": "cgroup",
+      "rolled_back": true
+    },
+    {
+      "before": {
+        "memory.max": 536870912,
+        "memory.peak": 528896000,
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0,
+          "sock_throttled": 0
+        },
+        "memory.swap.max": 0,
+        "memory.current": 511954944,
+        "memory.stat.inactive_file": 286720,
+        "diagnostic_working_set": {
+          "bytes": 511668224,
+          "unit": "bytes",
+          "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+          "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+        }
+      },
+      "after": {
+        "memory.current": 518770688,
+        "memory.max": 536870912,
+        "memory.peak": 528896000,
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0,
+          "sock_throttled": 0
+        },
+        "memory.swap.max": 0,
+        "memory.stat.inactive_file": 286720,
+        "diagnostic_working_set": {
+          "bytes": 518483968,
+          "unit": "bytes",
+          "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+          "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+        }
+      },
+      "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+      "scope": "point-in-time samples; no continuous usage guarantee",
+      "code": "Neo.TransientError.General.MemoryPressure",
+      "type": "TransientError",
+      "reason": "cgroup",
+      "rolled_back": true
+    }
+  ],
+  "rejected_transaction_run": {
+    "before": {
+      "memory.max": 536870912,
+      "memory.peak": 520015872,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 518819840,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 518533120,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "after": {
+      "memory.current": 512339968,
+      "memory.max": 536870912,
+      "memory.peak": 520609792,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 512053248,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+    "scope": "point-in-time samples; no continuous usage guarantee",
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "after_transaction_rollback": {
+    "memory.max": 536870912,
+    "memory.peak": 520609792,
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0,
+      "sock_throttled": 0
+    },
+    "memory.swap.max": 0,
+    "memory.current": 519139328,
+    "memory.stat.inactive_file": 286720,
+    "diagnostic_working_set": {
+      "bytes": 518852608,
+      "unit": "bytes",
+      "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+      "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+    }
+  },
+  "rejected_new_run": {
+    "before": {
+      "memory.max": 536870912,
+      "memory.peak": 528896000,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 511954944,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 511668224,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "after": {
+      "memory.current": 518770688,
+      "memory.max": 536870912,
+      "memory.peak": 528896000,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 518483968,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+    "scope": "point-in-time samples; no continuous usage guarantee",
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "recovered_counts": {
+    "acknowledged": 1,
+    "pending-before-pressure": 0,
+    "rejected-under-pressure": 0
+  },
+  "after_relief": {
+    "memory.max": 536870912,
+    "memory.peak": 528896000,
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0,
+      "sock_throttled": 0
+    },
+    "memory.swap.max": 0,
+    "memory.current": 157818880,
+    "memory.stat.inactive_file": 303104,
+    "diagnostic_working_set": {
+      "bytes": 157515776,
+      "unit": "bytes",
+      "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+      "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+    }
+  },
+  "final_state": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 31022,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-04T17:17:15.744696627Z",
+    "FinishedAt": "0001-01-01T00:00:00Z",
+    "Health": {
+      "Status": "healthy",
+      "FailingStreak": 0,
+      "Log": [
+        {
+          "Start": "2026-11-04T17:17:20.847646462Z",
+          "End": "2026-11-04T17:17:20.866789837Z",
+          "ExitCode": 0,
+          "Output": ""
+        }
+      ]
+    }
+  },
+  "pressure_log_lines": [
+    "memory pressure admission: Available { current: 8757248, limit: 536870912 } PressureUsage { denied_runs: 0, unavailable_samples: 0 } (sampled cgroup usage; not an RSS ceiling)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=1; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 517132288, inactive_file_bytes: 286720, effective_bytes: 516845568, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=2; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 520818688, inactive_file_bytes: 286720, effective_bytes: 520531968, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)"
+  ],
+  "offline_audit": {
+    "database": "demo",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "docker_events": [
+    {
+      "action": "create",
+      "time": 1793812635
+    },
+    {
+      "action": "mount",
+      "time": 1793812635
+    },
+    {
+      "action": "start",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: touch /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: touch /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=334 oflag=append conv=notrunc status=none",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=334 oflag=append conv=notrunc status=none",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: /usr/local/bin/brainwire probe --mode handshake",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: /usr/local/bin/brainwire probe --mode handshake",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "health_status: healthy",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: rm -- /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: rm -- /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "kill",
+      "time": 1793812642
+    },
+    {
+      "action": "unmount",
+      "time": 1793812642
+    },
+    {
+      "action": "stop",
+      "time": 1793812642
+    },
+    {
+      "action": "die",
+      "time": 1793812642
+    },
+    {
+      "action": "create",
+      "time": 1793812642
+    },
+    {
+      "action": "attach",
+      "time": 1793812642
+    },
+    {
+      "action": "mount",
+      "time": 1793812642
+    },
+    {
+      "action": "start",
+      "time": 1793812642
+    },
+    {
+      "action": "unmount",
+      "time": 1793812642
+    },
+    {
+      "action": "die",
+      "time": 1793812642
+    },
+    {
+      "action": "destroy",
+      "time": 1793812642
+    }
+  ],
+  "owned_resources_cleaned": true,
+  "cleanup_state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-04T17:17:15.744696627Z",
+    "FinishedAt": "2026-11-04T17:17:22.547176088Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": [
+        {
+          "Start": "2026-11-04T17:17:20.847646462Z",
+          "End": "2026-11-04T17:17:20.866789837Z",
+          "ExitCode": 0,
+          "Output": ""
+        }
+      ]
+    }
+  },
+  "cleanup_pressure_log_lines": [
+    "memory pressure admission: Available { current: 8757248, limit: 536870912 } PressureUsage { denied_runs: 0, unavailable_samples: 0 } (sampled cgroup usage; not an RSS ceiling)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=1; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 517132288, inactive_file_bytes: 286720, effective_bytes: 516845568, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=2; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 520818688, inactive_file_bytes: 286720, effective_bytes: 520531968, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)"
+  ],
+  "cleanup_docker_events": [
+    {
+      "action": "create",
+      "time": 1793812635
+    },
+    {
+      "action": "mount",
+      "time": 1793812635
+    },
+    {
+      "action": "start",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812635
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: touch /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: touch /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=334 oflag=append conv=notrunc status=none",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=334 oflag=append conv=notrunc status=none",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812636
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812637
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812638
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812639
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-02caca85c80d4bb28a05797590f58992 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: /usr/local/bin/brainwire probe --mode handshake",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: /usr/local/bin/brainwire probe --mode handshake",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "health_status: healthy",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812640
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812641
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: rm -- /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: rm -- /pressure/smoke-fill-02caca85c80d4bb28a05797590f58992",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.peak",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.events",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.swap.max",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.current",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_create: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_start: cat /sys/fs/cgroup/memory.stat",
+      "time": 1793812642
+    },
+    {
+      "action": "exec_die",
+      "time": 1793812642
+    },
+    {
+      "action": "kill",
+      "time": 1793812642
+    },
+    {
+      "action": "unmount",
+      "time": 1793812642
+    },
+    {
+      "action": "stop",
+      "time": 1793812642
+    },
+    {
+      "action": "die",
+      "time": 1793812642
+    },
+    {
+      "action": "create",
+      "time": 1793812642
+    },
+    {
+      "action": "attach",
+      "time": 1793812642
+    },
+    {
+      "action": "mount",
+      "time": 1793812642
+    },
+    {
+      "action": "start",
+      "time": 1793812642
+    },
+    {
+      "action": "unmount",
+      "time": 1793812642
+    },
+    {
+      "action": "die",
+      "time": 1793812642
+    },
+    {
+      "action": "destroy",
+      "time": 1793812642
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,10 +24,21 @@ MANIFEST = "brainwire-manifest.json"
 
 def _files(root):
     for path in sorted(root.rglob("*")):
-        if path.is_symlink():
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode):
             raise ValueError(f"checkpoint contains a symlink: {path}")
-        if path.is_file() and path.name != MANIFEST:
+        if stat.S_ISDIR(mode):
+            continue
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"checkpoint contains a nonregular file: {path}")
+        if path != root / MANIFEST:
             yield path
+
+
+def _safe_inventory_path(name):
+    return (isinstance(name, str) and bool(name) and "\\" not in name
+            and all(part not in ("", ".", "..") for part in name.split("/"))
+            and name != MANIFEST and "\x00" not in name)
 
 
 def _sha256(path):
@@ -52,8 +64,19 @@ def copy_checkpoint(source, destination, receipt):
         raise ValueError(f"receipt names {receipt.get('name')!r}, source is {source.name!r}")
     if not (source / "CURRENT").is_file():
         raise ValueError(f"{source} is not a checkpoint directory")
-    files = list(_files(source))
     partial = destination.with_name(destination.name + ".partial")
+    source_root = source.resolve()
+    for path in (destination, partial):
+        resolved = path.resolve()
+        if any(ancestor.exists() and ancestor.samefile(source_root)
+               for ancestor in (resolved, *resolved.parents)):
+            raise ValueError("backup destination must be outside the source checkpoint")
+    if (source / MANIFEST).exists() or (source / MANIFEST).is_symlink():
+        if verify_copy(source):
+            raise ValueError("source backup manifest does not verify")
+    files = list(_files(source))
+    if any(not _safe_inventory_path(path.relative_to(source).as_posix()) for path in files):
+        raise ValueError("checkpoint contains an unsupported inventory path")
     if (destination.exists() or destination.is_symlink()
             or partial.exists() or partial.is_symlink()):
         raise FileExistsError(f"{destination} or {partial} already exists")
@@ -90,10 +113,30 @@ def copy_checkpoint(source, destination, receipt):
 def verify_copy(destination):
     """Return a list of problems; empty means every listed file matches."""
     destination = Path(destination)
-    manifest = json.loads((destination / MANIFEST).read_text())
+    manifest_path = destination / MANIFEST
+    if not stat.S_ISREG(manifest_path.lstat().st_mode):
+        return ["manifest must be a regular file"]
+    manifest = json.loads(manifest_path.read_text())
+    if not isinstance(manifest, dict):
+        return ["manifest must be an object"]
     if manifest.get("format") != FORMAT:
         return [f"unknown format: {manifest.get('format')!r}"]
-    expected = {entry["path"]: entry for entry in manifest["files"]}
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        return ["manifest files must be a nonempty list"]
+    expected = {}
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return [f"invalid manifest entry: {index}"]
+        name, size, digest = entry.get("path"), entry.get("size"), entry.get("sha256")
+        if (not _safe_inventory_path(name) or name in expected
+                or type(size) is not int or size < 0
+                or not isinstance(digest, str) or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)):
+            return [f"invalid manifest entry: {index}"]
+        expected[name] = entry
+    if "CURRENT" not in expected:
+        return ["manifest must include CURRENT"]
     actual = {path.relative_to(destination).as_posix(): path for path in _files(destination)}
     problems = [f"missing: {name}" for name in expected if name not in actual]
     problems += [f"extra: {name}" for name in actual if name not in expected]

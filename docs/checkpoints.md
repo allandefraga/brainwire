@@ -108,6 +108,15 @@ files; it exits 1 on any problem. The manifest file
 (`brainwire-manifest.json`) is not part of the store: remove it, or copy the
 directory without it, when restoring into `server.data_dir`.
 
+Only the manifest at the backup root is reserved; a file with the same name in
+a subdirectory is part of the inventory. Verification rejects malformed,
+duplicate or unsafe inventory entries and requires `CURRENT`. Copying an
+existing manifested backup first verifies it. Checksums detect accidental
+changes but do not authenticate the backup or replace an offline `db check`.
+The destination must be outside the source checkpoint, including through
+directory aliases. Keep the checkpoint immutable and use trusted parent
+directories; the helper does not defend against concurrent path replacement.
+
 Concurrent copies to the same destination do not remove one another's staging
 directory. A failure while syncing the destination's parent after rename can
 still leave a completed directory whose durability is uncertain; inspect and

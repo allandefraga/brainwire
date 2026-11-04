@@ -1,0 +1,41 @@
+{
+  "result": "PASS",
+  "scope": "synthetic single-client three-native-process loopback diagnostic; includes Bolt, Cypher, quorum and durable ACK; not multi-machine throughput",
+  "binary_sha256": "50da8bf3a2486177172f29a973501152d7dcee8df9de00a4ecc446e634119f4e",
+  "driver": "5.28.8",
+  "rows_per_round": 2000,
+  "batch_size": 100,
+  "repeats": 75,
+  "verified_rows_after_sigkill_restart": 300000,
+  "child_processes_stopped": true,
+  "fault_proxies_stopped": true,
+  "owned_resources_removed": true,
+  "total_elapsed_seconds": 433.0747241659992,
+  "aggregate": {
+    "single": {
+      "sample_count": 150000,
+      "p95_method": "nearest rank; fewer than 20 samples yields the maximum",
+      "p50_ms": 2.0006455,
+      "p95_ms": 3.058709,
+      "max_ms": 80.842833,
+      "total_ms": 327517.339413,
+      "rows_per_second": 457.9910189452587
+    },
+    "batch": {
+      "sample_count": 1500,
+      "p95_method": "nearest rank; fewer than 20 samples yields the maximum",
+      "p50_ms": 24.151104,
+      "p95_ms": 29.47975,
+      "max_ms": 93.240625,
+      "total_ms": 37090.722628,
+      "rows_per_second": 4044.137977693757
+    }
+  },
+  "source": "Locally built beta.10 candidate before commit; debug binary, not a published image",
+  "limitations": [
+    "One client, three native processes on a shared host; not multi-machine or production throughput",
+    "Samples omitted from public summary; raw receipt retained locally",
+    "This run does not explain or resolve the historical leader-election failure"
+  ],
+  "command": "python crates/server/tests/quorum_write_benchmark.py --binary <candidate> --rows 2000 --batch-size 100 --repeats 75 --failure-receipt <new-file>"
+}

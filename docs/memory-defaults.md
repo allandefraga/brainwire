@@ -167,6 +167,10 @@ remain at its high-water mark until the query or transaction finishes.
 Quantifiers also check deadlines during iteration. These measures do not create
 a process-wide RSS ceiling.
 
+`replace()` accounts for the actual UTF-8 output size before constructing it;
+an absent pattern no longer reserves a hypothetical expanded string. A large
+real expansion can still be refused. Timeout checks remain cooperative.
+
 A fresh RUN RSS reading that exceeds the current sample also reduces the
 shared reservation headroom until a later sampler reading confirms relief. A
 sampler read already in progress cannot replace an intervening higher reading.

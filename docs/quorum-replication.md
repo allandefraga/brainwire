@@ -296,6 +296,10 @@ sequence, leader order and command shape. A malformed later entry therefore
 does not apply an earlier entry in that batch. An application or I/O failure
 after validation can still interrupt application; recovery and the durable
 request ledger remain necessary. This is not batch-wide transactional atomicity.
+Command-size validation stops serializing once the 2 MiB limit is exceeded,
+and request digests are computed incrementally without a full JSON copy. The
+serialized bytes and SHA-256 request identity remain compatible with previous
+versions; other transport and storage allocations remain outside this change.
 Snapshots and log purging are not implemented; these checks do not establish
 multi-machine failover readiness or repair an already corrupt log.
 

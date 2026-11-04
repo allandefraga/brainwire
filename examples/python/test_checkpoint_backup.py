@@ -91,6 +91,33 @@ class CheckpointCopyTest(unittest.TestCase):
         self.assertFalse(destination.with_name("nightly-1.partial").exists())
         self.assertEqual(verify_copy(destination), [])
 
+    def test_copy_refuses_destination_inside_source(self):
+        alias = self.root / "source-alias"
+        alias.symlink_to(self.source, target_is_directory=True)
+        for destination in (self.source, self.source / "nested-copy", alias / "alias-copy"):
+            with self.subTest(destination=destination), self.assertRaises(ValueError):
+                copy_checkpoint(self.source, destination, receipt())
+        self.assertEqual(sorted(path.relative_to(self.source).as_posix()
+                                for path in self.source.rglob("*")),
+                         ["000010.sst", "CURRENT", "sub", "sub/OPTIONS"])
+
+    def test_copy_accepts_external_destination_through_directory_symlink(self):
+        external = self.root / "external"
+        external.mkdir()
+        alias = self.root / "external-alias"
+        alias.symlink_to(external, target_is_directory=True)
+        destination = alias / "copy"
+        copy_checkpoint(self.source, destination, receipt())
+        self.assertEqual(verify_copy(external / "copy"), [])
+
+    def test_copy_refuses_case_alias_of_source_on_case_insensitive_filesystem(self):
+        alternate = self.source.with_name(self.source.name.upper())
+        if not alternate.exists() or not alternate.samefile(self.source):
+            self.skipTest("case-insensitive filesystem required")
+        with self.assertRaises(ValueError):
+            copy_checkpoint(self.source, alternate / "nested-copy", receipt())
+        self.assertFalse((self.source / "nested-copy").exists())
+
     def test_verify_reports_changed_missing_and_extra_files(self):
         destination = self.root / "copy"
         copy_checkpoint(self.source, destination, receipt())
@@ -99,6 +126,132 @@ class CheckpointCopyTest(unittest.TestCase):
         (destination / "stray").write_text("x")
         problems = verify_copy(destination)
         self.assertEqual(sorted(problems), ["changed: 000010.sst", "extra: stray", "missing: CURRENT"])
+
+    def test_copy_preserves_manifest_named_files_below_root(self):
+        nested = self.source / "sub" / "brainwire-manifest.json"
+        nested.write_text("nested checkpoint data")
+        destination = self.root / "copy"
+        manifest = copy_checkpoint(self.source, destination, receipt())
+        self.assertIn("sub/brainwire-manifest.json", [entry["path"] for entry in manifest["files"]])
+        self.assertEqual((destination / "sub" / nested.name).read_text(), nested.read_text())
+        self.assertEqual(verify_copy(destination), [])
+
+    def test_verify_reports_extra_nested_manifest_named_file(self):
+        destination = self.root / "copy"
+        copy_checkpoint(self.source, destination, receipt())
+        (destination / "sub" / "brainwire-manifest.json").write_text("unlisted")
+        self.assertEqual(verify_copy(destination), ["extra: sub/brainwire-manifest.json"])
+
+    def test_verify_rejects_invalid_manifest_inventory(self):
+        destination = self.root / "copy"
+        original = copy_checkpoint(self.source, destination, receipt())
+        path = destination / "brainwire-manifest.json"
+        current = next(entry for entry in original["files"] if entry["path"] == "CURRENT")
+        cases = [
+            [], {}, {**original, "files": []}, {**original, "files": "CURRENT"},
+            {**original, "files": [entry for entry in original["files"] if entry["path"] != "CURRENT"]},
+            {**original, "files": [*original["files"], current]},
+            {**original, "files": [*original["files"], "bad entry"]},
+        ]
+        for field, value in [
+            ("path", "../CURRENT"), ("path", "/CURRENT"), ("path", "./CURRENT"),
+            ("path", "sub//CURRENT"), ("path", "sub\\CURRENT"),
+            ("path", "brainwire-manifest.json"), ("size", -1), ("size", True),
+            ("sha256", "not a hash"),
+        ]:
+            cases.append({**original, "files": [{**current, field: value},
+                                               *[e for e in original["files"] if e is not current]]})
+        for manifest in cases:
+            with self.subTest(manifest=manifest):
+                path.write_text(json.dumps(manifest))
+                self.assertTrue(verify_copy(destination))
+
+    def test_verify_refuses_manifest_symlink(self):
+        destination = self.root / "copy"
+        copy_checkpoint(self.source, destination, receipt())
+        path = destination / "brainwire-manifest.json"
+        external = self.root / "external.json"
+        path.rename(external)
+        path.symlink_to(external)
+        with patch.object(Path, "read_text", side_effect=AssertionError("symlink must not be read")):
+            self.assertTrue(verify_copy(destination))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO support required")
+    def test_verify_refuses_manifest_fifo_without_reading_it(self):
+        destination = self.root / "copy"
+        copy_checkpoint(self.source, destination, receipt())
+        path = destination / "brainwire-manifest.json"
+        path.unlink()
+        os.mkfifo(path)
+        with patch.object(Path, "read_text", side_effect=AssertionError("FIFO must not be read")):
+            self.assertTrue(verify_copy(destination))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO support required")
+    def test_copy_and_verify_refuse_nonregular_inventory_objects(self):
+        destination = self.root / "copy"
+        copy_checkpoint(self.source, destination, receipt())
+        os.mkfifo(destination / "extra-pipe")
+        with self.assertRaises(ValueError):
+            verify_copy(destination)
+        os.mkfifo(self.source / "extra-pipe")
+        with self.assertRaises(ValueError):
+            copy_checkpoint(self.source, self.root / "second", receipt())
+
+    def test_copy_refuses_manifest_named_symlinks_at_any_depth(self):
+        external = self.root / "external.json"
+        external.write_text("unrelated")
+        for directory in (self.source, self.source / "sub"):
+            link = directory / "brainwire-manifest.json"
+            link.symlink_to(external)
+            with self.subTest(directory=directory), self.assertRaises(ValueError):
+                copy_checkpoint(self.source, self.root / "copy", receipt())
+            link.unlink()
+
+    def test_verify_rejects_inventory_without_current_even_when_files_match(self):
+        destination = self.root / "copy"
+        manifest = copy_checkpoint(self.source, destination, receipt())
+        (destination / "CURRENT").unlink()
+        manifest["files"] = [entry for entry in manifest["files"] if entry["path"] != "CURRENT"]
+        (destination / "brainwire-manifest.json").write_text(json.dumps(manifest))
+        self.assertEqual(verify_copy(destination), ["manifest must include CURRENT"])
+
+    def test_verify_rejects_empty_inventory_in_empty_directory(self):
+        destination = self.root / "empty"
+        destination.mkdir()
+        (destination / "brainwire-manifest.json").write_text(json.dumps({
+            "format": "brainwire-checkpoint-copy/1", "files": []}))
+        self.assertTrue(verify_copy(destination))
+
+    def test_verify_preserves_missing_and_malformed_json_errors(self):
+        with self.assertRaises(FileNotFoundError):
+            verify_copy(self.root / "missing")
+        (self.source / "brainwire-manifest.json").write_text("invalid json")
+        with self.assertRaises(json.JSONDecodeError):
+            verify_copy(self.source)
+
+    def test_copy_rejects_paths_its_inventory_cannot_represent(self):
+        (self.source / "sub\\data").write_text("data")
+        destination = self.root / "copy"
+        with self.assertRaises(ValueError):
+            copy_checkpoint(self.source, destination, receipt())
+        self.assertFalse(destination.exists())
+
+    def test_copy_verifies_existing_root_manifest_before_recopy(self):
+        (self.source / "brainwire-manifest.json").write_text("unrelated file")
+        destination = self.root / "copy"
+        with self.assertRaises(ValueError):
+            copy_checkpoint(self.source, destination, receipt())
+        self.assertFalse(destination.exists())
+        self.assertFalse((self.root / "copy.partial").exists())
+
+    def test_valid_manifest_copy_can_be_copied_again(self):
+        first_root = self.root / "first"
+        first_root.mkdir()
+        first = first_root / self.source.name
+        copy_checkpoint(self.source, first, receipt())
+        destination = self.root / "copy"
+        copy_checkpoint(first, destination, receipt())
+        self.assertEqual(verify_copy(destination), [])
 
     def test_copy_refuses_existing_destination_mismatched_receipt_and_symlinks(self):
         destination = self.root / "copy"

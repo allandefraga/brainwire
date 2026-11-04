@@ -27,9 +27,13 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.15.0-beta.9 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.15.0-beta.10 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
+
+This beta improves bounded Python batch callbacks, validates checkpoint
+inventories more strictly, and reduces temporary serialization in the
+experimental quorum path. `replace()` also budgets its actual output size.
 
 ## What you can build
 
@@ -55,9 +59,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.9 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.15.0-beta.10 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.9 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.10 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -157,11 +161,12 @@ the connected TUI. [View the social card](assets/brainwire-social-preview-v1.jpg
 Start with a rebuildable graph and a tested backup while evaluating this beta.
 
 - **Memory:** query budgets and pressure admission help reject work under load.
-  A [512 MiB synthetic pressure smoke](docs/benchmarks/2026-11-04-cgroup-015b9.json)
+  A [512 MiB synthetic pressure smoke](docs/benchmarks/2026-11-04-cgroup-015b10.json)
   and a [short 100k-node load and restart](docs/benchmarks/2026-11-04-load100k-015b9.json)
   passed on local candidates. A hard process-wide RSS ceiling is not guaranteed;
   a [small 30-minute read soak](docs/benchmarks/2026-11-04-soak-015b9.json)
-  passed but showed RSS growth that needs investigation. Sustained representative
+  showed RSS growth; a [repeat](docs/benchmarks/2026-11-04-soak-015b10.json)
+  did not. The earlier growth still needs investigation. Sustained representative
   2/4/8 GiB tests are incomplete. An older failed run cannot be
   explained because its receipt is unavailable.
 - **Queries and search:** Brainwire supports a [documented Cypher subset](docs/local-cypher.md)
@@ -206,7 +211,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.9 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.15.0-beta.10 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

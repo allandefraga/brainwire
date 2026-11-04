@@ -35,6 +35,9 @@ Loading has a separate one-hour deadline. The 30-minute default is read soak
 *after* loading; load duration is recorded separately. `--rows`, reader width
 and timings may be reduced for smoke tests; those runs are never full
 qualification. Docker Desktop's VM must have enough available memory/disk.
+New receipts record batch size, neighborhood width, sampling interval, reader
+pause and query timeout. Earlier receipts may lack those fields; do not assume
+matching conditions from a comparison of the fields they did record.
 
 ## Dataset and operations
 

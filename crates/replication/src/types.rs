@@ -1,12 +1,50 @@
 //! Canonical replicated commands; application rejections are deterministic replies.
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, io::Cursor};
+use std::{
+    collections::BTreeMap,
+    io::{self, BufWriter, Cursor, Write},
+};
 
 pub type NodeId = u64;
 pub const MAX_COMMAND_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ENTRY_BYTES: usize = 4 * 1024 * 1024;
 pub use openraft::BasicNode;
+
+struct CommandSize {
+    bytes: usize,
+    exceeded: bool,
+}
+
+impl Write for CommandSize {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self.bytes.checked_add(bytes.len()) {
+            Some(total) if total <= MAX_COMMAND_BYTES => self.bytes = total,
+            _ => {
+                self.exceeded = true;
+                return Err(io::Error::other("serialized command exceeds 2 MiB"));
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct HashWriter(Sha256);
+
+impl Write for HashWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Command {
@@ -78,13 +116,25 @@ impl Command {
         {
             return Err("request_id must be 1..128 ASCII identifier characters".into());
         }
-        if serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > MAX_COMMAND_BYTES {
+        let mut size = CommandSize {
+            bytes: 0,
+            exceeded: false,
+        };
+        let serialized = serde_json::to_writer(&mut size, self);
+        if size.exceeded {
             return Err("serialized command exceeds 2 MiB".into());
         }
+        serialized.map_err(|e| e.to_string())?;
         Ok(())
     }
     pub fn digest(&self) -> Result<[u8; 32], serde_json::Error> {
-        Ok(Sha256::digest(serde_json::to_vec(self)?).into())
+        let mut writer = BufWriter::new(HashWriter(Sha256::new()));
+        serde_json::to_writer(&mut writer, self)?;
+        writer.flush().map_err(serde_json::Error::io)?;
+        let hash = writer
+            .into_inner()
+            .map_err(|error| serde_json::Error::io(error.into_error()))?;
+        Ok(hash.0.finalize().into())
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

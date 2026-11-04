@@ -220,6 +220,52 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(progress, [(1, 2), (2, 3)])
         self.assertEqual(driver.write_count, 2)
 
+    def test_full_load_batch_commits_before_requesting_the_next_source_row(self):
+        cases = [
+            ("nodes", {"entity_id": "a"}, 33),
+            ("edges", {"source_id": "a", "target_id": "b"}, 49),
+        ]
+        for kind, row, encoded_size in cases:
+            for bounds in ({"batch_size": 1}, {"batch_bytes": encoded_size}):
+                with self.subTest(kind=kind, bounds=bounds):
+                    driver, progress = Driver(), []
+                    graph = GraphClient(driver, "tickets", **bounds)
+
+                    def source():
+                        yield row
+                        self.assertEqual(progress, [(1, 1)])
+                        self.assertEqual(len(driver.committed), 1)
+                        raise RuntimeError("source failed after acknowledged batch")
+
+                    callback = lambda batch, total: progress.append((batch, total))
+                    with self.assertRaisesRegex(RuntimeError, "source failed"):
+                        if kind == "nodes":
+                            graph.load_nodes("Ticket", source(), on_batch=callback)
+                        else:
+                            graph.load_edges("Page", "LINK", "Page", source(), on_batch=callback)
+                    self.assertEqual(progress, [(1, 1)])
+                    self.assertEqual(len(driver.committed), 1)
+
+    def test_incomplete_load_batch_is_not_committed_when_source_fails(self):
+        for kind, row in (("nodes", {"entity_id": "a"}),
+                          ("edges", {"source_id": "a", "target_id": "b"})):
+            with self.subTest(kind=kind):
+                driver, progress = Driver(), []
+                graph = GraphClient(driver, "tickets", batch_size=2)
+
+                def source():
+                    yield row
+                    raise RuntimeError("source failed before batch was full")
+
+                callback = lambda batch, total: progress.append((batch, total))
+                with self.assertRaisesRegex(RuntimeError, "source failed"):
+                    if kind == "nodes":
+                        graph.load_nodes("Ticket", source(), on_batch=callback)
+                    else:
+                        graph.load_edges("Page", "LINK", "Page", source(), on_batch=callback)
+                self.assertEqual(progress, [])
+                self.assertEqual(driver.committed, [])
+
     def test_load_nodes_with_acl_stamps_each_batch_in_the_same_transaction(self):
         driver = Driver()
         graph = GraphClient(driver, "tickets", batch_size=2)

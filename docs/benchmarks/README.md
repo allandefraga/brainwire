@@ -14,6 +14,10 @@ successful capacity benchmark.
 
 ## Recent pressure-admission smoke
 
+The [beta.10 candidate pressure receipt](2026-11-04-cgroup-015b10.json) records
+a synthetic 512 MiB refusal and recovery on a local image. It is not a
+sustained-load or global RSS qualification.
+
 The [beta.9 candidate receipt](2026-11-04-cgroup-015b9.json) records a
 512 MiB single-container pressure injection, rejection and recovery. It is a
 short synthetic diagnostic, not a sustained capacity or failover test.
@@ -29,6 +33,18 @@ by itself identify a leak: intermediate windows were lower and the increase
 was not steady. Writes stopped before the soak, the data was small,
 and host kernel logs were unavailable. This does not qualify the full 2 GiB
 workload or the separate 4/8 GiB targets.
+Reviewing that run's raw samples showed median anonymous process RSS rising
+from about 222 MiB to 275 MiB over the same windows; file-backed RSS was nearly
+unchanged. This narrows the observation but does not distinguish live data,
+allocator retention or other anonymous allocations.
+
+A [beta.10 repeat](2026-11-04-soak-015b10.json) with the same intended small
+fixture and 30-minute read soak passed counts and offline integrity. Median RSS
+fell from about 227 MiB to 208 MiB between the first and last windows. The
+[descriptive comparison](2026-11-04-soak-comparison-015b10.json) shows both
+runs, but their older receipts omit some settings and the host was shared. The
+different outcome neither explains the earlier increase nor establishes that a
+leak was fixed. Neither run qualifies production capacity.
 
 A separate [100,000-node load and restart](2026-11-04-load100k-015b9.json)
 passed against the same local candidate. It is a brief single-container test
@@ -43,6 +59,14 @@ RSS ceiling or sustained 2/4/8 GiB qualification. The first inconclusive
 attempt and the repeated run are both recorded.
 
 ## Recent work
+
+The [beta.10 quorum acceptance summary](2026-11-04-quorum-015b10.json) records
+21 passing local-process fault and recovery checks on the candidate. It does
+not qualify independent machines, snapshots or production throughput.
+The [beta.10 quorum write summary](2026-11-04-quorum-write-015b10.json) records
+300,000 verified rows after restarting three local voters. It used one client
+and a debug binary on a shared host; it does not resolve the previous election
+failure or establish multi-machine performance.
 
 The [beta.9 quorum acceptance summary](2026-11-04-quorum-015b9.json) records
 21 passing scenarios using three local processes. It covers partitions,
@@ -108,6 +132,18 @@ its specified workload, execution rules and applicable audit process; the
 current runner is a smaller custom diagnostic.
 
 ## Test memory under a container limit
+
+To compare two complete raw four-label read-soak receipts, run:
+
+```sh
+python3 scripts/compare_read_soaks.py /path/to/first/report.json /path/to/second/report.json
+```
+
+The output compares sampled five-minute RSS and cgroup windows and checks the
+workload fields present in both receipts. A raw receipt can contain host
+telemetry; review it before sharing. A change in memory is not, by itself,
+proof of a leak or its cause, and matching recorded fields does not make the
+host or the complete workloads identical.
 
 Use the [four-label container guide](../../scripts/bench_v09_container.md).
 Start with its small smoke test, then run 2, 4 and 8 GiB separately using the

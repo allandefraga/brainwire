@@ -72,7 +72,7 @@ pub struct MemorySection {
     pub query: ByteSize,
     /// Shared Bolt assembled-input and decoded-storage admission, separate from query memory.
     pub ingress: ByteSize,
-    /// Process RSS ceiling (docs/design/process-memory-ceiling.md); 0 disables it.
+    /// Sampled process RSS admission threshold; not a hard ceiling. Zero disables it.
     pub limit: ByteSize,
 }
 
@@ -632,7 +632,7 @@ pub fn default_file() -> String {
          # query = \"{query}\"\n\
          # Shared Bolt assembled input and decoded storage (not process RSS).\n\
          # ingress = \"{ingress}\"\n\
-         # Process RSS ceiling: reservations are refused near it; 0 disables. Default 90% of detected memory.\n\
+         # Sampled RSS admission threshold, not a hard ceiling; 0 disables. Default 90% of detected memory.\n\
          # limit = \"{limit}\"\n",
         listen = d.server.listen,
         data_dir = d.server.data_dir.display(),

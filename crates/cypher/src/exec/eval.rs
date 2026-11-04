@@ -982,8 +982,36 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
                 str_arg(&args[2], name)?,
             ) {
                 (Some(s), Some(from), Some(to)) => {
-                    ctx.budget.charge(s.len().saturating_mul(to.len().max(1)))?;
-                    Val::Str(s.replace(from, to))
+                    let mut bytes = s.len();
+                    let mut matched = false;
+                    for _ in s.match_indices(from) {
+                        ctx.budget.tick()?;
+                        matched = true;
+                        bytes = bytes
+                            .checked_sub(from.len())
+                            .and_then(|n| n.checked_add(to.len()))
+                            .filter(|n| *n <= isize::MAX as usize)
+                            .ok_or_else(|| semantic("replacement output size overflow"))?;
+                    }
+                    ctx.budget.check_deadline()?;
+                    if !matched {
+                        return Ok(args.remove(0));
+                    }
+                    let _scope = ctx.budget.scope();
+                    ctx.budget
+                        .charge(bytes.saturating_add(std::mem::size_of::<Val>()))?;
+                    // Exact capacity avoids unaccounted geometric growth on expanding replacements.
+                    let mut replaced = String::with_capacity(bytes);
+                    let mut after = 0;
+                    for (start, _) in s.match_indices(from) {
+                        ctx.budget.tick()?;
+                        replaced.push_str(&s[after..start]);
+                        replaced.push_str(to);
+                        after = start + from.len();
+                    }
+                    replaced.push_str(&s[after..]);
+                    ctx.budget.check_deadline()?;
+                    Val::Str(replaced)
                 }
                 _ => Val::Null,
             }

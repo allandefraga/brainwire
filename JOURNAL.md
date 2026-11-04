@@ -29,6 +29,36 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.10 bounded writes and recovery
+
+- **Done:** commit full Python node/edge batches before requesting another
+  normalized row; verify checkpoint manifests and reject special files; budget
+  `replace()` by its real output; avoid full JSON buffers during replicated
+  command validation and hashing while preserving request digests. Add a
+  receipt comparator for RSS windows, including anonymous/file-backed memory,
+  and record more workload settings in new read-soak receipts.
+- **Evidence:** 1,036 Rust tests passed (3 ignored), workspace Clippy and
+  formatting passed, 217 Python and 108 script tests passed. Local three-voter
+  acceptance passed 21 checks; the candidate passed the 512 MiB synthetic
+  pressure smoke. A real checkpoint copy, offline audit and restored read
+  passed in a disposable directory; protected ACL and TUI checks passed too.
+- **Small read soak:** the same intended 2 GiB, 4,000-node synthetic fixture
+  passed 30 minutes of reads, counts and offline audit. Median RSS fell from
+  about 227 MiB to 208 MiB; this does not explain the beta.9 increase or prove
+  a fix. Both runs used a shared host and older receipts omit some settings.
+- **Quorum writes:** 300,000 synthetic rows verified after killing and
+  restarting three local voters; their offline graph digests matched. This
+  shared-host diagnostic does not resolve the earlier election failure.
+- **Application integration:** a disposable writer parity scenario passed
+  against two isolated databases. A producer received batch callbacks before
+  yielding the next row, and keyed events survived an isolated SIGKILL/restart.
+- **Next step:** investigate the read-soak RSS variation with component-level
+  telemetry and production-shaped data; qualify independent voter machines,
+  encrypted connections and safe snapshot/log compaction.
+- **Blockers:** memory admission is sampled, not a hard process ceiling; native
+  Bolt TLS and multi-machine failover qualification remain open. Checksums do
+  not authenticate checkpoint data.
+
 ## 2026-11-04: v0.15.0-beta.9 application pilot
 
 - **Done:** account for temporary Cypher list-comprehension and reduce bindings;

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -16,9 +17,10 @@ import secrets
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from neo4j import GraphDatabase, Query
+from neo4j import GraphDatabase, Query, __version__ as driver_version
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from examples.python.client import GraphClient
+from examples.python.checkpoint_backup import MANIFEST, copy_checkpoint, verify_copy
 from examples.python.create_service_tokens import create, write_private
 
 
@@ -165,15 +167,21 @@ def run(binary, count):
                         process.kill()
                         process.wait(timeout=10)
             if phase == "reopened":
-                checkpoint = json.loads(subprocess.run([str(binary),"db","checkpoint","pages","--destination",str(folder / "data/restored")],env=env,check=True,text=True,capture_output=True).stdout)
+                checkpoint_path = folder / "checkpoint"
+                checkpoint = json.loads(subprocess.run([str(binary),"db","checkpoint","pages","--destination",str(checkpoint_path)],env=env,check=True,text=True,capture_output=True).stdout)
                 assert checkpoint["status"] == "checkpoint_created"
+                copy_path = folder / "independent-copy"
+                copy_checkpoint(checkpoint_path, copy_path, {"name": checkpoint_path.name})
+                assert verify_copy(copy_path) == []
+                shutil.copytree(copy_path, folder / "data/restored")
+                (folder / "data/restored" / MANIFEST).unlink()
                 restored_audit = json.loads(subprocess.run([str(binary),"db","check","restored","--json"],env=env,check=True,text=True,capture_output=True).stdout)
                 assert restored_audit["status"] == "ok"
         audit = json.loads(subprocess.run([str(binary),"db","check","pages","--json"],env=env,check=True,text=True,capture_output=True).stdout)
         assert audit["status"] == "ok"
         return {"status":"PASS","nodes":count,"nodeLoadSeconds":elapsed,"nodeLoadRowsPerSecond":count/elapsed,
-                "serverSha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"driver":"neo4j==6.3.0",
-                "checks":["bounded Python batches","node partial update/remove","edge upsert/update/remove","index maintenance","private ACL stamp","ACL count/PK/traversal/WCC/SCC","restricted mutation denial","hidden scan count denial","delegated autocommit and explicit transaction metadata required and enforced","TUI filtered graph","restart","private ACL checkpoint restore","offline audit"],
+                "serverSha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"driver":f"neo4j=={driver_version}",
+                "checks":["bounded Python batches","node partial update/remove","edge upsert/update/remove","index maintenance","private ACL stamp","ACL count/PK/traversal/WCC/SCC","restricted mutation denial","hidden scan count denial","delegated autocommit and explicit transaction metadata required and enforced","TUI filtered graph","restart","checkpoint copy, manifest verification and private ACL restore","offline audit"],
                 "scope":"synthetic protected single-node localhost; no live-source or replication claim"}
 
 
