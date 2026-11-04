@@ -432,6 +432,22 @@ async fn corrupt_durable_accounting_is_not_silently_reset_on_reopen() {
 }
 
 struct FixedReply(Reply);
+#[test]
+fn recovery_rejects_malformed_vote_without_rewriting_it() {
+    for bytes in [b"{".as_slice(), b"null".as_slice(), b"true".as_slice()] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        drop(Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap());
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        db.put(b"Mvote", bytes).unwrap();
+        db.flush_wal(true).unwrap();
+        drop(db);
+        assert!(Storage::open(dir.path(), 1024 * 1024, app).is_err());
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        assert_eq!(db.get(b"Mvote").unwrap().unwrap(), bytes);
+    }
+}
+
 impl Application for FixedReply {
     fn apply(&self, _: &Command) -> Result<Reply, String> {
         Ok(self.0.clone())

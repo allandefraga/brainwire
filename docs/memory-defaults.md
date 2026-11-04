@@ -160,6 +160,11 @@ and checking the cgroup limit.
 
 ## Admission under Linux cgroup pressure
 
+Cypher list quantifiers account for temporary copies before evaluating each
+item and check deadlines during iteration. Temporary accounting resets per item;
+the shared reservation can remain at its high-water mark until the query or
+transaction finishes. This is not a process-wide RSS ceiling.
+
 A fresh RUN RSS reading that exceeds the current sample also reduces the
 shared reservation headroom until a later sampler reading confirms relief. A
 sampler read already in progress cannot replace an intervening higher reading.

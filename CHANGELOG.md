@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.0-beta.8 — experimental candidate
+
+- Account for temporary row copies and check deadlines during Cypher list
+  quantifiers; this does not guarantee a process RSS limit.
+- Reject unreadable persisted Raft vote metadata at startup without rewriting it.
+- Add an optional Kubernetes disruption budget for the single authenticated
+  persistent instance. This blocks voluntary eviction, not machine failure.
+
 ## 0.15.0-beta.7 — experimental candidate
 
 - Apply `TCP_NODELAY` to accepted Raft peer sockets, matching outbound sockets

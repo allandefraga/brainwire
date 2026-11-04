@@ -319,6 +319,23 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             };
             let (mut hits, mut misses, mut unknown) = (0usize, 0usize, false);
             for item in &items {
+                let _scope = ctx.budget.scope();
+                ctx.budget.tick()?;
+                // Admit the temporary slot row and binding before deep-cloning them.
+                ctx.budget.row(row)?;
+                let slot = ctx
+                    .vars
+                    .slot(var)
+                    .ok_or_else(|| semantic(format!("unknown variable {var}")))?;
+                // with_var can resize its copied row to introduce the local slot.
+                if slot >= row.len() {
+                    ctx.budget.charge(
+                        slot.saturating_add(1)
+                            .max(row.len().saturating_mul(2))
+                            .saturating_mul(std::mem::size_of::<Val>()),
+                    )?;
+                }
+                ctx.budget.charge(item.bytes())?;
                 let scoped = with_var(row, var, item.clone(), ctx)?;
                 match boolean(eval(test, &scoped, ctx)?)? {
                     Some(true) => hits += 1,

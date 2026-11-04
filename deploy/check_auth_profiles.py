@@ -112,9 +112,22 @@ def check():
     ):
         assert stanza in public_release, stanza
     assert "imagePullSecrets" not in public_release
+    protected = " ".join(run(["kubectl", "kustomize", "deploy/kubernetes-disruption-protected"], env).split())
+    for stanza in (
+        "apiVersion: policy/v1 kind: PodDisruptionBudget metadata: name: brainwire "
+        "spec: minAvailable: 1 selector: matchLabels: app: brainwire",
+        "replicas: 1",
+        "persistentVolumeClaimRetentionPolicy: whenDeleted: Retain whenScaled: Retain",
+        f"image: ghcr.io/allandefraga/brainwire:v{version}",
+        f"name: BRAINWIRE_SERVER_AUTH_FILE value: {POLICY}",
+    ):
+        assert stanza in protected, stanza
+    assert protected.count("kind: PodDisruptionBudget") == 1
+    assert "imagePullSecrets" not in protected
     checked.extend(["Kubernetes required read-only Secret projection, fsGroup, probes and retained single replica",
                     "Development Compose and Kubernetes base profiles remain without auth mounts",
-                    "Versioned private/public Kubernetes overlays combine auth with appropriate GHCR pull behavior"])
+                    "Versioned private/public Kubernetes overlays combine auth with appropriate GHCR pull behavior",
+                    "Optional disruption budget protects the single authenticated persistent instance from voluntary eviction"])
     return {"mode": "local-render-only", "checks": checked}
 
 

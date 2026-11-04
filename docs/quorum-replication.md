@@ -275,6 +275,10 @@ promptly. Read [connection limits](connection-limits.md) for client deadlines.
 
 ## Peer TLS, retained volumes and recovery boundaries
 
+A voter refuses to open a store with unreadable persisted vote metadata. The
+original bytes are retained; this does not repair corruption or detect every
+semantically invalid or missing vote.
+
 Accepted and outbound Raft peer sockets enable `TCP_NODELAY` to reduce delays
 between small frame writes. This does not eliminate network delays or guarantee
 quorum availability.

@@ -150,7 +150,7 @@ kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.7`. <!-- brainwire-release-version --> The local
+Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.8`. <!-- brainwire-release-version --> The local
 release helper updates both tags with the Cargo workspace version. The private
 overlay references `ghcr-pull`; logging in on your workstation alone does not
 authenticate cluster nodes. The public overlay needs no image-pull secret. For
@@ -187,6 +187,27 @@ transactions still open after it are abandoned, so draining every transaction is
 not promised. Acknowledged
 commits sync the WAL; interrupted uncommitted writes must disappear.
 
+### Protect against accidental voluntary eviction
+
+For a single-instance deployment where planned downtime must be explicit, the
+optional overlay adds a `PodDisruptionBudget` with `minAvailable: 1` and inherits
+the public release's authentication, image version and persistent volume:
+
+```sh
+kubectl kustomize deploy/kubernetes-disruption-protected
+kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-disruption-protected
+```
+
+Provision the `brainwire-auth` Secret as above first. This budget blocks
+voluntary eviction of the only healthy Pod, including ordinary node drains.
+It does not create a replica, prevent machine failure or OOM, or protect direct
+Pod/StatefulSet deletion. For approved maintenance, take and test a backup,
+allow downtime, delete the budget with `kubectl delete pdb brainwire` in the
+same namespace, then drain the node. Restore the budget after the original
+volume has reattached and the Pod is ready. Force deletion still requires
+fencing the previous writer. Removing this optional overlay from a local file
+does not remove an already applied budget from the cluster.
+
 Acceptance: write synthetic indexed data via Python/Bolt, replace the Pod,
 wait for startup/readiness, then verify counts, index lookups and absence of
 uncommitted writes. Fence an unreachable old writer before force-deleting its
@@ -205,7 +226,7 @@ described in [protected Swarm setup](protected-containers.md):
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.7 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.8 # brainwire-release-version
 docker secret create brainwire-auth-policy /secure/path/policy.json
 docker secret create brainwire-health-auth /secure/path/health.json
 docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml

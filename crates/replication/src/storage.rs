@@ -77,6 +77,8 @@ impl Storage {
             application,
             max_log_bytes,
         }));
+        // Reject unreadable consensus metadata before a voter starts serving.
+        let _: Option<Vote<u64>> = result.read(VOTE)?;
         let applied = result.last_applied()?;
         let mut applied_membership = StoredMembership::default();
         let mut bytes = 0u64;

@@ -29,6 +29,17 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.8 query admission and recovery
+
+- **Done:** Account for temporary Cypher quantifier copies, validate persisted
+  Raft votes before opening a voter, and provide an optional single-pod
+  disruption budget for voluntary Kubernetes evictions.
+- **Evidence:** Focused regressions and static deployment rendering passed. An
+  isolated writer parity scenario passed with a preconfigured keyed graph.
+- **Next step:** Qualify sustained memory and multi-machine recovery; exercise
+  Kubernetes eviction in a real cluster.
+- **Blockers:** No hard process RSS ceiling or qualified multi-node failover.
+
 ## 2026-11-04: v0.15.0-beta.7 release verification follow-up
 
 - **Finding:** The beta.6 GitHub release failed in a quorum read under the
