@@ -81,7 +81,8 @@ impl Storage {
         let mut applied_membership = StoredMembership::default();
         let mut bytes = 0u64;
         let mut previous: Option<u64> = None;
-        let mut previous_term = 0;
+        // OpenRaft's configured leader ordering includes node ID within a term.
+        let mut previous_leader = None;
         for item in result.0.db.iterator(IteratorMode::Start) {
             let (k, v) = item.map_err(error)?;
             if k.first() != Some(&b'L') {
@@ -101,10 +102,10 @@ impl Storage {
             {
                 return Err(error("nonconsecutive or corrupt retained log"));
             }
-            if e.log_id.leader_id.term < previous_term {
-                return Err(error("retained log term regressed"));
+            if previous_leader.is_some_and(|leader| e.log_id.leader_id < leader) {
+                return Err(error("retained log leader regressed"));
             }
-            previous_term = e.log_id.leader_id.term;
+            previous_leader = Some(e.log_id.leader_id);
             previous = Some(e.log_id.index);
             bytes = bytes
                 .checked_add(v.len() as u64)
@@ -269,8 +270,8 @@ impl Storage {
             }
             if let Some(index) = first.log_id.index.checked_sub(1) {
                 let previous: Option<Entry<TypeConfig>> = self.read(&key(index))?;
-                if previous.is_some_and(|e| e.log_id.leader_id.term > first.log_id.leader_id.term) {
-                    return Err(error("append log term regressed"));
+                if previous.is_some_and(|e| e.log_id.leader_id > first.log_id.leader_id) {
+                    return Err(error("append log leader regressed"));
                 }
             }
         }
@@ -278,8 +279,8 @@ impl Storage {
             if pair[0].log_id.index.checked_add(1) != Some(pair[1].log_id.index) {
                 return Err(error("append entries must be consecutive"));
             }
-            if pair[0].log_id.leader_id.term > pair[1].log_id.leader_id.term {
-                return Err(error("append log term regressed"));
+            if pair[0].log_id.leader_id > pair[1].log_id.leader_id {
+                return Err(error("append log leader regressed"));
             }
         }
         for entry in entries {

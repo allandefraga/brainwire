@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0-beta.5 — experimental candidate
+
+- Preserve fresh RUN RSS observations for query reservation headroom until a
+  later sampler confirms relief, including overlapping equal-valued readings.
+- Reject Raft log entries with regressing leader identities, including a lower
+  node ID in the same term; reopening an inconsistent log now fails closed.
+- Add a bounded-row chronological reader to the explicit timeline example.
+  It is application-managed, may scan and sort more rows, and is not a native
+  history or pagination feature.
+
+Relationship `MERGE` still keys by endpoints and type; existing integrations
+using its properties to distinguish events need a model migration. A hard RSS
+ceiling, native historical revisions and multi-machine failover remain open.
+
 ## 0.15.0-beta.4 — experimental candidate
 
 - Add a Python example for recording explicit timeline milestones as separate

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from examples.python.timeline_demo import event_id, ontology, record_event
+from examples.python.timeline_demo import event_id, ontology, read_events, record_event
 
 
 class TimelineTest(unittest.TestCase):
@@ -80,6 +80,31 @@ class TimelineTest(unittest.TestCase):
         self.assertEqual([n["label"] for n in schema["nodes"]], ["Ticket", "TimelineEvent"])
         self.assertEqual(schema["edges"][0]["from"], {"label": "Ticket"})
         self.assertEqual(schema["edges"][0]["to"], {"label": "TimelineEvent"})
+
+    def test_read_returns_a_chronological_page_with_a_stable_tie_breaker(self):
+        driver = MagicMock()
+        session = driver.session.return_value.__enter__.return_value
+        records = [{"id": "timeline:a", "kind": "opened", "occurred_at": "2026-11-03T10:00:00+00:00",
+                    "payload_json": "{}"}]
+        session.run.return_value = iter(records)
+        self.assertEqual(read_events(driver, "demo", ("Ticket", "ticket-1"), limit=20), records)
+        query, params = session.run.call_args.args
+        self.assertIn("MATCH (s:Ticket {entity_id:$subject})-[:HAS_EVENT]->(e:TimelineEvent)", query)
+        self.assertIn("ORDER BY e.occurred_at, e.entity_id LIMIT $limit", query)
+        self.assertEqual(params, {"subject": "ticket-1", "limit": 20})
+        driver.session.assert_called_once_with(database="demo")
+
+    def test_read_validation_precedes_connection(self):
+        invalid = [(("Ticket", "ticket-1"), 0), (("Ticket", "ticket-1"), 101),
+                   (("Ticket", "ticket-1"), True), (("Ticket", "ticket-1"), 1.5),
+                   (("Ticket); DELETE n", "ticket-1"), 20), (("Ticket", ""), 20),
+                   (("TimelineEvent", "event-1"), 20), (("Ticket",), 20)]
+        for subject, limit in invalid:
+            with self.subTest(subject=subject, limit=limit):
+                driver = MagicMock()
+                with self.assertRaises(ValueError):
+                    read_events(driver, "demo", subject, limit=limit)
+                driver.session.assert_not_called()
 
 
 if __name__ == "__main__":

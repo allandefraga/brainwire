@@ -29,6 +29,26 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.5 memory observations and recovery
+
+- **Done:** Preserve fresh RSS observations for query reservations, even when
+  a sampler read overlaps an equal-valued RUN observation. Reject regressing
+  Raft leader identities on append and recovery. Add an explicit timeline
+  example reader with a row limit and deterministic timestamp ordering.
+- **Decision:** Retain the documented relationship `MERGE` identity; changing
+  its semantics needs coordinated client migration and recovery of lost data.
+- **Evidence:** Focused memory and replication tests cover stale samples and
+  rejected logs. The timeline reader and event-node model were exercised against
+  a local server, including rollback, concurrency and restart. External adapter
+  unit tests passed, but its existing property-keyed relationship scenario
+  still lost five relationships compared with its reference graph.
+  A local 512 MiB pressure smoke and 19 loopback quorum scenarios passed;
+  neither qualifies an RSS ceiling or multi-machine recovery.
+- **Next step:** Qualify representative workloads, identify a compatible keyed
+  relationship migration, and exercise multi-machine recovery.
+- **Blockers:** The RSS limit remains cooperative; history and distributed
+  production qualification remain open.
+
 ## 2026-11-03: v0.15.0-beta.4 explicit timeline and vote protection
 
 - **Done:** Added an opt-in Python example that records milestones as separate

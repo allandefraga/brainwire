@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brainwire"
-version = "0.15.0b4"
+version = "0.15.0b5"
 description = "Bounded Python graph mutations for Brainwire over Bolt"
 readme = "docs/python-package.md"
 requires-python = ">=3.9"

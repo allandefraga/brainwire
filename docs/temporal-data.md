@@ -23,6 +23,11 @@ rejected. A subject must already exist. Generate a starter ontology with
 `python -m examples.python.timeline_demo --print-ontology`; the example's
 module help shows how to record an event.
 
+Call `read_events(driver, database, (label, entity_id), limit=50)` to read the
+first milestones in timestamp order, with event ID as a tie breaker. The limit
+is 1–100 returned rows; the server may still scan and sort a larger timeline.
+This example does not provide pagination or a snapshot across calls.
+
 The event and link commit together. Conflicts and unknown commit outcomes are
 returned to the caller, who must reconcile before retrying. The example does
 not enforce immutability against other clients, configure ACLs, capture

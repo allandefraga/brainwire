@@ -14,6 +14,10 @@ application chooses stable event keys and access rules; this example does not
 capture changes automatically, provide AS OF reads, or implement retention/ACLs.
 It attempts one explicit transaction. Reconcile an unknown commit result by the
 returned/deterministic event ID before retrying; no managed retries occur here.
+
+Read at most 100 milestones in chronological order with read_events(). Equal
+timestamps are ordered by event ID. This caps returned rows; the server may
+still scan and sort the subject's full timeline within its query budget.
 """
 import argparse
 from datetime import datetime, timezone
@@ -106,6 +110,31 @@ def record_event(driver, database, subject, key, kind, occurred_at, payload):
                 raise RuntimeError("event link was not acknowledged")
             tx.commit()
     return identity
+
+
+def read_events(driver, database, subject, *, limit=50):
+    """Return the first 1–100 explicit milestones ordered by UTC timestamp and ID.
+
+    Intended for timelines written by record_event(), which normalizes timestamps.
+    This caps returned rows, not server scan/sort memory or response bytes. There
+    is no pagination or snapshot guarantee across repeated calls.
+    """
+    if not isinstance(subject, tuple) or len(subject) != 2:
+        raise ValueError("subject must be (label, entity_id)")
+    label = identifier(subject[0])
+    if label == "TimelineEvent":
+        raise ValueError("subject label must differ from TimelineEvent")
+    subject_id = _text(subject[1], "subject entity_id")
+    _text(database, "database")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be an integer between 1 and 100")
+    with driver.session(database=database) as session:
+        rows = session.run(
+            f"MATCH (s:{label} {{entity_id:$subject}})-[:HAS_EVENT]->(e:TimelineEvent) "
+            "RETURN e.entity_id AS id, e.kind AS kind, e.occurred_at AS occurred_at, "
+            "e.payload_json AS payload_json ORDER BY e.occurred_at, e.entity_id LIMIT $limit",
+            {"subject": subject_id, "limit": limit})
+        return [dict(row) for row in rows]
 
 
 def main(argv=None):

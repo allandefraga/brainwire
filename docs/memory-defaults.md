@@ -160,6 +160,11 @@ and checking the cgroup limit.
 
 ## Admission under Linux cgroup pressure
 
+A fresh RUN RSS reading that exceeds the current sample also reduces the
+shared reservation headroom until a later sampler reading confirms relief. A
+sampler read already in progress cannot replace an intervening higher reading.
+This narrows one sampling window; it is not a process-wide memory ceiling.
+
 The synthetic 512 MiB admission smoke compares the same working-set estimate
 as the server and records raw usage separately for the injection safety limit.
 It only accepts a structured cgroup refusal as a confirmed cgroup rejection;
@@ -168,6 +173,9 @@ unexplained, and this test does not qualify sustained memory use or an RSS cap.
 The [v0.14.0-beta.4 local candidate receipt](benchmarks/2026-11-03-cgroup-014b4.json)
 records two cgroup refusals with rollback and a successful offline graph audit on
 Linux arm64. It identifies the local image, not the published image digest.
+The [v0.15.0-beta.5 local candidate receipt](benchmarks/2026-11-04-cgroup-015b5.json)
+records a repeat of this synthetic smoke on a locally built image; it does not
+establish sustained-load behavior or explain the earlier failure.
 
 Decision logs include the selected cgroup's raw usage, inactive file cache,
 effective working-set estimate and limit when the cgroup check refuses a RUN. If any examined cgroup has raw usage

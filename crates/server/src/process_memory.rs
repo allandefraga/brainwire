@@ -1,6 +1,6 @@
 //! Process memory ceiling and allocator return (docs/design/process-memory-ceiling.md).
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 const REFUSE_PERCENT: u64 = 95;
@@ -20,6 +20,7 @@ pub(crate) struct ProcessMemory {
     rss: AtomicU64,
     peak: AtomicU64,
     level: AtomicU8,
+    observation: Mutex<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,7 @@ impl ProcessMemory {
             rss: AtomicU64::new(rss),
             peak: AtomicU64::new(rss),
             level: AtomicU8::new(0),
+            observation: Mutex::new(0),
         })
     }
 
@@ -54,8 +56,35 @@ impl ProcessMemory {
     }
 
     /// Stores one RSS sample; returns the level it crossed upwards, if any.
+    #[cfg(test)]
     pub(crate) fn record(&self, rss: u64) -> Option<Crossing> {
-        self.rss.store(rss, Ordering::Relaxed);
+        self.record_sample(self.sample_generation(), rss)
+    }
+
+    fn sample_generation(&self) -> u64 {
+        *self
+            .observation
+            .lock()
+            .expect("RSS observation lock poisoned")
+    }
+
+    fn record_sample(&self, before_sample: u64, rss: u64) -> Option<Crossing> {
+        let rss = {
+            // Count observations rather than values: even a same-valued RUN
+            // reading must invalidate a sampler read that started earlier.
+            let mut generation = self
+                .observation
+                .lock()
+                .expect("RSS observation lock poisoned");
+            let rss = if *generation == before_sample {
+                rss
+            } else {
+                self.rss.load(Ordering::Relaxed).max(rss)
+            };
+            self.rss.store(rss, Ordering::Relaxed);
+            *generation = generation.wrapping_add(1);
+            rss
+        };
         self.peak.fetch_max(rss, Ordering::Relaxed);
         let previous = self.level.load(Ordering::Relaxed);
         let hysteresis = |percent: u64| self.threshold(percent - HYSTERESIS_PERCENT);
@@ -86,16 +115,22 @@ impl ProcessMemory {
         usize::try_from(cap.saturating_sub(self.rss.load(Ordering::Relaxed))).unwrap_or(usize::MAX)
     }
 
-    /// Check current RSS for each new RUN, preserving a higher sampler reading.
+    /// Check current RSS for each new RUN and preserve it for reservations.
     pub(crate) fn refusal(&self) -> Option<(u64, u64)> {
         self.refusal_with_rss(resident_bytes())
     }
 
     fn refusal_with_rss(&self, fresh: Option<u64>) -> Option<(u64, u64)> {
-        // On-demand samples must not overwrite the sampler or consume its log
-        // crossings. A lower fresh sample waits for the sampler to confirm relief.
+        // Lower RUN samples wait for the sampler to confirm relief. Preserve
+        // spikes for reservation headroom without consuming log crossings.
         if let Some(rss) = fresh {
+            let mut generation = self
+                .observation
+                .lock()
+                .expect("RSS observation lock poisoned");
             self.peak.fetch_max(rss, Ordering::Relaxed);
+            self.rss.fetch_max(rss, Ordering::Relaxed);
+            *generation = generation.wrapping_add(1);
         }
         let rss = self.rss.load(Ordering::Relaxed).max(fresh.unwrap_or(0));
         let cap = self.threshold(REFUSE_PERCENT);
@@ -113,13 +148,15 @@ impl ProcessMemory {
         std::thread::Builder::new()
             .name("brainwire-memory".into())
             .spawn(move || loop {
+                let before_sample = memory.sample_generation();
                 if let Some(rss) = resident_bytes() {
-                    if let Some(crossing) = memory.record(rss) {
+                    if let Some(crossing) = memory.record_sample(before_sample, rss) {
+                        let admission_rss = memory.rss.load(Ordering::Relaxed);
                         if !purge() {
                             eprintln!("brainwire memory: allocator purge failed");
                         }
                         eprintln!(
-                            "brainwire memory: {} rss={rss} peak={} limit={} {}",
+                            "brainwire memory: {} rss={admission_rss} sampled_rss={rss} peak={} limit={} {}",
                             match crossing {
                                 Crossing::Warn =>
                                     "above 80% of memory.limit; allocator purge requested",
@@ -265,11 +302,11 @@ mod tests {
     }
 
     #[test]
-    fn run_admission_observes_fresh_rss_without_replacing_the_sampler() {
+    fn run_admission_preserves_fresh_rss_until_the_sampler_confirms_relief() {
         let memory = ProcessMemory::with_initial_rss(1000, 500);
         assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
         assert_eq!(memory.peak(), 950);
-        assert_eq!(memory.headroom(), 450);
+        assert_eq!(memory.headroom(), 0);
         assert_eq!(memory.record(950), Some(Crossing::Refuse));
         // A low on-demand sample cannot undo a high sampler reading.
         assert_eq!(memory.refusal_with_rss(Some(500)), Some((950, 950)));
@@ -278,6 +315,37 @@ mod tests {
         assert_eq!(memory.refusal_with_rss(Some(500)), None);
         assert_eq!(memory.refusal_with_rss(None), None);
         assert_eq!(memory.peak(), 950);
+    }
+
+    #[test]
+    fn fresh_run_rss_reduces_reservation_headroom_before_the_next_sampler_tick() {
+        let memory = ProcessMemory::with_initial_rss(1000, 500);
+        let before_sample = memory.sample_generation();
+        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(memory.headroom(), 0);
+        // The sampler started before RUN observed a spike and returned later.
+        assert_eq!(
+            memory.record_sample(before_sample, 600),
+            Some(Crossing::Refuse)
+        );
+        assert_eq!(memory.headroom(), 0);
+        // A new sampler observation can confirm relief after that spike.
+        assert_eq!(memory.record(500), None);
+        assert_eq!(memory.headroom(), 450);
+    }
+
+    #[test]
+    fn equal_valued_run_observation_also_invalidates_an_older_sampler_read() {
+        let memory = ProcessMemory::with_initial_rss(1000, 950);
+        let before_sample = memory.sample_generation();
+        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(
+            memory.record_sample(before_sample, 600),
+            Some(Crossing::Refuse)
+        );
+        assert_eq!(memory.headroom(), 0);
+        assert_eq!(memory.record(500), None);
+        assert_eq!(memory.headroom(), 450);
     }
 
     #[cfg(not(target_env = "msvc"))]

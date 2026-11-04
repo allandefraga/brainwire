@@ -83,6 +83,69 @@ async fn vote_updates_cannot_regress_persisted_term_leader_or_commit() {
 }
 
 #[tokio::test]
+async fn append_rejects_same_term_leader_regression_without_partial_write() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let mut logs = store.log_store();
+    let mut first = entry(0, command("first"));
+    first.log_id.leader_id = openraft::CommittedLeaderId::new(2, 3);
+    logs.blocking_append([first.clone()]).await.unwrap();
+    let bytes = store.log_bytes().unwrap();
+    let mut second = entry(1, command("second"));
+    second.log_id.leader_id = openraft::CommittedLeaderId::new(2, 4);
+    let mut regressed = entry(2, command("regressed"));
+    regressed.log_id.leader_id = openraft::CommittedLeaderId::new(2, 2);
+    for invalid in [
+        vec![Entry {
+            log_id: LogId::new(regressed.log_id.leader_id, 1),
+            ..regressed.clone()
+        }],
+        vec![second.clone(), regressed],
+    ] {
+        assert!(logs.blocking_append(invalid).await.is_err());
+        assert_eq!(store.log_bytes().unwrap(), bytes);
+        assert_eq!(
+            logs.try_get_log_entries(..).await.unwrap(),
+            vec![first.clone()]
+        );
+    }
+    logs.blocking_append([second.clone()]).await.unwrap();
+    logs.blocking_append([first.clone()]).await.unwrap();
+    drop(logs);
+    drop(store);
+    let store = Storage::open(dir.path(), 1024 * 1024, app).unwrap();
+    assert_eq!(
+        store.log_store().try_get_log_entries(..).await.unwrap(),
+        vec![first, second]
+    );
+}
+
+#[tokio::test]
+async fn recovery_rejects_same_term_leader_regression() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    drop(store);
+    let db = rocksdb::DB::open_default(dir.path()).unwrap();
+    let mut bytes = 0_u64;
+    for (index, node_id) in [(0, 3), (1, 2)] {
+        let mut value = entry(index, command("corrupt"));
+        value.log_id.leader_id = openraft::CommittedLeaderId::new(2, node_id);
+        let encoded = serde_json::to_vec(&value).unwrap();
+        bytes += encoded.len() as u64;
+        let mut key = [b'L'; 9];
+        key[1..].copy_from_slice(&index.to_be_bytes());
+        db.put(key, encoded).unwrap();
+    }
+    db.put(b"Mbytes", serde_json::to_vec(&bytes).unwrap())
+        .unwrap();
+    db.flush_wal(true).unwrap();
+    drop(db);
+    assert!(Storage::open(dir.path(), 1024 * 1024, app).is_err());
+}
+
+#[tokio::test]
 async fn committed_marker_rejects_missing_mismatched_and_regressing_logs_before_persistence() {
     let dir = TempDir::new().unwrap();
     let app = Arc::new(App::default());
