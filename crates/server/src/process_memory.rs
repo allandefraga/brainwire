@@ -20,7 +20,13 @@ pub(crate) struct ProcessMemory {
     rss: AtomicU64,
     peak: AtomicU64,
     level: AtomicU8,
-    observation: Mutex<u64>,
+    observation: Mutex<Observation>,
+}
+
+#[derive(Default)]
+struct Observation {
+    generation: u64,
+    run_peak: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +53,7 @@ impl ProcessMemory {
             rss: AtomicU64::new(rss),
             peak: AtomicU64::new(rss),
             level: AtomicU8::new(0),
-            observation: Mutex::new(0),
+            observation: Mutex::new(Observation::default()),
         })
     }
 
@@ -62,27 +68,32 @@ impl ProcessMemory {
     }
 
     fn sample_generation(&self) -> u64 {
-        *self
+        let mut observation = self
             .observation
             .lock()
-            .expect("RSS observation lock poisoned")
+            .expect("RSS observation lock poisoned");
+        // There is one periodic sampler. Track fresh RUN observations only in
+        // its current read window, without holding this lock during OS I/O.
+        observation.run_peak = None;
+        observation.generation
     }
 
     fn record_sample(&self, before_sample: u64, rss: u64) -> Option<Crossing> {
         let rss = {
-            // Count observations rather than values: even a same-valued RUN
-            // reading must invalidate a sampler read that started earlier.
-            let mut generation = self
+            let mut observation = self
                 .observation
                 .lock()
                 .expect("RSS observation lock poisoned");
-            let rss = if *generation == before_sample {
+            let rss = if observation.generation == before_sample {
                 rss
             } else {
-                self.rss.load(Ordering::Relaxed).max(rss)
+                // Preserve every fresh spike overlapping this sampler read,
+                // including same-valued RUNs, but not an old retained peak.
+                // Otherwise continuous low RUNs can prevent recovery forever.
+                observation.run_peak.unwrap_or(0).max(rss)
             };
             self.rss.store(rss, Ordering::Relaxed);
-            *generation = generation.wrapping_add(1);
+            observation.generation = observation.generation.wrapping_add(1);
             rss
         };
         self.peak.fetch_max(rss, Ordering::Relaxed);
@@ -124,13 +135,14 @@ impl ProcessMemory {
         // Lower RUN samples wait for the sampler to confirm relief. Preserve
         // spikes for reservation headroom without consuming log crossings.
         if let Some(rss) = fresh {
-            let mut generation = self
+            let mut observation = self
                 .observation
                 .lock()
                 .expect("RSS observation lock poisoned");
             self.peak.fetch_max(rss, Ordering::Relaxed);
             self.rss.fetch_max(rss, Ordering::Relaxed);
-            *generation = generation.wrapping_add(1);
+            observation.run_peak = Some(observation.run_peak.unwrap_or(0).max(rss));
+            observation.generation = observation.generation.wrapping_add(1);
         }
         let rss = self.rss.load(Ordering::Relaxed).max(fresh.unwrap_or(0));
         let cap = self.threshold(REFUSE_PERCENT);
@@ -346,6 +358,51 @@ mod tests {
         assert_eq!(memory.headroom(), 0);
         assert_eq!(memory.record(500), None);
         assert_eq!(memory.headroom(), 450);
+    }
+
+    #[test]
+    fn concurrent_low_runs_do_not_prevent_the_sampler_from_confirming_relief() {
+        let memory = ProcessMemory::with_initial_rss(1000, 950);
+        for _ in 0..3 {
+            let before_sample = memory.sample_generation();
+            memory.refusal_with_rss(Some(500));
+            memory.record_sample(before_sample, 500);
+        }
+        assert_eq!(memory.headroom(), 450);
+        assert_eq!(memory.refusal_with_rss(None), None);
+        assert_eq!(memory.peak(), 950);
+    }
+
+    #[test]
+    fn overlapping_run_spike_survives_later_low_runs_in_the_same_sample() {
+        let memory = ProcessMemory::with_initial_rss(1000, 500);
+        let before_sample = memory.sample_generation();
+        memory.refusal_with_rss(Some(950));
+        memory.refusal_with_rss(Some(500));
+        assert_eq!(
+            memory.record_sample(before_sample, 500),
+            Some(Crossing::Refuse)
+        );
+        assert_eq!(memory.headroom(), 0);
+        assert_eq!(memory.record(500), None);
+        assert_eq!(memory.headroom(), 450);
+    }
+
+    #[test]
+    fn failed_sampler_read_preserves_pressure_until_a_valid_sample_confirms_relief() {
+        let memory = ProcessMemory::with_initial_rss(1000, 500);
+        memory.sample_generation();
+        memory.refusal_with_rss(Some(950));
+        // An unavailable OS reading skips record_sample entirely.
+        assert_eq!(memory.refusal_with_rss(None), Some((950, 950)));
+        let before_sample = memory.sample_generation();
+        memory.refusal_with_rss(Some(500));
+        memory.record_sample(before_sample, 500);
+        assert_eq!(memory.headroom(), 450);
+        assert_eq!(memory.peak(), 950);
+        // A fresh RUN after publication still immediately closes admission.
+        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(memory.headroom(), 0);
     }
 
     #[cfg(not(target_env = "msvc"))]

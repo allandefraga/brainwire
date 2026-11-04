@@ -663,6 +663,89 @@ mod tests {
     static ACCOUNTING_ALLOCATOR: AccountingAllocator = AccountingAllocator;
 
     #[test]
+    fn scalar_inspection_does_not_copy_its_already_admitted_argument() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let vars = plan::Vars::default();
+        for (name, argument, expected) in [
+            (
+                "size",
+                Value::Str("x".repeat(1 << 20)),
+                val::Val::Int(1 << 20),
+            ),
+            (
+                "size",
+                Value::List(vec![Value::Str("x".repeat(1 << 20))]),
+                val::Val::Int(1),
+            ),
+            (
+                "isempty",
+                Value::List(vec![Value::Str("x".repeat(1 << 20))]),
+                val::Val::Bool(false),
+            ),
+            (
+                "isempty",
+                Value::Map(BTreeMap::from([(
+                    "body".into(),
+                    Value::Str("x".repeat(1 << 20)),
+                )])),
+                val::Val::Bool(false),
+            ),
+            (
+                "exists",
+                Value::Map(BTreeMap::from([(
+                    "body".into(),
+                    Value::Str("x".repeat(1 << 20)),
+                )])),
+                val::Val::Bool(true),
+            ),
+        ] {
+            let param_vals = BTreeMap::from([("argument".into(), val::Val::from(&argument))]);
+            let params = BTreeMap::from([("argument".into(), argument)]);
+            let budget = Budget::new(
+                ExecutionLimits {
+                    memory_bytes: (1 << 20) + (64 << 10),
+                    timeout: None,
+                },
+                None,
+            );
+            let ctx = Context {
+                txn: &txn,
+                catalog: &catalog,
+                params: &params,
+                budget: &budget,
+                visibility: None,
+                checkpoint_dir: None,
+                vars: &vars,
+                cache: None,
+                param_vals: Some(&param_vals),
+                partition: None,
+            };
+            let expr = Expr::Call {
+                name: name.into(),
+                distinct: false,
+                args: vec![Expr::Param("argument".into())],
+            };
+            ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+            let result = eval::eval(&expr, &[], &ctx);
+            let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+            assert_eq!(result.unwrap(), expected);
+            assert!(
+                allocated < (1 << 20) + (64 << 10),
+                "{name} copied a large argument beyond its admitted allocation: {allocated}"
+            );
+        }
+    }
+
+    #[test]
     fn map_projection_does_not_clone_unselected_payloads() {
         use brainwire_store::db::{Resources, StoreConfig};
         let dir = tempfile::tempdir().unwrap();

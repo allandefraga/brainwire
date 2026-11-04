@@ -296,6 +296,9 @@ sequence, leader order and command shape. A malformed later entry therefore
 does not apply an earlier entry in that batch. An application or I/O failure
 after validation can still interrupt application; recovery and the durable
 request ledger remain necessary. This is not batch-wide transactional atomicity.
+Normal commands are also validated before appending to the Raft log and when
+reopening retained entries. A malformed command refuses the append or startup;
+it is not repaired automatically. Validation adds work on both paths.
 Command-size validation stops serializing once the 2 MiB limit is exceeded,
 and request digests are computed incrementally without a full JSON copy. The
 serialized bytes and SHA-256 request identity remain compatible with previous

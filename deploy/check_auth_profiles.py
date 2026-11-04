@@ -141,11 +141,26 @@ def check():
     ):
         assert stanza in isolated, stanza
     assert "imagePullSecrets" not in isolated
+    single_writer = " ".join(run(["kubectl", "kustomize", "deploy/kubernetes-single-writer"], env).split())
+    for stanza in (
+        "accessModes: - ReadWriteOncePod", "replicas: 1",
+        "persistentVolumeClaimRetentionPolicy: whenDeleted: Retain whenScaled: Retain",
+        f"image: ghcr.io/allandefraga/brainwire:v{version}",
+        f"name: BRAINWIRE_SERVER_AUTH_FILE value: {POLICY}",
+        f"name: BRAINWIRE_BOLT_AUTH_FILE value: {HEALTH}",
+        "secretName: brainwire-auth", "readOnlyRootFilesystem: true",
+    ):
+        assert stanza in single_writer, stanza
+    assert single_writer.count("accessModes:") == 1
+    assert "accessModes: - ReadWriteOnce " not in single_writer
+    assert "imagePullSecrets" not in single_writer
+    assert "accessModes: - ReadWriteOnce " in public_release
     checked.extend(["Kubernetes required read-only Secret projection, fsGroup, probes and retained single replica",
                     "Development Compose and Kubernetes base profiles remain without auth mounts",
                     "Versioned private/public Kubernetes overlays combine auth with appropriate GHCR pull behavior",
                     "Optional disruption budget protects the single authenticated persistent instance from voluntary eviction",
-                    "Optional ingress policy only admits labeled same-namespace Bolt clients and retains auth, PVC and disruption budget"])
+                    "Optional ingress policy only admits labeled same-namespace Bolt clients and retains auth, PVC and disruption budget",
+                    "Optional single-writer profile requests ReadWriteOncePod for new CSI volumes and retains auth, version and single replica"])
     return {"mode": "local-render-only", "checks": checked}
 
 

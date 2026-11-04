@@ -1,0 +1,91 @@
+{
+  "status": "descriptive-comparison",
+  "window_seconds": 300,
+  "scope": "completed synthetic four-label container read soaks; recorded workload fields match",
+  "baseline": {
+    "image_id": "sha256:475a1bd6ba86406c8f159e7e7e559ceeece5ed63d4f17054bffa7f77311941e6",
+    "read_soak_seconds": 1800.0016190419992,
+    "sampled_span_seconds": 1795.3528625420004,
+    "max_sample_gap_seconds": 5.123063207996893,
+    "coverage_tolerance_seconds": 10.139800167016801,
+    "first_window": {
+      "samples": 60,
+      "observed_span_seconds": 299.1115616669995,
+      "median_process_rss_bytes": 237979648.0,
+      "median_cgroup_current_bytes": 264435712.0,
+      "median_process_rss_anon_bytes": 220968960.0,
+      "median_process_rss_file_bytes": 17010688.0
+    },
+    "last_window": {
+      "samples": 60,
+      "observed_span_seconds": 299.27100341700134,
+      "median_process_rss_bytes": 218171392.0,
+      "median_cgroup_current_bytes": 256894976.0,
+      "median_process_rss_anon_bytes": 201160704.0,
+      "median_process_rss_file_bytes": 17010688.0
+    },
+    "window_change_bytes": -19808256.0,
+    "window_change_anon_bytes": -19808256.0,
+    "window_change_file_bytes": 0.0,
+    "sampled_peak_process_rss_bytes": 263819264,
+    "sampled_peak_cgroup_current_bytes": 271581184,
+    "kernel_log_verified": false,
+    "receipt_sha256": "daa30cce9499a18566a82253f9d363148df8e9831150a88a26ab53b24e931cac"
+  },
+  "candidate": {
+    "image_id": "sha256:6060e79a5acc7c9ddbb8aa486244d9b4607e29e3123c7947ec437e8d2bc598f5",
+    "read_soak_seconds": 1800.0051071659982,
+    "sampled_span_seconds": 1795.2808143329894,
+    "max_sample_gap_seconds": 5.130371332998038,
+    "coverage_tolerance_seconds": 10.140310542003135,
+    "first_window": {
+      "samples": 60,
+      "observed_span_seconds": 299.1121809999895,
+      "median_process_rss_bytes": 238575616.0,
+      "median_cgroup_current_bytes": 263581696.0,
+      "median_process_rss_anon_bytes": 221511680.0,
+      "median_process_rss_file_bytes": 17063936.0
+    },
+    "last_window": {
+      "samples": 60,
+      "observed_span_seconds": 299.2906517079973,
+      "median_process_rss_bytes": 226359296.0,
+      "median_cgroup_current_bytes": 270163968.0,
+      "median_process_rss_anon_bytes": 209295360.0,
+      "median_process_rss_file_bytes": 17063936.0
+    },
+    "window_change_bytes": -12216320.0,
+    "window_change_anon_bytes": -12216320.0,
+    "window_change_file_bytes": 0.0,
+    "sampled_peak_process_rss_bytes": 259874816,
+    "sampled_peak_cgroup_current_bytes": 281096192,
+    "kernel_log_verified": false,
+    "receipt_sha256": "f2e3a7438d6927fb89278f1127592412a11856714c005f9e76690b0734be4e0e"
+  },
+  "difference_in_window_changes_bytes": 7591936.0,
+  "difference_in_anon_window_changes_bytes": 7591936.0,
+  "difference_in_file_window_changes_bytes": 0.0,
+  "kernel_logs_verified_for_both": false,
+  "workload_settings": {
+    "status": "unavailable",
+    "matched_values": {},
+    "unavailable_fields": [
+      "batch_size",
+      "neighborhood_rows",
+      "query_timeout",
+      "reader_pause",
+      "sample_seconds"
+    ]
+  },
+  "limitations": [
+    "A change in sampled RSS does not identify a leak or establish its cause.",
+    "Process RSS and cgroup memory account for different things; neither is a global RSS guarantee.",
+    "Missing RssAnon or RssFile readings produce null diagnostics; process file RSS is not cgroup page cache.",
+    "Matching recorded fields does not prove identical hosts, workload settings or external load.",
+    "Settings absent in either receipt remain unverified; older receipts omit several workload settings.",
+    "Receipt validation does not independently verify image provenance or kernel logs.",
+    "Reader success counts cover load and soak together; they do not prove successful reads in each window.",
+    "Writes stop before the read soak; this is not sustained mixed-write qualification.",
+    "This comparison does not establish production capacity or multi-machine recovery."
+  ]
+}

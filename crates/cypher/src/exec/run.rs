@@ -418,8 +418,10 @@ enum AggState {
     Min(Option<Val>),
     Max(Option<Val>),
     Collect(Vec<Val>),
-    /// Numbers for stdev and percentiles; whether every input was an integer.
-    Stdev(Vec<f64>, bool),
+    /// Original numeric values for the discrete percentile.
+    Discrete(Vec<Val>),
+    /// Numbers for stdev and the continuous percentile.
+    Stdev(Vec<f64>),
 }
 
 struct Group {
@@ -719,7 +721,8 @@ fn merge_state(
                 }
             }
         }
-        (AggState::Collect(a), AggState::Collect(b)) => {
+        (AggState::Collect(a), AggState::Collect(b))
+        | (AggState::Discrete(a), AggState::Discrete(b)) => {
             let growth = merge_capacity_bytes(a, b.len());
             budget.retain(
                 b.iter()
@@ -729,7 +732,7 @@ fn merge_state(
             )?;
             a.extend(b);
         }
-        (AggState::Stdev(a, ints), AggState::Stdev(b, ints2)) => {
+        (AggState::Stdev(a), AggState::Stdev(b)) => {
             let growth = merge_capacity_bytes(a, b.len());
             budget.retain(
                 b.len()
@@ -737,7 +740,6 @@ fn merge_state(
                     .saturating_add(growth),
             )?;
             a.extend(b);
-            *ints &= ints2;
         }
         _ => unreachable!("merged states come from the same aggregate"),
     }
@@ -770,7 +772,8 @@ fn initial(func: &str) -> AggState {
         "min" => AggState::Min(None),
         "max" => AggState::Max(None),
         "collect" => AggState::Collect(vec![]),
-        _ => AggState::Stdev(vec![], true),
+        "percentiledisc" => AggState::Discrete(vec![]),
+        _ => AggState::Stdev(vec![]),
     }
 }
 
@@ -822,9 +825,14 @@ fn update(state: &mut AggState, value: Val, ctx: &Context<'_, '_>) -> Result<(),
             ctx.budget.retain(value.bytes())?;
             items.push(value);
         }
-        AggState::Stdev(items, ints) => {
+        AggState::Discrete(items) => {
+            number(&value)?;
+            ctx.budget
+                .retain(value.bytes().saturating_add(merge_capacity_bytes(items, 1)))?;
+            items.push(value);
+        }
+        AggState::Stdev(items) => {
             ctx.budget.retain(8)?;
-            *ints &= matches!(value, Val::Int(_));
             items.push(number(&value)?);
         }
     }
@@ -850,42 +858,27 @@ fn result(state: AggState, spec: &AggSpec, ctx: &Context<'_, '_>) -> Result<Val,
         }
         AggState::Min(v) | AggState::Max(v) => v.unwrap_or(Val::Null),
         AggState::Collect(items) => Val::List(items),
-        AggState::Stdev(mut items, ints) => match spec.func.as_str() {
-            "percentilecont" | "percentiledisc" => {
-                let fraction = match spec
-                    .fraction
-                    .as_ref()
-                    .map(|e| eval::constant(e, ctx))
-                    .transpose()?
-                {
-                    Some(Value::Int(i)) => i as f64,
-                    Some(Value::Float(f)) => f,
-                    _ => return Err(ExecError::Semantic("percentile needs a number".into())),
-                };
-                if !(0.0..=1.0).contains(&fraction) {
-                    return Err(ExecError::Semantic(
-                        "percentile must be between 0.0 and 1.0".into(),
-                    ));
-                }
+        AggState::Discrete(mut items) => {
+            let fraction = percentile_fraction(spec, ctx)?;
+            if items.is_empty() {
+                return Ok(Val::Null);
+            }
+            // Sort original values so large integers and mixed numeric types
+            // retain both their exact ordering and the selected input's type.
+            items.sort_unstable_by(discrete_cmp);
+            let index = ((fraction * items.len() as f64).ceil() as usize).saturating_sub(1);
+            items.swap_remove(index.min(items.len() - 1))
+        }
+        AggState::Stdev(mut items) => match spec.func.as_str() {
+            "percentilecont" => {
+                let fraction = percentile_fraction(spec, ctx)?;
                 if items.is_empty() {
                     return Ok(Val::Null);
                 }
                 items.sort_by(f64::total_cmp);
-                let last = (items.len() - 1) as f64;
-                if spec.func == "percentiledisc" {
-                    let index = ((fraction * items.len() as f64).ceil() as usize).saturating_sub(1);
-                    let value = items[index.min(items.len() - 1)];
-                    // percentileDisc returns one of its inputs, keeping integers.
-                    if ints {
-                        Val::Int(value as i64)
-                    } else {
-                        Val::Float(value)
-                    }
-                } else {
-                    let position = fraction * last;
-                    let (low, high) = (position.floor() as usize, position.ceil() as usize);
-                    Val::Float(items[low] + (items[high] - items[low]) * (position - low as f64))
-                }
+                let position = fraction * (items.len() - 1) as f64;
+                let (low, high) = (position.floor() as usize, position.ceil() as usize);
+                Val::Float(items[low] + (items[high] - items[low]) * (position - low as f64))
             }
             func => {
                 let sample = func == "stdev";
@@ -899,6 +892,36 @@ fn result(state: AggState, spec: &AggSpec, ctx: &Context<'_, '_>) -> Result<Val,
             }
         },
     })
+}
+
+// Equal numeric values need a deterministic representative regardless of
+// input order or parallel merge: integers precede floats, then IEEE total order.
+fn discrete_cmp(a: &Val, b: &Val) -> std::cmp::Ordering {
+    val::sort_cmp(a, b).then_with(|| match (a, b) {
+        (Val::Int(_), Val::Float(_)) => std::cmp::Ordering::Less,
+        (Val::Float(_), Val::Int(_)) => std::cmp::Ordering::Greater,
+        (Val::Float(a), Val::Float(b)) => a.total_cmp(b),
+        _ => std::cmp::Ordering::Equal,
+    })
+}
+
+fn percentile_fraction(spec: &AggSpec, ctx: &Context<'_, '_>) -> Result<f64, ExecError> {
+    let fraction = match spec
+        .fraction
+        .as_ref()
+        .map(|e| eval::constant(e, ctx))
+        .transpose()?
+    {
+        Some(Value::Int(i)) => i as f64,
+        Some(Value::Float(f)) => f,
+        _ => return Err(ExecError::Semantic("percentile needs a number".into())),
+    };
+    if !(0.0..=1.0).contains(&fraction) {
+        return Err(ExecError::Semantic(
+            "percentile must be between 0.0 and 1.0".into(),
+        ));
+    }
+    Ok(fraction)
 }
 
 // -- matching ------------------------------------------------------------------
@@ -2014,20 +2037,28 @@ mod merge_budget_tests {
             Err(ExecError::MemoryLimit { .. })
         ));
         assert!(matches!(collected, AggState::Collect(ref values) if values.len() == 1));
-        let mut numeric = AggState::Stdev(vec![1.0], true);
+        let mut numeric = AggState::Stdev(vec![1.0]);
+        assert!(matches!(
+            merge_state(&mut numeric, AggState::Stdev(vec![2.5]), &tiny_budget()),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+        assert!(matches!(numeric, AggState::Stdev(ref values) if values == &[1.0]));
+        let mut discrete = AggState::Discrete(vec![Val::Int(9007199254740993)]);
         assert!(matches!(
             merge_state(
-                &mut numeric,
-                AggState::Stdev(vec![2.5], false),
+                &mut discrete,
+                AggState::Discrete(vec![Val::Float(1.5)]),
                 &tiny_budget()
             ),
             Err(ExecError::MemoryLimit { .. })
         ));
-        assert!(matches!(numeric, AggState::Stdev(ref values, true) if values == &[1.0]));
+        assert!(
+            matches!(discrete, AggState::Discrete(ref values) if matches!(values.as_slice(), [Val::Int(9007199254740993)]))
+        );
     }
 
     #[test]
-    fn merge_keeps_collect_order_and_numeric_input_kind_with_budget() {
+    fn merge_keeps_collect_order_and_numeric_values_with_budget() {
         let budget = Budget::new(
             ExecutionLimits {
                 memory_bytes: 4096,
@@ -2045,8 +2076,45 @@ mod merge_budget_tests {
         assert!(
             matches!(collected, AggState::Collect(ref values) if matches!(values.as_slice(), [Val::Int(1), Val::Int(2)]))
         );
-        let mut numeric = AggState::Stdev(vec![1.0], true);
-        merge_state(&mut numeric, AggState::Stdev(vec![2.5], false), &budget).unwrap();
-        assert!(matches!(numeric, AggState::Stdev(ref values, false) if values == &[1.0, 2.5]));
+        let mut numeric = AggState::Stdev(vec![1.0]);
+        merge_state(&mut numeric, AggState::Stdev(vec![2.5]), &budget).unwrap();
+        assert!(matches!(numeric, AggState::Stdev(ref values) if values == &[1.0, 2.5]));
+        let mut discrete = AggState::Discrete(vec![Val::Int(9007199254740993)]);
+        merge_state(
+            &mut discrete,
+            AggState::Discrete(vec![Val::Float(1.5)]),
+            &budget,
+        )
+        .unwrap();
+        assert!(
+            matches!(discrete, AggState::Discrete(ref values) if matches!(values.as_slice(), [Val::Int(9007199254740993), Val::Float(1.5)]))
+        );
+    }
+    #[test]
+    fn discrete_merge_orders_equal_numeric_types_and_signed_zero() {
+        for reverse in [false, true] {
+            let budget = Budget::new(
+                ExecutionLimits {
+                    memory_bytes: 4096,
+                    timeout: None,
+                },
+                None,
+            );
+            let mut left = vec![Val::Int(2), Val::Float(0.0)];
+            let mut right = vec![Val::Float(2.0), Val::Float(-0.0)];
+            if reverse {
+                std::mem::swap(&mut left, &mut right);
+            }
+            let mut state = AggState::Discrete(left);
+            merge_state(&mut state, AggState::Discrete(right), &budget).unwrap();
+            let AggState::Discrete(mut values) = state else {
+                unreachable!()
+            };
+            values.sort_unstable_by(discrete_cmp);
+            assert!(
+                matches!(values.as_slice(), [Val::Float(negative), Val::Float(positive), Val::Int(2), Val::Float(two)]
+                if negative.to_bits() == (-0.0_f64).to_bits() && positive.to_bits() == 0.0_f64.to_bits() && *two == 2.0)
+            );
+        }
     }
 }

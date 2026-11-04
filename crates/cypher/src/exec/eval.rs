@@ -808,6 +808,32 @@ fn numeric_boolean_conversion(name: &str, value: Val) -> Result<Val, ExecError> 
     })
 }
 
+fn split_parts<'a>(
+    parts: impl Iterator<Item = &'a str> + Clone,
+    ctx: &Context<'_, '_>,
+) -> Result<Val, ExecError> {
+    // Admit borrowed pieces before allocating; call() charges the completed value.
+    let _scope = ctx.budget.scope();
+    ctx.budget.charge(std::mem::size_of::<Val>())?;
+    let mut count = 0usize;
+    for part in parts.clone() {
+        ctx.budget
+            .charge(part.len().saturating_add(std::mem::size_of::<Val>()))?;
+        count = count
+            .checked_add(1)
+            .filter(|count| *count <= isize::MAX as usize / std::mem::size_of::<Val>())
+            .ok_or_else(|| semantic("split output size overflow"))?;
+    }
+    ctx.budget.check_deadline()?;
+    let mut output = Vec::with_capacity(count);
+    for part in parts {
+        ctx.budget.tick()?;
+        output.push(Val::Str(part.to_string()));
+    }
+    ctx.budget.check_deadline()?;
+    Ok(Val::List(output))
+}
+
 fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val, ExecError> {
     let first = || args.first().cloned().unwrap_or(Val::Null);
     let one = |args: &[Val]| arity(name, args, 1, 1);
@@ -883,26 +909,27 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
         }
         "size" => {
             one(&args)?;
-            match first() {
+            // Inspect the admitted argument without cloning its nested payload.
+            match &args[0] {
                 Val::Null => Val::Null,
                 Val::List(items) => Val::Int(items.len() as i64),
                 Val::Str(s) => Val::Int(s.chars().count() as i64),
-                other => return Err(type_error("size", &other)),
+                other => return Err(type_error("size", other)),
             }
         }
         "isempty" => {
             one(&args)?;
-            match first() {
+            match &args[0] {
                 Val::Null => Val::Null,
                 Val::List(items) => Val::Bool(items.is_empty()),
                 Val::Str(s) => Val::Bool(s.is_empty()),
                 Val::Map(m) => Val::Bool(m.is_empty()),
-                other => return Err(type_error("isEmpty", &other)),
+                other => return Err(type_error("isEmpty", other)),
             }
         }
         "exists" => {
             one(&args)?;
-            Val::Bool(!first().is_null())
+            Val::Bool(!args[0].is_null())
         }
         "tolower" | "toupper" | "lower" | "upper" => {
             one(&args)?;
@@ -1059,11 +1086,17 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
         "split" => {
             arity(name, &args, 2, 2)?;
             match (str_arg(&args[0], name)?, str_arg(&args[1], name)?) {
-                (Some(s), Some(sep)) => Val::List(if sep.is_empty() {
-                    s.chars().map(|c| Val::Str(c.to_string())).collect()
-                } else {
-                    s.split(sep).map(|p| Val::Str(p.to_string())).collect()
-                }),
+                (Some(s), Some(sep)) => {
+                    if sep.is_empty() {
+                        split_parts(
+                            s.char_indices()
+                                .map(|(start, character)| &s[start..start + character.len_utf8()]),
+                            ctx,
+                        )?
+                    } else {
+                        split_parts(s.split(sep), ctx)?
+                    }
+                }
                 _ => Val::Null,
             }
         }

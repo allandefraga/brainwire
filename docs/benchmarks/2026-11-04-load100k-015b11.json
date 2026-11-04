@@ -1,0 +1,24 @@
+{
+  "result": "PASS",
+  "source": "locally built beta.11 container candidate before commit",
+  "image_id": "sha256:6060e79a5acc7c9ddbb8aa486244d9b4607e29e3123c7947ec437e8d2bc598f5",
+  "scope": "synthetic single-node Docker load, indexed overwrite and retained-volume recovery",
+  "memory_limit_bytes": 1073741824,
+  "bulk_rows": 100000,
+  "additional_seed_customers": 2,
+  "configured_update_cycles": 1,
+  "checks": [
+    "exact counts after restart",
+    "indexed overwrite retained",
+    "uncommitted indexed change absent after SIGKILL",
+    "old indexed values absent",
+    "offline graph audit"
+  ],
+  "limitations": [
+    "short run, not sustained capacity qualification",
+    "one seed edge; no representative relationship density or application payloads",
+    "not a distributed recovery test",
+    "not a throughput benchmark"
+  ],
+  "command": "python crates/server/tests/container_restart.py --image <candidate> --rows 100000 --cycles 1"
+}

@@ -14,6 +14,10 @@ successful capacity benchmark.
 
 ## Recent pressure-admission smoke
 
+The [beta.11 candidate pressure summary](2026-11-04-cgroup-015b11.json)
+records synthetic rejection, rollback and recovery in a 512 MiB container.
+It does not establish a process-wide limit or production capacity.
+
 The [beta.10 candidate pressure receipt](2026-11-04-cgroup-015b10.json) records
 a synthetic 512 MiB refusal and recovery on a local image. It is not a
 sustained-load or global RSS qualification.
@@ -46,9 +50,19 @@ runs, but their older receipts omit some settings and the host was shared. The
 different outcome neither explains the earlier increase nor establishes that a
 leak was fixed. Neither run qualifies production capacity.
 
+The [beta.11 candidate repeat](2026-11-04-soak-015b11.json) passed the same
+small 30-minute read diagnostic: median process RSS was about 227.5 MiB in the
+first window and 215.9 MiB in the last. The [comparison](2026-11-04-soak-comparison-015b11.json)
+is descriptive: the host was shared, the older receipt omitted some settings,
+and neither run establishes a hard ceiling or explains the earlier increase.
+
 A separate [100,000-node load and restart](2026-11-04-load100k-015b9.json)
 passed against the same local candidate. It is a brief single-container test
 without edges, ACL or representative source payloads.
+
+The [beta.11 repeat](2026-11-04-load100k-015b11.json) loaded 100,000 synthetic
+rows in a 1 GiB container and checked indexed overwrites after forced restarts.
+It is a brief recovery check, not a sustained workload or throughput benchmark.
 
 A [v0.13 local diagnostic](2026-10-30-v013-memory.md) repeats the pressure
 smoke and records a small idle-RSS experiment. Its limits are explicit.
@@ -59,6 +73,13 @@ RSS ceiling or sustained 2/4/8 GiB qualification. The first inconclusive
 attempt and the repeated run are both recorded.
 
 ## Recent work
+
+The [beta.11 quorum acceptance summary](2026-11-04-quorum-015b11.json) records
+21 passing local-process fault and recovery checks on the candidate. It does
+not qualify independent machines, snapshots or production throughput.
+The [beta.11 quorum write summary](2026-11-04-quorum-write-015b11.json) records
+300,000 synthetic rows verified after three local voters restarted. It used one
+client on a shared host and does not establish multi-machine performance.
 
 The [beta.10 quorum acceptance summary](2026-11-04-quorum-015b10.json) records
 21 passing local-process fault and recovery checks on the candidate. It does

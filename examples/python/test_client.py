@@ -61,8 +61,10 @@ class ArrowTable:
 
 
 class Driver:
-    def __init__(self, counts=()):
+    def __init__(self, counts=(), relationships=None, schema_error=None):
         self.committed, self.counts = [], iter(counts)
+        self.relationships = relationships
+        self.schema_error = schema_error
         self.fail_on_write = None
         self.write_count = 0
         self.retry_write = False
@@ -98,6 +100,13 @@ class Driver:
 
             def run(self, query, **params):
                 captured.append((query, params))
+                if query.startswith("CALL db.schema()"):
+                    if driver.schema_error is not None:
+                        raise driver.schema_error
+                    class SchemaResult:
+                        def single(self):
+                            return {"relationships": driver.relationships}
+                    return SchemaResult()
                 return Result(next(driver.counts, len(params.get("rows", [1]))))
 
             def commit(self):
@@ -522,6 +531,94 @@ class ClientTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "one .*relationship"):
             GraphClient(driver, "tickets").update_edge(
                 ("Ticket", "a"), "EVENT", ("Ticket", "b"), {"summary": "changed"})
+        self.assertEqual(driver.committed, [])
+
+    def test_keyed_event_patch_uses_complete_catalog_key_in_one_transaction(self):
+        relationships = [{"name": "EVENT", "source": "Ticket", "target": "Ticket",
+                          "mergeKeyFields": ["kind", "revision"]}]
+        driver = Driver([1, 1], relationships=relationships)
+        graph = GraphClient(driver, "tickets")
+        self.assertTrue(graph.update_edge(("Ticket", "a"), "EVENT", ("Ticket", "b"),
+                                         {"summary": "corrected"}, remove=["old"],
+                                         key={"kind": "closed", "revision": "r-2"}))
+        self.assertEqual(len(driver.committed), 1)
+        queries = driver.committed[0]
+        self.assertEqual(len(queries), 3)
+        self.assertTrue(queries[0][0].startswith("CALL db.schema()"))
+        for query, params in queries[1:]:
+            self.assertIn("EVENT {kind:$key_0, revision:$key_1}", query)
+            self.assertEqual((params["key_0"], params["key_1"]), ("closed", "r-2"))
+        self.assertIn("SET r.old=$property_0, r.summary=$property_1", queries[-1][0])
+
+    def test_keyed_event_patch_rejects_partial_or_unknown_keys_before_mutation(self):
+        relationships = [{"name": "EVENT", "source": "Ticket", "target": "Ticket",
+                          "mergeKeyFields": ["kind", "revision"]}]
+        for key in ({"kind": "closed"}, {"kind": "closed", "revision": "r-2", "other": "x"}):
+            driver = Driver([1, 1], relationships=relationships)
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "complete.*key"):
+                GraphClient(driver, "tickets").update_edge(
+                    ("Ticket", "a"), "EVENT", ("Ticket", "b"), {"summary": "changed"}, key=key)
+            self.assertEqual(driver.committed, [])
+        for key in ({}, {"kind": ""}, {"kind": 1}, {"kind": None}, {"acl_allow": "x"}, {"kind}]->() DELETE r": "x"}):
+            driver = Driver()
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                GraphClient(driver, "tickets").update_edge(
+                    ("Ticket", "a"), "EVENT", ("Ticket", "b"), {}, key=key)
+            self.assertEqual(driver.committed, [])
+
+    def test_keyed_event_values_are_parameters(self):
+        driver = Driver([1, 1], relationships=[{
+            "name": "EVENT", "source": "Ticket", "target": "Ticket", "mergeKeyFields": ["kind"]}])
+        value = "é'}]->() DELETE r //"
+        self.assertTrue(GraphClient(driver, "tickets").delete_edge(
+            ("Ticket", "a"), "EVENT", ("Ticket", "b"), key={"kind": value}))
+        for query, parameters in driver.committed[0][1:]:
+            self.assertNotIn(value, query)
+            self.assertEqual(parameters["key_0"], value)
+
+    def test_keyed_event_patch_cannot_set_or_remove_selector_keys(self):
+        for properties, remove in (({"kind": "opened"}, ()), ({}, ["kind"])):
+            driver = Driver()
+            with self.subTest(properties=properties, remove=remove), self.assertRaisesRegex(ValueError, "immutable"):
+                GraphClient(driver, "tickets").update_edge(
+                    ("Ticket", "a"), "EVENT", ("Ticket", "b"), properties,
+                    remove=remove, key={"kind": "closed"})
+            self.assertEqual(driver.committed, [])
+
+    def test_delete_keyed_event_is_selective_and_repeated_delete_is_missing(self):
+        relationships = [{"name": "EVENT", "source": "Ticket", "target": "Ticket",
+                          "mergeKeyFields": ["kind", "revision"]}]
+        driver = Driver([1, 1, 0], relationships=relationships)
+        graph = GraphClient(driver, "tickets")
+        arguments = (("Ticket", "a"), "EVENT", ("Ticket", "b"))
+        key = {"kind": "closed", "revision": "r-2"}
+        self.assertTrue(graph.delete_edge(*arguments, key=key))
+        self.assertFalse(graph.delete_edge(*arguments, key=key))
+        query, params = driver.committed[0][-1]
+        self.assertIn("[r:EVENT {kind:$key_0, revision:$key_1}]", query)
+        self.assertIn("DELETE r", query)
+        self.assertNotIn("MERGE", query)
+        self.assertEqual(params["key_1"], "r-2")
+        self.assertEqual(len(driver.committed[1]), 2)
+
+    def test_keyed_event_mutation_refuses_ambiguous_or_unkeyed_schema(self):
+        for relationships, count in (([{"name": "EVENT", "source": "Ticket", "target": "Ticket",
+                                       "mergeKeyFields": ["kind"]}], 2),
+                                     ([{"name": "EVENT", "source": "Ticket", "target": "Ticket"}], 1),
+                                     (None, 1)):
+            driver = Driver([count], relationships=relationships)
+            with self.subTest(relationships=relationships), self.assertRaises(ValueError):
+                GraphClient(driver, "tickets").delete_edge(
+                    ("Ticket", "a"), "EVENT", ("Ticket", "b"), key={"kind": "closed"})
+            self.assertEqual(driver.committed, [])
+
+    def test_keyed_event_mutation_propagates_schema_denial_without_writing(self):
+        denied = RuntimeError("schema forbidden")
+        driver = Driver(schema_error=denied)
+        with self.assertRaises(RuntimeError) as raised:
+            GraphClient(driver, "tickets").delete_edge(
+                ("Ticket", "a"), "EVENT", ("Ticket", "b"), key={"kind": "closed"})
+        self.assertIs(raised.exception, denied)
         self.assertEqual(driver.committed, [])
 
     def test_rejects_injection_reserved_fields_invalid_values_and_oversized_rows(self):

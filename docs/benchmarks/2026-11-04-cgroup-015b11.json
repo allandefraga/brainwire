@@ -1,0 +1,48 @@
+{
+  "result": "PASS",
+  "scope": "synthetic single-container Linux cgroup-v2 RUN admission",
+  "limitations": [
+    "not a global RSS ceiling",
+    "not sustained 2/4/8 GiB qualification",
+    "not power-loss or distributed failover",
+    "raw usage includes tmpfs and file cache",
+    "kernel logs not independently verified"
+  ],
+  "driver": "5.28.8",
+  "image_id": "sha256:6060e79a5acc7c9ddbb8aa486244d9b4607e29e3123c7947ec437e8d2bc598f5",
+  "memory_limit_bytes": 536870912,
+  "threshold_percent": 95,
+  "pressure_basis": "memory.current minus inactive_file; raw usage retained for injection safety",
+  "recovered_counts": {
+    "acknowledged": 1,
+    "pending-before-pressure": 0,
+    "rejected-under-pressure": 0
+  },
+  "offline_audit": {
+    "database": "demo",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "owned_resources_cleaned": true,
+  "refused_transaction": {
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "refused_new_run": {
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "oom_events_after": {
+    "low": 0,
+    "high": 0,
+    "max": 0,
+    "oom": 0,
+    "oom_kill": 0,
+    "oom_group_kill": 0,
+    "sock_throttled": 0
+  },
+  "command": "python crates/server/tests/cgroup_pressure_smoke.py --image <candidate> --output <receipt>",
+  "source": "locally built beta.11 candidate before commit"
+}

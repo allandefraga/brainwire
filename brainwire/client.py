@@ -494,7 +494,7 @@ class GraphClient:
         count and compact UTF-8 JSON bytes and atomic individually. Missing
         endpoints or edges count zero; earlier complete batches survive errors.
         On keyed types this deletes every sibling key for each supplied pair;
-        use an explicit keyed MATCH/DELETE query to remove one event instead.
+        use ``delete_edge(..., key=...)`` to remove one event instead.
         """
         source_label, relationship, target_label = map(
             identifier, (source_label, relationship, target_label))
@@ -610,27 +610,57 @@ class GraphClient:
         query += " RETURN count(*) AS processed"
         return self._write(lambda tx: tx.run(query, id=entity_id, **params).single()["processed"] == 1)
 
-    def _edge(self, source, relationship, target, properties, remove, require_existing):
+    def _edge(self, source, relationship, target, properties, remove, require_existing,
+              key=None, delete=False):
         if not isinstance(source, tuple) or not isinstance(target, tuple) or len(source) != 2 or len(target) != 2:
             raise ValueError("endpoints must be (label, entity_id) tuples")
         left, right, relationship = identifier(source[0]), identifier(target[0]), identifier(relationship)
         props = _properties({} if properties is None else properties, remove)
+        if key is not None:
+            if (not isinstance(key, dict) or not key
+                    or any(not isinstance(value, str) or not value for value in key.values())):
+                raise ValueError("key must be a nonempty dictionary of nonempty strings")
+            key = _properties(key)
+            if set(key) & set(props):
+                raise ValueError("relationship key fields are immutable")
         assignments, values = _parameters(props)
         params = {"source": _entity(source[1]), "target": _entity(target[1]), **values}
+        key_fields = ""
+        if key is not None:
+            key_fields = " {" + ", ".join(
+                f"{name}:$key_{index}" for index, name in enumerate(sorted(key))) + "}"
+            params.update({f"key_{index}": key[name] for index, name in enumerate(sorted(key))})
         match = f"MATCH (a:{left} {{entity_id:$source}}), (b:{right} {{entity_id:$target}})"
         fields = ", ".join(f"{name}:${parameter}" for name, parameter in assignments)
         edge = f"MERGE (a)-[:{relationship}" + (" {" + fields + "}" if fields else "") + "]->(b) RETURN count(*) AS processed"
 
         def apply(tx):
             if require_existing:
-                query = f"MATCH (a:{left} {{entity_id:$source}})-[:{relationship}]->(b:{right} {{entity_id:$target}}) RETURN count(*) AS processed"
+                if key is not None:
+                    schema = tx.run("CALL db.schema() YIELD relationships RETURN relationships").single()
+                    relationships = schema.get("relationships") if isinstance(schema, Mapping) else None
+                    if not isinstance(relationships, list) or any(not isinstance(item, dict) for item in relationships):
+                        raise ValueError("invalid schema response")
+                    matches = [item for item in relationships
+                               if (item.get("name"), item.get("source"), item.get("target"))
+                               == (relationship, left, right)]
+                    fields = matches[0].get("mergeKeyFields") if len(matches) == 1 else None
+                    if (not isinstance(fields, list) or not fields
+                            or any(not isinstance(field, str) for field in fields)
+                            or len(set(fields)) != len(fields) or set(fields) != set(key)):
+                        raise ValueError("key must contain the complete declared relationship key")
+                pattern = (f"MATCH (a:{left} {{entity_id:$source}})"
+                           f"-[r:{relationship}{key_fields}]->(b:{right} {{entity_id:$target}})")
+                query = pattern + " RETURN count(*) AS processed"
                 count = tx.run(query, **params).single()["processed"]
                 if count == 0:
                     return False
                 if count != 1:
-                    raise ValueError("edge update requires one merged relationship per endpoint pair/type")
-                query = f"MATCH (a:{left} {{entity_id:$source}})-[r:{relationship}]->(b:{right} {{entity_id:$target}})"
-                if assignments:
+                    raise ValueError("edge mutation requires one merged relationship per selection")
+                query = pattern
+                if delete:
+                    query += " DELETE r"
+                elif assignments:
                     query += " SET " + ", ".join(f"r.{name}=${parameter}" for name, parameter in assignments)
                 query += " RETURN count(*) AS processed"
             else:
@@ -649,13 +679,25 @@ class GraphClient:
         """
         return self._edge(source, relationship, target, properties, (), False)
 
-    def update_edge(self, source, relationship, target, properties=None, *, remove=()):
+    def update_edge(self, source, relationship, target, properties=None, *, remove=(), key=None):
         """Patch the only existing relationship of a pair/type; never create one.
 
-        Multiple keyed siblings require an explicit keyed MATCH/SET query.
-        Immutable merge-key changes are rejected by the server.
+        For keyed types, pass every declared immutable field in ``key`` to
+        select one timeline event. The catalog and mutation share a transaction.
+        Omitting key retains the unique-pair behavior; ambiguous pairs are refused.
         """
-        return self._edge(source, relationship, target, properties, remove, True)
+        return self._edge(source, relationship, target, properties, remove, True, key=key)
+
+    def delete_edge(self, source, relationship, target, *, key):
+        """Delete one keyed relationship; return False when that event is absent.
+
+        Supply every declared key field as a nonempty string. Catalog validation,
+        selection and deletion share one transaction. Sibling events survive.
+        Use ``delete_edges`` for deliberate endpoint-pair deletion.
+        """
+        if key is None:
+            raise ValueError("key must be a nonempty dictionary of nonempty strings")
+        return self._edge(source, relationship, target, {}, (), True, key=key, delete=True)
 
     def set_node_acl(self, label, entity_id, acl):
         """Replace private metadata; server requires graph-write + instance-admin.

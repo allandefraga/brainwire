@@ -53,6 +53,84 @@ fn command(id: &str) -> Command {
 }
 
 #[tokio::test]
+async fn append_rejects_invalid_commands_without_persisting_a_valid_prefix() {
+    for invalid in [
+        command(""),
+        Command::Write {
+            request_id: "oversized".into(),
+            graph: "g".into(),
+            expected_revision: 0,
+            batch: vec![255; 600_000],
+        },
+    ] {
+        assert!(invalid.validate().is_err());
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        let store = Storage::open(dir.path(), 8 * 1024 * 1024, app.clone()).unwrap();
+        let mut logs = store.log_store();
+        let first = entry(0, command("first"));
+        logs.blocking_append([first.clone()]).await.unwrap();
+        let bytes = store.log_bytes().unwrap();
+        let second = entry(1, command("second"));
+        assert!(logs
+            .blocking_append([second.clone(), entry(2, invalid)])
+            .await
+            .is_err());
+        assert_eq!(store.log_bytes().unwrap(), bytes);
+        assert_eq!(
+            logs.try_get_log_entries(..).await.unwrap(),
+            vec![first.clone()]
+        );
+        assert_eq!(app.calls.load(Ordering::SeqCst), 0);
+        drop(logs);
+        drop(store);
+        let store = Storage::open(dir.path(), 8 * 1024 * 1024, app).unwrap();
+        assert_eq!(store.log_bytes().unwrap(), bytes);
+        let mut logs = store.log_store();
+        logs.blocking_append([second.clone()]).await.unwrap();
+        assert_eq!(
+            logs.try_get_log_entries(..).await.unwrap(),
+            vec![first, second]
+        );
+    }
+}
+
+#[test]
+fn recovery_rejects_invalid_retained_commands_without_rewriting_them() {
+    for invalid in [
+        command("bad space"),
+        Command::Write {
+            request_id: "oversized".into(),
+            graph: "g".into(),
+            expected_revision: 0,
+            batch: vec![255; 600_000],
+        },
+    ] {
+        assert!(invalid.validate().is_err());
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        drop(Storage::open(dir.path(), 8 * 1024 * 1024, app.clone()).unwrap());
+        let encoded = serde_json::to_vec(&entry(0, invalid)).unwrap();
+        assert!(encoded.len() < brainwire_replication::MAX_ENTRY_BYTES);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        let mut key = [b'L'; 9];
+        key[1..].copy_from_slice(&0_u64.to_be_bytes());
+        db.put(key, &encoded).unwrap();
+        db.put(
+            b"Mbytes",
+            serde_json::to_vec(&(encoded.len() as u64)).unwrap(),
+        )
+        .unwrap();
+        db.flush_wal(true).unwrap();
+        drop(db);
+        assert!(Storage::open(dir.path(), 8 * 1024 * 1024, app.clone()).is_err());
+        assert_eq!(app.calls.load(Ordering::SeqCst), 0);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        assert_eq!(db.get(key).unwrap().unwrap(), encoded);
+    }
+}
+
+#[tokio::test]
 async fn vote_updates_cannot_regress_persisted_term_leader_or_commit() {
     let dir = TempDir::new().unwrap();
     let app = Arc::new(App::default());

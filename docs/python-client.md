@@ -187,9 +187,10 @@ missing targets and do not create them. `upsert_node` creates or updates;
 `upsert_edge` requires both endpoints to exist. Legacy relationship types use
 source, type and destination as identity. For a keyed type, include every
 configured key in `properties`; other fields are mutable. See the
-[keyed relationship guide](temporal-data.md#keyed-relationships). Updating a parallel-edge group is rejected
-when the preflight sees more than one relationship; arbitrary EdgeId editing is
-not exposed by this helper. Edge checks and patch occur in one transaction.
+[keyed relationship guide](temporal-data.md#keyed-relationships). Pass a complete
+`key` to `update_edge` to select one keyed relationship; without a key, the
+helper rejects ambiguous parallel edges. Arbitrary EdgeId editing is not
+exposed. Edge checks and patch occur in one transaction.
 
 `delete_nodes(label, entity_ids)` detach-deletes node IDs in bounded batches and
 returns the number removed. Incident edges are deleted with their node. IDs are
@@ -220,8 +221,21 @@ edge. The result counts
 deleted physical relationships: if a pair has parallel edges of the selected
 type, **all matching edges are removed**. This differs from `update_edge`, which
 requires exactly one matching relationship and rejects ambiguous parallel edges.
-For keyed types, use a key-filtered Cypher `MATCH` and `DELETE` when only one
-milestone should be removed.
+For keyed types, `delete_edge` selects one milestone using all declared key
+fields:
+
+```python
+graph.delete_edge(("Person", "p-1"), "HAD_EVENT", ("Ticket", "t-1"),
+                  key={"event_type": "closed"})
+```
+
+The keyed `update_edge` and `delete_edge` helpers validate the complete key
+against the catalog and check for ambiguity in the same transaction as the
+mutation. Each uses up to three queries and is intended for individual edits.
+Use a credential with graph-write permission and without delegated read
+visibility: delegated-visibility transactions are read-only. The schema lookup
+and relationship scans remain subject to query limits; this helper does not
+automatically retry a failed transaction.
 
 The helper bounds each batch by item count and compact UTF-8 JSON input bytes,
 not exact Bolt bytes, deleted-edge count or process memory. Each batch commits

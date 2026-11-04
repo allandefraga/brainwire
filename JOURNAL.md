@@ -29,6 +29,39 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.11 memory, quorum and event editing
+
+- **Done:** allow sampled memory admission to recover under concurrent low RSS
+  observations; budget `split()` before allocation and avoid deep copies in
+  `size()`, `isEmpty()` and `exists()`; preserve exact inputs in
+  `percentileDisc`; validate Raft commands before append and log reopening;
+  allow Python to edit one keyed relationship; add an optional Kubernetes
+  single-pod PVC overlay. Correct the protected image setup documentation.
+- **Evidence:** 1,050 Rust tests passed (3 ignored), workspace Clippy and
+  formatting passed; 224 Python and 108 script tests passed. A 512 MiB cgroup
+  pressure injection recovered; a 100,000-row Docker load passed forced
+  restart and indexed-overwrite checks. The local quorum harness passed 21
+  checks, and 300,000 synthetic rows survived three voter restarts on the same
+  host. Protected ACL, TUI, checkpoint and restore checks passed locally.
+- **Small read soak:** the final candidate completed 30 minutes of synthetic
+  reads in a 2 GiB container with correct counts and offline audit. Median
+  process RSS went from 227.5 MiB to 215.9 MiB; no OOM was observed. The
+  workload is small and the host shared; this does not qualify production
+  capacity or explain the earlier observed increase.
+- **Application integration:** an isolated synthetic writer parity scenario
+  passed against the candidate image. A composite-key timeline and a large
+  integer percentile were checked over Bolt; keyed events survived SIGKILL.
+  A protected Bolt test confirmed that a read-only user and a writer using
+  delegated visibility cannot mutate keyed events, while a trusted writer can.
+- **Next step:** continue representative sustained memory and mixed-write
+  qualification; test CSI volume behavior and quorum on separate machines;
+  investigate the earlier RSS and leader-election failures before production.
+  Harden quorum graph materialization to compare any existing catalog with the
+  requested schema, matching the check performed when reopening a graph.
+- **Blockers:** no hard global RSS ceiling, native Bolt TLS, automatic graph
+  history or qualified multi-machine failover. The optional single-pod PVC
+  overlay has only been rendered, not exercised on a real cluster.
+
 ## 2026-11-04: v0.15.0-beta.10 bounded writes and recovery
 
 - **Done:** commit full Python node/edge batches before requesting another

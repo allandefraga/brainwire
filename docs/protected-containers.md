@@ -146,7 +146,7 @@ production-qualification checks described above.
 
 ## Docker Swarm
 
-Use the existing [Swarm retained-volume runbook](container.md) for the required
+Use the existing [Swarm retained-volume runbook](orchestrators.md#docker-swarm) for the required
 owner node/volume. Create secrets separately, then render both files together:
 
 ```sh

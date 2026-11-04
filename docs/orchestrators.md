@@ -16,7 +16,7 @@ templates or provide a runnable replicated cluster.
 ## Docker Compose
 
 Run these commands from the repository root with Docker Engine running. For a
-ready-to-query synthetic ontology, use the [demo quickstart](container.md#fastest-local-start).
+ready-to-query synthetic ontology, use the [demo quickstart](container.md#start-a-local-demo-with-one-command).
 For a protected `default` graph, first create a server policy and health
 credential as described in [service-token setup](bolt-auth.md), then set their
 file paths and start both Compose files:
@@ -55,6 +55,11 @@ For a single authenticated instance, the optional
 allows Bolt traffic from labeled client pods in the same namespace when the
 cluster's CNI enforces NetworkPolicy. Test that enforcement in your cluster.
 The overlay is not encryption, replication, or a multi-pod deployment.
+
+For a new single-instance deployment on a compatible CSI storage class, the
+optional [single-writer overlay](../deploy/kubernetes-single-writer/README.md)
+requests `ReadWriteOncePod`. Verify enforcement in the target cluster. It does
+not migrate existing claims or add replication or high availability.
 
 ### Local laptop quickstart with kind
 
@@ -117,15 +122,28 @@ kubectl kustomize deploy/kubernetes
 
 The base manifest uses `brainwire:local` for local image builds. Create the
 `brainwire-auth` server/health secret described in [protected Kubernetes setup](protected-containers.md).
-For a private GHCR package, also create a namespace-scoped image pull secret with a GitHub token
-that has `read:packages` access. This prompt keeps the token out of shell
-history, command arguments, and repository files:
+First create the namespace and authentication secret:
 
 ```sh
 kubectl create namespace YOUR_TEST_NAMESPACE
 kubectl create secret generic brainwire-auth -n YOUR_TEST_NAMESPACE \
   --from-file=policy.json=/secure/path/policy.json \
   --from-file=health.json=/secure/path/health.json
+```
+
+For the public image, apply the public overlay:
+
+```sh
+kubectl kustomize deploy/kubernetes-public-release
+kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-public-release
+```
+
+For a private GHCR package, create an additional namespace-scoped pull secret
+using a GitHub token with `read:packages` access. Run this interactively; it
+reads credentials from the terminal rather than shell history, command arguments
+or repository files:
+
+```sh
 python3 - YOUR_TEST_NAMESPACE <<'PY'
 import base64
 import getpass
@@ -133,8 +151,16 @@ import json
 import subprocess
 import sys
 
-username = input("GitHub username: ")
+with open("/dev/tty", "r", encoding="utf-8") as tty_in, \
+     open("/dev/tty", "w", encoding="utf-8") as tty_out:
+    tty_out.write("GitHub username: ")
+    tty_out.flush()
+    username = tty_in.readline().strip()
+if not username:
+    raise SystemExit("GitHub username is required")
 token = getpass.getpass("GitHub token (read:packages): ")
+if not token:
+    raise SystemExit("GitHub token is required")
 auth = base64.b64encode(f"{username}:{token}".encode()).decode()
 docker_config = json.dumps({"auths": {"ghcr.io": {"auth": auth}}})
 secret = {
@@ -149,14 +175,11 @@ subprocess.run(
     input=json.dumps(secret), text=True, check=True,
 )
 PY
-kubectl kustomize deploy/kubernetes-public-release
-kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-public-release
-# For a private GHCR package, use the overlay that also references ghcr-pull:
 kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.10`. <!-- brainwire-release-version --> The local
+Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.11`. <!-- brainwire-release-version --> The local
 release helper updates both tags with the Cargo workspace version. The private
 overlay references `ghcr-pull`; logging in on your workstation alone does not
 authenticate cluster nodes. The public overlay needs no image-pull secret. For
@@ -181,7 +204,7 @@ Only `/data` is writable. Startup runs a query-ready probe with a 15-minute
 recovery window. Until startup succeeds, readiness and liveness are deferred.
 Readiness executes `RETURN 1`; liveness only negotiates a Bolt session, avoiding
 storage queries. Tune the window using real recovery measurements. Probes use
-500 ms individual network timeouts and a 5 s outer orchestrator timeout.
+a 500 ms overall deadline and a 5 s outer orchestrator timeout.
 
 The memory limit is 2 GiB, cache 256 MiB, memtables 32 MiB inside that cache,
 and query setting 256 MiB. The query setting is a conservative per-RUN
@@ -232,7 +255,7 @@ described in [protected Swarm setup](protected-containers.md):
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.10 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.11 # brainwire-release-version
 docker secret create brainwire-auth-policy /secure/path/policy.json
 docker secret create brainwire-health-auth /secure/path/health.json
 docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml

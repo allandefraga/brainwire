@@ -71,8 +71,19 @@ to roll back. Test backup and recovery for your deployment.
 
 Pair-only DuckLake edge synchronization refuses keyed types because deleting a
 pair would delete all of its events. Likewise, Python `delete_edges` deletes
-all relationships for each pair; use a key-filtered Cypher `MATCH` and `DELETE`
-to remove a single milestone.
+all relationships for each pair. For an individual milestone, use the Python
+client's complete key:
+
+```python
+endpoints = (("Person", "p-1"), "HAD_EVENT", ("Ticket", "t-1"))
+graph.update_edge(*endpoints, {"summary": "Resolved"}, key={"event_type": "closed"})
+graph.delete_edge(*endpoints, key={"event_type": "closed"})
+```
+
+The key must include exactly all declared key fields. The client checks the
+catalog and the number of matching edges in the same transaction as the change;
+each operation uses up to three queries and is intended for individual edits. Key
+fields cannot be changed. These operations do not preserve prior revisions.
 
 ## What the engine versions today
 

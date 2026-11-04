@@ -190,6 +190,10 @@ contract](cypher-regex.md) for flags, memory, errors and performance limits.
 
 **Aggregates.** `count`, `sum`, `avg`, `min`, `max`, `collect`, `stdev`,
 `stdevp`, `percentileCont`, `percentileDisc`, with `DISTINCT` and grouping.
+`percentileDisc` retains the selected numeric input, including large integers;
+its retained values count against the query budget, so large aggregates may be
+refused. With `DISTINCT`, numerically equal integer and float inputs share a key
+and the first representative is kept.
 
 **Procedures.** `db.labels`, `db.relationshipTypes`, `db.propertyKeys`,
 `dbms.components`, `db.schema`, `db.indexes`, `db.commitState`,

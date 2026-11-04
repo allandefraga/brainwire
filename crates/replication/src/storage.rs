@@ -107,6 +107,9 @@ impl Storage {
             if previous_leader.is_some_and(|leader| e.log_id.leader_id < leader) {
                 return Err(error("retained log leader regressed"));
             }
+            if let EntryPayload::Normal(command) = &e.payload {
+                command.validate().map_err(error)?;
+            }
             previous_leader = Some(e.log_id.leader_id);
             previous = Some(e.log_id.index);
             bytes = bytes
@@ -286,6 +289,9 @@ impl Storage {
             }
         }
         for entry in entries {
+            if let EntryPayload::Normal(command) = &entry.payload {
+                command.validate().map_err(error)?;
+            }
             let k = key(entry.log_id.index);
             let v = serde_json::to_vec(&entry).map_err(error)?;
             if v.len() > crate::types::MAX_ENTRY_BYTES {

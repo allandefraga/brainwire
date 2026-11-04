@@ -46,6 +46,9 @@ fit the sampled headroom. RUN admission also samples RSS on demand and uses
 the higher of that sample and the latest periodic sample. If the on-demand
 sample fails, the previous sample remains in use. This adds up to two OS RSS
 reads per RUN; it does not check every allocation or eliminate sampling races.
+When RSS falls after a spike, periodic sampling can restore headroom even if
+new RUNs arrive during sampling. A higher concurrent RUN observation is retained
+for that sampling window.
 See [the design](design/process-memory-ceiling.md).
 
 The component budgets are accounting budgets. Sampling, admission and
@@ -170,6 +173,10 @@ a process-wide RSS ceiling.
 `replace()` accounts for the actual UTF-8 output size before constructing it;
 an absent pattern no longer reserves a hypothetical expanded string. A large
 real expansion can still be refused. Timeout checks remain cooperative.
+`split()` also accounts for each output segment before allocating its result;
+it scans the input twice and may refuse large output under the query budget.
+`size()`, `isEmpty()` and `exists()` inspect already-evaluated arguments
+without an additional deep copy. Argument evaluation itself can still copy data.
 
 A fresh RUN RSS reading that exceeds the current sample also reduces the
 shared reservation headroom until a later sampler reading confirms relief. A
@@ -189,6 +196,8 @@ records a repeat of this synthetic smoke on a locally built image; it does not
 establish sustained-load behavior or explain the earlier failure.
 The [beta.9 candidate receipt](benchmarks/2026-11-04-cgroup-015b9.json) records
 another passing run with the same scope and limitations.
+The [beta.11 candidate summary](benchmarks/2026-11-04-cgroup-015b11.json)
+records a fresh synthetic pressure rejection, rollback and recovery.
 In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
 the median process RSS rose by about 53 MiB between the first and last
 five-minute windows. This observation needs investigation; it does not prove
