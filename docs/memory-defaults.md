@@ -160,10 +160,12 @@ and checking the cgroup limit.
 
 ## Admission under Linux cgroup pressure
 
-Cypher list quantifiers account for temporary copies before evaluating each
-item and check deadlines during iteration. Temporary accounting resets per item;
-the shared reservation can remain at its high-water mark until the query or
-transaction finishes. This is not a process-wide RSS ceiling.
+Cypher list quantifiers, comprehensions and `reduce` account for temporary
+binding copies before evaluating each item. Temporary accounting resets per
+iteration while retained results remain charged; the shared reservation can
+remain at its high-water mark until the query or transaction finishes.
+Quantifiers also check deadlines during iteration. These measures do not create
+a process-wide RSS ceiling.
 
 A fresh RUN RSS reading that exceeds the current sample also reduces the
 shared reservation headroom until a later sampler reading confirms relief. A
@@ -181,6 +183,12 @@ Linux arm64. It identifies the local image, not the published image digest.
 The [v0.15.0-beta.5 local candidate receipt](benchmarks/2026-11-04-cgroup-015b5.json)
 records a repeat of this synthetic smoke on a locally built image; it does not
 establish sustained-load behavior or explain the earlier failure.
+The [beta.9 candidate receipt](benchmarks/2026-11-04-cgroup-015b9.json) records
+another passing run with the same scope and limitations.
+In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
+the median process RSS rose by about 53 MiB between the first and last
+five-minute windows. This observation needs investigation; it does not prove
+a leak or qualify sustained production memory use.
 
 Decision logs include the selected cgroup's raw usage, inactive file cache,
 effective working-set estimate and limit when the cgroup check refuses a RUN. If any examined cgroup has raw usage

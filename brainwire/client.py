@@ -310,8 +310,9 @@ class GraphClient:
 
         Requires an instance-admin principal and ``server.checkpoint_dir`` on
         the server. ``name`` is a plain directory name, never a path. The
-        receipt adds the graph and its ontology version, which only changes
-        offline on a standalone server. The copy stays on the server's storage;
+        receipt adds the graph and a separately sampled ontology version. An
+        online catalog change can make that version older than the checkpoint.
+        The copy stays on the server's storage;
         use ``checkpoint_backup.py copy`` to move it to independent storage.
         """
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_\-][A-Za-z0-9_.\-]{0,127}", name):

@@ -265,6 +265,88 @@ async fn durable_vote_log_committed_membership_dedupe_and_conflicting_retry() {
     assert!(logs.truncate(conflict.log_id).await.is_err());
 }
 #[tokio::test]
+async fn invalid_apply_batch_has_no_graph_effects_and_valid_log_replays_after_reopen() {
+    for corruption in [
+        "origin",
+        "gap",
+        "duplicate",
+        "leader",
+        "leader-id",
+        "command",
+    ] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        let retained = vec![entry(0, command("first")), entry(1, command("second"))];
+        store
+            .log_store()
+            .blocking_append(retained.clone())
+            .await
+            .unwrap();
+        let mut invalid = retained.clone();
+        match corruption {
+            "origin" => invalid = vec![retained[1].clone()],
+            "gap" => invalid[1].log_id.index = 2,
+            "duplicate" => invalid[1].log_id.index = 0,
+            "leader" => invalid[1].log_id.leader_id = openraft::CommittedLeaderId::new(0, 1),
+            "leader-id" => invalid[1].log_id.leader_id = openraft::CommittedLeaderId::new(1, 0),
+            "command" => {
+                invalid[1].payload = EntryPayload::Normal(command(""));
+            }
+            _ => unreachable!(),
+        }
+        let mut sm = store.state_machine();
+        assert!(sm.apply(invalid).await.is_err(), "{corruption}");
+        assert_eq!(app.calls.load(Ordering::SeqCst), 0, "{corruption}");
+        assert_eq!(store.last_applied().unwrap(), None);
+        assert_eq!(store.lookup("first").unwrap(), None);
+        // An invalid batch still stops this runtime, but leaves durable replay intact.
+        assert!(sm.apply(retained.clone()).await.is_err());
+        drop(sm);
+        drop(store);
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        assert_eq!(
+            store.state_machine().apply(retained).await.unwrap().len(),
+            2
+        );
+        assert_eq!(app.calls.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[tokio::test]
+async fn apply_preflight_checks_the_previously_applied_boundary() {
+    for corruption in ["duplicate", "gap", "leader", "leader-id"] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        let first = entry(0, command("first"));
+        let second = entry(1, command("second"));
+        store
+            .log_store()
+            .blocking_append([first.clone(), second.clone()])
+            .await
+            .unwrap();
+        store.state_machine().apply([first.clone()]).await.unwrap();
+        let mut invalid = second.clone();
+        match corruption {
+            "duplicate" => invalid.log_id.index = 0,
+            "gap" => invalid.log_id.index = 2,
+            "leader" => invalid.log_id.leader_id = openraft::CommittedLeaderId::new(0, 1),
+            "leader-id" => invalid.log_id.leader_id = openraft::CommittedLeaderId::new(1, 0),
+            _ => unreachable!(),
+        }
+        assert!(store.state_machine().apply([invalid]).await.is_err());
+        assert_eq!(app.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(store.last_applied().unwrap(), Some(first.log_id));
+        assert_eq!(store.lookup("second").unwrap(), None);
+        drop(store);
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        store.state_machine().apply([second]).await.unwrap();
+        assert_eq!(app.calls.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[tokio::test]
 async fn crash_window_replay_uses_application_ledger_and_fatal_runtime_stops() {
     let dir = TempDir::new().unwrap();
     let app = Arc::new(App::default());

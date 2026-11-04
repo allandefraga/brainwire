@@ -11,12 +11,14 @@ recovery changes. Treat those as candidates until the integrated source,
 binary, container and acceptance checks all pass. Record the exact commit and
 image digest for any result used to approve deployment.
 
-## First target: an observable, recoverable single-node service
+## Priorities for an application pilot
 
-The first production target is one protected instance with an independent
-persistent volume, explicit resource limits and a tested restoration procedure.
-Declare supported workloads and operational limits before increasing deployment
-scope. Use a rebuildable graph in shadow mode while the gates below remain open.
+Work on a recoverable protected instance and distributed failure testing in
+parallel. A pilot needs a persistent volume, bounded batches, application query
+and ingestion tests, an encrypted network boundary, and a tested restore. Use a
+rebuildable graph in shadow mode while these gates remain open. A pilot on one
+instance does not establish high availability; the quorum path needs independent
+volumes, protected peers and the failure tests described below.
 
 | Priority | Work | Acceptance evidence |
 | --- | --- | --- |
@@ -24,9 +26,11 @@ scope. Use a rebuildable graph in shadow mode while the gates below remain open.
 | P0 | Profile remaining process memory | Account separately for encoded/decoded input, query reservations, results waiting for a slow client, RocksDB cache/memtables/table metadata/compaction, allocator retention and OS page cache. Explain residual memory rather than equating a configured budget with RSS. |
 | P0 | Qualify mixed load under container limits | Complete the specified four-label load and at least 30 minutes of varied concurrent reads/writes in separate 2, 4 and 8 GiB runs. Record peak process RSS and cgroup memory, kernel evidence, restart count, useful throughput, denials and timeouts. Verify exact counts/properties/ACL results and offline `db check` afterward. |
 | P0 | Establish predictable overload behavior | A large request or query is bounded or rejected before exhausting process memory; other sessions remain usable. A slow reader cannot release accounting while still retaining results. Test recovery of useful throughput after pressure ends, not merely absence of a crash. |
-| P1 | Confirm atomic recovery and backup restoration | Preserve all acknowledged batches after process kill and retained-volume restart. For COMMIT sent without a consumed acknowledgment, reconcile complete committed or absent state, including edges and indexes. Restore a verified checkpoint into a fresh volume and compare exact logical data and ACLs. |
-| P1 | Protect the actual network path | Enforce authenticated least-privilege access and a verified encrypted boundary. Reject plaintext where TLS is required. Test invalid/expired/wrong-host certificates and rotation. No credential, query parameter or token appears in logs or diagnostic artifacts. |
-| P1 | Make authorization and compatibility measurable | Run ACL allow/deny matrices across point lookup, scans, indexes, traversals, algorithms, aggregates and result metadata. Publish a Cypher feature matrix and a fixed differential corpus whose results match or return an explicit supported error. |
+| P0 | Confirm atomic recovery and backup restoration | Preserve all acknowledged batches after process kill and retained-volume restart. For COMMIT sent without a consumed acknowledgment, reconcile complete committed or absent state, including edges and indexes. Restore a verified checkpoint into a fresh volume and compare exact logical data and ACLs. |
+| P0 | Test distributed recovery in parallel | Exercise the experimental three-voter path with independent storage, leader loss, partitions and retained-volume restart. Do not route writes to arbitrary pods or claim multi-machine HA until those paths are qualified. |
+| P0 | Protect the actual network path | Enforce authenticated least-privilege access and a verified encrypted boundary. Reject plaintext where TLS is required. Test invalid/expired/wrong-host certificates and rotation. No credential, query parameter or token appears in logs or diagnostic artifacts. |
+| P0 | Qualify the application's source and queries | Test stable node and relationship identity, bounded writes, updates, deletes, replay and unknown-commit reconciliation against the real source contract. Compare the application's supported queries and permissions with expected results. |
+| P0 | Make authorization and compatibility measurable | Run ACL allow/deny matrices across point lookup, scans, indexes, traversals, algorithms, aggregates and result metadata. Publish a Cypher feature matrix and a fixed differential corpus whose results match or return an explicit supported error. |
 | P1 | Expose actionable operational state | Provide liveness separately from readiness and pressure state. Export connection counts, request/query latency, memory reservations/denials, compaction, disk usage, errors and per-graph status. Verify alerts by injecting the condition, including low disk and sustained memory pressure. |
 
 Managed byte admission is one mechanism within the memory work. It does not by
@@ -107,7 +111,7 @@ and source query/egress cost. Benchmark freshness, source load and tail latency
 against a maintained local graph. Reusing external tables is an architectural
 option, not a free connector feature.
 
-## Only then widen the failure domain
+## Distributed operation and wider failure domains
 
 The standard Docker, Kubernetes and Swarm manifests run a single instance.
 Additional pods are not independent database replicas. The

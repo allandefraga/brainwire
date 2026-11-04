@@ -1,0 +1,145 @@
+{
+  "result": "PASS",
+  "image_id": "sha256:3a61edf070dd63cbe690af40fae3921e86a130b395a40963c46640c324868e0f",
+  "version": "brainwire 0.15.0-beta.9",
+  "architecture": "arm64",
+  "node_target": 100000,
+  "batch_size": 250,
+  "memory_limit_bytes": 2147483648,
+  "safety_stop_fraction": 0.85,
+  "memory_samples": [
+    {
+      "stage": "ready",
+      "cgroup_current_bytes": 148631552,
+      "elapsed_s": 8.77
+    },
+    {
+      "stage": "5000",
+      "cgroup_current_bytes": 167399424,
+      "elapsed_s": 8.95
+    },
+    {
+      "stage": "10000",
+      "cgroup_current_bytes": 167546880,
+      "elapsed_s": 9.12
+    },
+    {
+      "stage": "15000",
+      "cgroup_current_bytes": 167768064,
+      "elapsed_s": 9.3
+    },
+    {
+      "stage": "20000",
+      "cgroup_current_bytes": 179871744,
+      "elapsed_s": 9.46
+    },
+    {
+      "stage": "25000",
+      "cgroup_current_bytes": 183242752,
+      "elapsed_s": 9.64
+    },
+    {
+      "stage": "30000",
+      "cgroup_current_bytes": 184573952,
+      "elapsed_s": 9.8
+    },
+    {
+      "stage": "35000",
+      "cgroup_current_bytes": 185057280,
+      "elapsed_s": 9.97
+    },
+    {
+      "stage": "40000",
+      "cgroup_current_bytes": 188723200,
+      "elapsed_s": 10.11
+    },
+    {
+      "stage": "45000",
+      "cgroup_current_bytes": 190586880,
+      "elapsed_s": 10.28
+    },
+    {
+      "stage": "50000",
+      "cgroup_current_bytes": 189714432,
+      "elapsed_s": 10.47
+    },
+    {
+      "stage": "55000",
+      "cgroup_current_bytes": 199471104,
+      "elapsed_s": 10.67
+    },
+    {
+      "stage": "60000",
+      "cgroup_current_bytes": 199581696,
+      "elapsed_s": 10.93
+    },
+    {
+      "stage": "65000",
+      "cgroup_current_bytes": 205692928,
+      "elapsed_s": 11.08
+    },
+    {
+      "stage": "70000",
+      "cgroup_current_bytes": 208719872,
+      "elapsed_s": 11.22
+    },
+    {
+      "stage": "75000",
+      "cgroup_current_bytes": 211378176,
+      "elapsed_s": 11.35
+    },
+    {
+      "stage": "80000",
+      "cgroup_current_bytes": 217264128,
+      "elapsed_s": 11.49
+    },
+    {
+      "stage": "85000",
+      "cgroup_current_bytes": 218181632,
+      "elapsed_s": 11.63
+    },
+    {
+      "stage": "90000",
+      "cgroup_current_bytes": 230694912,
+      "elapsed_s": 11.81
+    },
+    {
+      "stage": "95000",
+      "cgroup_current_bytes": 231141376,
+      "elapsed_s": 11.95
+    },
+    {
+      "stage": "100000",
+      "cgroup_current_bytes": 232292352,
+      "elapsed_s": 12.1
+    },
+    {
+      "stage": "loaded",
+      "cgroup_current_bytes": 242491392,
+      "elapsed_s": 12.16
+    },
+    {
+      "stage": "restarted",
+      "cgroup_current_bytes": 223506432,
+      "elapsed_s": 13.78
+    }
+  ],
+  "inserted_nodes": 100000,
+  "load_seconds": 3.338,
+  "count_before_restart": 100000,
+  "count_after_restart": 100000,
+  "restart_persistence": "PASS",
+  "oom_killed": false,
+  "memory_events_before_restart": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+  "memory_events_after_restart": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+  "owned_resources_removed": true,
+  "scope": "Short single-container synthetic node load and graceful retained-volume restart, on a shared host",
+  "limitations": [
+    "No edges, ACL, complex payloads or representative source data",
+    "Not a sustained-load, global RSS or multi-machine test",
+    "Kernel log not independently checked",
+    "Local image built before commit; not the published image digest",
+    "This receipt summarizes a private ad hoc runner; it is not a published reproducible benchmark script."
+  ],
+  "method": "Demo ontology; 400 UNWIND MERGE batches of 250 Customer nodes with stable IDs, names, emails and segments; read count and last record, restart the same volume, then repeat reads."
+}

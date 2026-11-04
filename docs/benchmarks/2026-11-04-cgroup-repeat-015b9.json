@@ -1,0 +1,129 @@
+{
+  "result": "PASS",
+  "image_id": "sha256:3a61edf070dd63cbe690af40fae3921e86a130b395a40963c46640c324868e0f",
+  "memory_limit_bytes": 536870912,
+  "scope": "synthetic single-container Linux cgroup-v2 RUN admission",
+  "limitations": [
+    "not a global RSS ceiling",
+    "not sustained 2/4/8 GiB qualification",
+    "not power-loss or distributed failover",
+    "raw usage includes tmpfs and file cache",
+    "kernel logs not independently verified"
+  ],
+  "rejected_transaction_run": {
+    "before": {
+      "memory.max": 536870912,
+      "memory.peak": 516653056,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 511873024,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 511586304,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "after": {
+      "memory.current": 514166784,
+      "memory.max": 536870912,
+      "memory.peak": 516661248,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 513880064,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+    "scope": "point-in-time samples; no continuous usage guarantee",
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "rejected_new_run": {
+    "before": {
+      "memory.max": 536870912,
+      "memory.peak": 517734400,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.current": 518311936,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 518025216,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "after": {
+      "memory.current": 516870144,
+      "memory.max": 536870912,
+      "memory.peak": 519135232,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.swap.max": 0,
+      "memory.stat.inactive_file": 286720,
+      "diagnostic_working_set": {
+        "bytes": 516583424,
+        "unit": "bytes",
+        "source": "/sys/fs/cgroup/memory.current minus memory.stat inactive_file, clamped at zero",
+        "scope": "separate point-in-time readings; admission-test estimate, not an atomic runtime sample"
+      }
+    },
+    "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+    "scope": "point-in-time samples; no continuous usage guarantee",
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "recovered_counts": {
+    "acknowledged": 1,
+    "pending-before-pressure": 0,
+    "rejected-under-pressure": 0
+  },
+  "offline_audit": {
+    "database": "demo",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "owned_resources_cleaned": true,
+  "note": "Summary of a second synthetic run on a local candidate; full event log retained locally."
+}

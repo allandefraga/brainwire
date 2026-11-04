@@ -29,6 +29,36 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.9 application pilot
+
+- **Done:** account for temporary Cypher list-comprehension and reduce bindings;
+  validate replicated apply batches before graph effects; protect checkpoint
+  staging from competing copies; add an optional authenticated single-instance
+  Kubernetes ingress policy and an application pilot checklist.
+- **Evidence:** 1,030 Rust tests passed (3 ignored), Clippy and formatting
+  passed, 199 Python and 101 script tests passed. Local three-voter fault
+  acceptance passed 21 checks. The candidate passed two 512 MiB synthetic pressure
+  test, an isolated application-writer parity scenario, and a keyed-edge
+  SIGKILL/restart. These are not multi-machine or production qualifications.
+- **More recovery:** a brief 100,000-node load retained its count after a
+  restart. Uncommitted indexed overwrites were interrupted in a separate
+  container; confirmed data and the offline index audit survived each restart.
+- **Quorum write diagnostic:** three local voters verified 300,000 synthetic
+  rows after SIGKILL/restart, with matching offline audits. This shared-host,
+  debug-binary run does not explain the earlier leader-election failure or
+  qualify multi-machine behavior.
+- **Small read soak:** four concurrent readers with delegated visibility ran for
+  30 minutes after a 4,000-node load in a 2 GiB container; counts and offline
+  integrity passed. Median sampled RSS rose about 53 MiB between the first and
+  last five-minute windows. Investigate the increase; do not label it a leak or
+  treat this small read-only soak as full memory qualification.
+- **Next step:** qualify representative ingestion and permissions, restore a
+  verified backup, and exercise independent volumes, protected peers, leader
+  routing and machine loss. Implement safe snapshot and log-compaction support.
+- **Blockers:** no hard process RSS ceiling, native Bolt TLS, or qualified
+  multi-machine failover; Kubernetes NetworkPolicy enforcement was not tested
+  in a live cluster.
+
 ## 2026-11-04: v0.15.0-beta.8 query admission and recovery
 
 - **Done:** Account for temporary Cypher quantifier copies, validate persisted

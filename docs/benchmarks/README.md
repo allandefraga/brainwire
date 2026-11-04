@@ -14,6 +14,26 @@ successful capacity benchmark.
 
 ## Recent pressure-admission smoke
 
+The [beta.9 candidate receipt](2026-11-04-cgroup-015b9.json) records a
+512 MiB single-container pressure injection, rejection and recovery. It is a
+short synthetic diagnostic, not a sustained capacity or failover test.
+An independent [repeat summary](2026-11-04-cgroup-repeat-015b9.json) also
+passed on the same candidate; its complete event log remains local.
+
+The [beta.9 small read soak](2026-11-04-soak-015b9.json) loaded 1,000 rows per
+label in a 2 GiB container, then ran four readers for 30 minutes with delegated
+ACL visibility. Exact counts and the offline integrity check passed. Median
+sampled process RSS increased from about 238 MiB in the first five-minute
+window to 291 MiB in the last. That change needs investigation; it does not
+by itself identify a leak: intermediate windows were lower and the increase
+was not steady. Writes stopped before the soak, the data was small,
+and host kernel logs were unavailable. This does not qualify the full 2 GiB
+workload or the separate 4/8 GiB targets.
+
+A separate [100,000-node load and restart](2026-11-04-load100k-015b9.json)
+passed against the same local candidate. It is a brief single-container test
+without edges, ACL or representative source payloads.
+
 A [v0.13 local diagnostic](2026-10-30-v013-memory.md) repeats the pressure
 smoke and records a small idle-RSS experiment. Its limits are explicit.
 
@@ -23,6 +43,17 @@ RSS ceiling or sustained 2/4/8 GiB qualification. The first inconclusive
 attempt and the repeated run are both recorded.
 
 ## Recent work
+
+The [beta.9 quorum acceptance summary](2026-11-04-quorum-015b9.json) records
+21 passing scenarios using three local processes. It covers partitions,
+retained-state recovery and unknown-commit reconciliation; it does not qualify
+TLS, snapshots or machine loss.
+
+The [beta.9 quorum write summary](2026-11-04-quorum-write-015b9.json) records
+300,000 verified rows after restarting three local voters. This one-client
+diagnostic used a debug binary on a shared host; its throughput does not
+represent a production deployment, and the previous leader-election failure
+remains unexplained. Per-transaction samples were omitted from this summary.
 
 | Report | What was measured | What remains open |
 | --- | --- | --- |

@@ -291,6 +291,11 @@ or be cleared after a commit; invalid updates are rejected before persistence.
 Persisted votes likewise cannot regress under the configured OpenRaft vote
 ordering; repeated votes remain valid. This protects new writes and does not
 repair an already damaged vote.
+Before applying a batch to the graph, a voter also validates every entry's
+sequence, leader order and command shape. A malformed later entry therefore
+does not apply an earlier entry in that batch. An application or I/O failure
+after validation can still interrupt application; recovery and the durable
+request ledger remain necessary. This is not batch-wide transactional atomicity.
 Snapshots and log purging are not implemented; these checks do not establish
 multi-machine failover readiness or repair an already corrupt log.
 

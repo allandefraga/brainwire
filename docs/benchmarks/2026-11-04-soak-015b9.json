@@ -1,0 +1,184 @@
+{
+  "status": "passed-diagnostic",
+  "scope": "small synthetic 2 GiB container: four-label initial load with concurrent readers, then 30-minute read soak with ACL",
+  "limitations": [
+    "1,000 rows per label; not the production-size qualification dataset",
+    "writes stop before the read soak; not a 30-minute mixed write workload",
+    "shared Docker Desktop host; no production performance claim",
+    "sampled RSS and cgroup accounting are different from a hard process ceiling",
+    "host kernel log was not independently verified",
+    "not a multi-machine or power-loss test",
+    "local image built before commit; image identity is not a published digest"
+  ],
+  "source_version": "0.15.0-beta.9",
+  "image_identity": {
+    "image_id": "sha256:3a61edf070dd63cbe690af40fae3921e86a130b395a40963c46640c324868e0f",
+    "repo_digests": [
+      "brainwire-pilot9@sha256:3a61edf070dd63cbe690af40fae3921e86a130b395a40963c46640c324868e0f"
+    ],
+    "revision_label": null,
+    "source_provenance_verified": false
+  },
+  "memory_limit_bytes": 2147483648,
+  "rows_per_label": 1000,
+  "writers_during_load": 2,
+  "readers": [
+    "scan",
+    "aggregation",
+    "neighborhood",
+    "cursor"
+  ],
+  "driver": "5.28.8",
+  "load_seconds": 5.066624624989345,
+  "read_soak_seconds": 1800.002264834009,
+  "counts": {
+    "Usuario": 1000,
+    "Carro": 1000,
+    "Endereco": 1000,
+    "Casa": 1000,
+    "TEM_CARRO": 1000,
+    "TEM_ENDERECO": 1000,
+    "TEM_CASA": 1000,
+    "CASA_FICA_EM": 1000
+  },
+  "cursor": {
+    "rows": 1000,
+    "page_size": 200,
+    "seconds": 0.03233541699592024,
+    "delegated": true
+  },
+  "memory_by_phase": {
+    "setup": {
+      "samples": 1,
+      "current_peak_bytes": 150167552,
+      "rss_peak_bytes": 156094464,
+      "last_current_bytes": 150167552,
+      "last_rss_bytes": 156094464,
+      "last_anon_bytes": 139739136
+    },
+    "mixed-load": {
+      "samples": 1,
+      "current_peak_bytes": 233521152,
+      "rss_peak_bytes": 236527616,
+      "last_current_bytes": 233521152,
+      "last_rss_bytes": 236527616,
+      "last_anon_bytes": 220041216
+    },
+    "read-soak": {
+      "samples": 355,
+      "current_peak_bytes": 370667520,
+      "rss_peak_bytes": 317689856,
+      "last_current_bytes": 366006272,
+      "last_rss_bytes": 304123904,
+      "last_anon_bytes": 287244288
+    },
+    "post-load-idle": {
+      "samples": 3,
+      "current_peak_bytes": 369029120,
+      "rss_peak_bytes": 304537600,
+      "last_current_bytes": 357580800,
+      "last_rss_bytes": 296648704,
+      "last_anon_bytes": 279769088
+    }
+  },
+  "read_soak_windows": {
+    "approximate_window_seconds": 300,
+    "first_median_process_rss_bytes": 249804800,
+    "last_median_process_rss_bytes": 304898048,
+    "first_median_cgroup_current_bytes": 281196544,
+    "last_median_cgroup_current_bytes": 365496320,
+    "successive_median_process_rss_bytes": [
+      249804800,
+      230586368,
+      229353472,
+      229521408,
+      297267200,
+      304766976
+    ],
+    "note": "Five-second samples; change is descriptive and does not by itself identify a leak or prove stability."
+  },
+  "oom_evidence": {
+    "observed": false,
+    "cgroup_oom": false,
+    "docker_oom_event": false,
+    "docker_oom_killed": false,
+    "restart_count": 0,
+    "kernel_log_verified": false
+  },
+  "integrity": {
+    "database": "bench",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "client_results": [
+    {
+      "role": "scan",
+      "latency": {
+        "requests": 3334,
+        "p50_ms": 33.57,
+        "p95_ms": 67.379,
+        "p99_ms": 122.711
+      },
+      "denials": {},
+      "rows": 3333000
+    },
+    {
+      "role": "aggregation",
+      "latency": {
+        "requests": 3450,
+        "p50_ms": 16.198,
+        "p95_ms": 37.155,
+        "p99_ms": 86.467
+      },
+      "denials": {},
+      "rows": 13796
+    },
+    {
+      "role": "neighborhood",
+      "latency": {
+        "requests": 3167,
+        "p50_ms": 60.892,
+        "p95_ms": 105.579,
+        "p99_ms": 203.86
+      },
+      "denials": {},
+      "rows": 3166000
+    },
+    {
+      "role": "cursor",
+      "latency": {
+        "requests": 3505,
+        "p50_ms": 9.922,
+        "p95_ms": 23.25,
+        "p99_ms": 62.892
+      },
+      "denials": {},
+      "rows": 584000
+    },
+    {
+      "role": "writer",
+      "index": 0,
+      "ack_rows_per_label": 500,
+      "latency": {
+        "requests": 5,
+        "p50_ms": 28.559,
+        "p95_ms": 50.368,
+        "p99_ms": 50.368
+      },
+      "denials": {}
+    },
+    {
+      "role": "writer",
+      "index": 1,
+      "ack_rows_per_label": 500,
+      "latency": {
+        "requests": 5,
+        "p50_ms": 30.198,
+        "p95_ms": 54.652,
+        "p99_ms": 54.652
+      },
+      "denials": {}
+    }
+  ],
+  "command": "python scripts/bench_v09_container.py --image <candidate> --memory-gib 2 --rows 1000 --batch-size 100 --writers 2 --neighborhood-rows 1000 --soak-seconds 1800 --idle-seconds 10 --sample-seconds 5 --reader-pause 0.5 --stamp-acl --output <new-directory>"
+}

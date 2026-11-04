@@ -127,6 +127,16 @@ fn with_var(
         .vars
         .slot(name)
         .ok_or_else(|| semantic(format!("unknown variable {name}")))?;
+    // Admit the deep copy and any slot-vector growth before allocating either.
+    ctx.budget.row(row)?;
+    if slot >= row.len() {
+        ctx.budget.charge(
+            slot.saturating_add(1)
+                .max(row.len().saturating_mul(2))
+                .max(4)
+                .saturating_mul(std::mem::size_of::<Val>()),
+        )?;
+    }
     let mut next = row.to_vec();
     if next.len() <= slot {
         next.resize(slot + 1, Val::Null);
@@ -286,6 +296,9 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             filter,
             map,
         } => {
+            // Input and accumulated output are live during construction. Replace
+            // those credits with the completed value's generic charge below.
+            let _scope = ctx.budget.scope();
             let items = match eval(list, row, ctx)? {
                 Val::Null => return Ok(Val::Null),
                 Val::List(items) => items,
@@ -293,16 +306,28 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             };
             let mut out = Vec::new();
             for item in items {
-                let scoped = with_var(row, var, item.clone(), ctx)?;
-                if let Some(filter) = filter {
-                    if !predicate(filter, &scoped, ctx)? {
-                        continue;
+                let mapped = {
+                    let _scope = ctx.budget.scope();
+                    ctx.budget.charge(item.bytes())?;
+                    let scoped = with_var(row, var, item.clone(), ctx)?;
+                    if let Some(filter) = filter {
+                        if !predicate(filter, &scoped, ctx)? {
+                            continue;
+                        }
                     }
-                }
-                out.push(match map {
-                    Some(map) => eval(map, &scoped, ctx)?,
-                    None => item,
-                });
+                    match map {
+                        Some(map) => eval(map, &scoped, ctx)?,
+                        None => item,
+                    }
+                };
+                // The selected value survives the binding scope. Keep its credit
+                // and allow for Vec slack/reallocation before appending it.
+                ctx.budget.charge(
+                    mapped
+                        .bytes()
+                        .saturating_add(3 * std::mem::size_of::<Val>()),
+                )?;
+                out.push(mapped);
             }
             Val::List(out)
         }
@@ -321,20 +346,6 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
             for item in &items {
                 let _scope = ctx.budget.scope();
                 ctx.budget.tick()?;
-                // Admit the temporary slot row and binding before deep-cloning them.
-                ctx.budget.row(row)?;
-                let slot = ctx
-                    .vars
-                    .slot(var)
-                    .ok_or_else(|| semantic(format!("unknown variable {var}")))?;
-                // with_var can resize its copied row to introduce the local slot.
-                if slot >= row.len() {
-                    ctx.budget.charge(
-                        slot.saturating_add(1)
-                            .max(row.len().saturating_mul(2))
-                            .saturating_mul(std::mem::size_of::<Val>()),
-                    )?;
-                }
                 ctx.budget.charge(item.bytes())?;
                 let scoped = with_var(row, var, item.clone(), ctx)?;
                 match boolean(eval(test, &scoped, ctx)?)? {
@@ -368,6 +379,10 @@ pub(super) fn eval(expr: &Expr, row: &[Val], ctx: &Context<'_, '_>) -> Result<Va
                 other => return Err(type_error("reduce", &other)),
             };
             for item in items {
+                let _scope = ctx.budget.scope();
+                // The previous accumulator survives the preceding iteration's
+                // scope; account for it while producing its replacement.
+                ctx.budget.charge(value.bytes())?;
                 let scoped = with_var(row, acc, value, ctx)?;
                 let scoped = with_var(&scoped, var, item, ctx)?;
                 value = eval(expr, &scoped, ctx)?;

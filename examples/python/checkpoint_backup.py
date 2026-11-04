@@ -54,10 +54,15 @@ def copy_checkpoint(source, destination, receipt):
         raise ValueError(f"{source} is not a checkpoint directory")
     files = list(_files(source))
     partial = destination.with_name(destination.name + ".partial")
-    if destination.exists() or partial.exists():
+    if (destination.exists() or destination.is_symlink()
+            or partial.exists() or partial.is_symlink()):
         raise FileExistsError(f"{destination} or {partial} already exists")
+    # Only the invocation that created the staging directory may remove it.
+    partial.mkdir()
     try:
-        partial.mkdir()
+        # Another invocation may have published after the initial check.
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(f"{destination} already exists")
         entries = []
         for path in files:
             relative = path.relative_to(source)
@@ -74,10 +79,11 @@ def copy_checkpoint(source, destination, receipt):
         for directory in sorted({p.parent for p in partial.rglob("*")}, reverse=True):
             _fsync(directory)
         partial.rename(destination)
-        _fsync(destination.parent)
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
         raise
+    # The staging name can be reused by another copy after rename.
+    _fsync(destination.parent)
     return manifest
 
 

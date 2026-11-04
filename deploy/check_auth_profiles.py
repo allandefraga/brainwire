@@ -124,10 +124,28 @@ def check():
         assert stanza in protected, stanza
     assert protected.count("kind: PodDisruptionBudget") == 1
     assert "imagePullSecrets" not in protected
+    isolated = " ".join(run(["kubectl", "kustomize", "deploy/kubernetes-network-isolated"], env).split())
+    network_policy = (
+        "apiVersion: networking.k8s.io/v1 kind: NetworkPolicy metadata: name: brainwire-client-access "
+        "spec: ingress: - from: - podSelector: matchLabels: brainwire-client: \"true\" "
+        "ports: - port: 7687 protocol: TCP podSelector: matchLabels: app: brainwire policyTypes: - Ingress"
+    )
+    assert network_policy in isolated, "network policy must only admit labeled same-namespace Bolt clients"
+    assert isolated.count("kind: NetworkPolicy") == 1
+    assert "namespaceSelector" not in isolated and "ipBlock" not in isolated
+    for stanza in (
+        "replicas: 1", "kind: PodDisruptionBudget",
+        "persistentVolumeClaimRetentionPolicy: whenDeleted: Retain whenScaled: Retain",
+        f"image: ghcr.io/allandefraga/brainwire:v{version}",
+        f"name: BRAINWIRE_SERVER_AUTH_FILE value: {POLICY}",
+    ):
+        assert stanza in isolated, stanza
+    assert "imagePullSecrets" not in isolated
     checked.extend(["Kubernetes required read-only Secret projection, fsGroup, probes and retained single replica",
                     "Development Compose and Kubernetes base profiles remain without auth mounts",
                     "Versioned private/public Kubernetes overlays combine auth with appropriate GHCR pull behavior",
-                    "Optional disruption budget protects the single authenticated persistent instance from voluntary eviction"])
+                    "Optional disruption budget protects the single authenticated persistent instance from voluntary eviction",
+                    "Optional ingress policy only admits labeled same-namespace Bolt clients and retains auth, PVC and disruption budget"])
     return {"mode": "local-render-only", "checks": checked}
 
 

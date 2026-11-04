@@ -108,6 +108,13 @@ files; it exits 1 on any problem. The manifest file
 (`brainwire-manifest.json`) is not part of the store: remove it, or copy the
 directory without it, when restoring into `server.data_dir`.
 
+Concurrent copies to the same destination do not remove one another's staging
+directory. A failure while syncing the destination's parent after rename can
+still leave a completed directory whose durability is uncertain; inspect and
+verify it before deciding how to retry. Only one operator should own a backup
+destination, and the filesystem must provide the expected rename and fsync
+semantics.
+
 The ontology version is read in the same session just before the checkpoint.
 An online catalog change that commits between the two reads can leave the
 recorded version one behind the checkpoint's catalog. The

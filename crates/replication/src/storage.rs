@@ -316,14 +316,27 @@ impl Storage {
             return Err(error(reason));
         }
         let result = (|| {
+            // Reject malformed batches before any application effects; later I/O failures
+            // still require the application's durable request ledger for replay.
+            let mut previous = self.last_applied()?;
+            for entry in &entries {
+                if let Some(last) = previous {
+                    if last.index.checked_add(1) != Some(entry.log_id.index) {
+                        return Err(error("state machine apply must advance"));
+                    }
+                    if entry.log_id.leader_id < last.leader_id {
+                        return Err(error("state machine apply leader regressed"));
+                    }
+                } else if entry.log_id.index != 0 {
+                    return Err(error("state machine apply must start at index zero"));
+                }
+                if let EntryPayload::Normal(command) = &entry.payload {
+                    command.validate().map_err(error)?;
+                }
+                previous = Some(entry.log_id);
+            }
             let mut replies = Vec::with_capacity(entries.len());
             for entry in entries {
-                if self
-                    .last_applied()?
-                    .is_some_and(|last| last.index.checked_add(1) != Some(entry.log_id.index))
-                {
-                    return Err(error("state machine apply must advance"));
-                }
                 let mut batch = WriteBatch::default();
                 let reply = match entry.payload {
                     EntryPayload::Blank => Reply::Initialized,
@@ -336,7 +349,6 @@ impl Storage {
                         Reply::Initialized
                     }
                     EntryPayload::Normal(command) => {
-                        command.validate().map_err(error)?;
                         let digest = command.digest().map_err(error)?;
                         let k = dedupe_key(command.request_id());
                         match self.read::<Cached>(&k)? {

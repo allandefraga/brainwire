@@ -2,7 +2,10 @@ import json
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
+from unittest.mock import patch
 
 from examples.python.checkpoint_backup import copy_checkpoint, main, verify_copy
 from examples.python.client import GraphClient
@@ -109,6 +112,101 @@ class CheckpointCopyTest(unittest.TestCase):
             copy_checkpoint(self.source, self.root / "linked", receipt())
         self.assertFalse((self.root / "linked").exists())
         self.assertFalse((self.root / "linked.partial").exists())
+
+    def test_copy_refuses_dangling_destination_symlink(self):
+        destination = self.root / "copy"
+        destination.symlink_to(self.root / "missing-target")
+        with self.assertRaises(FileExistsError):
+            copy_checkpoint(self.source, destination, receipt())
+        self.assertTrue(destination.is_symlink())
+        self.assertFalse((self.root / "copy.partial").exists())
+
+    def test_losing_staging_race_does_not_remove_other_copy(self):
+        destination = self.root / "copy"
+        partial = self.root / "copy.partial"
+        original_mkdir = Path.mkdir
+
+        def competing_mkdir(path, *args, **kwargs):
+            if path == partial:
+                original_mkdir(path)
+                (path / "in-progress").write_text("owned by the other copy")
+                raise FileExistsError(str(path))
+            return original_mkdir(path, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", competing_mkdir), self.assertRaises(FileExistsError):
+            copy_checkpoint(self.source, destination, receipt())
+        self.assertEqual((partial / "in-progress").read_text(), "owned by the other copy")
+
+    def test_copy_rechecks_destination_after_acquiring_staging(self):
+        destination = self.root / "copy"
+        partial = self.root / "copy.partial"
+        original_mkdir = Path.mkdir
+
+        def late_mkdir(path, *args, **kwargs):
+            result = original_mkdir(path, *args, **kwargs)
+            if path == partial and not kwargs.get("exist_ok", False):
+                original_mkdir(destination)
+                (destination / "finished").write_text("existing backup")
+            return result
+
+        with patch.object(Path, "mkdir", late_mkdir), patch("shutil.copyfile") as copy_file:
+            with self.assertRaises(FileExistsError):
+                copy_checkpoint(self.source, destination, receipt())
+            copy_file.assert_not_called()
+        self.assertEqual((destination / "finished").read_text(), "existing backup")
+        self.assertFalse(partial.exists())
+
+    def test_sync_failure_after_rename_keeps_reused_staging_directory(self):
+        destination = self.root / "copy"
+        partial = self.root / "copy.partial"
+        from examples.python import checkpoint_backup
+        original_fsync = checkpoint_backup._fsync
+
+        def failing_parent_sync(path):
+            if path == self.root:
+                partial.mkdir()
+                (partial / "in-progress").write_text("owned by the other copy")
+                raise OSError("injected parent sync failure")
+            original_fsync(path)
+
+        with patch.object(checkpoint_backup, "_fsync", failing_parent_sync):
+            with self.assertRaises(OSError):
+                copy_checkpoint(self.source, destination, receipt())
+        self.assertEqual(verify_copy(destination), [])
+        self.assertEqual((partial / "in-progress").read_text(), "owned by the other copy")
+
+    def test_copy_failure_removes_own_staging_directory(self):
+        destination = self.root / "copy"
+        partial = self.root / "copy.partial"
+        with patch("examples.python.checkpoint_backup._fsync", side_effect=OSError("injected")):
+            with self.assertRaises(OSError):
+                copy_checkpoint(self.source, destination, receipt())
+        self.assertFalse(partial.exists())
+        self.assertFalse(destination.exists())
+
+    def test_competing_copies_leave_one_valid_backup(self):
+        destination = self.root / "copy"
+        partial = self.root / "copy.partial"
+        original_mkdir = Path.mkdir
+        barrier = Barrier(2, timeout=5)
+
+        def competing_mkdir(path, *args, **kwargs):
+            if path == partial and not kwargs.get("exist_ok", False):
+                barrier.wait()
+            return original_mkdir(path, *args, **kwargs)
+
+        def attempt():
+            try:
+                copy_checkpoint(self.source, destination, receipt())
+                return "copied"
+            except FileExistsError:
+                return "exists"
+
+        with patch.object(Path, "mkdir", competing_mkdir):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(lambda _: attempt(), range(2)))
+        self.assertCountEqual(results, ["copied", "exists"])
+        self.assertEqual(verify_copy(destination), [])
 
     def test_cli_copy_and_verify_exit_codes(self):
         receipt_file = self.root / "receipt.json"

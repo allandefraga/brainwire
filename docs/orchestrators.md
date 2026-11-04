@@ -50,6 +50,12 @@ schema is synthetic; mount an appropriate schema for other workloads.
 
 ## Kubernetes
 
+For a single authenticated instance, the optional
+[network-isolated overlay](../deploy/kubernetes-network-isolated/README.md)
+allows Bolt traffic from labeled client pods in the same namespace when the
+cluster's CNI enforces NetworkPolicy. Test that enforcement in your cluster.
+The overlay is not encryption, replication, or a multi-pod deployment.
+
 ### Local laptop quickstart with kind
 
 Install Docker, `kubectl` and `kind` first, and run from the repository root.
@@ -150,7 +156,7 @@ kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.8`. <!-- brainwire-release-version --> The local
+Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.9`. <!-- brainwire-release-version --> The local
 release helper updates both tags with the Cargo workspace version. The private
 overlay references `ghcr-pull`; logging in on your workstation alone does not
 authenticate cluster nodes. The public overlay needs no image-pull secret. For
@@ -226,7 +232,7 @@ described in [protected Swarm setup](protected-containers.md):
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.8 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.9 # brainwire-release-version
 docker secret create brainwire-auth-policy /secure/path/policy.json
 docker secret create brainwire-health-auth /secure/path/health.json
 docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml

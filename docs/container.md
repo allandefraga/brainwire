@@ -27,13 +27,13 @@ and access to the package. Do not enter your GitHub account password. Public
 images do not need this step. Then start the published version:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.8 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.9 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --wait --wait-timeout 900
 ```
 
-Images use the exact release tag, for example `v0.15.0-beta.8`. <!-- brainwire-release-version -->
+Images use the exact release tag, for example `v0.15.0-beta.9`. <!-- brainwire-release-version -->
 For reproducible deployment, pin the digest from the release receipt. A private
 GHCR image requires package access in addition to repository access. Keep
 credentials out of shell arguments and source files. If `pull` reports
