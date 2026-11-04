@@ -3,7 +3,6 @@ use crate::overview::{panel, terminal_text};
 use crate::*;
 use ratatui::{
     layout::{Constraint, Layout},
-    style::Style,
     widgets::{Paragraph, Row, Table, Wrap},
     Frame,
 };
@@ -118,7 +117,11 @@ pub(crate) fn render_at(
     frame.render_widget(
         Paragraph::new(status)
             .wrap(Wrap { trim: false })
-            .block(panel(title, CYAN, no_color)),
+            .block(panel(
+                title,
+                if state.error.is_some() { AMBER } else { CYAN },
+                no_color,
+            )),
         areas[1],
     );
     let capacity = usize::from(areas[2].height.saturating_sub(3)).max(1);
@@ -143,10 +146,10 @@ pub(crate) fn render_at(
                 display(&index.property),
                 status.into(),
             ])
-            .style(if selected && !no_color {
-                Style::default().fg(GREEN)
+            .style(if selected {
+                selection_style(no_color)
             } else {
-                Style::default()
+                crate::overview::text_style(PALE, no_color)
             })
         });
     let table = Table::new(

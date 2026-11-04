@@ -245,6 +245,45 @@ fn write_pattern(
             .catalog
             .edge_type(&rel.rel_type)
             .expect("validated type");
+        if !ty.merge_key_fields.is_empty() {
+            if create {
+                return Err(semantic(
+                    "CREATE is not supported for keyed relationship types; use MERGE",
+                ));
+            }
+            for field in &ty.merge_key_fields {
+                if !matches!(values.get(field), Some(Value::Str(value)) if !value.is_empty()) {
+                    return Err(semantic(format!(
+                        "relationship merge key {field} requires a nonempty string"
+                    )));
+                }
+            }
+            let (source, target, id, was_created) = {
+                let _scope = env.budget.scope();
+                store::merge_keyed_edge::<ExecError>(
+                    txn,
+                    env.catalog,
+                    source,
+                    &rel.rel_type,
+                    target,
+                    rel.direction == Direction::Both,
+                    &values,
+                    |bytes| {
+                        env.budget.tick()?;
+                        env.budget.charge(bytes.saturating_mul(2))
+                    },
+                )?
+            };
+            created |= was_created;
+            overlay.charge(txn, env)?;
+            row[rel.slot] = Val::Rel(Relationship {
+                source,
+                target,
+                edge_type: ty.id,
+                id,
+            });
+            continue;
+        }
         let key = (source, ty.id, target, brainwire_core::ids::EdgeId::MERGED);
         let exists = store::edge_exists(txn, key)?
             || (rel.direction == Direction::Both
@@ -387,7 +426,13 @@ fn set_items(
                 store::merge_node(txn, env.catalog, &label, &entity_id, &values)?;
             }
             Target::Rel(rel) => {
-                if rel.id != brainwire_core::ids::EdgeId::MERGED {
+                let keyed = env
+                    .catalog
+                    .edge_types
+                    .iter()
+                    .find(|ty| ty.id == rel.edge_type)
+                    .is_some_and(|ty| !ty.merge_key_fields.is_empty());
+                if !keyed && rel.id != brainwire_core::ids::EdgeId::MERGED {
                     return Err(ExecError::Unsupported(
                         "SET on a relationship created outside MERGE".into(),
                     ));
@@ -399,7 +444,19 @@ fn set_items(
                 if !store::edge_exists(txn, (rel.source, rel.edge_type, rel.target, rel.id))? {
                     continue;
                 }
-                store::merge_edge(txn, env.catalog, rel.source, &name, rel.target, &values)?;
+                if keyed {
+                    store::update_edge_with_id(
+                        txn,
+                        env.catalog,
+                        rel.source,
+                        &name,
+                        rel.target,
+                        rel.id,
+                        &values,
+                    )?;
+                } else {
+                    store::merge_edge(txn, env.catalog, rel.source, &name, rel.target, &values)?;
+                }
             }
         }
         overlay.charge(txn, env)?;

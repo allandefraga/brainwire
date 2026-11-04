@@ -220,6 +220,9 @@ work.
 Whole relationship `SET` is not available; create or update edge properties
 with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r` removes the matched
 relationship, preserves endpoint nodes and respects graph write authorization.
+An ontology can opt a new relationship type into immutable merge keys; see
+[keyed relationships](temporal-data.md#keyed-relationships) for the supported
+semantics, migration and mixed-version restrictions.
 
 Some read pipelines process intermediate rows incrementally; writes and the
 final result remain materialized. Over Bolt, a read that returns nodes,

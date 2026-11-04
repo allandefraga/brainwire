@@ -168,7 +168,11 @@ pub(crate) fn render_at(
     frame.render_widget(
         Paragraph::new(status)
             .wrap(Wrap { trim: false })
-            .block(panel(title, CYAN, no_color)),
+            .block(panel(
+                title,
+                if state.error.is_some() { AMBER } else { CYAN },
+                no_color,
+            )),
         areas[1],
     );
     let unknown = lang.choose("desconhecido", "unknown");

@@ -124,6 +124,13 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             if let Some(description) = &ty.description {
                 size.add(&["description", description], 1)?;
             }
+            if !ty.merge_key_fields.is_empty() {
+                size.add(&["mergeKeyFields"], 1)?;
+                for field in &ty.merge_key_fields {
+                    ctx.budget.check_deadline()?;
+                    size.add(&[field], 1)?;
+                }
+            }
             for column in &ty.columns {
                 ctx.budget.check_deadline()?;
                 if property(&column.name, false) {
@@ -192,6 +199,14 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             ]);
             if let Some(description) = &ty.description {
                 fields.insert("description".into(), Value::Str(description.clone()));
+            }
+            if !ty.merge_key_fields.is_empty() {
+                let mut keys = Vec::with_capacity(ty.merge_key_fields.len());
+                for field in &ty.merge_key_fields {
+                    ctx.budget.check_deadline()?;
+                    keys.push(Value::Str(field.clone()));
+                }
+                fields.insert("mergeKeyFields".into(), Value::List(keys));
             }
             relationships.push(Value::Map(fields));
         }

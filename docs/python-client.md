@@ -184,8 +184,10 @@ fork limitations. This helper is separate from quorum `request_key` lookup.
 
 Empty patches check existence. `update_node` and `update_edge` return false for
 missing targets and do not create them. `upsert_node` creates or updates;
-`upsert_edge` requires both endpoints to exist, and identifies the public MERGE
-edge by source, type and destination. Updating a parallel-edge group is rejected
+`upsert_edge` requires both endpoints to exist. Legacy relationship types use
+source, type and destination as identity. For a keyed type, include every
+configured key in `properties`; other fields are mutable. See the
+[keyed relationship guide](temporal-data.md#keyed-relationships). Updating a parallel-edge group is rejected
 when the preflight sees more than one relationship; arbitrary EdgeId editing is
 not exposed by this helper. Edge checks and patch occur in one transaction.
 
@@ -218,6 +220,8 @@ edge. The result counts
 deleted physical relationships: if a pair has parallel edges of the selected
 type, **all matching edges are removed**. This differs from `update_edge`, which
 requires exactly one matching relationship and rejects ambiguous parallel edges.
+For keyed types, use a key-filtered Cypher `MATCH` and `DELETE` when only one
+milestone should be removed.
 
 The helper bounds each batch by item count and compact UTF-8 JSON input bytes,
 not exact Bolt bytes, deleted-edge count or process memory. Each batch commits

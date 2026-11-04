@@ -3,7 +3,7 @@ use crate::overview::{panel, terminal_text};
 use crate::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Clear, Paragraph, Wrap},
     Frame,
@@ -260,7 +260,7 @@ fn render(
                 if no_color {
                     Style::default()
                 } else {
-                    Style::default().fg(CYAN)
+                    crate::overview::text_style(MUTED, no_color)
                 },
             )),
             Line::raw(lang.choose(" Somente leitura", " Read only")),
@@ -280,10 +280,10 @@ fn render(
                     view.index() + 1,
                     view.name(lang)
                 ),
-                if selected && !no_color {
-                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
+                if selected {
+                    selection_style(no_color)
                 } else {
-                    Style::default()
+                    crate::overview::text_style(PALE, no_color)
                 },
             )));
             lines.push(Line::from(Span::styled(
@@ -291,7 +291,7 @@ fn render(
                 if no_color {
                     Style::default()
                 } else {
-                    Style::default().fg(CYAN)
+                    crate::overview::text_style(MUTED, no_color)
                 },
             )));
             lines.push(Line::raw(""));

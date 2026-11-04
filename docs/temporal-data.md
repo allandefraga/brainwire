@@ -34,11 +34,45 @@ not enforce immutability against other clients, configure ACLs, capture
 changes automatically, update the current subject, or provide `AS OF` and
 retention. Existing data overwritten by earlier writes is not reconstructed.
 
-This model is an explicit application choice. It does not change the existing
-relationship `MERGE` behavior: using the same source, type and target for
-multiple property-keyed milestones can overwrite an earlier milestone.
-Applications using that pattern must migrate their model or wait for a
-compatible relationship identity implementation.
+This model is an explicit application choice. Alternatively, new relationship
+types may opt in to the keyed identity described below.
+
+## Keyed relationships
+
+By default, a relationship `MERGE` identifies one edge by its source, type and
+target. To retain multiple milestones for a pair, declare immutable key fields
+when creating a new relationship type in the ontology:
+
+```json
+{
+  "type": "HAD_EVENT",
+  "from": {"label": "Person"},
+  "to": {"label": "Ticket"},
+  "properties": ["event_type", "summary"],
+  "merge_key_fields": ["event_type"]
+}
+```
+
+With the endpoint nodes bound, `MERGE (p)-[e:HAD_EVENT {event_type: $kind}]->(t)`
+creates one edge per pair and key. Repeating a key updates that edge; use `SET`
+for mutable properties. All key fields must be nonempty strings. They cannot be
+changed or removed, and `CREATE` on a keyed type is not supported. The opt-in
+also treats non-key properties in the `MERGE` map as mutable updates, rather
+than as additional identity fields. Matching scans the pair's relationships
+and is subject to query budgets; it is not an indexed key lookup.
+
+Declare this policy before creating the type. An existing type cannot be
+converted in place: create a new graph with the ontology and reingest its data
+from an authoritative source. Earlier overwritten events cannot be recovered
+from the graph alone. All writers and voters must support this feature before
+using it. Older versions can ignore its catalog metadata; do not run mixed
+versions or downgrade a keyed graph. Restore a compatible pre-feature backup
+to roll back. Test backup and recovery for your deployment.
+
+Pair-only DuckLake edge synchronization refuses keyed types because deleting a
+pair would delete all of its events. Likewise, Python `delete_edges` deletes
+all relationships for each pair; use a key-filtered Cypher `MATCH` and `DELETE`
+to remove a single milestone.
 
 ## What the engine versions today
 

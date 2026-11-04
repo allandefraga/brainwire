@@ -138,7 +138,11 @@ pub(crate) fn render_at(
     frame.render_widget(
         Paragraph::new(status)
             .wrap(Wrap { trim: false })
-            .block(panel(status_title, CYAN, no_color)),
+            .block(panel(
+                status_title,
+                if state.error.is_some() { AMBER } else { CYAN },
+                no_color,
+            )),
         areas[1],
     );
     crate::ontology::render(

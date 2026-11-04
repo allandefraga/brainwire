@@ -4,11 +4,17 @@ Use this page to choose a test and find its results. All recorded workloads are
 synthetic. Each result applies to the exact binary, data and environment named
 in its report; an older report does not qualify the current version.
 
-**The current memory qualification is incomplete.** The recorded 2, 4 and 8 GiB
-runs stopped during loading or reading and did not complete the required
+**The current memory qualification is incomplete.** Previous 2, 4 and 8 GiB
+qualification attempts stopped during loading or reading and did not complete the required
 30-minute workload. They do not prove a safe process-memory ceiling or absence
 of OOM. Start with the [v0.9 report](PRODUCTION-v0.9.md) and
 [production readiness roadmap](docs/production-readiness-roadmap.md).
+
+A separate [short beta.6 load smoke](docs/benchmarks/2026-11-04-load100k-015b6.json)
+loaded 100,000 synthetic nodes in batches of 250 into a 2 GiB Linux arm64
+container, then verified the count after restart. One local run recorded 2.483 s
+for loading and 12.161 s for the whole workflow. This is not the sustained
+qualification above, a comparison, or a performance guarantee.
 
 ## Choose a test
 

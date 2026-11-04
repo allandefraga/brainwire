@@ -25,6 +25,7 @@ EDGES = Mapping.from_json({"table": "main.follows", "type": "FOLLOWS",
                            "source": {"label": "Customer", "column": "src"},
                            "target": {"label": "Customer", "column": "dst"},
                            "properties": ["weight"]})
+EDGE_SIGNATURE = {"name": "FOLLOWS", "source": "Customer", "target": "Customer"}
 
 
 def collect(con, mapping, start, end, workers=3):
@@ -159,6 +160,76 @@ class ApplyTest(unittest.TestCase):
         _apply(client, EDGES, [], [("a", "b")])
         self.assertEqual(client.delete_edges, ("Customer", "FOLLOWS", "Customer",
                                                [{"source_id": "a", "target_id": "b"}]))
+
+
+class EdgeIdentityTest(unittest.TestCase):
+    def test_keyed_type_is_rejected_before_claim_or_source_work(self):
+        for prune in (False, True):
+            with self.subTest(prune=prune), \
+                    patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(object())), \
+                    patch.object(ducklake_sync.GraphClient, "schema", return_value={"relationships": [
+                        dict(EDGE_SIGNATURE, mergeKeyFields=["event_key"])]}), \
+                    patch.object(ducklake_sync, "claim") as claim, \
+                    patch.object(ducklake_sync, "lake") as source, \
+                    patch.object(ducklake_sync, "ProcessPoolExecutor") as pool:
+                with self.assertRaisesRegex(ValueError, "keyed relationship"):
+                    ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
+                                       database="demo", source_id="edges", workers=1,
+                                       full=prune, prune=prune)
+                claim.assert_not_called()
+                source.assert_not_called()
+                pool.assert_not_called()
+
+    def test_schema_failure_precedes_lease_mutation(self):
+        with patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(object())), \
+                patch.object(ducklake_sync.GraphClient, "schema", side_effect=RuntimeError("schema unavailable")), \
+                patch.object(ducklake_sync, "claim") as claim:
+            with self.assertRaisesRegex(RuntimeError, "schema unavailable"):
+                ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
+                                   database="demo", source_id="edges", workers=1)
+            claim.assert_not_called()
+
+    def test_legacy_identity_and_unrelated_keyed_types_are_allowed(self):
+        for relationships in ([EDGE_SIGNATURE], [dict(EDGE_SIGNATURE, mergeKeyFields=[])],
+                              [EDGE_SIGNATURE, dict(EDGE_SIGNATURE, name="OTHER", mergeKeyFields=["event_key"])]):
+            with self.subTest(relationships=relationships), \
+                    patch.object(ducklake_sync.GraphClient, "schema", return_value={"relationships": relationships}):
+                ducklake_sync._validate_edge_identity(object(), "demo", EDGES)
+
+    def test_missing_or_filtered_relationship_is_refused_before_mutation(self):
+        for relationships in ([], [dict(EDGE_SIGNATURE, name="OTHER")],
+                              [dict(EDGE_SIGNATURE, target="Other")]):
+            with self.subTest(relationships=relationships), \
+                    patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(object())), \
+                    patch.object(ducklake_sync.GraphClient, "schema", return_value={"relationships": relationships}), \
+                    patch.object(ducklake_sync, "claim") as claim, \
+                    patch.object(ducklake_sync, "lake") as source:
+                with self.assertRaisesRegex(ValueError, "not visible"):
+                    ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
+                                       database="demo", source_id="edges", workers=1)
+                claim.assert_not_called()
+                source.assert_not_called()
+
+    def test_malformed_relationship_collection_is_refused(self):
+        for schema in (None, {}, {"relationships": None}, {"relationships": {}},
+                       {"relationships": [None]}, {"relationships": [{}]}):
+            with self.subTest(schema=schema), \
+                    patch.object(ducklake_sync.GraphClient, "schema", return_value=schema):
+                with self.assertRaisesRegex(ValueError, "invalid relationship"):
+                    ducklake_sync._validate_edge_identity(object(), "demo", EDGES)
+
+    def test_node_mapping_does_not_require_schema_inspection(self):
+        with patch.object(ducklake_sync.GraphClient, "schema") as schema:
+            ducklake_sync._validate_edge_identity(object(), "demo", NODES)
+            schema.assert_not_called()
+
+    def test_malformed_key_metadata_is_refused(self):
+        for keys in (None, "event_key", [1], [""]):
+            with self.subTest(keys=keys), \
+                    patch.object(ducklake_sync.GraphClient, "schema", return_value={"relationships": [
+                        dict(EDGE_SIGNATURE, mergeKeyFields=keys)]}):
+                with self.assertRaisesRegex(ValueError, "invalid relationship"):
+                    ducklake_sync._validate_edge_identity(object(), "demo", EDGES)
 
 
 class PruneBatchTest(unittest.TestCase):

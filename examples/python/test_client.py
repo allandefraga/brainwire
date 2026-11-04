@@ -460,6 +460,24 @@ class ClientTests(unittest.TestCase):
             GraphClient(driver,"pages").upsert_edge(("Page","a"),"LINK",("Page","missing"))
         self.assertEqual(driver.committed,[])
 
+    def test_edge_patch_never_creates_a_relationship_from_update_properties(self):
+        driver = Driver([1, 1])
+        graph = GraphClient(driver, "tickets")
+        self.assertTrue(graph.update_edge(("Ticket", "a"), "EVENT", ("Ticket", "b"),
+                                          {"event_key": "absent", "summary": "changed"}))
+        query, params = driver.committed[0][1]
+        self.assertNotIn("MERGE", query)
+        self.assertIn("MATCH (a:Ticket {entity_id:$source})-[r:EVENT]->", query)
+        self.assertIn("SET r.event_key=$property_0, r.summary=$property_1", query)
+        self.assertEqual(params["property_0"], "absent")
+
+    def test_edge_patch_refuses_parallel_relationships_without_writing(self):
+        driver = Driver([2])
+        with self.assertRaisesRegex(ValueError, "one .*relationship"):
+            GraphClient(driver, "tickets").update_edge(
+                ("Ticket", "a"), "EVENT", ("Ticket", "b"), {"summary": "changed"})
+        self.assertEqual(driver.committed, [])
+
     def test_rejects_injection_reserved_fields_invalid_values_and_oversized_rows(self):
         graph = GraphClient(Driver(),"tickets",batch_bytes=100)
         for label, props in [("Ticket) RETURN 1",{}),("Ticket",{"acl_allow":["user"]}),

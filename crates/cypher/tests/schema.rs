@@ -148,6 +148,63 @@ fn returns_effective_columns_and_every_signature_in_catalog_order() {
 }
 
 #[test]
+fn exposes_declared_merge_keys_for_each_keyed_relationship_signature() {
+    let (_dir, db) = open();
+    let mapping: GraphMapping = serde_json::from_value(serde_json::json!({
+        "version":"1", "nodes":[{"label":"Ticket"}, {"label":"Person"}],
+        "edges":[
+            {"type":"EVENT", "from":{"label":"Ticket"}, "to":{"label":"Ticket"},
+             "properties":["event_key"], "merge_key_fields":["event_key"]},
+            {"type":"EVENT", "from":{"label":"Person"}, "to":{"label":"Ticket"},
+             "properties":["event_key"]},
+            {"type":"LINK", "from":{"label":"Ticket"}, "to":{"label":"Ticket"}}
+        ]
+    }))
+    .unwrap();
+    db.apply_ontology(&mapping).unwrap();
+    let Out::Value(Value::List(relationships)) = &run(&db)[2] else {
+        panic!("expected relationships")
+    };
+    assert_eq!(relationships.len(), 3);
+    for relationship in &relationships[..2] {
+        let Value::Map(fields) = relationship else {
+            panic!("expected relationship map")
+        };
+        assert_eq!(fields.get("mergeKeyFields"), Some(&strings(&["event_key"])));
+    }
+    let Value::Map(legacy) = &relationships[2] else {
+        panic!("expected relationship map")
+    };
+    assert!(!legacy.contains_key("mergeKeyFields"));
+}
+
+#[test]
+fn merge_key_metadata_is_counted_for_schema_limits() {
+    let (_dir, db) = open();
+    let mut c = catalog();
+    c.edge_types.push(EdgeType {
+        merge_key_fields: vec!["k".repeat(600_000)],
+        description: None,
+        id: EdgeTypeId(1),
+        name: "EVENT".into(),
+        signatures: vec![(TypeId(1), TypeId(1)); 2],
+        columns: vec![],
+    });
+    store_catalog(&db, &c);
+    assert!(execute(&db, QUERY, &BTreeMap::new())
+        .unwrap_err()
+        .to_string()
+        .contains("schema string limit"));
+    c.edge_types[0].signatures.truncate(1);
+    c.edge_types[0].merge_key_fields = vec![String::new(); 65536];
+    store_catalog(&db, &c);
+    assert!(execute(&db, QUERY, &BTreeMap::new())
+        .unwrap_err()
+        .to_string()
+        .contains("collection entry limit"));
+}
+
+#[test]
 fn rejects_arguments_and_invalid_yields_and_rolls_back_staged_writes() {
     let (_dir, db) = open();
     store_catalog(&db, &catalog());
@@ -190,6 +247,7 @@ fn rejects_oversized_schema_and_dangling_endpoints() {
     ));
     c = catalog();
     c.edge_types.push(EdgeType {
+        merge_key_fields: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
@@ -300,6 +358,7 @@ fn caps_count_repeated_endpoints_and_relationship_properties() {
     let mut c = catalog();
     c.node_types[0].label = "x".repeat(200_000);
     c.edge_types.push(EdgeType {
+        merge_key_fields: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
@@ -375,6 +434,7 @@ fn accumulated_node_and_relationship_descriptions_obey_schema_string_cap() {
     c = catalog();
     c.edge_types = (1..=257)
         .map(|id| EdgeType {
+            merge_key_fields: vec![],
             id: EdgeTypeId(id),
             name: format!("LINK{id}"),
             description: Some("x".repeat(4096)),
@@ -395,6 +455,7 @@ fn endpoint_lookup_preserves_sparse_ids_and_first_duplicate_in_catalog_order() {
     let mut c = catalog();
     c.node_types = vec![node("First", 1), node("Duplicate", 1), node("Last", 4095)];
     c.edge_types.push(EdgeType {
+        merge_key_fields: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
@@ -430,6 +491,7 @@ fn dense_schema_preserves_every_relationship_without_scanning_instances() {
     let mut c = catalog();
     c.node_types = (0..4096).map(|id| node(&format!("Type{id}"), id)).collect();
     c.edge_types.push(EdgeType {
+        merge_key_fields: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),

@@ -1,7 +1,7 @@
 //! Read-only schema connections, independent of stored instance counts.
 
 use crate::overview::{panel, terminal_text, text_style};
-use crate::{Language, CYAN, GREEN, PALE};
+use crate::{selection_style, Language, CYAN, GREEN, PALE};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Modifier,
@@ -319,7 +319,11 @@ pub(crate) fn render(
                     if i == selected { ">" } else { " " },
                     terminal_text(&node.label)
                 ),
-                text_style(if i == selected { GREEN } else { PALE }, no_color),
+                if i == selected {
+                    selection_style(no_color)
+                } else {
+                    text_style(PALE, no_color)
+                },
             )
         })
         .collect::<Vec<_>>();

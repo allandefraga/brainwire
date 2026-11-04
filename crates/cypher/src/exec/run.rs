@@ -1195,13 +1195,33 @@ fn anchor(
         }
         Access::EntityIn(expr) => {
             let ty = ty.expect("entity access has a label");
+            let _input_scope = ctx.budget.scope();
             let Val::List(items) = eval(expr, &row, ctx)? else {
                 return Ok(());
             };
+            let mut entities = HashSet::new();
             let mut ids = BTreeSet::new();
             for item in items {
+                ctx.budget.tick()?;
                 if let Val::Str(entity_id) = item {
-                    ids.extend(store::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))?);
+                    if entities.contains(&entity_id) {
+                        continue;
+                    }
+                    // Include set overhead and the temporary primary-key buffer.
+                    ctx.budget.charge(
+                        entity_id
+                            .len()
+                            .saturating_mul(2)
+                            .saturating_add(std::mem::size_of::<String>())
+                            .saturating_add(128),
+                    )?;
+                    for id in store::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))? {
+                        if !ids.contains(&id) {
+                            ctx.budget.charge(128)?;
+                            ids.insert(id);
+                        }
+                    }
+                    entities.insert(entity_id);
                 }
             }
             for id in ids {

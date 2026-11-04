@@ -130,6 +130,11 @@ add contention.
 `examples/python/ducklake_sync.py` reads a DuckLake table directly and mirrors
 it into one node label or one edge type. Describe the mapping in JSON:
 
+Edge mappings use only source and target IDs as identity. The sync refuses a
+keyed relationship type before acquiring its source lease; it cannot safely
+reconcile multiple keyed siblings. The target relationship signature must be
+visible through the authorized graph schema.
+
 ```json
 {"table": "main.customers", "label": "Customer", "id": "customer_id",
  "properties": {"name": "name", "segment": "segment", "score": "score"}}

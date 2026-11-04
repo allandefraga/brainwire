@@ -1,0 +1,145 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "image_id": "sha256:712019a3220f6f57cec67a8606bfbb7f39e01edb8c99a332fbaa8973b4017895",
+  "architecture": "arm64",
+  "node_target": 100000,
+  "batch_size": 250,
+  "memory_limit_bytes": 2147483648,
+  "load_seconds": 2.483,
+  "total_workload_seconds": 12.161,
+  "inserted_nodes": 100000,
+  "count_before_restart": 100000,
+  "count_after_restart": 100000,
+  "write_read": "PASS",
+  "restart_persistence": "PASS",
+  "oom_killed": false,
+  "memory_events_before_restart": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+  "memory_events_after_restart": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+  "memory_samples": [
+    {
+      "stage": "ready",
+      "cgroup_current_bytes": 91279360,
+      "elapsed_s": 8.06
+    },
+    {
+      "stage": "5000",
+      "cgroup_current_bytes": 97660928,
+      "elapsed_s": 8.21
+    },
+    {
+      "stage": "10000",
+      "cgroup_current_bytes": 100380672,
+      "elapsed_s": 8.34
+    },
+    {
+      "stage": "15000",
+      "cgroup_current_bytes": 103190528,
+      "elapsed_s": 8.46
+    },
+    {
+      "stage": "20000",
+      "cgroup_current_bytes": 105590784,
+      "elapsed_s": 8.57
+    },
+    {
+      "stage": "25000",
+      "cgroup_current_bytes": 103907328,
+      "elapsed_s": 8.67
+    },
+    {
+      "stage": "30000",
+      "cgroup_current_bytes": 111964160,
+      "elapsed_s": 8.78
+    },
+    {
+      "stage": "35000",
+      "cgroup_current_bytes": 114020352,
+      "elapsed_s": 8.89
+    },
+    {
+      "stage": "40000",
+      "cgroup_current_bytes": 116621312,
+      "elapsed_s": 9.02
+    },
+    {
+      "stage": "45000",
+      "cgroup_current_bytes": 119058432,
+      "elapsed_s": 9.14
+    },
+    {
+      "stage": "50000",
+      "cgroup_current_bytes": 122245120,
+      "elapsed_s": 9.26
+    },
+    {
+      "stage": "55000",
+      "cgroup_current_bytes": 124088320,
+      "elapsed_s": 9.38
+    },
+    {
+      "stage": "60000",
+      "cgroup_current_bytes": 126959616,
+      "elapsed_s": 9.49
+    },
+    {
+      "stage": "65000",
+      "cgroup_current_bytes": 128966656,
+      "elapsed_s": 9.6
+    },
+    {
+      "stage": "70000",
+      "cgroup_current_bytes": 131743744,
+      "elapsed_s": 9.78
+    },
+    {
+      "stage": "75000",
+      "cgroup_current_bytes": 134144000,
+      "elapsed_s": 9.91
+    },
+    {
+      "stage": "80000",
+      "cgroup_current_bytes": 138915840,
+      "elapsed_s": 10.05
+    },
+    {
+      "stage": "85000",
+      "cgroup_current_bytes": 139997184,
+      "elapsed_s": 10.18
+    },
+    {
+      "stage": "90000",
+      "cgroup_current_bytes": 148119552,
+      "elapsed_s": 10.3
+    },
+    {
+      "stage": "95000",
+      "cgroup_current_bytes": 150454272,
+      "elapsed_s": 10.43
+    },
+    {
+      "stage": "100000",
+      "cgroup_current_bytes": 152064000,
+      "elapsed_s": 10.55
+    },
+    {
+      "stage": "loaded",
+      "cgroup_current_bytes": 162918400,
+      "elapsed_s": 10.59
+    },
+    {
+      "stage": "restarted",
+      "cgroup_current_bytes": 130342912,
+      "elapsed_s": 12.11
+    }
+  ],
+  "owned_resources_removed": true,
+  "scope": "One local Linux arm64 container; 100,000 synthetic nodes via Bolt, batches of 250, point read, restart and count. Single run.",
+  "limitations": [
+    "Not sustained memory qualification",
+    "Not a hard RSS cap",
+    "Not a comparison with other databases",
+    "No production workload or network failures",
+    "Local candidate image ID, not a published digest"
+  ]
+}

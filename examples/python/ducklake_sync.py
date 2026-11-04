@@ -20,6 +20,11 @@ The cursor (``ImportCheckpoint {entity_id: source_id}``
 with ``snapshot`` and ``lease`` properties, which the ontology must declare)
 advances only after every partition has committed.
 
+Edge mappings identify a relationship only by its endpoint pair. Synchronization
+refuses keyed relationship types before claiming the source lease; their extra
+identity fields need a different mapping and reconciliation contract.
+The target signature must be visible in the authorized graph schema.
+
     uv run --no-project --with duckdb==1.5.5 --with neo4j==5.28.6 \\
       python -m examples.python.ducklake_sync customers.json \\
       --lake ducklake:sqlite:/data/catalog.sqlite --database crm \\
@@ -261,6 +266,32 @@ def _driver(uri):
     return GraphDatabase.driver(uri, auth=auth_from_env())
 
 
+def _validate_edge_identity(driver, database, mapping):
+    """Pair-only synchronization cannot safely reconcile a keyed edge type."""
+    relationship = getattr(mapping, "type", None)
+    if relationship is None:
+        return
+    schema = GraphClient(driver, database).schema()
+    if not isinstance(schema, dict) or not isinstance(schema.get("relationships"), list):
+        raise ValueError("invalid relationship schema metadata")
+    visible = False
+    for edge in schema["relationships"]:
+        if not isinstance(edge, dict) or any(not isinstance(edge.get(field), str) or not edge[field]
+                                             for field in ("name", "source", "target")):
+            raise ValueError("invalid relationship signature metadata")
+        if edge.get("name") != relationship:
+            continue
+        # Older catalogs omit this field and use the legacy endpoint-pair key.
+        keys = edge.get("mergeKeyFields", [])
+        if not isinstance(keys, list) or any(not isinstance(key, str) or not key for key in keys):
+            raise ValueError("invalid relationship merge key metadata")
+        if keys:
+            raise ValueError(f"DuckLake pair mappings cannot synchronize keyed relationship {relationship}")
+        visible |= edge["source"] == mapping.source_label and edge["target"] == mapping.target_label
+    if not visible:
+        raise ValueError(f"relationship signature {relationship} is not visible in the authorized schema")
+
+
 def _apply(client, mapping, upserts, deletes, require_endpoints=True):
     if mapping.label:
         return (client.load_nodes(mapping.label, upserts, with_acl=bool(mapping.acl)) if upserts else 0,
@@ -360,6 +391,9 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
     started = time.monotonic()
     run_id = uuid.uuid4().hex
     with _driver(uri) as driver:
+        # Check before claiming a lease or mutating rows: pair deletion would
+        # otherwise remove every keyed sibling between the same endpoints.
+        _validate_edge_identity(driver, database, mapping)
         def session():  # a fresh session per step: a long run can outlive an idle connection
             return driver.session(database=database)
         with session() as s:

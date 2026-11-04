@@ -11,7 +11,7 @@ use brainwire_core::codec::{
 };
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
-use brainwire_core::schema::{Catalog, Column, GraphMapping, NodeType};
+use brainwire_core::schema::{Catalog, Column, EdgeType, GraphMapping, NodeType};
 use brainwire_core::sparse::{SparseMatrix, SparseMatrixError};
 use brainwire_core::value::Value;
 
@@ -1324,6 +1324,128 @@ pub fn merge_edge(
     dst: NodeId,
     props: &BTreeMap<String, Value>,
 ) -> Result<(), GraphError> {
+    let et = catalog
+        .edge_type(edge_type)
+        .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
+    if !et.merge_key_fields.is_empty() {
+        return Err(GraphError::Catalog(
+            "keyed relationships require merge_keyed_edge".into(),
+        ));
+    }
+    write_edge(txn, catalog, src, edge_type, dst, EdgeId::MERGED, props)
+}
+
+fn row_property<'a>(row: &'a Row, ty: &EdgeType, name: &str) -> Option<&'a Value> {
+    row.extra.get(name).or_else(|| {
+        ty.columns
+            .iter()
+            .find(|column| column.name == name)
+            .and_then(|column| row.columns.get(&column.id))
+    })
+}
+
+fn key_error(name: &str) -> GraphError {
+    GraphError::Catalog(format!(
+        "relationship merge key {name} requires a nonempty immutable string"
+    ))
+}
+
+/// Merge one opted-in keyed relationship; the callback accounts for each row
+/// before decoding. Pair-range dependencies reject concurrent duplicate keys.
+#[allow(clippy::too_many_arguments)]
+pub fn merge_keyed_edge<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    catalog: &Catalog,
+    src: NodeId,
+    edge_type: &str,
+    dst: NodeId,
+    either_direction: bool,
+    props: &BTreeMap<String, Value>,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<(NodeId, NodeId, EdgeId, bool), E> {
+    check_props(props)?;
+    let ty = catalog
+        .edge_type(edge_type)
+        .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
+    if ty.merge_key_fields.is_empty() {
+        return Err(GraphError::Catalog("relationship type has no merge key".into()).into());
+    }
+    for field in &ty.merge_key_fields {
+        if !matches!(props.get(field), Some(Value::Str(value)) if !value.is_empty()) {
+            return Err(key_error(field).into());
+        }
+    }
+    let mut found = None;
+    let orientations = [(src, dst), (dst, src)];
+    let count = if either_direction && src != dst { 2 } else { 1 };
+    for (source, target) in orientations.into_iter().take(count) {
+        let prefix = edge_key(source, ty.id, target, EdgeId::MERGED);
+        txn.visit_prefix_for_update::<E>(Cf::Out, &prefix[..18], |key, bytes| {
+            control(estimate_row_allocation(bytes).map_err(StoreError::from)?)?;
+            let row = decode_row(bytes).map_err(StoreError::from)?;
+            let mut matches = true;
+            for field in &ty.merge_key_fields {
+                let Some(Value::Str(actual)) = row_property(&row, ty, field) else {
+                    return Err(key_error(field).into());
+                };
+                if actual.is_empty() {
+                    return Err(key_error(field).into());
+                }
+                matches &= row_property(&row, ty, field) == props.get(field);
+            }
+            if matches {
+                if found.is_some() {
+                    return Err(GraphError::Catalog(
+                        "relationship merge key matches multiple stored relationships".into(),
+                    )
+                    .into());
+                }
+                let (_, _, _, id) = decode_edge_key(key).map_err(GraphError::from)?;
+                found = Some((source, target, id));
+            }
+            Ok(())
+        })?;
+    }
+    let created = found.is_none();
+    let (source, target, id) = match found {
+        Some(found) => found,
+        None => (src, dst, txn.next_edge_id()?),
+    };
+    write_edge(txn, catalog, source, edge_type, target, id, props)?;
+    Ok((source, target, id, created))
+}
+
+/// Update an existing physical relationship, preserving its immutable merge key.
+pub fn update_edge_with_id(
+    txn: &mut Txn,
+    catalog: &Catalog,
+    src: NodeId,
+    edge_type: &str,
+    dst: NodeId,
+    id: EdgeId,
+    props: &BTreeMap<String, Value>,
+) -> Result<(), GraphError> {
+    let et = catalog
+        .edge_type(edge_type)
+        .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
+    if txn
+        .get_for_update(Cf::Out, &edge_key(src, et.id, dst, id))?
+        .is_none()
+    {
+        return Err(GraphError::Catalog("relationship no longer exists".into()));
+    }
+    write_edge(txn, catalog, src, edge_type, dst, id, props)
+}
+
+fn write_edge(
+    txn: &mut Txn,
+    catalog: &Catalog,
+    src: NodeId,
+    edge_type: &str,
+    dst: NodeId,
+    id: EdgeId,
+    props: &BTreeMap<String, Value>,
+) -> Result<(), GraphError> {
     check_props(props)?;
     let et = catalog
         .edge_type(edge_type)
@@ -1341,19 +1463,26 @@ pub fn merge_edge(
             return Err(GraphError::NodeNotFound(id));
         }
     }
-    let out = edge_key(src, et.id, dst, EdgeId::MERGED);
-    let mut row = match txn.get_for_update(Cf::Out, &out)? {
-        Some(bytes) => decode_row(&bytes).map_err(StoreError::from)?,
+    let out = edge_key(src, et.id, dst, id);
+    let previous = txn.get_for_update(Cf::Out, &out)?;
+    let mut row = match &previous {
+        Some(bytes) => decode_row(bytes).map_err(StoreError::from)?,
         None => Row::default(),
     };
+    for field in &et.merge_key_fields {
+        let current = row_property(&row, et, field);
+        let supplied = props.get(field);
+        let key = supplied.or(current);
+        if !matches!(key, Some(Value::Str(value)) if !value.is_empty())
+            || (previous.is_some() && supplied.is_some() && supplied != current)
+        {
+            return Err(key_error(field));
+        }
+    }
     row.schema_version = catalog.version;
     apply_props(&mut row, &et.columns, props);
     txn.put(Cf::Out, out, encode_row(&row));
-    txn.put(
-        Cf::In,
-        edge_key(dst, et.id, src, EdgeId::MERGED),
-        Vec::new(),
-    );
+    txn.put(Cf::In, edge_key(dst, et.id, src, id), Vec::new());
     Ok(())
 }
 
@@ -2299,6 +2428,88 @@ mod tests {
         let back = in_edges(&r, k).unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].other, c);
+    }
+
+    #[test]
+    fn keyed_relationship_helpers_preserve_identity_and_block_legacy_bypass() {
+        let (_d, _r, db, mut cat) = setup();
+        cat.edge_types
+            .iter_mut()
+            .find(|ty| ty.name == "WORKS_AT")
+            .unwrap()
+            .merge_key_fields = vec!["role".into()];
+        let mut tx = db.begin();
+        let source = merge_node(&mut tx, &cat, "Customer", "source", &BTreeMap::new()).unwrap();
+        let target = merge_node(&mut tx, &cat, "Company", "target", &BTreeMap::new()).unwrap();
+        let first = props(&[("role", Value::Str("engineer".into()))]);
+        assert!(merge_edge(&mut tx, &cat, source, "WORKS_AT", target, &first).is_err());
+        let (_, _, id, created) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &first,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(created);
+        assert_ne!(id, EdgeId::MERGED);
+        let (_, _, replay, created) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &first,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(id, replay);
+        assert!(!created);
+        assert!(update_edge_with_id(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            id,
+            &props(&[("role", Value::Null)])
+        )
+        .is_err());
+        assert!(update_edge_with_id(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            EdgeId(u64::MAX),
+            &first
+        )
+        .is_err());
+        let second = props(&[("role", Value::Str("reviewer".into()))]);
+        let (_, _, other, _) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &second,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_ne!(id, other);
+        tx.commit().unwrap();
+        let mut tx = db.begin();
+        assert_eq!(out_edges(&tx, source).unwrap().len(), 2);
+        assert_eq!(in_edges(&tx, target).unwrap().len(), 2);
+        detach_delete(&mut tx, source).unwrap();
+        tx.commit().unwrap();
+        assert!(in_edges(&db.begin(), target).unwrap().is_empty());
+        check_invariants(&db).unwrap();
     }
 
     #[test]

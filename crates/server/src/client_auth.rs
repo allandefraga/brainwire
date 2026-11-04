@@ -34,12 +34,18 @@ impl Credentials {
         let file = options
             .open(path)
             .map_err(|_| "cannot open Bolt credentials file")?;
-        if !file
+        let metadata = file
             .metadata()
-            .map_err(|_| "cannot inspect Bolt credentials file")?
-            .is_file()
-        {
+            .map_err(|_| "cannot inspect Bolt credentials file")?;
+        if !metadata.is_file() {
             return Err("Bolt credentials must be a regular file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o022 != 0 {
+                return Err("Bolt credentials file must not be writable by group or others".into());
+            }
         }
         let mut bytes = Vec::new();
         file.take(65_537)
@@ -109,6 +115,33 @@ mod tests {
         assert!(Credentials::load_file(directory.path()).is_err());
         std::fs::write(&path, "x".repeat(65_537)).unwrap();
         assert!(Credentials::load_file(&path).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credentials_reject_group_or_world_writable_opened_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("credentials.json");
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"principal":"reader","credentials":"{}"}}"#,
+                "a".repeat(64)
+            ),
+        )
+        .unwrap();
+        for mode in [0o400, 0o600, 0o440, 0o640, 0o444, 0o644] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(Credentials::load_file(&path).is_ok(), "mode {mode:o}");
+        }
+        for mode in [0o666, 0o620, 0o602, 0o622] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            let error = Credentials::load_file(&path)
+                .err()
+                .expect("unsafe permissions accepted");
+            assert!(!error.contains(&"a".repeat(64)), "credentials leaked");
+        }
     }
 
     #[cfg(unix)]

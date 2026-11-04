@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.15.0-beta.6 — experimental candidate
+
+- New relationship types can opt in to immutable string merge keys in their
+  ontology, allowing distinct events between the same endpoints. Existing types
+  keep their endpoint-pair identity; conversion requires a new graph and source
+  reingestion. Keys use a budgeted pair scan rather than an index.
+- The Python single-edge update now matches an existing edge without creating
+  one. Pair-based DuckLake edge synchronization rejects keyed types before
+  acquiring a lease, and the schema reports configured keys.
+- Connected schema inspection accepts the new metadata. All writers and
+  voters must be upgraded before using keyed graphs; older binaries can ignore
+  the policy. Do not downgrade a keyed volume.
+- Account and deduplicate `entity_id IN` candidates before primary-key seeks,
+  and check deadlines during candidate processing. Native Unix Bolt clients
+  reject credential files writable by group or others.
+- Refresh the graph logo, documentation colors and TUI selection hierarchy.
+  Extend the local quorum acceptance test to cover keyed edges across failover
+  and restart; this is not multi-machine qualification.
+- Record a short synthetic 100,000-node load and restart in a 2 GiB container;
+  this is not sustained-load qualification or a cross-database comparison.
+
+This does not add native temporal history, recover overwritten events, qualify
+multi-machine failover, or guarantee a global RSS ceiling.
+
 ## 0.15.0-beta.5 — experimental candidate
 
 - Preserve fresh RUN RSS observations for query reservation headroom until a

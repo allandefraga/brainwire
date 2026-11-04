@@ -44,6 +44,8 @@ pub struct EdgeSpec {
     pub to: EndpointSpec,
     #[serde(default)]
     pub properties: Vec<String>,
+    #[serde(default)]
+    pub merge_key_fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,6 +118,8 @@ pub struct EdgeType {
     pub name: String,
     pub signatures: Vec<(TypeId, TypeId)>,
     pub columns: Vec<Column>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub merge_key_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +141,8 @@ pub struct Catalog {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SchemaError {
+    #[error("invalid or incompatible merge key fields for {0}")]
+    BadMergeKey(String),
     #[error("invalid description for {0}: maximum 4096 UTF-8 bytes, no NUL, and one consistent value per type")]
     BadDescription(String),
     #[error("unknown label {0}")]
@@ -165,6 +171,50 @@ fn description<'a>(
 
 fn is_reserved(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("acl_")
+}
+
+fn merge_keys(
+    mapping: &GraphMapping,
+    name: &str,
+    previous: Option<&EdgeType>,
+) -> Result<Vec<String>, SchemaError> {
+    let mut declared: Option<&Vec<String>> = None;
+    for keys in mapping
+        .edges
+        .iter()
+        .filter(|edge| edge.name == name)
+        .filter_map(|edge| edge.merge_key_fields.as_ref())
+    {
+        if keys.is_empty() || declared.is_some_and(|prior| prior != keys) {
+            return Err(SchemaError::BadMergeKey(name.into()));
+        }
+        for (index, key) in keys.iter().enumerate() {
+            let valid = !key.is_empty()
+                && key.len() <= 128
+                && key.bytes().enumerate().all(|(i, b)| {
+                    b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())
+                });
+            let column = previous
+                .is_some_and(|edge| edge.columns.iter().any(|column| &column.name == key))
+                || mapping
+                    .edges
+                    .iter()
+                    .filter(|edge| edge.name == name)
+                    .any(|edge| edge.properties.contains(key));
+            if !valid || is_reserved(key) || keys[..index].contains(key) || !column {
+                return Err(SchemaError::BadMergeKey(name.into()));
+            }
+        }
+        declared = Some(keys);
+    }
+    match (declared, previous) {
+        (Some(keys), Some(previous)) if keys != &previous.merge_key_fields => {
+            Err(SchemaError::BadMergeKey(name.into()))
+        }
+        (Some(keys), _) => Ok(keys.clone()),
+        (None, Some(previous)) => Ok(previous.merge_key_fields.clone()),
+        (None, None) => Ok(vec![]),
+    }
 }
 
 /// Keeps the previous columns (so old rows decode) and appends new names.
@@ -320,6 +370,7 @@ impl Catalog {
 
         let mut edge_types = prev.edge_types.clone();
         for spec in &mapping.edges {
+            let merge_key_fields = merge_keys(mapping, &spec.name, prev.edge_type(&spec.name))?;
             let description = description(
                 &spec.name,
                 mapping
@@ -331,6 +382,7 @@ impl Catalog {
             let sig = (type_of(&spec.from.label)?, type_of(&spec.to.label)?);
             match edge_types.iter_mut().find(|t| t.name == spec.name) {
                 Some(t) => {
+                    t.merge_key_fields = merge_key_fields;
                     if description.is_some() {
                         t.description = description;
                     }
@@ -352,6 +404,7 @@ impl Catalog {
                         name: spec.name.clone(),
                         signatures: vec![sig],
                         columns: merge_columns(&[], &[], &spec.properties, &spec.name)?,
+                        merge_key_fields,
                     });
                 }
             }
@@ -602,6 +655,7 @@ mod tests {
                 name: "OLD_EDGE".into(),
                 signatures: vec![(TypeId(1), TypeId(2))],
                 columns: vec![],
+                merge_key_fields: vec![],
             }],
             streams: vec![],
         };
@@ -630,6 +684,7 @@ mod tests {
             edges: vec![EdgeSpec {
                 description: None,
                 name: "NEW_EDGE".into(),
+                merge_key_fields: None,
                 from: EndpointSpec {
                     label: "Customer".into(),
                 },
@@ -747,6 +802,7 @@ mod tests {
             edges: vec![EdgeSpec {
                 description: None,
                 name: "WORKS_AT".into(),
+                merge_key_fields: None,
                 from: EndpointSpec {
                     label: "Customer".into(),
                 },
@@ -851,5 +907,96 @@ mod tests {
             reapplied.edge_types[0].description,
             cat.edge_types[0].description
         );
+    }
+
+    fn keyed_mapping(keys: serde_json::Value) -> GraphMapping {
+        serde_json::from_value(serde_json::json!({
+            "version":"1", "nodes":[{"label":"Ticket"}],
+            "edges":[{"type":"EVENT", "from":{"label":"Ticket"},
+                "to":{"label":"Ticket"}, "properties":["event_key", "kind"],
+                "merge_key_fields":keys}]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn merge_keys_are_persisted_and_omitted_reapply_preserves_them() {
+        let mapping = keyed_mapping(serde_json::json!(["event_key"]));
+        let cat = Catalog::apply(&mapping, None).unwrap();
+        let encoded = serde_json::to_value(&cat).unwrap();
+        assert_eq!(
+            encoded["edge_types"][0]["merge_key_fields"],
+            serde_json::json!(["event_key"])
+        );
+        let restored: Catalog = serde_json::from_value(encoded).unwrap();
+        assert_eq!(restored, cat);
+        let mut omitted = serde_json::to_value(&restored).unwrap();
+        omitted["edge_types"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("merge_key_fields");
+        assert!(serde_json::from_value::<Catalog>(omitted).is_ok());
+        let mapping: GraphMapping = serde_json::from_value(serde_json::json!({
+            "version":"2", "nodes":[{"label":"Ticket"}],
+            "edges":[{"type":"EVENT", "from":{"label":"Ticket"}, "to":{"label":"Ticket"}}]
+        }))
+        .unwrap();
+        let reapplied = Catalog::apply(&mapping, Some(&cat)).unwrap();
+        assert_eq!(
+            serde_json::to_value(reapplied).unwrap()["edge_types"][0]["merge_key_fields"],
+            serde_json::json!(["event_key"])
+        );
+    }
+
+    #[test]
+    fn merge_keys_cannot_be_enabled_changed_or_cleared_on_an_existing_type() {
+        let mapping = keyed_mapping(serde_json::json!(["event_key"]));
+        let keyed = Catalog::apply(&mapping, None).unwrap();
+        assert!(Catalog::apply(&mapping, Some(&keyed)).is_ok());
+        assert!(Catalog::apply(&keyed_mapping(serde_json::json!(["kind"])), Some(&keyed)).is_err());
+        assert!(Catalog::apply(&keyed_mapping(serde_json::json!([])), Some(&keyed)).is_err());
+        let mut legacy = serde_json::to_value(&keyed).unwrap();
+        legacy["edge_types"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("merge_key_fields");
+        let legacy: Catalog = serde_json::from_value(legacy).unwrap();
+        assert!(Catalog::apply(&mapping, Some(&legacy)).is_err());
+    }
+
+    #[test]
+    fn merge_keys_reject_bad_fields_and_conflicting_signatures() {
+        for keys in [
+            serde_json::json!([]),
+            serde_json::json!([""]),
+            serde_json::json!(["missing"]),
+            serde_json::json!(["event_key", "event_key"]),
+            serde_json::json!(["acl_allow"]),
+            serde_json::json!(["bad field"]),
+        ] {
+            assert!(
+                Catalog::apply(&keyed_mapping(keys.clone()), None).is_err(),
+                "{keys}"
+            );
+        }
+        let mut mapping = keyed_mapping(serde_json::json!(["event_key"]));
+        let other = keyed_mapping(serde_json::json!(["kind"]));
+        mapping.edges.extend(other.edges);
+        assert!(Catalog::apply(&mapping, None).is_err());
+        let mut reserved = keyed_mapping(serde_json::json!(["acl_allow"]));
+        reserved.edges[0].properties.push("acl_allow".into());
+        assert!(Catalog::apply(&reserved, None).is_err());
+    }
+
+    #[test]
+    fn duplicate_signatures_share_one_explicit_merge_identity() {
+        let mut mapping = keyed_mapping(serde_json::json!(["event_key"]));
+        let mut omitted = mapping.edges[0].clone();
+        omitted.merge_key_fields = None;
+        mapping.edges.push(omitted);
+        let cat = Catalog::apply(&mapping, None).unwrap();
+        assert_eq!(cat.edge_types.len(), 1);
+        assert_eq!(cat.edge_types[0].signatures.len(), 1);
+        assert_eq!(cat.edge_types[0].merge_key_fields, vec!["event_key"]);
     }
 }

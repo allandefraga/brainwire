@@ -488,6 +488,8 @@ class GraphClient:
         Each flat row has only source_id and target_id. Batches are bounded by
         count and compact UTF-8 JSON bytes and atomic individually. Missing
         endpoints or edges count zero; earlier complete batches survive errors.
+        On keyed types this deletes every sibling key for each supplied pair;
+        use an explicit keyed MATCH/DELETE query to remove one event instead.
         """
         source_label, relationship, target_label = map(
             identifier, (source_label, relationship, target_label))
@@ -618,17 +620,32 @@ class GraphClient:
                     return False
                 if count != 1:
                     raise ValueError("edge update requires one merged relationship per endpoint pair/type")
-            count = tx.run(match + " " + edge, **params).single()["processed"]
+                query = f"MATCH (a:{left} {{entity_id:$source}})-[r:{relationship}]->(b:{right} {{entity_id:$target}})"
+                if assignments:
+                    query += " SET " + ", ".join(f"r.{name}=${parameter}" for name, parameter in assignments)
+                query += " RETURN count(*) AS processed"
+            else:
+                query = match + " " + edge
+            count = tx.run(query, **params).single()["processed"]
             if count != 1:
                 raise ValueError("both edge endpoints must already exist")
             return True
         return self._write(apply)
 
     def upsert_edge(self, source, relationship, target, properties=None):
-        """Create/update the public MERGE edge identified by endpoint pair and type."""
+        """Create/update an edge using its configured type identity.
+
+        Keyed types require every merge key in properties. Other properties are
+        mutable payload; a legacy type uses one edge per endpoint pair.
+        """
         return self._edge(source, relationship, target, properties, (), False)
 
     def update_edge(self, source, relationship, target, properties=None, *, remove=()):
+        """Patch the only existing relationship of a pair/type; never create one.
+
+        Multiple keyed siblings require an explicit keyed MATCH/SET query.
+        Immutable merge-key changes are rejected by the server.
+        """
         return self._edge(source, relationship, target, properties, remove, True)
 
     def set_node_acl(self, label, entity_id, acl):

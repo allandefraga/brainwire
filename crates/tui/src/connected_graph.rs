@@ -178,7 +178,7 @@ pub(crate) fn render_at(
                 } else {
                     lang.choose("DADOS REAIS • SOMENTE LEITURA", "REAL DATA • READ ONLY")
                 },
-                CYAN,
+                if state.error.is_some() { AMBER } else { CYAN },
                 no_color,
             )),
         areas[1],

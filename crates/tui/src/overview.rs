@@ -365,11 +365,9 @@ pub(super) fn panel(title: &'static str, color: Color, no_color: bool) -> Block<
     Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .border_style(if no_color {
-            Style::default()
-        } else {
-            Style::default().fg(color).bg(BG)
-        })
+        .border_style(text_style(BORDER, no_color))
+        .title_style(text_style(color, no_color).add_modifier(Modifier::BOLD))
+        .style(text_style(PALE, no_color))
 }
 
 pub(super) fn text_style(color: Color, no_color: bool) -> Style {

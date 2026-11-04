@@ -8,7 +8,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::{CrosstermBackend, TestBackend};
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::Terminal;
 mod connected;
 mod connected_graph;
@@ -27,10 +27,25 @@ mod ui;
 pub use overview::{run_overview, GraphSummary, StorageFileSummary};
 pub use ui::render;
 
-const GREEN: Color = Color::Rgb(0x57, 0xff, 0x48);
-const BG: Color = Color::Rgb(0x07, 0x0b, 0x09);
-const CYAN: Color = Color::Rgb(0x67, 0xd9, 0xd2);
-const PALE: Color = Color::Rgb(0xd9, 0xec, 0xe4);
+const GREEN: Color = Color::Rgb(0x65, 0xff, 0x54);
+const BG: Color = Color::Rgb(0x09, 0x10, 0x0e);
+const CYAN: Color = Color::Rgb(0x77, 0xcc, 0xc6);
+const PALE: Color = Color::Rgb(0xe7, 0xf0, 0xeb);
+const AMBER: Color = Color::Rgb(0xe8, 0xbd, 0x58);
+const BORDER: Color = Color::Rgb(0x30, 0x4a, 0x3e);
+const MUTED: Color = Color::Rgb(0x96, 0xad, 0xa1);
+const SELECTED_BG: Color = Color::Rgb(0x16, 0x35, 0x22);
+
+fn selection_style(no_color: bool) -> Style {
+    if no_color {
+        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(GREEN)
+            .bg(SELECTED_BG)
+            .add_modifier(Modifier::BOLD)
+    }
+}
 const EXAMPLES: [&str; 2] = [
     "MATCH (c:Customer) RETURN c.name LIMIT 12",
     "MATCH (c:Customer)-[:WORKS_AT]->(co:Company) RETURN c.name, co.name LIMIT 12",

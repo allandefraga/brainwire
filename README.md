@@ -2,11 +2,11 @@
   <img src="assets/brainwire-logo.svg" alt="Brainwire" width="360">
 </p>
 
-<h1 align="center">Give your context connections.</h1>
+<h1 align="center">Your data has connections.</h1>
 
 <p align="center">
-  <strong>A Rust graph database for the context behind your AI apps.</strong>
-  <br>Python in. Cypher out. Relationships that stay on disk.
+  <strong>A durable graph for the context behind your AI apps.</strong>
+  <br>Write with Python. Query with Cypher. Inspect in your terminal.
 </p>
 
 <p align="center">
@@ -24,47 +24,35 @@
   <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
-<p align="center">
-  <img src="assets/brainwire-demo.gif" alt="Animated illustration of a Cypher query and its matching graph connections" width="900">
-  <br><sub>Animated illustration using synthetic data · the terminal UI is described below · <a href="assets/brainwire-social-preview-v1.jpg">Social card</a></sub>
-</p>
+Brainwire connects people, projects, documents and events in named graphs.
+The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-People own projects. Documents explain decisions. Tickets depend on releases.
-Brainwire stores those connections in named graphs. Write from Python, query
-with Cypher over Bolt and inspect your data in the terminal. Rust runs the engine;
-RocksDB stores the data.
-
-> **v0.15.0-beta.5 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.15.0-beta.6 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
 ## What you can build
 
-- **Knowledge graphs:** nodes, edges, properties, ontology descriptions and indexes. Inspect the catalog with `graph.schema()` in Python.
-- **Explicit timelines:** record and read application-supplied milestones as
-  separate event nodes using the [Python example](docs/temporal-data.md#record-explicit-milestones).
-- **Agent context:** bounded Python reads, source references and experimental text/vector reranking of explicit candidates. Evidence reads stop when the response limit is exceeded.
-- **Code maps:** local Python AST extraction, source references, inferred import/call candidates, paths and explanations.
-- **Graph queries:** supported Cypher, sparse algorithms and explainable metadata ranking.
-- **List conversions:** `toBooleanList`, `toIntegerList` and `toFloatList` help
-  clean mixed values in supported Cypher queries.
-- **Inspectable storage:** persistent files, checkpoints and a read-only terminal UI.
-- **Memory-aware admission:** on Linux, reject new queries under visible cgroup
-  pressure, including a configured `memory.high` threshold. See
-  [how the check works](docs/memory-defaults.md#admission-under-linux-cgroup-pressure).
-  New RUN admission also checks current process RSS where available.
+| Work with | Available today |
+|---|---|
+| **Connected context** | Nodes, relationships, properties, ontology descriptions and indexes |
+| **Agent retrieval** | Bounded reads, source references and experimental reranking of explicit candidates |
+| **Timelines** | Explicit event nodes or opt-in immutable keys for new relationship types |
+| **Code graphs** | Local Python AST extraction, source links, paths and explanations |
+| **Operations** | Persistent files, checkpoints, query-memory diagnostics and a read-only TUI |
 
 Your application chooses the data, permissions and model. See the
-[context API](docs/context-api.md) and [code graph guide](docs/code-graph.md).
+[context API](docs/context-api.md), [timeline model and migration](docs/temporal-data.md),
+and [supported Cypher](docs/local-cypher.md).
 
 ## Quickstart
 
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.5 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.15.0-beta.6 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.5 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.6 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -148,13 +136,24 @@ Stop the demo and keep its data:
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
 
+<details>
+<summary>See the illustrated graph demo</summary>
+
+![Animated graph illustration](assets/brainwire-demo.gif)
+
+Illustration with synthetic entities and relationships. It is not a recording of
+the connected TUI. [View the social card](assets/brainwire-social-preview-v1.jpg).
+
+</details>
+
 ## Current limits
 
 Start with a rebuildable graph and a tested backup while evaluating this beta.
 
 - **Memory:** query budgets and pressure admission help reject work under load.
   A [512 MiB synthetic pressure smoke](docs/benchmarks/2026-11-04-cgroup-015b5.json)
-  passed on the local candidate. A hard process-wide RSS ceiling is not guaranteed;
+  and a [short 100k-node load and restart](docs/benchmarks/2026-11-04-load100k-015b6.json)
+  passed on local candidates. A hard process-wide RSS ceiling is not guaranteed;
   sustained 2/4/8 GiB tests are incomplete and an older failure remains unexplained.
 - **Queries and search:** Brainwire supports a [documented Cypher subset](docs/local-cypher.md)
   and reranks explicit candidates. Nodes have one fixed label; native ANN and
@@ -163,9 +162,10 @@ Start with a rebuildable graph and a tested backup while evaluating this beta.
   Full reconciliation applies missing-key deletions in bounded Python batches.
   Confirmed rolled-back transaction conflicts receive bounded retries.
   Native CDC, historical node/edge revisions and `AS OF` reads are not available.
-  Relationship `MERGE` currently identifies an edge by its endpoints and type:
-  different property maps on the same pair do not create independent events.
-  Use explicit event nodes where multiple milestones must remain distinct.
+  Relationship `MERGE` defaults to one edge per pair and type. New types can
+  opt in to [immutable keys](docs/temporal-data.md#keyed-relationships); existing
+  types need a new graph and reingestion to migrate. Pair-based DuckLake edge
+  synchronization does not support keyed types.
 - **Security:** authentication and grants are available. Shared deployments need
   a verified encrypted network boundary because native Bolt TLS is not implemented.
 - **Distribution:** an experimental three-voter quorum is available for testing.
@@ -196,7 +196,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.5 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.15.0-beta.6 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

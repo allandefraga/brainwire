@@ -117,6 +117,11 @@ are numeric `IP:PORT`; total timeout accepts 1–30,000 ms. Readiness is not a
 certificate of workload capacity or disk integrity. Docker's image health check
 uses `handshake`; the demo Compose profile overrides it with `ready`.
 
+On Unix, native Bolt clients reject credential files writable by group or others.
+Read-only secret mounts remain supported. Use a private owner-readable file such
+as mode `0600` where possible; accepting a readable file is not a confidentiality
+guarantee. This check applies to the opened file, including mounted symlinks.
+
 ## Inspect with the TUI
 
 ```sh

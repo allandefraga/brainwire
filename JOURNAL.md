@@ -29,6 +29,29 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-04: v0.15.0-beta.6 keyed relationship identity
+
+- **Done:** Added an explicit, immutable merge-key policy for new relationship
+  types. Legacy types keep pair identity. Added guards for Python updates and
+  pair-only source synchronization and exposed policy through schema inspection.
+- **Evidence:** Synthetic integration parity passed with a preprovisioned keyed
+  type where the previous candidate lost five relationships. A local restart
+  retained two distinct events. Focused tests cover replay, rollback, deletion,
+  concurrency and the legacy update behavior.
+- **Also:** Account and deduplicate entity-ID `IN` candidates; reject
+  group/other-writable native client credential files; refresh the logo,
+  documentation and TUI palette; extend local quorum coverage for keyed edges.
+- **Decision:** Key policies cannot be added to existing types in place. Rebuild
+  and reingest from authoritative sources; do not mix older binaries or
+  downgrade a keyed graph. Pair-only source sync is rejected for keyed types.
+- **Load smoke:** A local 2 GiB container loaded 100,000 synthetic nodes and
+  retained the count after restart. This brief run is not sustained 2/4/8 GiB
+  qualification or a comparison.
+- **Next step:** Qualify representative data volumes, indexed key lookups and
+  multi-machine failure and recovery; test migration with real source backups.
+- **Blockers:** Native historical revisions and a global RSS ceiling remain
+  unimplemented, and existing overwritten events require source recovery.
+
 ## 2026-11-04: v0.15.0-beta.5 memory observations and recovery
 
 - **Done:** Preserve fresh RSS observations for query reservations, even when

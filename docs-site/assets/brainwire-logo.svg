@@ -1,19 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-labelledby="title desc">
   <title id="title">Brainwire</title>
-  <desc id="desc">A connected B monogram and a custom Brainwire wordmark in bright green and soft white, designed for dark backgrounds.</desc>
-  <g stroke="#77FF5A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M34 26v108M34 26h54l32 27-32 27H34m54 0 32 27-32 27H34"/>
-    <path d="m34 26 54 54-54 54" stroke-opacity=".35" stroke-width="3"/>
+  <desc id="desc">An asymmetric network of six nodes with two connected hubs, beside the Brainwire wordmark in bright green and soft white. Designed for dark backgrounds.</desc>
+  <g fill="none" stroke="#77FF5A" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m26 30 38 36 62-40M64 66l40 46 34-28M64 66l-40 58" stroke-width="6"/>
+    <path d="m24 124 80-12M64 66l74 18" stroke-width="4" stroke-opacity=".5"/>
   </g>
   <g fill="#77FF5A">
-    <circle cx="34" cy="26" r="8"/>
-    <circle cx="88" cy="26" r="8"/>
-    <circle cx="120" cy="53" r="8"/>
-    <circle cx="88" cy="80" r="10"/>
-    <circle cx="34" cy="80" r="8"/>
-    <circle cx="120" cy="107" r="8"/>
-    <circle cx="88" cy="134" r="8"/>
-    <circle cx="34" cy="134" r="8"/>
+    <circle cx="26" cy="30" r="7"/>
+    <circle cx="126" cy="26" r="8"/>
+    <circle cx="64" cy="66" r="12"/>
+    <circle cx="24" cy="124" r="8"/>
+    <circle cx="104" cy="112" r="10"/>
+    <circle cx="138" cy="84" r="7"/>
   </g>
   <g transform="translate(184 48)" fill="none" stroke="#F0F5EF" stroke-width="8" stroke-linecap="square" stroke-linejoin="round">
     <path d="M0 64V0h22c26 0 26 31 0 31H0m22 0c29 0 29 33 0 33H0"/>

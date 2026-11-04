@@ -25,7 +25,10 @@ MAX_LOG_BYTES = 1 << 30
 SCHEMA = {"version": "1", "nodes": [
     {"label": "Page", "properties": ["title"], "indexed_fields": ["title"]},
     {"label": "ImportCheckpoint", "properties": ["next_offset", "sha256"]}],
-    "edges": [{"type": "LINK", "from": {"label": "Page"}, "to": {"label": "Page"}, "properties": ["weight"]}]}
+    "edges": [
+        {"type": "LINK", "from": {"label": "Page"}, "to": {"label": "Page"}, "properties": ["weight"]},
+        {"type": "EVENT", "from": {"label": "Page"}, "to": {"label": "Page"},
+         "properties": ["event_key", "summary"], "merge_key_fields": ["event_key"]}]}
 
 
 def read_exact(stream, count):
@@ -415,6 +418,14 @@ def run(binary, rows, log_cap_recovery=False):
                 with client.session(database=graph, default_access_mode=READ_ACCESS if principal == "alice" else "WRITE") as session:
                     return session.run(text, parameters).data()
 
+        def events(member):
+            return query(member, "MATCH (:Page {entity_id:'page-0'})-[r:EVENT]->(:Page {entity_id:'page-2'}) "
+                "RETURN r.event_key AS key, r.summary AS summary, elementId(r) AS id ORDER BY key")
+
+        def event(member, key, summary):
+            query(member, "MATCH (a:Page {entity_id:'page-0'}), (b:Page {entity_id:'page-2'}) "
+                "MERGE (a)-[r:EVENT {event_key:$key}]->(b) SET r.summary=$summary", key=key, summary=summary)
+
         def refused(member, text, principal="writer"):
             try:
                 query(member, text, principal=principal)
@@ -454,6 +465,12 @@ def run(binary, rows, log_cap_recovery=False):
                 query(current, "CALL db.setNodeAcl({label:'Page',entityId:$id,allow:$allow}) YIELD updated RETURN updated",
                     id=f"page-{index}", allow=["alice" if index % 2 == 0 else "bob"])
             query(current, "MATCH (a:Page {entity_id:'page-0'}) MATCH (b:Page {entity_id:'page-2'}) MERGE (a)-[:LINK]->(b)")
+            event(current, "opened", "first")
+            event(current, "closed", "second")
+            initial_events = events(current)
+            assert [(item["key"], item["summary"]) for item in initial_events] == [("closed", "second"), ("opened", "first")]
+            assert len({item["id"] for item in initial_events}) == 2, "keyed siblings share a physical identity"
+            report["keyed_events_before_failover"] = initial_events
             query(current, "CREATE (c:ImportCheckpoint {entity_id:'source',next_offset:$offset,sha256:'fixture'})", offset=rows)
             query(current, "CREATE (p:Page {entity_id:'aux-1',title:'aux'})", graph="aux")
             query(current, "CALL db.setNodeAcl({label:'Page',entityId:'aux-1',allow:['alice']}) YIELD updated RETURN updated", graph="aux")
@@ -547,6 +564,19 @@ def run(binary, rows, log_cap_recovery=False):
             stop(current)
             killed = current
             current = leader(tuple(member for member in (1, 2, 3) if member != killed))
+            assert events(current) == initial_events, "leader loss changed acknowledged keyed events"
+            event(current, "opened", "updated-after-promotion")
+            updated_events = events(current)
+            assert [item["id"] for item in updated_events] == [item["id"] for item in initial_events]
+            assert [(item["key"], item["summary"]) for item in updated_events] == [("closed", "second"), ("opened", "updated-after-promotion")]
+            event(current, "promoted", "third")
+            promoted_events = events(current)
+            assert len(promoted_events) == 3 and len({item["id"] for item in promoted_events}) == 3, "promoted leader reused a relationship ID"
+            query(current, "MATCH (:Page {entity_id:'page-0'})-[r:EVENT {event_key:'closed'}]->(:Page {entity_id:'page-2'}) DELETE r")
+            retained_events = events(current)
+            assert retained_events == [item for item in promoted_events if item["key"] != "closed"], "keyed delete changed another sibling"
+            report["keyed_events_after_promotion"] = retained_events
+            report["checks"].append("leader loss retains distinct keyed siblings; replay preserves physical identity, promoted allocation remains unique and selective deletion preserves other keys")
             assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == [{"n": rows + 1}]
             assert query(current, "MATCH (p:Page) RETURN count(*) AS n", principal="alice") == [{"n": rows // 2 + 1}]
             assert query(current, "MATCH (c:ImportCheckpoint {entity_id:'source'}) RETURN c.next_offset AS offset") == [{"offset": rows}]
@@ -667,6 +697,9 @@ def run(binary, rows, log_cap_recovery=False):
             assert query(current, "MATCH (p:Page) RETURN count(*) AS n") == [{"n": rows + 3}]
             assert query(current, "MATCH (p:Page {entity_id:'idempotent'}) RETURN count(*) AS n") == [{"n": 1}]
             assert query(current, "MATCH (a:Page)-[:LINK]->(b:Page) RETURN count(*) AS n") == [{"n": 2}]
+            assert events(current) == retained_events, "full voter restart changed acknowledged keyed siblings"
+            report["keyed_events_after_full_restart"] = events(current)
+            report["checks"].append("all three voters restart with the exact surviving keyed relationship identities and payloads")
             with driver(current) as client:
                 with client.session(database="pages") as session:
                     identities = [record["node"].element_id for record in session.run("MATCH (p:Page) RETURN p AS node")]

@@ -279,6 +279,7 @@ pub fn create_relationship_type(
         label: label.into(),
     };
     let spec = EdgeSpec {
+        merge_key_fields: None,
         description: None,
         name: name.into(),
         from: endpoint(from),

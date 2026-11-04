@@ -21,7 +21,8 @@ fn block<'a>(title: &'a str, color: Color, no_color: bool) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .border_style(style(color, no_color))
+        .border_style(style(BORDER, no_color))
+        .title_style(style(color, no_color).add_modifier(Modifier::BOLD))
         .style(style(PALE, no_color))
 }
 
@@ -423,15 +424,9 @@ fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
 }
 
 fn selected_style(no_color: bool) -> Style {
-    if no_color {
-        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(BG)
-            .bg(GREEN)
-            .add_modifier(Modifier::BOLD)
-    }
+    selection_style(no_color)
 }
+
 fn position(id: usize) -> (f64, f64) {
     let cluster = id / 12;
     let angle = (id % 12) as f64 * std::f64::consts::TAU / 12.0 + cluster as f64 * 0.25;
@@ -623,7 +618,7 @@ fn disk(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
         if spaced {
             lines.push(Line::styled(
                 "─".repeat(files.width as usize),
-                style(Color::Rgb(30, 79, 66), no_color),
+                style(BORDER, no_color),
             ));
         }
     }

@@ -111,12 +111,25 @@ impl Limits {
     }
 }
 
-fn map<'a>(value: &'a PackValue, keys: &[&str]) -> Result<Vec<&'a PackValue>, String> {
+fn map<'a>(
+    value: &'a PackValue,
+    keys: &[&str],
+    optional: &[&str],
+) -> Result<Vec<&'a PackValue>, String> {
     let PackValue::Map(entries) = value else {
         return Err("expected schema map".into());
     };
-    if entries.len() != keys.len() {
+    if entries.len() < keys.len() || entries.len() > keys.len() + optional.len() {
         return Err("unexpected schema map fields".into());
+    }
+    let mut names = HashSet::new();
+    for (name, _) in entries {
+        if !keys.contains(&name.as_str()) && !optional.contains(&name.as_str()) {
+            return Err("unexpected schema map fields".into());
+        }
+        if !names.insert(name.as_str()) {
+            return Err("duplicate schema map field".into());
+        }
     }
     keys.iter()
         .map(|key| {
@@ -128,6 +141,26 @@ fn map<'a>(value: &'a PackValue, keys: &[&str]) -> Result<Vec<&'a PackValue>, St
             Ok(&value.1)
         })
         .collect()
+}
+
+fn optional<'a>(value: &'a PackValue, key: &str) -> Option<&'a PackValue> {
+    let PackValue::Map(entries) = value else {
+        return None;
+    };
+    entries
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value)
+}
+
+fn description(limits: &mut Limits, value: &PackValue) -> Result<(), String> {
+    if let Some(value) = optional(value, "description") {
+        let text = limits.text(value)?;
+        if text.len() > 4096 || text.contains('\0') {
+            return Err("invalid schema description".into());
+        }
+    }
+    Ok(())
 }
 
 fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
@@ -158,7 +191,12 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
     let mut labels = HashSet::new();
     let mut nodes = Vec::new();
     for value in node_values {
-        let fields = map(value, &["label", "properties", "indexedFields"])?;
+        let fields = map(
+            value,
+            &["label", "properties", "indexedFields"],
+            &["description"],
+        )?;
+        description(&mut limits, value)?;
         let label = limits.text(fields[0])?;
         if !labels.insert(label.clone()) {
             return Err("duplicate schema node label".into());
@@ -178,7 +216,12 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
     let mut signatures = HashSet::new();
     let mut edges = Vec::new();
     for value in edge_values {
-        let fields = map(value, &["name", "source", "target", "properties"])?;
+        let fields = map(
+            value,
+            &["name", "source", "target", "properties"],
+            &["description", "mergeKeyFields"],
+        )?;
+        description(&mut limits, value)?;
         let name = limits.text(fields[0])?;
         let source = limits.text(fields[1])?;
         let target = limits.text(fields[2])?;
@@ -188,11 +231,28 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
         if !labels.contains(&source) || !labels.contains(&target) {
             return Err("schema relationship references an unknown endpoint".into());
         }
+        let properties = limits.strings(fields[3])?;
+        if let Some(value) = optional(value, "mergeKeyFields") {
+            let keys = limits.strings(value)?;
+            if keys.is_empty()
+                || keys.iter().any(|key| {
+                    key.is_empty()
+                        || key.len() > 128
+                        || !properties.contains(key)
+                        || key.to_ascii_lowercase().starts_with("acl_")
+                        || !key.bytes().enumerate().all(|(i, b)| {
+                            b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())
+                        })
+                })
+            {
+                return Err("invalid schema relationship merge keys".into());
+            }
+        }
         edges.push(OntologyEdge {
             name,
             source,
             target,
-            properties: limits.strings(fields[3])?,
+            properties,
         });
     }
     Ok(OntologySnapshot {
@@ -443,6 +503,74 @@ mod tests {
         PackValue::Struct {
             tag: 0x71,
             fields: vec![row],
+        }
+    }
+
+    #[test]
+    fn schema_accepts_keyed_metadata_and_descriptions_but_rejects_bad_optional_fields() {
+        let strings = |names: &[&str]| {
+            PackValue::List(
+                names
+                    .iter()
+                    .map(|s| PackValue::String((*s).into()))
+                    .collect(),
+            )
+        };
+        let node = PackValue::Map(vec![
+            ("label".into(), PackValue::String("Ticket".into())),
+            ("properties".into(), strings(&["entity_id"])),
+            ("indexedFields".into(), strings(&[])),
+            ("description".into(), PackValue::String("A ticket".into())),
+        ]);
+        let edge = PackValue::Map(vec![
+            ("name".into(), PackValue::String("EVENT".into())),
+            ("source".into(), PackValue::String("Ticket".into())),
+            ("target".into(), PackValue::String("Ticket".into())),
+            ("properties".into(), strings(&["event_key", "summary"])),
+            (
+                "description".into(),
+                PackValue::String("A milestone".into()),
+            ),
+            ("mergeKeyFields".into(), strings(&["event_key"])),
+        ]);
+        let decode = |node, edge| {
+            decode_record(message_value(PackValue::List(vec![
+                PackValue::Int(1),
+                PackValue::List(vec![node]),
+                PackValue::List(vec![edge]),
+                PackValue::Bool(true),
+            ])))
+        };
+        let snapshot = decode(node.clone(), edge.clone()).unwrap();
+        assert_eq!(
+            snapshot.ontology.edges[0].properties,
+            ["event_key", "summary"]
+        );
+        for (name, value) in [
+            ("mergeKeyFields", PackValue::Bool(true)),
+            ("mergeKeyFields", strings(&[])),
+            ("mergeKeyFields", strings(&["event_key", "event_key"])),
+            ("mergeKeyFields", strings(&["missing"])),
+            ("description", PackValue::Int(1)),
+            ("description", PackValue::String("x".repeat(4097))),
+        ] {
+            let mut bad = edge.clone();
+            let PackValue::Map(fields) = &mut bad else {
+                unreachable!()
+            };
+            fields.iter_mut().find(|(key, _)| key == name).unwrap().1 = value;
+            assert!(decode(node.clone(), bad).is_err(), "{name}");
+        }
+        for (name, value) in [
+            ("unexpected", PackValue::Bool(false)),
+            ("mergeKeyFields", strings(&["event_key"])),
+        ] {
+            let mut bad = edge.clone();
+            let PackValue::Map(fields) = &mut bad else {
+                unreachable!()
+            };
+            fields.push((name.into(), value));
+            assert!(decode(node.clone(), bad).is_err());
         }
     }
 
