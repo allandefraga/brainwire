@@ -21,7 +21,8 @@ so the caller may retry it. The message ends with a machine-readable hint:
 |---|---|---|
 | `statement_limit` | one statement needs more than `memory.query` | split the statement; `available_bytes` is the per-statement limit |
 | `query_pool` | concurrent queries hold the shared pool | retry later or smaller |
-| `process_limit` | process RSS near `memory.limit` | back off; the whole server is busy |
+| `process_limit` | process headroom is insufficient or its sample expired during execution | back off; investigate server memory and monitoring |
+| `process_monitor` | a new RUN cannot get a recent process RSS sample | retry later; investigate process memory monitoring |
 | `cgroup` | container working set at 95% | back off; the whole server is busy |
 | `ingress` | shared Bolt input pool | send a smaller message or retry later |
 

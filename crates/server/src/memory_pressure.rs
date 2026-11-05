@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 #[cfg(any(target_os = "linux", test))]
 use crate::config::memory_defaults::visible_memory_groups;
 use crate::config::memory_defaults::MemoryGroup;
-use crate::process_memory::ProcessMemory;
+use crate::process_memory::{ProcessMemory, ProcessRefusal};
 use brainwire_bolt::session::EngineError;
 
 const PRESSURE_PERCENT: u128 = 95;
@@ -25,6 +25,7 @@ struct AdmissionTrace {
 enum TraceDecision {
     Cgroup(PressureObservation),
     ProcessLimit { rss_bytes: u64, cap_bytes: u64 },
+    ProcessMonitorUnavailable,
 }
 
 #[derive(Clone, Copy)]
@@ -90,12 +91,25 @@ impl std::fmt::Display for AdmissionTraceRecord {
             self.sequence, self.logged_unix_time_ns
         )?;
         match self.decision {
-            TraceDecision::Cgroup(observed) => write!(f,
+            TraceDecision::Cgroup(observed) => write!(
+                f,
                 "pressure_refused={} basis=cgroup status={:?} selected={:?} cache={:?}",
-                matches!(observed.status, PressureStatus::Pressured { .. }), observed.status,
-                observed.reading, observed.cache_reading),
-            TraceDecision::ProcessLimit { rss_bytes, cap_bytes } => write!(f,
-                "pressure_refused=true basis=process_limit rss_bytes={rss_bytes} cap_bytes={cap_bytes} cgroup_status=not_sampled"),
+                matches!(observed.status, PressureStatus::Pressured { .. }),
+                observed.status,
+                observed.reading,
+                observed.cache_reading
+            ),
+            TraceDecision::ProcessLimit {
+                rss_bytes,
+                cap_bytes,
+            } => write!(
+                f,
+                "pressure_refused=true basis=process_limit rss_bytes={rss_bytes} cap_bytes={cap_bytes} cgroup_status=not_sampled"
+            ),
+            TraceDecision::ProcessMonitorUnavailable => write!(
+                f,
+                "pressure_refused=true basis=process_monitor cgroup_status=not_sampled"
+            ),
         }
     }
 }
@@ -117,6 +131,8 @@ enum LimitSource {
 struct CgroupReading {
     limit_source: LimitSource,
     raw_bytes: u64,
+    inactive_file_before_bytes: Option<u64>,
+    inactive_file_after_bytes: Option<u64>,
     inactive_file_bytes: u64,
     effective_bytes: u64,
     limit_bytes: u64,
@@ -193,7 +209,9 @@ impl PressureGuard {
                 .fetch_add(1, Ordering::Relaxed)
                 .saturating_add(1);
             if should_log(count) {
-                eprintln!("brainwire memory pressure admission: monitor unavailable; unavailable_samples={count} (reservation controls remain active)");
+                eprintln!(
+                    "brainwire memory pressure admission: monitor unavailable; unavailable_samples={count} (reservation controls remain active)"
+                );
             }
         }
         observed
@@ -210,17 +228,33 @@ impl PressureGuard {
     /// is at 95% (docs/design/memory-error-contract.md).
     pub(crate) fn refusal(&self) -> Option<EngineError> {
         let mut cgroup_reading = None;
-        let refusal = if let Some((rss, cap)) = (self.process)().and_then(|p| p.refusal()) {
-            self.trace.emit(TraceDecision::ProcessLimit {
-                rss_bytes: rss,
-                cap_bytes: cap,
-            });
-            EngineError::memory_refused(
-                "process_limit",
-                0,
-                cap.saturating_sub(rss),
-                "process memory near memory.limit; RUN rejected before execution",
-            )
+        let refusal = if let Some(reason) = (self.process)().and_then(|p| p.refusal()) {
+            match reason {
+                ProcessRefusal::Limit {
+                    rss_bytes: rss,
+                    cap_bytes: cap,
+                } => {
+                    self.trace.emit(TraceDecision::ProcessLimit {
+                        rss_bytes: rss,
+                        cap_bytes: cap,
+                    });
+                    EngineError::memory_refused(
+                        "process_limit",
+                        0,
+                        cap.saturating_sub(rss),
+                        "process memory near memory.limit; RUN rejected before execution",
+                    )
+                }
+                ProcessRefusal::MonitorUnavailable => {
+                    self.trace.emit(TraceDecision::ProcessMonitorUnavailable);
+                    EngineError::memory_refused(
+                        "process_monitor",
+                        0,
+                        0,
+                        "process RSS monitor unavailable or stale; RUN rejected before execution",
+                    )
+                }
+            }
         } else {
             let observed = self.observe();
             if let PressureStatus::Pressured { current, limit } = observed.status {
@@ -246,7 +280,9 @@ impl PressureGuard {
                             .fetch_add(1, Ordering::Relaxed)
                             .saturating_add(1);
                         if should_log(count) {
-                            eprintln!("brainwire memory pressure decision: cgroup_allowed_after_inactive_file count={count} {reading:?} (decision-time sequential readings; not an atomic snapshot or RSS ceiling)");
+                            eprintln!(
+                                "brainwire memory pressure decision: cgroup_allowed_after_inactive_file count={count} {reading:?} (decision-time sequential readings; not an atomic snapshot or RSS ceiling)"
+                            );
                         }
                     }
                 }
@@ -258,7 +294,9 @@ impl PressureGuard {
             .fetch_add(1, Ordering::Relaxed)
             .saturating_add(1);
         if should_log(count) {
-            eprintln!("brainwire memory pressure admission: RUN rejected; denied_runs={count}; cgroup_reading={cgroup_reading:?} (decision-time sequential readings; not an atomic snapshot)");
+            eprintln!(
+                "brainwire memory pressure admission: RUN rejected; denied_runs={count}; cgroup_reading={cgroup_reading:?} (decision-time sequential readings; not an atomic snapshot)"
+            );
         }
         Some(refusal)
     }
@@ -330,6 +368,10 @@ fn sample_observed(
         } else {
             "memory.usage_in_bytes"
         });
+        // Bracket the usage read: a changing cache counter must not be fully
+        // discounted based on just one side of a non-atomic observation.
+        let stat_path = group.directory.join("memory.stat");
+        let before = read(&stat_path).and_then(|stat| inactive_file(&stat, group.v2));
         let Some(raw_current) = read(&used_path).and_then(|s| s.trim().parse::<u64>().ok()) else {
             unavailable = true;
             continue;
@@ -338,14 +380,22 @@ fn sample_observed(
         // contain pages that cannot be reclaimed immediately. Raw usage can remain
         // or written (the kernel reclaims cache only at the limit), so admitting on it
         // refused every RUN of an idle server whose anonymous memory was a third of it.
-        let reclaimable = read(&group.directory.join("memory.stat"))
-            .and_then(|stat| inactive_file(&stat, group.v2))
-            .unwrap_or(0);
+        let after = read(&stat_path).and_then(|stat| inactive_file(&stat, group.v2));
+        let reclaimable = before.zip(after).map_or(0, |(a, b)| {
+            let smaller = a.min(b);
+            if smaller <= raw_current {
+                smaller
+            } else {
+                0
+            }
+        });
         let current = raw_current.saturating_sub(reclaimable);
         // u128 avoids overflow even at u64::MAX and includes zero-limit pressure.
         let reading = CgroupReading {
             limit_source,
             raw_bytes: raw_current,
+            inactive_file_before_bytes: before,
+            inactive_file_after_bytes: after,
             inactive_file_bytes: reclaimable,
             effective_bytes: current,
             limit_bytes: limit,
@@ -503,6 +553,8 @@ mod tests {
         let reading = CgroupReading {
             limit_source: LimitSource::Max,
             raw_bytes: 99,
+            inactive_file_before_bytes: Some(10),
+            inactive_file_after_bytes: Some(10),
             inactive_file_bytes: 10,
             effective_bytes: 89,
             limit_bytes: 100,
@@ -557,6 +609,15 @@ mod tests {
         assert!(unavailable.contains("pressure_refused=false basis=cgroup status=Unavailable"));
         assert!(unavailable.contains("selected=None cache=None"));
         assert!(!unavailable.contains("raw_bytes"));
+
+        let unavailable_process = AdmissionTraceRecord {
+            sequence: 1,
+            logged_unix_time_ns: None,
+            decision: TraceDecision::ProcessMonitorUnavailable,
+        }
+        .to_string();
+        assert!(unavailable_process.contains("pressure_refused=true basis=process_monitor"));
+        assert!(!unavailable_process.contains("rss_bytes"));
     }
 
     #[test]
@@ -638,6 +699,51 @@ mod tests {
             .map(|(p, v)| (PathBuf::from(p), v.to_string()))
             .collect();
         sample(groups, |p| files.get(p).cloned())
+    }
+
+    #[test]
+    fn changing_or_unavailable_cache_samples_do_not_hide_pressure() {
+        use std::cell::Cell;
+
+        for v2 in [true, false] {
+            for (before, after) in [
+                (Some(90), Some(0)),
+                (Some(0), Some(90)),
+                (None, Some(90)),
+                (Some(90), None),
+                (Some(101), Some(101)),
+            ] {
+                let stats = Cell::new(0);
+                let key = if v2 {
+                    "inactive_file"
+                } else {
+                    "total_inactive_file"
+                };
+                let status = sample(&[group("/cg", v2)], |path| {
+                    let name = path.file_name()?.to_str()?;
+                    match name {
+                        "memory.max" | "memory.limit_in_bytes" => Some("100".into()),
+                        "memory.current" | "memory.usage_in_bytes" => Some("100".into()),
+                        "memory.stat" => {
+                            let count = stats.get();
+                            stats.set(count + 1);
+                            (if count == 0 { before } else { after })
+                                .map(|value| format!("{key} {value}\n"))
+                        }
+                        _ => None,
+                    }
+                });
+                assert_eq!(
+                    status,
+                    PressureStatus::Pressured {
+                        current: 100,
+                        limit: 100
+                    },
+                    "v2={v2}, before={before:?}, after={after:?}"
+                );
+                assert_eq!(stats.get(), 2);
+            }
+        }
     }
 
     #[test]
@@ -955,6 +1061,8 @@ mod tests {
                 reading: Some(CgroupReading {
                     limit_source: LimitSource::Max,
                     raw_bytes: 99,
+                    inactive_file_before_bytes: Some(10),
+                    inactive_file_after_bytes: Some(10),
                     inactive_file_bytes: 10,
                     effective_bytes: 89,
                     limit_bytes: 100,
@@ -962,6 +1070,8 @@ mod tests {
                 cache_reading: Some(CgroupReading {
                     limit_source: LimitSource::Max,
                     raw_bytes: 99,
+                    inactive_file_before_bytes: Some(10),
+                    inactive_file_after_bytes: Some(10),
                     inactive_file_bytes: 10,
                     effective_bytes: 89,
                     limit_bytes: 100,
@@ -1019,6 +1129,8 @@ mod tests {
             Some(CgroupReading {
                 limit_source: LimitSource::Max,
                 raw_bytes: 99,
+                inactive_file_before_bytes: Some(90),
+                inactive_file_after_bytes: Some(90),
                 inactive_file_bytes: 90,
                 effective_bytes: 9,
                 limit_bytes: 100,
@@ -1066,6 +1178,8 @@ mod tests {
             Some(CgroupReading {
                 limit_source: LimitSource::Max,
                 raw_bytes: 99,
+                inactive_file_before_bytes: Some(10),
+                inactive_file_after_bytes: Some(10),
                 inactive_file_bytes: 10,
                 effective_bytes: 89,
                 limit_bytes: 100,

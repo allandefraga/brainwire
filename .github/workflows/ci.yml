@@ -93,6 +93,9 @@ jobs:
       - name: Test cgroup diagnostic safety
         run: python -m unittest discover -s crates/server/tests -p 'test_cgroup*.py'
 
+      - name: Test Kubernetes CSI diagnostic safety
+        run: python -m unittest discover -s crates/server/tests -p 'test_kubernetes_csi_handoff.py'
+
       - name: Validate documentation links and site
         run: |
           python scripts/check_docs_links.py

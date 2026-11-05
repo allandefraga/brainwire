@@ -64,7 +64,10 @@ and is subject to query budgets; it is not an indexed key lookup.
 Declare this policy before creating the type. An existing type cannot be
 converted in place: create a new graph with the ontology and reingest its data
 from an authoritative source. Earlier overwritten events cannot be recovered
-from the graph alone. All writers and voters must support this feature before
+from the current graph. The online `db.createRelationshipType` procedure
+currently declares only the type and endpoints; it does not configure merge
+keys. Create the graph with a keyed ontology first, then connect the application.
+All writers and voters must support this feature before
 using it. Older versions can ignore its catalog metadata; do not run mixed
 versions or downgrade a keyed graph. Restore a compatible pre-feature backup
 to roll back. Test backup and recovery for your deployment.

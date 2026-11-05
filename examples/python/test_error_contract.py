@@ -57,6 +57,15 @@ class Driver:
 
 
 class ErrorContractTests(unittest.TestCase):
+    def test_unavailable_process_monitor_is_recognized_as_rolled_back(self):
+        hint = ('monitor unavailable [brainwire.memory reason=process_monitor '
+                'requested_bytes=0 available_bytes=0 rolled_back=true]')
+        with self.assertRaises(brainwire.MemoryPressureError) as caught:
+            GraphClient(Driver(ServerFailure(MEMORY_CODE, hint)), 'demo').run_cypher('RETURN 1')
+        error = caught.exception
+        self.assertEqual((error.reason, error.requested_bytes, error.available_bytes,
+                          error.rolled_back), ('process_monitor', 0, 0, True))
+
     def test_memory_error_preserves_verified_hint_and_cause(self):
         failure = ServerFailure(MEMORY_CODE, 'pool full' + HINT)
         driver = Driver(failure)

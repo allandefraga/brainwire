@@ -43,12 +43,23 @@ samples RSS at startup and every 100 ms. Crossing 80% of this threshold warns
 and requests an allocator purge; at 95%, new RUNs and query-pool growth are
 refused. A request may be refused earlier when its shared reservations cannot
 fit the sampled headroom. RUN admission also samples RSS on demand and uses
-the higher of that sample and the latest periodic sample. If the on-demand
-sample fails, the previous sample remains in use. This adds up to two OS RSS
-reads per RUN; it does not check every allocation or eliminate sampling races.
+the higher of that sample and the latest periodic sample. On supported RSS
+platforms, a failed reading does not refresh the sample: when no successful
+reading is available from the past second, new RUNs fail with
+`reason=process_monitor` and reservation headroom closes. A fresh reading
+reopens admission when the previously observed pressure has cleared. An
+already running query can instead receive `reason=process_limit` when its
+headroom is unavailable. This does not check every allocation or eliminate
+sampling races. On platforms without a supported RSS reader, the server logs
+a warning and RSS admission remains best effort.
 When RSS falls after a spike, periodic sampling can restore headroom even if
 new RUNs arrive during sampling. A higher concurrent RUN observation is retained
 for that sampling window.
+For cgroup admission, the server reads the inactive file-cache counter on both
+sides of the usage reading and discounts the smaller value. If either cache
+reading is missing or inconsistent, it discounts no cache. These readings are
+not atomic; they reduce one source of undercounting but cannot guarantee a
+process-wide ceiling or explain an earlier untraced decision.
 See [the design](design/process-memory-ceiling.md).
 
 The component budgets are accounting budgets. Sampling, admission and

@@ -473,6 +473,83 @@ async fn authentication_membership_bounds_and_total_deadline() {
     fixture.shutdown().await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aggregate_untrusted_frame_pressure_refuses_then_recovers() {
+    let fixture = Fixture::new(false).await;
+    let mut headers = Vec::new();
+    for _ in 0..2 {
+        let mut stream = TcpStream::connect(&fixture.peers[&2].addr).await.unwrap();
+        stream.write_u32(MAX_BODY_BYTES as u32).await.unwrap();
+        headers.push(stream);
+    }
+    assert!(matches!(
+        request(&fixture.settings[0], 2, RpcRequest::Status)
+            .await
+            .unwrap(),
+        RpcResponse::Status(_)
+    ));
+    drop(headers);
+    let pressure = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut partial = Vec::new();
+        let mut refused = false;
+        for _ in 0..3 {
+            let mut stream = TcpStream::connect(&fixture.peers[&2].addr).await.unwrap();
+            stream.write_u32(MAX_BODY_BYTES as u32).await.unwrap();
+            // Every frame stays incomplete, so neither parsing nor authentication
+            // can close it. Their aggregate capacity exceeds the shared budget.
+            if stream
+                .write_all(&vec![b' '; MAX_BODY_BYTES - 1])
+                .await
+                .is_err()
+            {
+                refused = true;
+            }
+            partial.push(stream);
+        }
+        if !refused {
+            let (first, rest) = partial.split_at_mut(1);
+            let (second, third) = rest.split_at_mut(1);
+            tokio::select! {
+                read = first[0].read_u8() => assert!(read.is_err()),
+                read = second[0].read_u8() => assert!(read.is_err()),
+                read = third[0].read_u8() => assert!(read.is_err()),
+            }
+        }
+    })
+    .await;
+    assert!(
+        pressure.is_ok(),
+        "partial pre-authentication bodies were not refused before the RPC deadline"
+    );
+    let recovered = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if matches!(
+                request(&fixture.settings[0], 2, RpcRequest::Status).await,
+                Ok(RpcResponse::Status(_))
+            ) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        recovered.is_ok(),
+        "ingress permits were not released after partial peers closed"
+    );
+    let vote = openraft::raft::VoteRequest {
+        vote: openraft::Vote::new(1, 1),
+        last_log_id: None,
+    };
+    assert!(matches!(
+        request(&fixture.settings[0], 2, RpcRequest::Vote(vote))
+            .await
+            .unwrap(),
+        RpcResponse::Voted(_)
+    ));
+    fixture.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mutual_tls_and_claimed_sender_hostname_required() {
     let fixture = Fixture::new(true).await;
     assert!(matches!(

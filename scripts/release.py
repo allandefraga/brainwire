@@ -262,6 +262,7 @@ def run_local_release_checks() -> None:
         ],
         [sys.executable, "scripts/check_docs_site.py"],
         [sys.executable, "-m", "unittest", "discover", "-s", "crates/server/tests", "-p", "test_cgroup*.py"],
+        [sys.executable, "-m", "unittest", "discover", "-s", "crates/server/tests", "-p", "test_kubernetes_csi_handoff.py"],
     )
     env.setdefault("CARGO_BUILD_JOBS", "2")
     env["CARGO_INCREMENTAL"] = "0"

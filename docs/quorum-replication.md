@@ -283,6 +283,14 @@ Accepted and outbound Raft peer sockets enable `TCP_NODELAY` to reduce delays
 between small frame writes. This does not eliminate network delays or guarantee
 quorum availability.
 
+Each peer listener also caps the aggregate requested capacity for inbound
+encoded frame bodies at 16 MiB. Capacity is acquired as body bytes arrive, not
+from an untrusted length header; overloaded connections are closed promptly.
+This bounds that buffer class, not decoded RPCs, allocator overhead, all network
+memory or process RSS. Large concurrent legitimate RPCs may also be refused;
+continuous overload can still prevent quorum progress. The wire format is
+unchanged, and normal Raft retries still apply.
+
 The Raft log rejects a nonzero first index and leader-identity regressions
 before writing the batch, including a lower node ID in the same term. Recovery
 rejects an existing log that violates this ordering rather than repairing it.

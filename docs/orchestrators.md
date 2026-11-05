@@ -179,7 +179,7 @@ kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.12`. <!-- brainwire-release-version --> The local
+Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.15.0-beta.13`. <!-- brainwire-release-version --> The local
 release helper updates both tags with the Cargo workspace version. The private
 overlay references `ghcr-pull`; logging in on your workstation alone does not
 authenticate cluster nodes. The public overlay needs no image-pull secret. For
@@ -255,7 +255,7 @@ described in [protected Swarm setup](protected-containers.md):
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.12 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.13 # brainwire-release-version
 docker secret create brainwire-auth-policy /secure/path/policy.json
 docker secret create brainwire-health-auth /secure/path/health.json
 docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml
@@ -312,6 +312,27 @@ counts. It then audits the store, creates/audits a native checkpoint and queries
 the copy over Bolt. Its cluster is deleted in `finally`, including on failure;
 it does not deploy to an existing context. Its acceptance scope covers process/Pod
 recovery on retained storage, not machine loss, distributed replication or HA.
+
+### Test a CSI volume handoff
+
+For a disposable two-node test cluster with a CSI StorageClass supporting
+`ReadWriteOncePod` and `Delete` reclaim policy, the opt-in diagnostic creates
+its own namespace, writes a small synthetic graph, stops its writer, and opens
+the same volume on the second node. It checks the data, index and offline audit.
+
+```sh
+python crates/server/tests/kubernetes_csi_handoff.py \
+  --run-disposable-csi-handoff --kubeconfig /path/to/test-kubeconfig \
+  --context TEST_CONTEXT --nodes NODE_A NODE_B --storage-class TEST_CSI_CLASS \
+  --image ghcr.io/allandefraga/brainwire@sha256:REPLACE_WITH_IMAGE_DIGEST
+```
+
+Use a cluster trusted to enforce its NetworkPolicy. The test creates and deletes
+resources and requires permission to inspect nodes and volumes; inspect its JSON
+receipt for cleanup failures. It verifies Kubernetes API removal, not provider
+disk deletion. This is a controlled handoff of one writer, not a simulated lost
+machine, storage fencing, Raft failover or proof of physical node independence.
+The harness itself has mock tests; a real CSI handoff has not yet been qualified.
 
 The first October 3 attempt timed out during kind bootstrap. The second-session
 retry passed Kubernetes 1.36.4 retained-PVC acceptance with 10K nodes: container

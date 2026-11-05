@@ -1,13 +1,14 @@
-//! Process memory ceiling and allocator return (docs/design/process-memory-ceiling.md).
+//! Sampled process memory admission and allocator return (docs/design/process-memory-ceiling.md).
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const REFUSE_PERCENT: u64 = 95;
 const WARN_PERCENT: u64 = 80;
 /// A level is left only once RSS falls this many points below its threshold.
 const HYSTERESIS_PERCENT: u64 = 5;
 const SAMPLE_EVERY: Duration = Duration::from_millis(100);
+const MAX_SAMPLE_AGE: Duration = Duration::from_secs(1);
 
 /// jemalloc for Rust and, where supported, for RocksDB's C++ allocations too.
 #[cfg(not(target_env = "msvc"))]
@@ -21,12 +22,29 @@ pub(crate) struct ProcessMemory {
     peak: AtomicU64,
     level: AtomicU8,
     observation: Mutex<Observation>,
+    require_fresh_sample: bool,
 }
 
 #[derive(Default)]
 struct Observation {
     generation: u64,
     run_peak: Option<u64>,
+    sampled_at: Option<Instant>,
+}
+
+impl Observation {
+    fn record_success(&mut self, sampled_at: Instant) {
+        self.sampled_at = Some(
+            self.sampled_at
+                .map_or(sampled_at, |prior| prior.max(sampled_at)),
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessRefusal {
+    Limit { rss_bytes: u64, cap_bytes: u64 },
+    MonitorUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,24 +55,53 @@ pub(crate) enum Crossing {
 
 impl ProcessMemory {
     pub(crate) fn new(limit: u64) -> Arc<Self> {
-        // Seed admission before the listener accepts work; the sampler may not
-        // run until after the first requests arrive. Unavailable RSS remains
-        // best-effort admission, matching later unavailable samples.
-        let rss = resident_bytes().unwrap_or_else(|| {
-            eprintln!("warning: initial process RSS unavailable; memory admission is best effort");
-            0
-        });
-        Self::with_initial_rss(limit, rss)
+        // Start the clock before OS I/O so a blocked read cannot appear fresh.
+        let sampled_at = Instant::now();
+        let rss = resident_bytes();
+        let require_fresh_sample = cfg!(any(
+            target_os = "linux",
+            target_os = "macos",
+            not(target_env = "msvc")
+        ));
+        if rss.is_none() {
+            if require_fresh_sample {
+                eprintln!("warning: initial process RSS unavailable; memory admission stays closed until a valid sample arrives");
+            } else {
+                eprintln!("warning: process RSS sampling unsupported on this platform; memory.limit admission has no RSS observation");
+            }
+        }
+        Self::with_initial_sample_at(limit, rss, require_fresh_sample, sampled_at)
     }
 
+    #[cfg(test)]
     fn with_initial_rss(limit: u64, rss: u64) -> Arc<Self> {
+        Self::with_initial_sample_at(limit, Some(rss), true, Instant::now())
+    }
+
+    fn with_initial_sample_at(
+        limit: u64,
+        rss: Option<u64>,
+        require_fresh_sample: bool,
+        sampled_at: Instant,
+    ) -> Arc<Self> {
         Arc::new(Self {
             limit,
-            rss: AtomicU64::new(rss),
-            peak: AtomicU64::new(rss),
+            rss: AtomicU64::new(rss.unwrap_or(0)),
+            peak: AtomicU64::new(rss.unwrap_or(0)),
             level: AtomicU8::new(0),
-            observation: Mutex::new(Observation::default()),
+            observation: Mutex::new(Observation {
+                sampled_at: rss.map(|_| sampled_at),
+                ..Observation::default()
+            }),
+            require_fresh_sample,
         })
+    }
+
+    fn sample_is_fresh(&self, observation: &Observation, now: Instant) -> bool {
+        !self.require_fresh_sample
+            || observation.sampled_at.is_some_and(|sampled_at| {
+                now.saturating_duration_since(sampled_at) <= MAX_SAMPLE_AGE
+            })
     }
 
     fn threshold(&self, percent: u64) -> u64 {
@@ -78,7 +125,17 @@ impl ProcessMemory {
         observation.generation
     }
 
+    #[cfg(test)]
     fn record_sample(&self, before_sample: u64, rss: u64) -> Option<Crossing> {
+        self.record_sample_at(before_sample, rss, Instant::now())
+    }
+
+    fn record_sample_at(
+        &self,
+        before_sample: u64,
+        rss: u64,
+        sampled_at: Instant,
+    ) -> Option<Crossing> {
         let rss = {
             let mut observation = self
                 .observation
@@ -92,6 +149,7 @@ impl ProcessMemory {
                 // Otherwise continuous low RUNs can prevent recovery forever.
                 observation.run_peak.unwrap_or(0).max(rss)
             };
+            observation.record_success(sampled_at);
             self.rss.store(rss, Ordering::Relaxed);
             observation.generation = observation.generation.wrapping_add(1);
             rss
@@ -120,33 +178,64 @@ impl ProcessMemory {
         }
     }
 
-    /// Bytes a reservation may still add before RSS reaches the refusal threshold.
+    /// Bytes a reservation may add while the RSS observation is recent enough.
     pub(crate) fn headroom(&self) -> usize {
+        self.headroom_at(Instant::now())
+    }
+
+    fn headroom_at(&self, now: Instant) -> usize {
+        let observation = self
+            .observation
+            .lock()
+            .expect("RSS observation lock poisoned");
+        if !self.sample_is_fresh(&observation, now) {
+            return 0;
+        }
         let cap = self.threshold(REFUSE_PERCENT);
         usize::try_from(cap.saturating_sub(self.rss.load(Ordering::Relaxed))).unwrap_or(usize::MAX)
     }
 
     /// Check current RSS for each new RUN and preserve it for reservations.
-    pub(crate) fn refusal(&self) -> Option<(u64, u64)> {
-        self.refusal_with_rss(resident_bytes())
+    pub(crate) fn refusal(&self) -> Option<ProcessRefusal> {
+        let sampled_at = Instant::now();
+        let fresh = resident_bytes();
+        self.refusal_with_rss_at(fresh, sampled_at, Instant::now())
     }
 
-    fn refusal_with_rss(&self, fresh: Option<u64>) -> Option<(u64, u64)> {
+    #[cfg(test)]
+    fn refusal_with_rss(&self, fresh: Option<u64>) -> Option<ProcessRefusal> {
+        let now = Instant::now();
+        self.refusal_with_rss_at(fresh, now, now)
+    }
+
+    fn refusal_with_rss_at(
+        &self,
+        fresh: Option<u64>,
+        sampled_at: Instant,
+        now: Instant,
+    ) -> Option<ProcessRefusal> {
+        let mut observation = self
+            .observation
+            .lock()
+            .expect("RSS observation lock poisoned");
         // Lower RUN samples wait for the sampler to confirm relief. Preserve
         // spikes for reservation headroom without consuming log crossings.
         if let Some(rss) = fresh {
-            let mut observation = self
-                .observation
-                .lock()
-                .expect("RSS observation lock poisoned");
             self.peak.fetch_max(rss, Ordering::Relaxed);
             self.rss.fetch_max(rss, Ordering::Relaxed);
+            observation.record_success(sampled_at);
             observation.run_peak = Some(observation.run_peak.unwrap_or(0).max(rss));
             observation.generation = observation.generation.wrapping_add(1);
         }
+        if !self.sample_is_fresh(&observation, now) {
+            return Some(ProcessRefusal::MonitorUnavailable);
+        }
         let rss = self.rss.load(Ordering::Relaxed).max(fresh.unwrap_or(0));
         let cap = self.threshold(REFUSE_PERCENT);
-        (rss >= cap).then_some((rss, cap))
+        (rss >= cap).then_some(ProcessRefusal::Limit {
+            rss_bytes: rss,
+            cap_bytes: cap,
+        })
     }
 
     pub(crate) fn peak(&self) -> u64 {
@@ -160,9 +249,10 @@ impl ProcessMemory {
         std::thread::Builder::new()
             .name("brainwire-memory".into())
             .spawn(move || loop {
+                let sampled_at = Instant::now();
                 let before_sample = memory.sample_generation();
                 if let Some(rss) = resident_bytes() {
-                    if let Some(crossing) = memory.record_sample(before_sample, rss) {
+                    if let Some(crossing) = memory.record_sample_at(before_sample, rss, sampled_at) {
                         let admission_rss = memory.rss.load(Ordering::Relaxed);
                         if !purge() {
                             eprintln!("brainwire memory: allocator purge failed");
@@ -294,6 +384,92 @@ mod tests {
     }
 
     #[test]
+    fn stale_rss_cannot_leave_reservation_admission_open() {
+        let now = Instant::now();
+        let memory = ProcessMemory::with_initial_sample_at(1000, Some(500), true, now);
+        let expired = now + MAX_SAMPLE_AGE + Duration::from_nanos(1);
+        assert_eq!(memory.headroom_at(now), 450);
+        assert_eq!(memory.headroom_at(expired), 0);
+        assert_eq!(
+            memory.refusal_with_rss_at(None, expired, expired),
+            Some(ProcessRefusal::MonitorUnavailable)
+        );
+        assert_eq!(
+            memory.refusal_with_rss_at(Some(500), expired, expired),
+            None
+        );
+        assert_eq!(memory.headroom_at(expired), 450);
+    }
+
+    #[test]
+    fn missing_initial_rss_closes_admission_until_a_valid_sample_arrives() {
+        let now = Instant::now();
+        let memory = ProcessMemory::with_initial_sample_at(1000, None, true, now);
+        assert_eq!(memory.headroom_at(now), 0);
+        assert_eq!(
+            memory.refusal_with_rss_at(None, now, now),
+            Some(ProcessRefusal::MonitorUnavailable)
+        );
+        memory.record_sample_at(memory.sample_generation(), 500, now);
+        assert_eq!(memory.headroom_at(now), 450);
+        assert_eq!(memory.refusal_with_rss_at(None, now, now), None);
+    }
+
+    #[test]
+    fn failed_reads_do_not_extend_sample_lifetime() {
+        let now = Instant::now();
+        let memory = ProcessMemory::with_initial_sample_at(1000, Some(500), true, now);
+        let last_valid = now + MAX_SAMPLE_AGE;
+        assert_eq!(
+            memory.refusal_with_rss_at(None, last_valid, last_valid),
+            None
+        );
+        let expired = last_valid + Duration::from_nanos(1);
+        assert_eq!(
+            memory.refusal_with_rss_at(None, expired, expired),
+            Some(ProcessRefusal::MonitorUnavailable)
+        );
+        assert_eq!(memory.headroom_at(expired), 0);
+    }
+
+    #[test]
+    fn a_blocked_os_read_does_not_become_fresh_when_it_completes() {
+        let began = Instant::now();
+        let memory = ProcessMemory::with_initial_sample_at(1000, None, true, began);
+        let completed = began + MAX_SAMPLE_AGE + Duration::from_nanos(1);
+        assert_eq!(
+            memory.refusal_with_rss_at(Some(500), began, completed),
+            Some(ProcessRefusal::MonitorUnavailable)
+        );
+        assert_eq!(memory.headroom_at(completed), 0);
+        memory.record_sample_at(memory.sample_generation(), 500, completed);
+        assert_eq!(memory.headroom_at(completed), 450);
+    }
+
+    #[test]
+    fn an_older_read_cannot_expire_a_more_recent_observation() {
+        let began = Instant::now();
+        let later = began + MAX_SAMPLE_AGE;
+        let memory = ProcessMemory::with_initial_sample_at(1000, Some(500), true, began);
+        assert_eq!(memory.refusal_with_rss_at(Some(550), later, later), None);
+        assert_eq!(memory.refusal_with_rss_at(Some(500), began, later), None);
+        let check = later + MAX_SAMPLE_AGE;
+        assert_eq!(memory.headroom_at(check), 400);
+        memory.record_sample_at(memory.sample_generation(), 550, began);
+        assert_eq!(memory.headroom_at(check), 400);
+        assert_eq!(memory.headroom_at(check + Duration::from_nanos(1)), 0);
+    }
+
+    #[test]
+    fn unsupported_rss_platform_retains_explicit_partial_admission() {
+        let now = Instant::now();
+        let memory = ProcessMemory::with_initial_sample_at(1000, None, false, now);
+        let later = now + Duration::from_secs(3600);
+        assert_eq!(memory.headroom_at(later), 950);
+        assert_eq!(memory.refusal_with_rss_at(None, later, later), None);
+    }
+
+    #[test]
     fn crossings_log_once_with_hysteresis_and_refuse_at_95_percent() {
         let memory = ProcessMemory::with_initial_rss(1000, 0);
         assert_eq!(memory.record(500), None);
@@ -302,7 +478,13 @@ mod tests {
         assert_eq!(memory.record(800), Some(Crossing::Warn));
         assert_eq!(memory.record(810), None);
         assert_eq!(memory.record(950), Some(Crossing::Refuse));
-        assert_eq!(memory.refusal_with_rss(None), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(None),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         assert_eq!(memory.headroom(), 0);
         // Below 95% but within the hysteresis band: no new crossing on return.
         assert_eq!(memory.record(920), None);
@@ -316,13 +498,31 @@ mod tests {
     #[test]
     fn run_admission_preserves_fresh_rss_until_the_sampler_confirms_relief() {
         let memory = ProcessMemory::with_initial_rss(1000, 500);
-        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(Some(950)),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         assert_eq!(memory.peak(), 950);
         assert_eq!(memory.headroom(), 0);
         assert_eq!(memory.record(950), Some(Crossing::Refuse));
         // A low on-demand sample cannot undo a high sampler reading.
-        assert_eq!(memory.refusal_with_rss(Some(500)), Some((950, 950)));
-        assert_eq!(memory.refusal_with_rss(None), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(Some(500)),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
+        assert_eq!(
+            memory.refusal_with_rss(None),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         assert_eq!(memory.record(500), None);
         assert_eq!(memory.refusal_with_rss(Some(500)), None);
         assert_eq!(memory.refusal_with_rss(None), None);
@@ -333,7 +533,13 @@ mod tests {
     fn fresh_run_rss_reduces_reservation_headroom_before_the_next_sampler_tick() {
         let memory = ProcessMemory::with_initial_rss(1000, 500);
         let before_sample = memory.sample_generation();
-        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(Some(950)),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         assert_eq!(memory.headroom(), 0);
         // The sampler started before RUN observed a spike and returned later.
         assert_eq!(
@@ -350,7 +556,13 @@ mod tests {
     fn equal_valued_run_observation_also_invalidates_an_older_sampler_read() {
         let memory = ProcessMemory::with_initial_rss(1000, 950);
         let before_sample = memory.sample_generation();
-        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(Some(950)),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         assert_eq!(
             memory.record_sample(before_sample, 600),
             Some(Crossing::Refuse)
@@ -394,14 +606,26 @@ mod tests {
         memory.sample_generation();
         memory.refusal_with_rss(Some(950));
         // An unavailable OS reading skips record_sample entirely.
-        assert_eq!(memory.refusal_with_rss(None), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(None),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         let before_sample = memory.sample_generation();
         memory.refusal_with_rss(Some(500));
         memory.record_sample(before_sample, 500);
         assert_eq!(memory.headroom(), 450);
         assert_eq!(memory.peak(), 950);
         // A fresh RUN after publication still immediately closes admission.
-        assert_eq!(memory.refusal_with_rss(Some(950)), Some((950, 950)));
+        assert_eq!(
+            memory.refusal_with_rss(Some(950)),
+            Some(ProcessRefusal::Limit {
+                rss_bytes: 950,
+                cap_bytes: 950
+            })
+        );
         assert_eq!(memory.headroom(), 0);
     }
 

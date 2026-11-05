@@ -34,7 +34,7 @@ class MemoryPressureError(BrainwireError):
         super().__init__(original_error)
         self.reason = self.requested_bytes = self.available_bytes = None
         hint = re.search(
-            r"\[brainwire\.memory reason=(statement_limit|query_pool|process_limit|cgroup|ingress) "
+            r"\[brainwire\.memory reason=(statement_limit|query_pool|process_limit|process_monitor|cgroup|ingress) "
             r"requested_bytes=([0-9]{1,20}) available_bytes=([0-9]{1,20}) rolled_back=true\]\Z",
             self.message,
         )

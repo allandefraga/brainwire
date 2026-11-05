@@ -93,7 +93,7 @@ pub const MEMORY_REFUSED: &str = "Neo.TransientError.General.MemoryPressure";
 
 impl EngineError {
     /// A memory refusal with its machine-readable size hint. `reason` is one of
-    /// `statement_limit`, `query_pool`, `process_limit`, `cgroup`, `ingress`.
+    /// `statement_limit`, `query_pool`, `process_limit`, `process_monitor`, `cgroup`, `ingress`.
     pub fn memory_refused(reason: &str, requested: u64, available: u64, detail: &str) -> Self {
         EngineError {
             code: MEMORY_REFUSED.into(),

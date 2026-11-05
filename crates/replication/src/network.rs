@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
@@ -33,6 +33,9 @@ pub const MAX_BODY_BYTES: usize = 8 << 20;
 pub const RPC_DEADLINE: Duration = Duration::from_secs(5);
 const PROTOCOL: u16 = 1;
 const MAX_CONNECTIONS: usize = 64;
+/// Aggregate requested capacity of incoming encoded bodies, excluding decoded
+/// RPCs, TLS, allocator overhead and outgoing responses; not a process RSS cap.
+const MAX_INCOMING_BODY_BYTES: usize = 2 * MAX_BODY_BYTES;
 /// An authenticated peer connection waits this long for its next request.
 const SERVER_IDLE: Duration = Duration::from_secs(30);
 /// Clients reuse an idle connection only well inside `SERVER_IDLE`.
@@ -59,6 +62,8 @@ pub enum TransportError {
     Protocol,
     #[error("peer authentication rejected")]
     Authentication,
+    #[error("peer ingress memory budget exhausted")]
+    Overloaded,
     #[error("peer RPC deadline exceeded; write outcome may be unknown")]
     Timeout,
     #[error("peer is unreachable")]
@@ -451,18 +456,47 @@ async fn read_frame(stream: &mut Stream) -> Result<Vec<u8>, TransportError> {
         .map_err(|_| TransportError::Unreachable)? as usize;
     read_body(stream, count).await
 }
+#[derive(Debug)]
+struct IncomingFrame {
+    bytes: Vec<u8>,
+    _permit: Option<OwnedSemaphorePermit>,
+}
+async fn incoming_frame(
+    stream: &mut Stream,
+    budget: &Arc<Semaphore>,
+) -> Result<IncomingFrame, TransportError> {
+    let count = stream
+        .read_u32()
+        .await
+        .map_err(|_| TransportError::Unreachable)? as usize;
+    read_body_accounted(stream, count, Some(budget)).await
+}
 /// Waits up to `wait` for the next frame to start; its body then gets only the
 /// RPC deadline, so an idle authenticated connection cannot stretch a request.
-async fn next_frame(stream: &mut Stream, wait: Duration) -> Result<Vec<u8>, TransportError> {
+async fn next_frame(
+    stream: &mut Stream,
+    wait: Duration,
+    budget: &Arc<Semaphore>,
+) -> Result<IncomingFrame, TransportError> {
     let count = tokio::time::timeout(wait, stream.read_u32())
         .await
         .map_err(|_| TransportError::Timeout)?
         .map_err(|_| TransportError::Unreachable)? as usize;
-    tokio::time::timeout(RPC_DEADLINE, read_body(stream, count))
-        .await
-        .map_err(|_| TransportError::Timeout)?
+    tokio::time::timeout(
+        RPC_DEADLINE,
+        read_body_accounted(stream, count, Some(budget)),
+    )
+    .await
+    .map_err(|_| TransportError::Timeout)?
 }
 async fn read_body(stream: &mut Stream, count: usize) -> Result<Vec<u8>, TransportError> {
+    Ok(read_body_accounted(stream, count, None).await?.bytes)
+}
+async fn read_body_accounted(
+    stream: &mut Stream,
+    count: usize,
+    budget: Option<&Arc<Semaphore>>,
+) -> Result<IncomingFrame, TransportError> {
     if count == 0 {
         return Err(TransportError::Protocol);
     }
@@ -472,6 +506,7 @@ async fn read_body(stream: &mut Stream, count: usize) -> Result<Vec<u8>, Transpo
     // A peer has not authenticated until its whole envelope arrives. Grow only
     // after receiving bytes, so a four-byte header cannot reserve an 8 MiB body.
     let mut body = Vec::new();
+    let mut permit: Option<OwnedSemaphorePermit> = None;
     let mut chunk = [0; 8 << 10];
     while body.len() < count {
         let take = (count - body.len()).min(chunk.len());
@@ -479,12 +514,34 @@ async fn read_body(stream: &mut Stream, count: usize) -> Result<Vec<u8>, Transpo
             .read_exact(&mut chunk[..take])
             .await
             .map_err(|_| TransportError::Unreachable)?;
-        // Geometric growth avoids quadratic copies for large valid RPCs.
-        body.try_reserve(take)
-            .map_err(|_| TransportError::TooLarge)?;
+        if body.len() + take > body.capacity() {
+            // Charge capacity growth only after bytes arrive; a length header
+            // alone cannot consume the shared budget or stall quorum traffic.
+            let capacity = count.min(
+                (body.capacity() * 2)
+                    .max(chunk.len())
+                    .max(body.len() + take),
+            );
+            if let Some(budget) = budget {
+                let growth = budget
+                    .clone()
+                    .try_acquire_many_owned((capacity - body.capacity()) as u32)
+                    .map_err(|_| TransportError::Overloaded)?;
+                if let Some(permit) = &mut permit {
+                    permit.merge(growth);
+                } else {
+                    permit = Some(growth);
+                }
+            }
+            body.try_reserve_exact(capacity - body.len())
+                .map_err(|_| TransportError::TooLarge)?;
+        }
         body.extend_from_slice(&chunk[..take]);
     }
-    Ok(body)
+    Ok(IncomingFrame {
+        bytes: body,
+        _permit: permit,
+    })
 }
 async fn write_frame(stream: &mut Stream, body: &[u8]) -> Result<(), TransportError> {
     stream
@@ -897,6 +954,7 @@ pub async fn serve(
         ));
     }
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let incoming_bytes = Arc::new(Semaphore::new(MAX_INCOMING_BODY_BYTES));
     let mut tasks = JoinSet::new();
     loop {
         tokio::select! {
@@ -904,6 +962,7 @@ pub async fn serve(
                 let Some(stream) = incoming? else { continue; };
                 let Ok(permit) = permits.clone().try_acquire_owned() else { drop(stream); continue; };
                 let settings = settings.clone(); let raft = raft.clone(); let storage = storage.clone();
+                let incoming_bytes = incoming_bytes.clone();
                 tasks.spawn(async move {
                     let _permit = permit;
                     let _: Result<(), TransportError> = async {
@@ -912,9 +971,9 @@ pub async fn serve(
                         // peer has authenticated, the connection stays open for reuse.
                         let (mut wait, mut sender) = (RPC_DEADLINE, None);
                         loop {
-                            let body = match sender { None => tokio::time::timeout(wait, read_frame(&mut stream)).await.map_err(|_| TransportError::Timeout)??, Some(_) => next_frame(&mut stream, wait).await? };
+                            let body = match sender { None => tokio::time::timeout(wait, incoming_frame(&mut stream, &incoming_bytes)).await.map_err(|_| TransportError::Timeout)??, Some(_) => next_frame(&mut stream, wait, &incoming_bytes).await? };
                             tokio::time::timeout(RPC_DEADLINE, async {
-                                let envelope: Envelope<'_> = serde_json::from_slice(&body).map_err(|_| TransportError::Protocol)?;
+                                let envelope: Envelope<'_> = serde_json::from_slice(&body.bytes).map_err(|_| TransportError::Protocol)?;
                                 settings.authenticate(&envelope, sender)?;
                                 if let Some(verifier) = &settings.peer_verifier {
                                     use rustls::client::danger::ServerCertVerifier;
@@ -1064,6 +1123,83 @@ mod tests {
             read_body(&mut stream, 1).await,
             Err(TransportError::Unreachable)
         ));
+    }
+
+    #[tokio::test]
+    async fn incoming_body_capacity_releases_on_cancellation_and_consumption() {
+        let budget = Arc::new(Semaphore::new(8192));
+        let (mut sender, receiver) = tokio::io::duplex(16384);
+        sender.write_all(&[0; 8192]).await.unwrap();
+        let reading_budget = budget.clone();
+        let read = tokio::spawn(async move {
+            let mut stream: Stream = Box::new(receiver);
+            read_body_accounted(&mut stream, 8193, Some(&reading_budget)).await
+        });
+        for _ in 0..100 {
+            if budget.available_permits() == 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(budget.available_permits(), 0);
+        let (mut other_sender, other_receiver) = tokio::io::duplex(1);
+        other_sender.write_all(&[1]).await.unwrap();
+        let mut other: Stream = Box::new(other_receiver);
+        assert!(matches!(
+            read_body_accounted(&mut other, 1, Some(&budget)).await,
+            Err(TransportError::Overloaded)
+        ));
+        read.abort();
+        assert!(read.await.unwrap_err().is_cancelled());
+        assert_eq!(budget.available_permits(), 8192);
+        let (mut sender, receiver) = tokio::io::duplex(1);
+        sender.write_all(&[2]).await.unwrap();
+        let mut stream: Stream = Box::new(receiver);
+        let frame = read_body_accounted(&mut stream, 1, Some(&budget))
+            .await
+            .unwrap();
+        assert_eq!(frame.bytes, [2]);
+        assert_eq!(budget.available_permits(), 8191);
+        drop(frame);
+        assert_eq!(budget.available_permits(), 8192);
+        let (mut sender, receiver) = tokio::io::duplex(8192);
+        sender.write_all(&[0; 8192]).await.unwrap();
+        drop(sender);
+        let mut stream: Stream = Box::new(receiver);
+        assert!(matches!(
+            read_body_accounted(&mut stream, 8193, Some(&budget)).await,
+            Err(TransportError::Unreachable)
+        ));
+        assert_eq!(budget.available_permits(), 8192);
+    }
+
+    #[tokio::test]
+    async fn incoming_header_alone_and_timed_out_body_do_not_retain_budget() {
+        let budget = Arc::new(Semaphore::new(MAX_INCOMING_BODY_BYTES));
+        let (mut sender, receiver) = tokio::io::duplex(16384);
+        sender.write_u32(MAX_BODY_BYTES as u32).await.unwrap();
+        let mut stream: Stream = Box::new(receiver);
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            incoming_frame(&mut stream, &budget)
+        )
+        .await
+        .is_err());
+        assert_eq!(budget.available_permits(), MAX_INCOMING_BODY_BYTES);
+        sender.write_all(&[0; 8192]).await.unwrap();
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            read_body_accounted(&mut stream, 8193, Some(&budget))
+        )
+        .await
+        .is_err());
+        assert_eq!(budget.available_permits(), MAX_INCOMING_BODY_BYTES);
+        drop(sender);
+        assert!(matches!(
+            read_body_accounted(&mut stream, 1, Some(&budget)).await,
+            Err(TransportError::Unreachable)
+        ));
+        assert_eq!(budget.available_permits(), MAX_INCOMING_BODY_BYTES);
     }
 
     fn settings(dir: &Path, node: u64, peers: &BTreeMap<u64, BasicNode>) -> TransportSettings {

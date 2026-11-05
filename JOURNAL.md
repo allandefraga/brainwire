@@ -29,6 +29,15 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-05: v0.15.0-beta.13 admission and recovery diagnostics
+
+- **Done:** close configured process-memory admission when RSS observations are absent or stale; bracket cgroup working-set sampling with cache reads; bound Raft encoded inbound frame capacity; add an opt-in guarded two-node CSI volume handoff diagnostic. Recognize the new monitor refusal in the Python client. Make an externally bracketed but internally unverified pressure observation inconclusive, not a pass.
+- **Verification:** 1,084 Rust tests passed (3 ignored); full workspace Clippy and formatting passed. Python client tests, 45 cgroup diagnostic tests and 12 mocked CSI harness tests passed. Raft ingress had a reproduced red regression and 46 green tests, with overload recovery repeated five times. CSI is mocked; no real CSI handoff or multi-machine failure was tested.
+- **Memory evidence:** the final candidate passed traced standard and persistent-observer pressure repeats and a persistent untraced control at 512 MiB. An earlier standard smoke returned FAIL while server trace showed a below-threshold decision; the external sampling precondition is inconclusive and the original receipt remains unchanged. See [pressure investigation](docs/benchmarks/2026-11-05-pressure-beta13.md). A 30-minute synthetic 2 GiB read diagnostic on the previous beta passed with 100,000 nodes and edges; it is not a candidate or production qualification. A short shared-host performance comparison was inconclusive.
+- **Integration:** a synthetic application writer parity test failed against both beta.12 and beta.13 when the graph was initialized without keyed timeline metadata. It passed on beta.13 when the type's immutable key was declared in the initial ontology. Online `db.createRelationshipType` cannot currently supply that key; existing unkeyed types cannot be converted in place.
+- **Next step:** add safe keyed online catalog declaration and adapt clients to verify identity before writes; separately run representative sustained mixed loads and independent-machine/CSI failure tests on a dedicated environment.
+- **Blockers:** process RSS remains a sampled cooperative guard, the earlier beta.12 pressure result cannot be reconstructed, and real multi-machine failover, CSI handoff and sustained representative workloads remain unqualified. Do not claim production readiness.
+
 ## 2026-11-05: v0.15.0-beta.12 memory, events and recovery
 
 - **Done:** admit DISTINCT and UNION key copies before allocating; account for

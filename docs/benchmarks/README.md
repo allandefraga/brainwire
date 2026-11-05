@@ -12,6 +12,12 @@ query-pool pressure. Neither completed the required sustained workload or
 established a process RSS ceiling. Those results must not be presented as a
 successful capacity benchmark.
 
+A [30-minute beta.12 2 GiB read diagnostic](2026-11-05-2g-read-soak.md) covered 100,000 synthetic nodes and relationships on a shared host.
+
+A [short admission-overhead comparison](2026-11-05-admission-overhead.md) was inconclusive on a shared host.
+
+A [beta.13 pressure investigation](2026-11-05-pressure-beta13.md) records a measurement discrepancy, traced repeats and an untraced control.
+
 ## Recent pressure-admission smoke
 
 The [beta.12 pressure investigation](2026-11-05-pressure-investigation.md)

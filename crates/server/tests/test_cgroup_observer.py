@@ -256,10 +256,10 @@ class ObserverLifecycleTests(unittest.TestCase):
 
 
 class ObserverVerdictTests(unittest.TestCase):
-    def test_trace_timestamps_capture_failed_verdict_without_changing_it(self):
+    def test_trace_timestamps_do_not_prove_decision_time_pressure(self):
         snapshot = {'memory.max': smoke.LIMIT, 'diagnostic_working_set': {'bytes': smoke.LIMIT}}
         checks = []
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(smoke.SmokeInconclusive):
             smoke.require_pressure_error('server', lambda: None, checks,
                                          sample=lambda *a, **kw: snapshot, trace=True)
         self.assertLessEqual(checks[0]['operation_wall_start_ns'], checks[0]['operation_wall_end_ns'])

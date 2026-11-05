@@ -232,14 +232,56 @@ class SmokeOwnershipTests(unittest.TestCase):
                     smoke.require_pressure_error('owned', lambda: None, [])
 
 
-    def test_effective_pressure_above_threshold_still_fails_an_admitted_run(self):
+    def test_external_pressure_cannot_establish_pressure_at_admitted_run(self):
         for effective in ((smoke.LIMIT * 95 + 99) // 100, smoke.LIMIT):
             sample = {'memory.max': smoke.LIMIT, 'memory.current': smoke.LIMIT,
                       'diagnostic_working_set': {'bytes': effective}}
             self.assertTrue(smoke.pressured(sample))
             with patch.object(smoke, 'cgroup', return_value=sample):
-                with self.assertRaisesRegex(AssertionError, 'RUN admitted'):
-                    smoke.require_pressure_error('owned', lambda: None, [])
+                checks = []
+                with self.assertRaisesRegex(smoke.SmokeInconclusive, 'decision-time pressure'):
+                    smoke.require_pressure_error('owned', lambda: None, checks)
+            self.assertEqual(checks[0]['before'], sample)
+            self.assertEqual(checks[0]['after'], sample)
+
+    def test_external_pressure_admission_is_inconclusive_receipt_never_pass(self):
+        sample = {'memory.max': smoke.LIMIT,
+                  'diagnostic_working_set': {'bytes': smoke.LIMIT}}
+        def run(args, report):
+            report['owned_resources_cleaned'] = True
+            smoke.require_pressure_error('owned', lambda: None,
+                                         report.setdefault('run_pressure_checks', []),
+                                         sample=lambda *a, **kw: sample, trace=True)
+            report['result'] = 'PASS'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / 'receipt.json'
+            with patch.object(sys, 'argv', ['smoke', '--image', 'local', '--output', str(output)]), \
+                 patch.object(smoke, 'run', side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(smoke.main(), 1)
+            receipt = json.loads(output.read_text())
+        self.assertEqual(receipt['result'], 'INCONCLUSIVE')
+        check = receipt['run_pressure_checks'][0]
+        self.assertEqual(check['before'], sample)
+        self.assertEqual(check['after'], sample)
+        self.assertLessEqual(check['operation_wall_start_ns'], check['operation_wall_end_ns'])
+
+    def test_oom_and_cleanup_failure_dominate_unproven_decision_pressure(self):
+        sample = {'memory.max': smoke.LIMIT,
+                  'diagnostic_working_set': {'bytes': smoke.LIMIT}}
+        for extra in ({'cleanup_cgroup': {'memory.events': {'oom': 1}}},
+                      {'owned_resources_cleaned': False},
+                      {'cleanup_errors': [{'operation': 'remove', 'error_type': 'TimeoutExpired'}]}):
+            def run(args, report):
+                report.update(owned_resources_cleaned=True)
+                report.update(extra)
+                smoke.require_pressure_error('owned', lambda: None, [],
+                                             sample=lambda *a, **kw: sample)
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as folder:
+                output = Path(folder) / 'receipt.json'
+                with patch.object(sys, 'argv', ['smoke', '--image', 'local', '--output', str(output)]), \
+                     patch.object(smoke, 'run', side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(smoke.main(), 1)
+                self.assertEqual(json.loads(output.read_text())['result'], 'FAIL')
 
     def test_invalid_or_changed_limits_cannot_fail_an_admitted_run(self):
         for cap in (0, -1, None, 'max', True):
