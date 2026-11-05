@@ -33,6 +33,9 @@ the [qualification report](../../PRODUCTION-v0.12.md).
    each spend the same headroom. Reservations already resident in RSS are
    deliberately counted twice; this conservative rule can refuse early.
    A RUN is refused at admission when sampled RSS is already at or above 95%.
+   Bolt ingress also checks its own aggregate reservations against sampled
+   headroom before positive buffer growth. Ingress and query reservations do
+   not share a single atomic pool; they can both observe the same headroom.
    Both use the [memory refusal contract](memory-error-contract.md).
 4. **Visibility and return.** Crossing 80% and 95% (upwards, with hysteresis)
    logs one line with RSS, limit, cache, memtables and query reservations; at
@@ -45,3 +48,23 @@ reservation (RocksDB compaction buffers, socket buffers) can still pass it
 between samples. The kernel stays the last line; the 5% margin and the purge
 do not guarantee avoidance of that path. Memory added by other processes in the same
 cgroup is handled by separate cgroup admission.
+
+## Next step: coordinate query and ingress reservations
+
+The two pools currently compare their totals independently with the same
+sampled headroom. A query and incoming request can therefore both reserve the
+same allowance before RSS is sampled again. A future shared ledger should give
+both pools one atomic total while retaining each pool's own limit. Each growth
+must acquire both credits before allocating; if either acquisition fails, it
+must release the other. Worker and result ownership transfers must transfer
+credits without reserving or releasing them twice. RESET and release must still
+work when headroom is zero.
+
+A deterministic concurrency test should allow only one of two simultaneous
+60-byte reservations against 100 bytes of shared headroom while the winner
+keeps its credit. Additional tests
+must cover pool-limit failure, cancellation, result lifetime beyond a
+transaction, worker credit transfers and zero outstanding credits after cleanup.
+Even this change would not account for every RocksDB, allocator or socket
+allocation, and sampling races would remain; it would not by itself guarantee a
+hard RSS ceiling.

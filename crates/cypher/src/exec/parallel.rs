@@ -274,10 +274,7 @@ pub(super) fn stream_leased(
                         stream(&worker, &part.ops, row, &mut |row| {
                             let _scope = budget.scope();
                             let row = super::run::project_output(row, outputs);
-                            let out = row
-                                .into_iter()
-                                .map(|value| graph::out(&worker, value))
-                                .collect::<Result<Vec<_>, _>>()?;
+                            let out = graph::output_row(&worker, row)?;
                             let bytes = Budget::output_bytes(&out);
                             budget.charge(bytes)?;
                             let lease = budget.output_lease(bytes)?;

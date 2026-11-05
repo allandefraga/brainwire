@@ -177,10 +177,7 @@ pub(super) fn stream_part(
     let row = vec![Val::Null; env.vars.len()];
     finish(stream(ctx, &part.ops, row, &mut |row| {
         let row = project_output(row, &outputs);
-        let out = row
-            .into_iter()
-            .map(|value| graph::out(ctx, value))
-            .collect::<Result<Vec<_>, _>>()?;
+        let out = graph::output_row(ctx, row)?;
         let bytes = Budget::output_bytes(&out);
         // Materialized output exists during the callback even when it is streamed.
         // Output retained by the sink takes its own lease before this scope ends.
@@ -230,16 +227,31 @@ pub(super) fn output_rows(
     rows: impl IntoIterator<Item = Row>,
 ) -> Result<QueryOutput, ExecError> {
     let rows = rows.into_iter();
+    // The outer vector owns each row's Vec header. Admit its requested capacity
+    // before allocating, and keep it separate from the row's payload credit.
+    let capacity = rows.size_hint().0;
+    budget.retain(capacity.saturating_mul(std::mem::size_of::<Vec<Out>>()))?;
     let mut output = QueryOutput {
         fields,
-        rows: Vec::with_capacity(rows.size_hint().0),
+        rows: Vec::with_capacity(capacity),
     };
     for row in rows {
-        let row: Vec<Out> = row
-            .into_iter()
-            .map(|value| graph::out(ctx, value))
-            .collect::<Result<_, _>>()?;
+        let row = graph::output_row(ctx, row)?;
         budget.output(&row)?;
+        if output.rows.len() == output.rows.capacity() {
+            let capacity = output.rows.capacity();
+            let next = capacity.saturating_mul(2).max(4);
+            budget.retain(
+                next.saturating_sub(capacity)
+                    .saturating_mul(std::mem::size_of::<Vec<Out>>()),
+            )?;
+            let _growth_scope = budget.scope();
+            // Reallocation can hold the old block while allocating its replacement.
+            budget.charge(capacity.saturating_mul(std::mem::size_of::<Vec<Out>>()))?;
+            output
+                .rows
+                .reserve_exact(next.saturating_sub(output.rows.len()));
+        }
         output.rows.push(row);
     }
     budget.check_deadline()?;

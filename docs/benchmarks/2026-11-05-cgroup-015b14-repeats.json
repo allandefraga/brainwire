@@ -1,0 +1,129 @@
+{
+  "scope": "512 MiB synthetic local cgroup-v2 smoke; shared host; not an RSS ceiling or sustained qualification",
+  "runs": [
+    {
+      "mode": "traced",
+      "attempt": 0,
+      "result": "PASS",
+      "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+      "persistent_observer": true,
+      "trace_enabled": true,
+      "refused_trace_lines": [
+        "brainwire memory pressure decision: trace sequence=5 logged_unix_time_ns=Some(1793877888535736092) pressure_refused=true basis=cgroup status=Pressured { current: 515764224, limit: 536870912 } selected=Some(CgroupReading { limit_source: Max, raw_bytes: 516050944, inactive_file_before_bytes: Some(286720), inactive_file_after_bytes: Some(286720), inactive_file_bytes: 286720, effective_bytes: 515764224, limit_bytes: 536870912 }) cache=None",
+        "brainwire memory pressure decision: trace sequence=6 logged_unix_time_ns=Some(1793877888645539842) pressure_refused=true basis=cgroup status=Pressured { current: 515981312, limit: 536870912 } selected=Some(CgroupReading { limit_source: Max, raw_bytes: 516268032, inactive_file_before_bytes: Some(286720), inactive_file_after_bytes: Some(286720), inactive_file_bytes: 286720, effective_bytes: 515981312, limit_bytes: 536870912 }) cache=None"
+      ],
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "offline_audit": {
+        "database": "demo",
+        "scalar_indexes": "checked_active_declarations",
+        "status": "ok"
+      },
+      "owned_resources_cleaned": true,
+      "error": null
+    },
+    {
+      "mode": "traced",
+      "attempt": 1,
+      "result": "PASS",
+      "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+      "persistent_observer": true,
+      "trace_enabled": true,
+      "refused_trace_lines": [
+        "brainwire memory pressure decision: trace sequence=5 logged_unix_time_ns=Some(1793877902567123043) pressure_refused=true basis=cgroup status=Pressured { current: 516612096, limit: 536870912 } selected=Some(CgroupReading { limit_source: Max, raw_bytes: 516898816, inactive_file_before_bytes: Some(286720), inactive_file_after_bytes: Some(286720), inactive_file_bytes: 286720, effective_bytes: 516612096, limit_bytes: 536870912 }) cache=None",
+        "brainwire memory pressure decision: trace sequence=6 logged_unix_time_ns=Some(1793877902686216584) pressure_refused=true basis=cgroup status=Pressured { current: 516653056, limit: 536870912 } selected=Some(CgroupReading { limit_source: Max, raw_bytes: 516939776, inactive_file_before_bytes: Some(286720), inactive_file_after_bytes: Some(286720), inactive_file_bytes: 286720, effective_bytes: 516653056, limit_bytes: 536870912 }) cache=None"
+      ],
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "offline_audit": {
+        "database": "demo",
+        "scalar_indexes": "checked_active_declarations",
+        "status": "ok"
+      },
+      "owned_resources_cleaned": true,
+      "error": null
+    },
+    {
+      "mode": "persistent",
+      "attempt": 0,
+      "result": "PASS",
+      "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+      "persistent_observer": true,
+      "trace_enabled": false,
+      "refused_trace_lines": [],
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "offline_audit": {
+        "database": "demo",
+        "scalar_indexes": "checked_active_declarations",
+        "status": "ok"
+      },
+      "owned_resources_cleaned": true,
+      "error": null
+    },
+    {
+      "mode": "persistent",
+      "attempt": 1,
+      "result": "PASS",
+      "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+      "persistent_observer": true,
+      "trace_enabled": false,
+      "refused_trace_lines": [],
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "offline_audit": {
+        "database": "demo",
+        "scalar_indexes": "checked_active_declarations",
+        "status": "ok"
+      },
+      "owned_resources_cleaned": true,
+      "error": null
+    },
+    {
+      "mode": "standard",
+      "attempt": 0,
+      "result": "PASS",
+      "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+      "persistent_observer": false,
+      "trace_enabled": false,
+      "refused_trace_lines": [],
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "offline_audit": {
+        "database": "demo",
+        "scalar_indexes": "checked_active_declarations",
+        "status": "ok"
+      },
+      "owned_resources_cleaned": true,
+      "error": null
+    },
+    {
+      "mode": "standard",
+      "attempt": 1,
+      "result": "INCONCLUSIVE",
+      "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+      "persistent_observer": false,
+      "trace_enabled": false,
+      "refused_trace_lines": [],
+      "recovered_counts": null,
+      "offline_audit": null,
+      "owned_resources_cleaned": true,
+      "error": "RUN admitted with high external bracketing samples; decision-time pressure is unproven"
+    }
+  ]
+}

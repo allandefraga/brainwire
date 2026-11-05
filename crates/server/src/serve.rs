@@ -85,7 +85,7 @@ pub fn run(
         if !crate::process_memory::init_allocator() {
             eprintln!("warning: allocator background decay unavailable; idle memory returns only on activity");
         }
-        if loaded.config.memory.limit.0 > 0 {
+        let ingress_headroom = if loaded.config.memory.limit.0 > 0 {
             let memory = crate::process_memory::ProcessMemory::new(loaded.config.memory.limit.0);
             crate::process_memory::install(Arc::clone(&memory));
             let ceiling = Arc::clone(&memory);
@@ -107,7 +107,10 @@ pub fn run(
                     query.reserved_bytes, query.rejections
                 )
             });
-        }
+            Some(Arc::new(move || memory.headroom()) as brainwire_bolt::server::ProcessHeadroom)
+        } else {
+            None
+        };
         // Registered after the stores open, so a signal during recovery still
         // stops at once (crash-safe), and before the first accept.
         let stop = termination().map_err(|e| format!("cannot install signal handlers: {e}"))?;
@@ -123,7 +126,7 @@ pub fn run(
             loaded.config.memory.ingress,
             loaded.config.memory.limit,
         );
-        let open = brainwire_bolt::server::serve_until(
+        let open = brainwire_bolt::server::serve_until_with_ingress_headroom(
             listener,
             move || {
                 let engine = if let Some(replica) = &replica {
@@ -144,6 +147,7 @@ pub fn run(
             auth,
             stop,
             grace,
+            ingress_headroom,
         )
         .await
         .map_err(|e| format!("Bolt server stopped: {e}"))?;

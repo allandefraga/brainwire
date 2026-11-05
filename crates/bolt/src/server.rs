@@ -12,6 +12,7 @@ use crate::chunk::encode_message;
 use crate::chunk::{write_packstream_message, ChunkReader, ReadError};
 use crate::handshake::{negotiate, response, MAGIC};
 use crate::ingress::IngressPool;
+pub use crate::ingress::ProcessHeadroom;
 use crate::message::{parse_request, Response};
 #[cfg(test)]
 use crate::packstream::{pack, unpack};
@@ -169,13 +170,37 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    serve_until_with_ingress_headroom(listener, make_engine, limits, auth, shutdown, grace, None)
+        .await
+}
+
+/// Serve with optional sampled process headroom for positive input-buffer growth.
+/// This limits the ingress pool, independently of query reservations and other allocations.
+pub async fn serve_until_with_ingress_headroom<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+    shutdown: impl std::future::Future<Output = ()>,
+    grace: std::time::Duration,
+    process_headroom: Option<ProcessHeadroom>,
+) -> std::io::Result<usize>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
     if limits.ingress_memory_bytes == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "ingress memory budget must be positive",
         ));
     }
-    let ingress_pool = IngressPool::new(limits.ingress_memory_bytes);
+    let ingress_pool = match process_headroom {
+        Some(headroom) => {
+            IngressPool::with_process_headroom(limits.ingress_memory_bytes, Some(headroom))
+        }
+        None => IngressPool::new(limits.ingress_memory_bytes),
+    };
     let make_engine = Arc::new(make_engine);
     let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
     let (drain, draining) = watch::channel(false);
@@ -1168,6 +1193,202 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn process_headroom_refuses_input_and_reset_survives_zero_headroom() {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            let available = Arc::new(std::sync::atomic::AtomicUsize::new(4096));
+            let observed = Arc::clone(&available);
+            let pool = IngressPool::with_process_headroom(
+                4096,
+                Some(Arc::new(move || {
+                    observed.load(std::sync::atomic::Ordering::Acquire)
+                })),
+            );
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (server, mut client) = tokio::io::duplex(4096);
+            let task = pooled_connection(
+                server,
+                BeginProbe(calls.clone()),
+                pool.clone(),
+                std::time::Duration::from_secs(5),
+            );
+            login(&mut client).await;
+            available.store(0, std::sync::atomic::Ordering::Release);
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("RETURN 1".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            assert_eq!(
+                read_failure(&mut client).await.0,
+                crate::session::MEMORY_REFUSED
+            );
+            reserved_equals(&pool, 0).await;
+            send_request(&mut client, 0x0F, vec![]).await;
+            read_success(&mut client).await;
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            // The recovery allowance cannot execute an arbitrary small RUN.
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("RETURN 2".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            assert_eq!(
+                read_failure(&mut client).await.0,
+                crate::session::MEMORY_REFUSED
+            );
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            send_request(&mut client, 0x0F, vec![]).await;
+            read_success(&mut client).await;
+            available.store(4096, std::sync::atomic::Ordering::Release);
+            send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            drop(client);
+            task.await.unwrap().unwrap();
+            reserved_equals(&pool, 0).await;
+        })
+        .await
+        .expect("pressure refusal and RESET recovery complete");
+    }
+
+    #[tokio::test]
+    async fn process_headroom_covers_decoding_and_closes_unauthed_input() {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            let available = Arc::new(std::sync::atomic::AtomicUsize::new(4096));
+            let observed = Arc::clone(&available);
+            let pool = IngressPool::with_process_headroom(
+                4096,
+                Some(Arc::new(move || {
+                    observed.load(std::sync::atomic::Ordering::Acquire)
+                })),
+            );
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (server, mut client) = tokio::io::duplex(4096);
+            let task = pooled_connection(
+                server,
+                BeginProbe(calls.clone()),
+                pool.clone(),
+                std::time::Duration::from_secs(5),
+            );
+            login(&mut client).await;
+            available.store(512, std::sync::atomic::Ordering::Release);
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("RETURN $x".into()),
+                    PackValue::Map(vec![(
+                        "x".into(),
+                        PackValue::List(vec![PackValue::Null; 32]),
+                    )]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            assert_eq!(
+                read_failure(&mut client).await.0,
+                crate::session::MEMORY_REFUSED
+            );
+            reserved_equals(&pool, 0).await;
+            available.store(0, std::sync::atomic::Ordering::Release);
+            send_request(&mut client, 0x13, vec![]).await;
+            assert!(matches!(
+                read_message(&mut client).await,
+                PackValue::Struct { tag: 0x7E, .. }
+            ));
+            // ROLLBACK has zero fields but does not leave FAILED; RESET does.
+            send_request(&mut client, 0x0F, vec![]).await;
+            // The first recovery message consumed the bounded allowance; a new
+            // refusal permits the following RESET without opening the engine.
+            assert!(matches!(
+                read_message(&mut client).await,
+                PackValue::Struct { tag: 0x7E, .. }
+            ));
+            send_request(&mut client, 0x0F, vec![]).await;
+            read_success(&mut client).await;
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            drop(client);
+            task.await.unwrap().unwrap();
+            reserved_equals(&pool, 0).await;
+
+            let (server, mut client) = tokio::io::duplex(1024);
+            let task = pooled_connection(
+                server,
+                BeginProbe(calls.clone()),
+                pool.clone(),
+                std::time::Duration::from_secs(5),
+            );
+            handshake(&mut client).await;
+            send_request(&mut client, 0x01, vec![PackValue::Map(vec![])]).await;
+            let mut failure = Vec::new();
+            client.read_to_end(&mut failure).await.unwrap();
+            assert_eq!(decode_failure(&failure).0, crate::session::MEMORY_REFUSED);
+            task.await.unwrap().unwrap();
+            reserved_equals(&pool, 0).await;
+        })
+        .await
+        .expect("decode refusal, bounded control messages and pre-auth close complete");
+    }
+
+    #[tokio::test]
+    async fn process_headroom_refusal_aborts_an_open_transaction() {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            let available = Arc::new(std::sync::atomic::AtomicUsize::new(4096));
+            let observed = Arc::clone(&available);
+            let pool = IngressPool::with_process_headroom(
+                4096,
+                Some(Arc::new(move || {
+                    observed.load(std::sync::atomic::Ordering::Acquire)
+                })),
+            );
+            let aborted = Arc::new(tokio::sync::Notify::new());
+            let (server, mut client) = tokio::io::duplex(4096);
+            let task = pooled_connection(
+                server,
+                CleanupEngine(aborted.clone()),
+                pool.clone(),
+                std::time::Duration::from_secs(5),
+            );
+            login(&mut client).await;
+            send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+            read_success(&mut client).await;
+            available.store(0, std::sync::atomic::Ordering::Release);
+            send_request(
+                &mut client,
+                0x10,
+                vec![
+                    PackValue::String("WRITE".into()),
+                    PackValue::Map(vec![]),
+                    PackValue::Map(vec![]),
+                ],
+            )
+            .await;
+            let (code, hint) = read_failure(&mut client).await;
+            assert_eq!(code, crate::session::MEMORY_REFUSED);
+            assert!(hint.contains("rolled_back=true"));
+            aborted.notified().await;
+            reserved_equals(&pool, 0).await;
+            send_request(&mut client, 0x0F, vec![]).await;
+            read_success(&mut client).await;
+            drop(client);
+            task.await.unwrap().unwrap();
+            reserved_equals(&pool, 0).await;
+        })
+        .await
+        .expect("input refusal aborts transaction before reply and RESET recovers");
+    }
+
+    #[tokio::test]
     async fn decoded_ingress_expansion_is_rejected_before_engine_and_released() {
         let pool = IngressPool::new(512);
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1384,6 +1605,43 @@ mod tests {
         .await
         .expect("listener shares admission across accepted connections");
         drop(a);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn listener_process_headroom_provider_is_shared_and_recovers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let available = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = Arc::clone(&available);
+        let task = tokio::spawn(serve_until_with_ingress_headroom(
+            listener,
+            || StubEngine,
+            ConnectionLimits::default(),
+            AuthMode::AllowAll,
+            std::future::pending(),
+            std::time::Duration::ZERO,
+            Some(Arc::new(move || {
+                observed.load(std::sync::atomic::Ordering::Acquire)
+            })),
+        ));
+        let mut refused = TcpStream::connect(address).await.unwrap();
+        handshake(&mut refused).await;
+        send_request(&mut refused, 0x01, vec![PackValue::Map(vec![])]).await;
+        let mut failure = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            refused.read_to_end(&mut failure),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(decode_failure(&failure).0, crate::session::MEMORY_REFUSED);
+        available.store(4096, std::sync::atomic::Ordering::Release);
+        let mut accepted = TcpStream::connect(address).await.unwrap();
+        login(&mut accepted).await;
+        drop(accepted);
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
     }

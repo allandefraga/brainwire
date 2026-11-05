@@ -18,7 +18,20 @@ A [short admission-overhead comparison](2026-11-05-admission-overhead.md) was in
 
 A [beta.13 pressure investigation](2026-11-05-pressure-beta13.md) records a measurement discrepancy, traced repeats and an untraced control.
 
+A [beta.14 Bolt query-memory test](2026-11-05-query-memory-015b14.json) exercised 16 simultaneous connections, bounded refusals and client-disconnect cleanup on a small native debug fixture.
+
+A [beta.14 2 GiB read diagnostic](2026-11-05-soak2g-015b14.json) passed 100,000 synthetic nodes and 100,000 relationships with four readers for 15 minutes; writes stopped before the soak. Other diagnostics ran concurrently on the shared host, so this is not an isolated benchmark. See the [runner guide](../../scripts/bench_v09_container.md) to repeat it.
+
+A [beta.14 8 GiB read diagnostic](2026-11-05-soak8g-015b14.json) passed the same 100,000-node/edge synthetic shape for 15 minutes on a rebuilt candidate. It did not approach 8 GiB and does not qualify capacity.
+
+A [beta.14 4 GiB read diagnostic](2026-11-05-soak4g-015b14.json) passed the same synthetic shape for 30 minutes on a rebuilt candidate. It did not approach 4 GiB and does not qualify capacity.
+
+A [beta.14 200,000-node integration diagnostic](2026-11-05-load200k-015b14.md) covers create, merge, deletes and restart on a synthetic single-container fixture.
+
 ## Recent pressure-admission smoke
+
+The [beta.14 512 MiB pressure smoke](2026-11-05-cgroup-015b14.json) passed refusal, rollback and recovery on a local synthetic container. It does not establish a global RSS ceiling.
+A subsequent [untraced control](2026-11-05-cgroup-015b14-untraced-inconclusive.json) was inconclusive: a request was admitted while external samples bracketed the threshold, but the runtime decision-time sample is unavailable. The external working-set estimates were only about 2.5 MiB above the threshold, and each standard sample launched a short-lived container process. That observer overhead is a plausible explanation, not a confirmed cause. The container remained healthy and cleanup succeeded. Further [controlled repeats](2026-11-05-cgroup-015b14-repeats.json) produced two traced passes, two untraced persistent-observer passes, one standard pass and another standard inconclusive result. The [second inconclusive receipt](2026-11-05-cgroup-015b14-untraced-inconclusive-2.json) is retained. These repeats do not explain the original failure.
 
 The [beta.12 pressure investigation](2026-11-05-pressure-investigation.md)
 preserves a failed standard smoke and three controlled repeats. Observer

@@ -105,6 +105,9 @@ its outcome before retrying. Container restart after a kernel OOM is recovery,
 not evidence that the load is safe. Sustained 2/4/8 GiB production-load
 qualification remains open for this beta.
 
+For design context and the limits of comparisons with other graph databases,
+see [memory reference notes](design/memory-reference-notes.md).
+
 ## Shared Bolt input admission
 
 `memory.ingress` limits the combined assembled-message buffer capacity and
@@ -112,6 +115,11 @@ PackStream decoded-storage charges across all connections to this server,
 including clients that have not authenticated. It is separate from
 `memory.query` and the RocksDB budgets. Unset, it uses one eighth of the detected
 memory limit, capped at 512 MiB; without detection it defaults to 256 MiB.
+When process memory admission is enabled, positive ingress reservations also
+respect the sampled process headroom. If RSS monitoring is stale, growth can
+be refused until observations recover. This is conservative admission: ingress
+and query reservations remain separate pools and can each observe the same
+sampled headroom. It does not establish a global RSS ceiling.
 Set `[memory] ingress = "128MiB"` in TOML or
 `BRAINWIRE_MEMORY_INGRESS=128MiB` in the environment. `config show` reports its
 value and source. Explicit values must be positive and fit the platform address
@@ -129,6 +137,8 @@ the message is skipped, its transaction is rolled back and RESET recovers it;
 an unauthenticated connection closes. Reduce batch sizes and use bounded
 backoff after a confirmed rejection. This error is different from an unknown
 commit outcome; never retry a write blindly after a lost acknowledgement.
+Existing sessions can still use bounded recovery messages such as RESET when
+headroom falls to zero; new authentication may fail while memory is pressured.
 
 Partial-message accounting is released on disconnect, timeout or rejection.
 Rejected input is discarded before waiting for the small failure response.
@@ -191,7 +201,10 @@ without an additional deep copy. Argument evaluation itself can still copy data.
 Projection and aggregate `DISTINCT` admit retained key payloads before cloning
 them; grouped projections account for both retained key copies, and `UNION`
 accounts for the copies used to deduplicate branches. These are conservative
-query-accounting checks, not a complete allocator or RSS limit. `UNION ALL`
+query-accounting checks, not a complete allocator or RSS limit. Output list
+conversion now reserves exact result capacity before allocation. For scalar
+lists this can temporarily hold a second buffer rather than reusing the input
+buffer; that overlap is charged to the query budget. `UNION ALL`
 does not create that deduplication set.
 
 A fresh RUN RSS reading that exceeds the current sample also reduces the

@@ -1,0 +1,106 @@
+{
+  "status": "passed-diagnostic",
+  "synthetic": true,
+  "image": "brainwire-session14:verified",
+  "image_identity": {
+    "image_id": "sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a",
+    "repo_digests": [
+      "brainwire-session14@sha256:3f88167594d69f6274f89315afa2a9f642257b9ddce998517bcc053084d5267a"
+    ],
+    "revision_label": null,
+    "source_provenance_verified": false
+  },
+  "rows_per_label": 25000,
+  "expected_nodes": 100000,
+  "expected_edges": 100000,
+  "memory_limit_bytes": 8589934592,
+  "writers": 4,
+  "readers": [
+    "scan",
+    "aggregation",
+    "neighborhood",
+    "cursor"
+  ],
+  "driver": "5.28.8",
+  "workload_settings": {
+    "batch_size": 500,
+    "neighborhood_rows": 5000,
+    "sample_seconds": 5.0,
+    "reader_pause": 0.01,
+    "query_timeout": 30
+  },
+  "load_seconds": 15.789482916996349,
+  "ack_rows_per_label": 25000,
+  "read_soak_seconds": 900.0013441659976,
+  "counts": {
+    "Usuario": 25000,
+    "Carro": 25000,
+    "Endereco": 25000,
+    "Casa": 25000,
+    "TEM_CARRO": 25000,
+    "TEM_ENDERECO": 25000,
+    "TEM_CASA": 25000,
+    "CASA_FICA_EM": 25000
+  },
+  "cursor": {
+    "rows": 25000,
+    "page_size": 200,
+    "seconds": 1.1772354999848176,
+    "delegated": true
+  },
+  "integrity": {
+    "database": "bench",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "oom_evidence": {
+    "observed": false,
+    "cgroup_oom": false,
+    "docker_oom_event": false,
+    "docker_oom_killed": false,
+    "restart_count": 0,
+    "kernel_log_verified": false
+  },
+  "memory_by_phase": {
+    "setup": {
+      "samples": 1,
+      "current_peak_bytes": 37879808,
+      "rss_peak_bytes": 50241536,
+      "last_current_bytes": 37879808,
+      "last_rss_bytes": 50241536,
+      "last_anon_bytes": 33820672
+    },
+    "mixed-load": {
+      "samples": 3,
+      "current_peak_bytes": 367595520,
+      "rss_peak_bytes": 332656640,
+      "last_current_bytes": 367595520,
+      "last_rss_bytes": 332656640,
+      "last_anon_bytes": 315580416
+    },
+    "read-soak": {
+      "samples": 173,
+      "current_peak_bytes": 375414784,
+      "rss_peak_bytes": 343048192,
+      "last_current_bytes": 297734144,
+      "last_rss_bytes": 229736448,
+      "last_anon_bytes": 212742144
+    },
+    "post-load-idle": {
+      "samples": 3,
+      "current_peak_bytes": 304898048,
+      "rss_peak_bytes": 233099264,
+      "last_current_bytes": 277553152,
+      "last_rss_bytes": 203309056,
+      "last_anon_bytes": 186314752
+    }
+  },
+  "gaps": [
+    "Kernel logs may be inaccessible; never infer no OOM from Docker OOMKilled=false.",
+    "No disk loss, power-loss, quorum or partition simulation.",
+    "Process RSS is sampled; cgroup memory.peak includes page cache.",
+    "Atomic four-label batches differ from the older embedded sequential-label loading order.",
+    "Concurrent cursor pages are separate transactions; final quiescent cursor is verified exactly."
+  ],
+  "conditions": "Shared macOS arm64 host with Docker and other diagnostics running concurrently; synthetic data, writes ended before read soak. This deviates from the isolated qualification procedure. A container limit is not a process RSS ceiling."
+}

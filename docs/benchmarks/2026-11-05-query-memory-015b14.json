@@ -1,0 +1,55 @@
+{
+  "result": "PASS",
+  "scope": "synthetic native Bolt; shared accounting, not RSS",
+  "rows": 2000,
+  "concurrentConnections": 16,
+  "outcomes": [
+    "held",
+    "held",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected",
+    "rejected"
+  ],
+  "during": {
+    "poolLimitBytes": 262144,
+    "poolReservedBytes": 162703,
+    "poolPeakBytes": 260791,
+    "poolRejections": 14
+  },
+  "after": {
+    "poolLimitBytes": 262144,
+    "poolReservedBytes": 177,
+    "poolPeakBytes": 260791,
+    "poolRejections": 14
+  },
+  "clientDisconnect": {
+    "result": "PASS",
+    "heldBytes": 81489,
+    "afterBytes": 177,
+    "scope": "SIGKILL of client, server remains running"
+  },
+  "deadlineRollback": "PASS",
+  "offlineAudits": {
+    "first": {
+      "database": "first",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    },
+    "second": {
+      "database": "second",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    }
+  }
+}

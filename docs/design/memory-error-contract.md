@@ -38,6 +38,12 @@ exceeds `memory.query`, the query fails with `MemoryPressure` and
 `reason=statement_limit`; the whole explicit transaction is rolled back.
 A bounded top-k or a single `count(*)` can succeed on the same input.
 
+Output row containers and the temporary adjacency lists and staged removals used
+by `DETACH DELETE` are admitted before construction. Ordinary `DELETE` checks
+only whether an edge exists instead of collecting a node's full adjacency list.
+These checks reduce specific allocation spikes; they do not account for every
+allocation or establish a process-wide RSS ceiling.
+
 The synthetic Bolt regression in `crates/server/tests/blocking_memory.rs`
 uses a 64 KiB query budget. It checks read-only refusals, rollback of a pending
 property overwrite, ignored COMMIT after failure, recovery with RESET, shared

@@ -2,7 +2,7 @@
 //! evaluated against the transaction first, then the mutation is staged.
 use super::eval::eval;
 use super::plan::*;
-use super::run::{Env, Row};
+use super::run::{Env, Flow, Row};
 use super::val::Val;
 use super::*;
 use brainwire_store::graph as store;
@@ -523,17 +523,31 @@ fn delete(
         if !store::node_exists(txn, id)? {
             continue;
         }
-        if !detach
-            && (!store::out_edges(txn, id)?.is_empty() || !store::in_edges(txn, id)?.is_empty())
-        {
+        if !detach && has_relationship(txn, id)? {
             return Err(ExecError::ConstraintViolation(format!(
                 "cannot delete node {} because it still has relationships; use DETACH DELETE",
                 id.element_id()
             )));
         }
-        store::detach_delete(txn, id)?;
+        {
+            let _scope = env.budget.scope();
+            store::detach_delete_with_control(txn, env.catalog, id, |bytes| {
+                env.budget.charge(bytes)
+            })?;
+        }
         overlay.charge(txn, env)?;
         *wrote = true;
     }
     Ok(())
+}
+
+fn has_relationship(txn: &Txn<'_>, id: NodeId) -> Result<bool, ExecError> {
+    for cf in [brainwire_store::txn::Cf::Out, brainwire_store::txn::Cf::In] {
+        match store::visit_edges::<Flow>(txn, cf, id, |_| Err(Flow::Stop)) {
+            Ok(()) => {}
+            Err(Flow::Stop) => return Ok(true),
+            Err(Flow::Error(error)) => return Err(error),
+        }
+    }
+    Ok(false)
 }

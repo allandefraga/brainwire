@@ -79,6 +79,23 @@ fn node_record(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeRecord, ExecErro
 pub(super) fn node_out(ctx: &Context<'_, '_>, id: NodeId) -> Result<NodeOut, ExecError> {
     let mut record = node_record(ctx, id)?;
     let ty = node_type(ctx, id)?;
+    let columns = ty
+        .columns
+        .iter()
+        .filter(|column| record.row.columns.contains_key(&column.id));
+    let (count, names) = columns.fold((1usize, "entity_id".len()), |(count, names), column| {
+        (
+            count.saturating_add(1),
+            names.saturating_add(column.name.len()),
+        )
+    });
+    ctx.budget.charge(
+        count
+            .saturating_add(record.row.extra.len())
+            .saturating_mul(128)
+            .saturating_add(names)
+            .saturating_add(ty.label.len()),
+    )?;
     let mut props = BTreeMap::new();
     for column in &ty.columns {
         if let Some(value) = record.row.columns.remove(&column.id) {
@@ -177,6 +194,7 @@ pub(super) fn edge_props(
     else {
         return Ok(BTreeMap::new());
     };
+    ctx.budget.charge(row.extra.len().saturating_mul(128))?;
     let mut props = BTreeMap::new();
     if let Some(ty) = ctx
         .catalog
@@ -184,6 +202,18 @@ pub(super) fn edge_props(
         .iter()
         .find(|t| t.id == edge.edge_type)
     {
+        let columns = ty
+            .columns
+            .iter()
+            .filter(|column| row.columns.contains_key(&column.id));
+        let (count, names) = columns.fold((0usize, 0usize), |(count, names), column| {
+            (
+                count.saturating_add(1),
+                names.saturating_add(column.name.len()),
+            )
+        });
+        ctx.budget
+            .charge(count.saturating_mul(128).saturating_add(names))?;
         for column in &ty.columns {
             if let Some(value) = row.columns.remove(&column.id) {
                 props.insert(column.name.clone(), value);
@@ -199,6 +229,9 @@ pub(super) fn rel_out(
     ctx: &Context<'_, '_>,
     rel: &Relationship,
 ) -> Result<RelationshipOut, ExecError> {
+    // Type and element identity are cloned; property payloads are moved below.
+    ctx.budget
+        .charge(type_of(ctx, rel)?.len().saturating_add(128))?;
     Ok(RelationshipOut {
         id: rel.legacy_id(),
         element_id: rel.element_id(),
@@ -209,37 +242,105 @@ pub(super) fn rel_out(
     })
 }
 
+/// Admit output-vector storage and decode temporaries before construction. The
+/// caller charges the completed row or acquires its owned lease synchronously.
+pub(super) fn output_row(ctx: &Context<'_, '_>, row: Vec<Val>) -> Result<Vec<Out>, ExecError> {
+    let _scope = ctx.budget.scope();
+    ctx.budget
+        .charge(row.len().saturating_mul(std::mem::size_of::<Out>()))?;
+    let mut output = Vec::with_capacity(row.len());
+    for value in row {
+        output.push(out(ctx, value)?);
+    }
+    Ok(output)
+}
+
+fn plain_container_bytes(value: &Val) -> usize {
+    match value {
+        Val::List(items) => items.iter().fold(
+            items.len().saturating_mul(std::mem::size_of::<Value>()),
+            |sum, item| sum.saturating_add(plain_container_bytes(item)),
+        ),
+        Val::Map(map) => map
+            .values()
+            .fold(map.len().saturating_mul(128), |sum, item| {
+                sum.saturating_add(plain_container_bytes(item))
+            }),
+        _ => 0,
+    }
+}
+
+fn plain_output_value(value: Val) -> Result<Value, ExecError> {
+    Ok(match value {
+        Val::List(items) => {
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                values.push(plain_output_value(item)?);
+            }
+            Value::List(values)
+        }
+        Val::Map(map) => {
+            let mut values = BTreeMap::new();
+            for (key, item) in map {
+                values.insert(key, plain_output_value(item)?);
+            }
+            Value::Map(values)
+        }
+        other => other.into_value()?,
+    })
+}
+
 /// Convert a runtime value for output; plain values stay `Out::Value`.
 pub(super) fn out(ctx: &Context<'_, '_>, value: Val) -> Result<Out, ExecError> {
     if !value.has_entity() {
-        return Ok(Out::Value(value.into_value()?));
+        // Payload strings move, but list/map conversion constructs fresh containers.
+        ctx.budget.charge(plain_container_bytes(&value))?;
+        return Ok(Out::Value(plain_output_value(value)?));
     }
     Ok(match value {
         Val::Node(id) => Out::Node(node_out(ctx, id)?),
         Val::Rel(rel) => Out::Relationship(rel_out(ctx, &rel)?),
-        Val::Path(path) => Out::Path(PathOut {
-            nodes: path
-                .nodes
-                .iter()
-                .map(|id| node_out(ctx, *id))
-                .collect::<Result<_, _>>()?,
-            rels: path
-                .rels
-                .iter()
-                .map(|rel| rel_out(ctx, rel))
-                .collect::<Result<_, _>>()?,
-        }),
-        Val::List(items) => Out::List(
-            items
-                .into_iter()
-                .map(|item| out(ctx, item))
-                .collect::<Result<_, _>>()?,
-        ),
-        Val::Map(map) => Out::Map(
-            map.into_iter()
-                .map(|(k, v)| Ok((k, out(ctx, v)?)))
-                .collect::<Result<_, ExecError>>()?,
-        ),
+        Val::Path(path) => {
+            ctx.budget.charge(
+                path.nodes
+                    .len()
+                    .saturating_mul(std::mem::size_of::<NodeOut>())
+                    .saturating_add(
+                        path.rels
+                            .len()
+                            .saturating_mul(std::mem::size_of::<RelationshipOut>()),
+                    ),
+            )?;
+            let mut nodes = Vec::with_capacity(path.nodes.len());
+            for id in &path.nodes {
+                nodes.push(node_out(ctx, *id)?);
+            }
+            let mut rels = Vec::with_capacity(path.rels.len());
+            for rel in &path.rels {
+                rels.push(rel_out(ctx, rel)?);
+            }
+            Out::Path(PathOut { nodes, rels })
+        }
+        Val::List(items) => {
+            ctx.budget
+                .charge(items.len().saturating_mul(std::mem::size_of::<Out>()))?;
+            let mut output = Vec::with_capacity(items.len());
+            for item in items {
+                output.push(out(ctx, item)?);
+            }
+            Out::List(output)
+        }
+        Val::Map(map) => {
+            ctx.budget.charge(
+                map.len()
+                    .saturating_mul(128usize.saturating_add(std::mem::size_of::<Out>())),
+            )?;
+            Out::Map(
+                map.into_iter()
+                    .map(|(k, v)| Ok((k, out(ctx, v)?)))
+                    .collect::<Result<_, ExecError>>()?,
+            )
+        }
         _ => unreachable!("plain values returned above"),
     })
 }

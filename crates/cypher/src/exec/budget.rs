@@ -546,7 +546,8 @@ impl<'a> Budget<'a> {
             })
     }
     pub fn output(&self, row: &[Out]) -> Result<(), ExecError> {
-        self.retain(Self::output_bytes(row))
+        // The outer result vector separately retains storage for Vec headers.
+        self.retain(Self::output_bytes(row).saturating_sub(size_of::<Vec<Out>>()))
     }
     pub(super) fn output_bytes(row: &[Out]) -> usize {
         size_of::<Vec<Out>>()
@@ -661,6 +662,179 @@ mod tests {
 
     #[global_allocator]
     static ACCOUNTING_ALLOCATOR: AccountingAllocator = AccountingAllocator;
+
+    #[test]
+    fn output_vector_growth_is_admitted_before_allocating() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let vars = plan::Vars::default();
+        let params = BTreeMap::new();
+        for rows in [vec![vec![val::Val::Null; 8192]], vec![vec![]; 8192]] {
+            let input_bytes = rows.iter().map(|row| Budget::row_bytes(row)).sum::<usize>();
+            let budget = Budget::new(
+                ExecutionLimits {
+                    memory_bytes: input_bytes + (64 << 10),
+                    timeout: None,
+                },
+                None,
+            );
+            budget.charge(input_bytes).unwrap();
+            let ctx = Context {
+                txn: &txn,
+                catalog: &catalog,
+                params: &params,
+                budget: &budget,
+                visibility: None,
+                checkpoint_dir: None,
+                vars: &vars,
+                cache: None,
+                param_vals: None,
+                partition: None,
+            };
+            ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+            let result = run::output_rows(&ctx, &budget, vec![], rows);
+            let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+            assert!(matches!(result, Err(ExecError::MemoryLimit { .. })));
+            assert!(
+                allocated < 8192,
+                "allocated {allocated} bytes before rejecting output storage"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_output_storage_is_admitted_before_materializing() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let vars = plan::Vars::default();
+        let params = BTreeMap::new();
+        for value in [
+            val::Val::List(vec![val::Val::Null; 8192]),
+            val::Val::List(vec![val::Val::Node(NodeId(1)); 8192]),
+            val::Val::Map((0..8192).map(|i| (i.to_string(), val::Val::Null)).collect()),
+            val::Val::Map(
+                (0..8192)
+                    .map(|i| (i.to_string(), val::Val::Node(NodeId(1))))
+                    .collect(),
+            ),
+            val::Val::Path(Box::new(val::PathVal {
+                nodes: vec![NodeId(1); 8192],
+                rels: vec![],
+            })),
+        ] {
+            let input_bytes = value.bytes();
+            let budget = Budget::new(
+                ExecutionLimits {
+                    memory_bytes: input_bytes + (64 << 10),
+                    timeout: None,
+                },
+                None,
+            );
+            budget.charge(input_bytes).unwrap();
+            let ctx = Context {
+                txn: &txn,
+                catalog: &catalog,
+                params: &params,
+                budget: &budget,
+                visibility: None,
+                checkpoint_dir: None,
+                vars: &vars,
+                cache: None,
+                param_vals: None,
+                partition: None,
+            };
+            ACCOUNTING_ALLOCATED.with(|counter| counter.set(Some(0)));
+            let result = graph::out(&ctx, value);
+            let allocated = ACCOUNTING_ALLOCATED.with(|counter| counter.replace(None).unwrap());
+            assert!(matches!(result, Err(ExecError::MemoryLimit { .. })));
+            assert!(
+                allocated < 8192,
+                "allocated {allocated} bytes before rejecting nested storage"
+            );
+        }
+    }
+
+    #[test]
+    fn output_temporary_credit_is_reused_and_outer_headers_are_retained_once() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let vars = plan::Vars::default();
+        let params = BTreeMap::new();
+        let limit = 64 << 10;
+        let pool = Arc::new(QueryMemoryPool::new(limit));
+        let reservation = Reservation::new(Arc::clone(&pool));
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: limit,
+                timeout: None,
+            },
+            Some(&reservation),
+        );
+        let ctx = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: None,
+            param_vals: None,
+            partition: None,
+        };
+        for _ in 0..1000 {
+            let output =
+                graph::output_row(&ctx, vec![val::Val::List(vec![val::Val::Null; 64])]).unwrap();
+            assert_eq!(budget.remaining(), limit);
+            drop(output);
+        }
+        assert!(matches!(
+            graph::output_row(&ctx, vec![val::Val::List(vec![val::Val::Null; 8192])]),
+            Err(ExecError::MemoryLimit { .. })
+        ));
+        assert_eq!(budget.remaining(), limit);
+        let rows = (0..5).map(|_| vec![val::Val::Null]).filter(|_| true);
+        let output = run::output_rows(&ctx, &budget, vec![], rows).unwrap();
+        let expected = output.rows.capacity() * size_of::<Vec<Out>>()
+            + output
+                .rows
+                .iter()
+                .map(|row| Budget::output_bytes(row) - size_of::<Vec<Out>>())
+                .sum::<usize>();
+        assert_eq!(budget.remaining(), limit - expected);
+        drop(output);
+        drop(budget);
+        assert!(pool.usage().reserved_bytes > 0);
+        drop(reservation);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
 
     #[test]
     fn scalar_inspection_does_not_copy_its_already_admitted_argument() {

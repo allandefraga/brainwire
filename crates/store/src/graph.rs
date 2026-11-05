@@ -1630,6 +1630,96 @@ pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
     Ok(())
 }
 
+/// Admit temporary adjacency/decode storage and staged removals before deleting.
+/// The caller supplies this transaction's catalog snapshot. Control failures
+/// precede all removals; range dependencies can still be recorded on refusal.
+pub fn detach_delete_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    catalog: &Catalog,
+    id: NodeId,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<(), E> {
+    control(0)?;
+    let record = get_node_with_control(txn, id, |bytes| {
+        // Keep allowance for constructing the old scalar index keys as well
+        // as the decoded row. The temporary row lives until removal completes.
+        control(bytes.saturating_mul(2))
+    })?
+    .ok_or_else(|| E::from(GraphError::NodeNotFound(id)))?;
+    let ty = catalog.node_types.iter().find(|ty| ty.id == id.type_id());
+    let index_bytes = ty.map_or(0, |ty| {
+        ty.indexed.iter().fold(0usize, |total, field| {
+            total
+                .saturating_add(256)
+                .saturating_add(field.len().saturating_mul(2))
+        })
+    });
+    control(
+        index_bytes
+            .saturating_add(record.entity_id.len())
+            .saturating_add(1024),
+    )?;
+    let outgoing = edges_for_delete_with_control(txn, Cf::Out, id, &[], &mut control)?;
+    let incoming = edges_for_delete_with_control(txn, Cf::In, id, &outgoing, &mut control)?;
+
+    if let Some(ty) = ty {
+        update_node_indexes(txn, ty, id, &record.row, &Row::default());
+    }
+    for edge in outgoing {
+        txn.delete(Cf::Out, edge_key(id, edge.edge_type, edge.other, edge.id));
+        txn.delete(Cf::In, edge_key(edge.other, edge.edge_type, id, edge.id));
+    }
+    for edge in incoming {
+        txn.delete(Cf::In, edge_key(id, edge.edge_type, edge.other, edge.id));
+        txn.delete(Cf::Out, edge_key(edge.other, edge.edge_type, id, edge.id));
+    }
+    txn.delete(Cf::Pk, pk_key(&record.entity_id, id.type_id()));
+    txn.delete(Cf::Node, node_key(id));
+    txn.delete(Cf::Acl, node_key(id));
+    Ok(())
+}
+
+fn edges_for_delete_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    cf: Cf,
+    node: NodeId,
+    outgoing: &[EdgeRef],
+    control: &mut impl FnMut(usize) -> Result<(), E>,
+) -> Result<Vec<EdgeRef>, E> {
+    // Reserve the range-dependency key before visit_prefix_for_update retains it.
+    control(136)?;
+    let mut found: Vec<EdgeRef> = Vec::new();
+    txn.visit_prefix_for_update::<E>(cf, &node.0.to_be_bytes(), |key, _| {
+        let (_, edge_type, other, id) = decode_edge_key(key)?;
+        if cf == Cf::In
+            && other == node
+            && outgoing
+                .binary_search_by_key(&(edge_type, other, id), |edge| {
+                    (edge.edge_type, edge.other, edge.id)
+                })
+                .is_ok()
+        {
+            return Ok(());
+        }
+        // Both physical tombstones, including BTreeMap/key retention overhead.
+        control(2 * (192 + 26))?;
+        if found.len() == found.capacity() {
+            let next = found.capacity().saturating_mul(2).max(4);
+            // Charge the new allocation before reserve; prior capacity remains
+            // accounted while the allocator moves the backing storage.
+            control(next.saturating_mul(std::mem::size_of::<EdgeRef>()))?;
+            found.reserve_exact(next - found.len());
+        }
+        found.push(EdgeRef {
+            edge_type,
+            other,
+            id,
+        });
+        Ok(())
+    })?;
+    Ok(found)
+}
+
 /// Checks the invariants the crash test relies on: pk and node agree both
 /// ways, node ids are unique, `out` and `in` mirror each other with both
 /// endpoints still existing as nodes, and every id counter is above the
@@ -2543,6 +2633,97 @@ mod tests {
     }
 
     #[test]
+    fn controlled_detach_refuses_before_staging_removals() {
+        let (_d, _r, db, cat) = setup();
+        let mut seed = db.begin();
+        let hub = merge_node(&mut seed, &cat, "Customer", "hub", &BTreeMap::new()).unwrap();
+        let neighbor =
+            merge_node(&mut seed, &cat, "Company", "neighbor", &BTreeMap::new()).unwrap();
+        merge_edge(&mut seed, &cat, hub, "WORKS_AT", neighbor, &BTreeMap::new()).unwrap();
+        seed.commit().unwrap();
+        let mut txn = db.begin();
+        let refused = detach_delete_with_control(&mut txn, &cat, hub, |bytes| {
+            if bytes > 0 {
+                Err(GraphError::Catalog("synthetic guard refusal".into()))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(
+            matches!(refused, Err(GraphError::Catalog(ref s)) if s == "synthetic guard refusal")
+        );
+        assert!(get_node(&txn, hub).unwrap().is_some());
+        assert_eq!(out_edges(&txn, hub).unwrap().len(), 1);
+        assert_eq!(in_edges(&txn, neighbor).unwrap().len(), 1);
+        txn.commit().unwrap();
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn controlled_detach_can_refuse_while_collecting_edges_without_removing_any() {
+        let (_d, _r, db, cat) = setup();
+        let mut seed = db.begin();
+        let hub = merge_node(&mut seed, &cat, "Customer", "hub", &BTreeMap::new()).unwrap();
+        let neighbor =
+            merge_node(&mut seed, &cat, "Company", "neighbor", &BTreeMap::new()).unwrap();
+        let edge_type = cat.edge_type("WORKS_AT").unwrap().id;
+        for i in 0..256 {
+            seed.put(
+                Cf::Out,
+                edge_key(hub, edge_type, neighbor, EdgeId(i)),
+                Vec::new(),
+            );
+            seed.put(
+                Cf::In,
+                edge_key(neighbor, edge_type, hub, EdgeId(i)),
+                Vec::new(),
+            );
+        }
+        seed.commit().unwrap();
+        let mut txn = db.begin();
+        let mut used = 0usize;
+        assert!(detach_delete_with_control(&mut txn, &cat, hub, |bytes| {
+            used = used.saturating_add(bytes);
+            if used > 16 * 1024 {
+                Err(GraphError::Catalog("synthetic guard refusal".into()))
+            } else {
+                Ok(())
+            }
+        })
+        .is_err());
+        assert!(get_node(&txn, hub).unwrap().is_some());
+        assert_eq!(out_edges(&txn, hub).unwrap().len(), 256);
+        assert_eq!(in_edges(&txn, neighbor).unwrap().len(), 256);
+        txn.commit().unwrap();
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn controlled_detach_keeps_endpoint_and_phantom_conflicts_in_both_commit_orders() {
+        for merge_first in [false, true] {
+            for source in [false, true] {
+                let (_d, _r, db, cat) = setup();
+                let (a, b) = seed_customer_and_company(&db, &cat);
+                let mut merge = db.begin();
+                let mut delete = db.begin();
+                merge_edge(&mut merge, &cat, a, "WORKS_AT", b, &BTreeMap::new()).unwrap();
+                detach_delete_with_control(&mut delete, &cat, if source { a } else { b }, |_| {
+                    Ok::<_, GraphError>(())
+                })
+                .unwrap();
+                if merge_first {
+                    merge.commit().unwrap();
+                    assert!(matches!(delete.commit(), Err(TxnError::Conflict)));
+                } else {
+                    delete.commit().unwrap();
+                    assert!(matches!(merge.commit(), Err(TxnError::Conflict)));
+                }
+                check_invariants(&db).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn high_degree_detach_streams_snapshot_and_transaction_overlay_edges() {
         let (_d, _r, db, cat) = setup();
         let mut seed = db.begin();
@@ -2558,8 +2739,7 @@ mod tests {
             seed.put(Cf::Out, edge_key(hub, edge_type, neighbor, id), Vec::new());
             seed.put(Cf::In, edge_key(neighbor, edge_type, hub, id), Vec::new());
         }
-        // A self-loop appears in both prefix scans; the outgoing pass stages
-        // the incoming tombstone before the incoming scan starts.
+        // A self-loop appears in both prefix scans and must be removed once.
         seed.put(
             Cf::Out,
             edge_key(hub, edge_type, hub, EdgeId(2_048)),
@@ -2587,7 +2767,7 @@ mod tests {
             edge_key(neighbor, edge_type, hub, EdgeId(2_049)),
             Vec::new(),
         );
-        detach_delete(&mut delete, hub).unwrap();
+        detach_delete_with_control(&mut delete, &cat, hub, |_| Ok::<_, GraphError>(())).unwrap();
         delete.commit().unwrap();
 
         assert!(get_node(&db.begin(), hub).unwrap().is_none());

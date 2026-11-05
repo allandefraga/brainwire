@@ -581,6 +581,39 @@ mod tests {
     }
 
     #[test]
+    fn fragmented_payload_rechecks_falling_process_headroom() {
+        use crate::ingress::IngressPool;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let available = Arc::new(AtomicUsize::new(100));
+        let observed = Arc::clone(&available);
+        let pool = IngressPool::with_process_headroom(
+            1000,
+            Some(Arc::new(move || observed.load(Ordering::Acquire))),
+        );
+        let mut lease = pool.lease();
+        let mut reader = ChunkReader::default();
+        reader.push(&[0, 4, 1, 2, 3, 4]);
+        assert_eq!(
+            reader.next_message_admitted(100, Some(&mut lease)),
+            Ok(None)
+        );
+        assert_eq!(pool.reserved(), 4);
+        available.store(0, Ordering::Release);
+        reader.push(&[0, 1, 5]);
+        assert!(matches!(
+            reader.next_message_admitted(100, Some(&mut lease)),
+            Err(ReadError::IngressExhausted { .. })
+        ));
+        assert_eq!(reader.current.capacity(), 0);
+        drop(reader);
+        drop(lease);
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
     fn fragmented_payload_reserves_capacity_before_geometric_growth() {
         use crate::ingress::IngressPool;
         let pool = IngressPool::new(24);
