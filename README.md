@@ -27,13 +27,13 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.15.0-beta.14 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.15.0-beta.15 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
-This release adds earlier memory checks for Bolt input, query output structures
-and deletion of highly connected nodes. Failed work is rejected through the
-existing transaction rollback path. Memory controls remain cooperative; see
+This candidate coordinates query and Bolt input reservations through one atomic
+ledger when process-memory admission is enabled. Each component keeps its own
+budget, and results retain their reservation until released. Memory controls remain cooperative; see
 the [current limits](#current-limits) before relying on them.
 
 ## What you can build
@@ -60,9 +60,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.14 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.15.0-beta.15 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.14 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.15 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -211,7 +211,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.14 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.15.0-beta.15 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

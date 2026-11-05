@@ -1,7 +1,7 @@
 # Memory reference notes
 
-Brainwire's beta.14 memory-admission changes were designed independently after
-reviewing the following public source snapshots. These are design references,
+Brainwire's memory-admission changes were designed independently after reviewing
+the following public source snapshots. These are design references,
 not imported source code or evidence of a hard RSS limit.
 
 - [Memgraph memory tracker](https://github.com/memgraph/memgraph/blob/bcec383fe10370abfaf86a48f6d34dc1011bab89/src/utils/memory_tracker.hpp)
@@ -15,7 +15,8 @@ not imported source code or evidence of a hard RSS limit.
 
 The Brainwire changes in this release reserve known output structures and
 high-degree deletion staging before allocation, and check sampled process
-headroom before growing its existing Bolt ingress pool. Query and ingress pools
-remain independent and do not cover all native allocations. The container limit
+headroom before growing its existing Bolt ingress pool. Query and ingress retain
+component limits and share a sampled-headroom ledger when process-memory
+admission is enabled. This ledger does not cover all native allocations. The container limit
 can still kill the process. Test memory pressure, rollback, other clients and
 recovery on the intended workload; the failure envelope is not yet qualified.

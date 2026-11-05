@@ -117,9 +117,13 @@ including clients that have not authenticated. It is separate from
 memory limit, capped at 512 MiB; without detection it defaults to 256 MiB.
 When process memory admission is enabled, positive ingress reservations also
 respect the sampled process headroom. If RSS monitoring is stale, growth can
-be refused until observations recover. This is conservative admission: ingress
-and query reservations remain separate pools and can each observe the same
-sampled headroom. It does not establish a global RSS ceiling.
+be refused until observations recover. Ingress and query keep their own limits
+but share an atomic admission ledger against sampled headroom. Concurrent input
+and query reservations cannot each spend the same allowance. Results keep their
+credit while retained; release and bounded RESET recovery remain possible when
+headroom is zero. Setting `memory.limit = 0` disables this process-headroom
+coordination, while component budgets still apply. This does not establish a
+global RSS ceiling.
 Set `[memory] ingress = "128MiB"` in TOML or
 `BRAINWIRE_MEMORY_INGRESS=128MiB` in the environment. `config show` reports its
 value and source. Explicit values must be positive and fit the platform address

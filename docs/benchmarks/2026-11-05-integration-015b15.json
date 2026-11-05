@@ -1,0 +1,318 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "rows_per_label": 10000,
+  "initial_nodes": 200000,
+  "initial_ring_edges": 200000,
+  "image_id": "sha256:654685ce3c7d0354bc480f82b12d406ebbfcc0de1b5e71f419183fdb34ba9852",
+  "image_version": "brainwire 0.15.0-beta.15",
+  "phases": [
+    {
+      "name": "initial_CREATE_nodes",
+      "seconds": 5.551
+    },
+    {
+      "name": "initial_CREATE_edges",
+      "seconds": 4.554
+    },
+    {
+      "name": "application_writer_MERGE_updates",
+      "seconds": 3.031
+    },
+    {
+      "name": "application_writer_MERGE_inserts",
+      "seconds": 0.166
+    },
+    {
+      "name": "application_writer_idempotent_replay",
+      "seconds": 0.21
+    },
+    {
+      "name": "application_writer_remove_properties",
+      "seconds": 0.187
+    },
+    {
+      "name": "application_execute_batch_deletes",
+      "seconds": 0.407
+    }
+  ],
+  "initial_counts": {
+    "nodes_per_label": {
+      "Person": 10000,
+      "Organization": 10000,
+      "Team": 10000,
+      "Project": 10000,
+      "Ticket": 10000,
+      "Document": 10000,
+      "Topic": 10000,
+      "Product": 10000,
+      "Customer": 10000,
+      "Order": 10000,
+      "Invoice": 10000,
+      "Payment": 10000,
+      "Asset": 10000,
+      "Location": 10000,
+      "EventRecord": 10000,
+      "Task": 10000,
+      "Release": 10000,
+      "Deployment": 10000,
+      "Service": 10000,
+      "Repository": 10000
+    },
+    "edges": 200040
+  },
+  "post_merge_counts": {
+    "nodes_per_label": {
+      "Person": 10100,
+      "Organization": 10100,
+      "Team": 10100,
+      "Project": 10100,
+      "Ticket": 10100,
+      "Document": 10100,
+      "Topic": 10100,
+      "Product": 10100,
+      "Customer": 10100,
+      "Order": 10100,
+      "Invoice": 10100,
+      "Payment": 10100,
+      "Asset": 10100,
+      "Location": 10100,
+      "EventRecord": 10100,
+      "Task": 10100,
+      "Release": 10100,
+      "Deployment": 10100,
+      "Service": 10100,
+      "Repository": 10100
+    },
+    "edges": 200040
+  },
+  "final_counts": {
+    "nodes_per_label": {
+      "Person": 10000,
+      "Organization": 10000,
+      "Team": 10000,
+      "Project": 10000,
+      "Ticket": 10000,
+      "Document": 10000,
+      "Topic": 10000,
+      "Product": 10000,
+      "Customer": 10000,
+      "Order": 10000,
+      "Invoice": 10000,
+      "Payment": 10000,
+      "Asset": 10000,
+      "Location": 10000,
+      "EventRecord": 10000,
+      "Task": 10000,
+      "Release": 10000,
+      "Deployment": 10000,
+      "Service": 10000,
+      "Repository": 10000
+    },
+    "edges": 196040
+  },
+  "point_lookup": {
+    "scope": "single sequential connection through application writer, local Docker/Bolt, warm established pool; synthetic 200k nodes, no concurrent readers; client roundtrip included, not production latency",
+    "measurements": {
+      "entity_id_projection": {
+        "samples": 200,
+        "warmups": 20,
+        "p50_ms": 1.054,
+        "p95_ms": 1.355,
+        "min_ms": 0.893,
+        "max_ms": 2.664
+      },
+      "entity_id_full_node": {
+        "samples": 200,
+        "warmups": 20,
+        "p50_ms": 1.162,
+        "p95_ms": 2.24,
+        "min_ms": 1.003,
+        "max_ms": 4.553
+      }
+    }
+  },
+  "duplicate_CREATE_error_code": "Neo.ClientError.Schema.ConstraintValidationFailed",
+  "duplicate_CREATE_rollback": "PASS",
+  "restart_counts": {
+    "nodes_per_label": {
+      "Person": 10000,
+      "Organization": 10000,
+      "Team": 10000,
+      "Project": 10000,
+      "Ticket": 10000,
+      "Document": 10000,
+      "Topic": 10000,
+      "Product": 10000,
+      "Customer": 10000,
+      "Order": 10000,
+      "Invoice": 10000,
+      "Payment": 10000,
+      "Asset": 10000,
+      "Location": 10000,
+      "EventRecord": 10000,
+      "Task": 10000,
+      "Release": 10000,
+      "Deployment": 10000,
+      "Service": 10000,
+      "Repository": 10000
+    },
+    "edges": 196040
+  },
+  "restart": "PASS",
+  "observed_cgroup_oom": false,
+  "audit": {
+    "database": "evaluation",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "cleanup": true,
+  "memory_samples": [
+    {
+      "phase": "initial_CREATE_nodes",
+      "memory.current": 273149952,
+      "memory.peak": 273149952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 187629568,
+      "VmRSS_bytes": 187629568,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "initial_CREATE_edges",
+      "memory.current": 275619840,
+      "memory.peak": 321277952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 252706816,
+      "VmRSS_bytes": 247468032,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "application_writer_MERGE_updates",
+      "memory.current": 312762368,
+      "memory.peak": 321277952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 268664832,
+      "VmRSS_bytes": 268664832,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "application_writer_MERGE_inserts",
+      "memory.current": 315580416,
+      "memory.peak": 321277952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 269271040,
+      "VmRSS_bytes": 269271040,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "application_writer_idempotent_replay",
+      "memory.current": 317296640,
+      "memory.peak": 321277952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 269377536,
+      "VmRSS_bytes": 269377536,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "application_writer_remove_properties",
+      "memory.current": 318672896,
+      "memory.peak": 321277952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 269422592,
+      "VmRSS_bytes": 269422592,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "application_execute_batch_deletes",
+      "memory.current": 305668096,
+      "memory.peak": 321277952,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 268591104,
+      "VmRSS_bytes": 252452864,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    },
+    {
+      "phase": "after_restart",
+      "memory.current": 215089152,
+      "memory.peak": 215162880,
+      "memory.max": 2147483648,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "VmHWM_bytes": 219877376,
+      "VmRSS_bytes": 219877376,
+      "scope": "external sequential samples; docker exec observers add cgroup overhead; not an atomic RSS ceiling"
+    }
+  ],
+  "labels_count": 20,
+  "conditions": "Shared macOS arm64 host, Docker with 2 GiB/2 CPUs, synthetic highly compressible data; an external application writer. Point queries sequential with warm connection; not an SLO or capacity benchmark."
+}

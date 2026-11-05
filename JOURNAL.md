@@ -29,6 +29,13 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-05: v0.15.0-beta.15 shared memory admission
+
+- **Done:** query and Bolt ingress reservations share an atomic ledger against sampled process headroom while retaining component budgets. Credits follow worker and result ownership; refusal and cancellation release them. RESET remains available under pressure.
+- **Verification:** the final beta.15 workspace passed 1,107 tests (3 ignored), and 234 Python tests passed. Focused shared-ledger and protocol checks, Clippy and native synthetic Python ingestion, query-memory and three-process quorum acceptance passed. Final beta.15 candidate passed 512 MiB traced pressure and an isolated 200k-node application-writer scenario with 200 measured warm point reads, mutations, forced restart and audit. Results are synthetic and varied across shared-host runs; see [receipt](docs/benchmarks/2026-11-05-integration-015b15.md).
+- **Next step:** run representative application workloads and sustained mixed reads and writes; investigate the historical pressure discrepancy and validate multi-machine recovery.
+- **Limits:** sampled cooperative admission is not a hard RSS ceiling. RocksDB and other native allocations are not fully accounted; conservative double counting can refuse early. The former pressure failure is unexplained; production capacity and multi-machine failover remain unqualified.
+
 ## 2026-11-05: v0.15.0-beta.14 memory admission and integration
 
 - **Done:** check sampled process headroom before Bolt ingress grows, while retaining bounded recovery messages; pre-admit query output structures before allocation; preflight adjacency and staged removals for high-degree `DETACH DELETE`. Inspired by documented memory-control principles from Memgraph and FalkorDB, without copying their source. See [reference notes](docs/design/memory-reference-notes.md).

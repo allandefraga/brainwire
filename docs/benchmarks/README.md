@@ -28,6 +28,8 @@ A [beta.14 4 GiB read diagnostic](2026-11-05-soak4g-015b14.json) passed the same
 
 A [beta.14 200,000-node integration diagnostic](2026-11-05-load200k-015b14.md) covers create, merge, deletes and restart on a synthetic single-container fixture.
 
+A [beta.15 integration diagnostic](2026-11-05-integration-015b15.md) covers 200,000 synthetic nodes, point reads, mutations and restart on a shared host.
+
 ## Recent pressure-admission smoke
 
 The [beta.14 512 MiB pressure smoke](2026-11-05-cgroup-015b14.json) passed refusal, rollback and recovery on a local synthetic container. It does not establish a global RSS ceiling.

@@ -85,9 +85,12 @@ pub fn run(
         if !crate::process_memory::init_allocator() {
             eprintln!("warning: allocator background decay unavailable; idle memory returns only on activity");
         }
-        let ingress_headroom = if loaded.config.memory.limit.0 > 0 {
+        let shared_admission = if loaded.config.memory.limit.0 > 0 {
             let memory = crate::process_memory::ProcessMemory::new(loaded.config.memory.limit.0);
             crate::process_memory::install(Arc::clone(&memory));
+            let ceiling = Arc::clone(&memory);
+            let admission = brainwire_core::admission::MemoryAdmission::new(Arc::new(move || ceiling.headroom()));
+            databases.query_pool().set_shared_admission(Arc::clone(&admission));
             let ceiling = Arc::clone(&memory);
             databases.query_pool().set_process_headroom(move || ceiling.headroom());
             databases.query_pool().set_process_memory(
@@ -107,7 +110,7 @@ pub fn run(
                     query.reserved_bytes, query.rejections
                 )
             });
-            Some(Arc::new(move || memory.headroom()) as brainwire_bolt::server::ProcessHeadroom)
+            Some(admission)
         } else {
             None
         };
@@ -126,7 +129,7 @@ pub fn run(
             loaded.config.memory.ingress,
             loaded.config.memory.limit,
         );
-        let open = brainwire_bolt::server::serve_until_with_ingress_headroom(
+        let open = brainwire_bolt::server::serve_until_with_shared_admission(
             listener,
             move || {
                 let engine = if let Some(replica) = &replica {
@@ -147,7 +150,7 @@ pub fn run(
             auth,
             stop,
             grace,
-            ingress_headroom,
+            shared_admission,
         )
         .await
         .map_err(|e| format!("Bolt server stopped: {e}"))?;

@@ -26,17 +26,15 @@ the [qualification report](../../PRODUCTION-v0.12.md).
    `proc_pid_rusage` on macOS. Other supported targets use jemalloc
    `stats.resident`, which is only a partial allocator estimate; sampling may
    also be unavailable.
-3. **Reservation checks sampled headroom.** Let
-   `headroom = max(0, 95% of memory.limit - sampled RSS)`. Query-pool growth
-   atomically requires `all live reserved bytes + extra <= min(pool limit,
-   headroom)`. This compares the shared total, so concurrent reservations cannot
-   each spend the same headroom. Reservations already resident in RSS are
-   deliberately counted twice; this conservative rule can refuse early.
-   A RUN is refused at admission when sampled RSS is already at or above 95%.
-   Bolt ingress also checks its own aggregate reservations against sampled
-   headroom before positive buffer growth. Ingress and query reservations do
-   not share a single atomic pool; they can both observe the same headroom.
-   Both use the [memory refusal contract](memory-error-contract.md).
+3. **Reservation checks sampled headroom.** With `memory.limit` enabled, query
+   and Bolt ingress retain their component limits and share an atomic ledger
+   against sampled process headroom. Growth must fit both the component budget
+   and the common total before allocation. If the component refuses growth,
+   the tentative common credit is released. Workers transfer existing credits;
+   results keep credit after their transaction ends and release it when dropped.
+   Already resident reservations may be counted twice, so admission is
+   deliberately conservative. Both use the
+   [memory refusal contract](memory-error-contract.md).
 4. **Visibility and return.** Crossing 80% and 95% (upwards, with hysteresis)
    logs one line with RSS, limit, cache, memtables and query reservations; at
    80% the sampler also asks jemalloc to purge every arena immediately.
@@ -49,22 +47,10 @@ between samples. The kernel stays the last line; the 5% margin and the purge
 do not guarantee avoidance of that path. Memory added by other processes in the same
 cgroup is handled by separate cgroup admission.
 
-## Next step: coordinate query and ingress reservations
+## Scope of the shared ledger
 
-The two pools currently compare their totals independently with the same
-sampled headroom. A query and incoming request can therefore both reserve the
-same allowance before RSS is sampled again. A future shared ledger should give
-both pools one atomic total while retaining each pool's own limit. Each growth
-must acquire both credits before allocating; if either acquisition fails, it
-must release the other. Worker and result ownership transfers must transfer
-credits without reserving or releasing them twice. RESET and release must still
-work when headroom is zero.
-
-A deterministic concurrency test should allow only one of two simultaneous
-60-byte reservations against 100 bytes of shared headroom while the winner
-keeps its credit. Additional tests
-must cover pool-limit failure, cancellation, result lifetime beyond a
-transaction, worker credit transfers and zero outstanding credits after cleanup.
-Even this change would not account for every RocksDB, allocator or socket
-allocation, and sampling races would remain; it would not by itself guarantee a
-hard RSS ceiling.
+The shared ledger closes double spending between query and ingress reservations.
+It is connected before accepting clients when `memory.limit` is enabled.
+Zero headroom prevents growth but permits releasing credit and bounded RESET.
+It still uses sampled RSS and does not account for every RocksDB, allocator or
+socket allocation. It does not guarantee a hard process-wide RSS ceiling.

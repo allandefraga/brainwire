@@ -189,17 +189,76 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    serve_admitted(
+        listener,
+        make_engine,
+        limits,
+        auth,
+        shutdown,
+        grace,
+        (process_headroom, None),
+    )
+    .await
+}
+
+/// Use one process reservation ledger shared with the query pool.
+pub async fn serve_until_with_shared_admission<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+    shutdown: impl std::future::Future<Output = ()>,
+    grace: std::time::Duration,
+    ledger: Option<Arc<brainwire_core::admission::MemoryAdmission>>,
+) -> std::io::Result<usize>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
+    serve_admitted(
+        listener,
+        make_engine,
+        limits,
+        auth,
+        shutdown,
+        grace,
+        (None, ledger),
+    )
+    .await
+}
+
+type Admission = (
+    Option<ProcessHeadroom>,
+    Option<Arc<brainwire_core::admission::MemoryAdmission>>,
+);
+async fn serve_admitted<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+    shutdown: impl std::future::Future<Output = ()>,
+    grace: std::time::Duration,
+    (process_headroom, ledger): Admission,
+) -> std::io::Result<usize>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
     if limits.ingress_memory_bytes == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "ingress memory budget must be positive",
         ));
     }
-    let ingress_pool = match process_headroom {
-        Some(headroom) => {
-            IngressPool::with_process_headroom(limits.ingress_memory_bytes, Some(headroom))
+    let ingress_pool = if let Some(ledger) = ledger {
+        IngressPool::with_ledger(limits.ingress_memory_bytes, ledger)
+    } else {
+        match process_headroom {
+            Some(headroom) => {
+                IngressPool::with_process_headroom(limits.ingress_memory_bytes, Some(headroom))
+            }
+            None => IngressPool::new(limits.ingress_memory_bytes),
         }
-        None => IngressPool::new(limits.ingress_memory_bytes),
     };
     let make_engine = Arc::new(make_engine);
     let permits = Arc::new(Semaphore::new(DEFAULT_MAX_CONNECTIONS));
@@ -1194,71 +1253,82 @@ mod tests {
 
     #[tokio::test]
     async fn process_headroom_refuses_input_and_reset_survives_zero_headroom() {
-        tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            let available = Arc::new(std::sync::atomic::AtomicUsize::new(4096));
-            let observed = Arc::clone(&available);
-            let pool = IngressPool::with_process_headroom(
-                4096,
-                Some(Arc::new(move || {
+        for shared in [false, true] {
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                let available = Arc::new(std::sync::atomic::AtomicUsize::new(4096));
+                let observed = Arc::clone(&available);
+                let ledger = brainwire_core::admission::MemoryAdmission::new(Arc::new(move || {
                     observed.load(std::sync::atomic::Ordering::Acquire)
-                })),
-            );
-            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let (server, mut client) = tokio::io::duplex(4096);
-            let task = pooled_connection(
-                server,
-                BeginProbe(calls.clone()),
-                pool.clone(),
-                std::time::Duration::from_secs(5),
-            );
-            login(&mut client).await;
-            available.store(0, std::sync::atomic::Ordering::Release);
-            send_request(
-                &mut client,
-                0x10,
-                vec![
-                    PackValue::String("RETURN 1".into()),
-                    PackValue::Map(vec![]),
-                    PackValue::Map(vec![]),
-                ],
-            )
-            .await;
-            assert_eq!(
-                read_failure(&mut client).await.0,
-                crate::session::MEMORY_REFUSED
-            );
-            reserved_equals(&pool, 0).await;
-            send_request(&mut client, 0x0F, vec![]).await;
-            read_success(&mut client).await;
-            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-            // The recovery allowance cannot execute an arbitrary small RUN.
-            send_request(
-                &mut client,
-                0x10,
-                vec![
-                    PackValue::String("RETURN 2".into()),
-                    PackValue::Map(vec![]),
-                    PackValue::Map(vec![]),
-                ],
-            )
-            .await;
-            assert_eq!(
-                read_failure(&mut client).await.0,
-                crate::session::MEMORY_REFUSED
-            );
-            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-            send_request(&mut client, 0x0F, vec![]).await;
-            read_success(&mut client).await;
-            available.store(4096, std::sync::atomic::Ordering::Release);
-            send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
-            read_success(&mut client).await;
-            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-            drop(client);
-            task.await.unwrap().unwrap();
-            reserved_equals(&pool, 0).await;
-        })
-        .await
-        .expect("pressure refusal and RESET recovery complete");
+                }));
+                let pool = if shared {
+                    IngressPool::with_ledger(4096, Arc::clone(&ledger))
+                } else {
+                    let available = Arc::clone(&available);
+                    IngressPool::with_process_headroom(
+                        4096,
+                        Some(Arc::new(move || {
+                            available.load(std::sync::atomic::Ordering::Acquire)
+                        })),
+                    )
+                };
+                let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let (server, mut client) = tokio::io::duplex(4096);
+                let task = pooled_connection(
+                    server,
+                    BeginProbe(calls.clone()),
+                    pool.clone(),
+                    std::time::Duration::from_secs(5),
+                );
+                login(&mut client).await;
+                available.store(0, std::sync::atomic::Ordering::Release);
+                send_request(
+                    &mut client,
+                    0x10,
+                    vec![
+                        PackValue::String("RETURN 1".into()),
+                        PackValue::Map(vec![]),
+                        PackValue::Map(vec![]),
+                    ],
+                )
+                .await;
+                assert_eq!(
+                    read_failure(&mut client).await.0,
+                    crate::session::MEMORY_REFUSED
+                );
+                reserved_equals(&pool, 0).await;
+                send_request(&mut client, 0x0F, vec![]).await;
+                read_success(&mut client).await;
+                assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+                // The recovery allowance cannot execute an arbitrary small RUN.
+                send_request(
+                    &mut client,
+                    0x10,
+                    vec![
+                        PackValue::String("RETURN 2".into()),
+                        PackValue::Map(vec![]),
+                        PackValue::Map(vec![]),
+                    ],
+                )
+                .await;
+                assert_eq!(
+                    read_failure(&mut client).await.0,
+                    crate::session::MEMORY_REFUSED
+                );
+                assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+                send_request(&mut client, 0x0F, vec![]).await;
+                read_success(&mut client).await;
+                available.store(4096, std::sync::atomic::Ordering::Release);
+                send_request(&mut client, 0x11, vec![PackValue::Map(vec![])]).await;
+                read_success(&mut client).await;
+                assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+                drop(client);
+                task.await.unwrap().unwrap();
+                reserved_equals(&pool, 0).await;
+                assert_eq!(ledger.reserved(), 0);
+            })
+            .await
+            .expect("pressure refusal and RESET recovery complete");
+        }
     }
 
     #[tokio::test]

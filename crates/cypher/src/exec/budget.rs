@@ -18,6 +18,7 @@ type ProcessRss = Box<
 /// Shared accounting for transaction high-water reservations, not allocator RSS.
 pub struct QueryMemoryPool {
     process_memory: std::sync::OnceLock<(usize, ProcessRss)>,
+    shared_admission: std::sync::OnceLock<Arc<brainwire_core::admission::MemoryAdmission>>,
     limit: usize,
     /// Private embedded budgets must not appear as server-wide pool telemetry.
     observable: bool,
@@ -46,6 +47,7 @@ impl QueryMemoryPool {
     pub fn new(limit_bytes: usize) -> Self {
         Self {
             process_memory: std::sync::OnceLock::new(),
+            shared_admission: std::sync::OnceLock::new(),
             limit: limit_bytes,
             observable: true,
             reserved: AtomicUsize::new(0),
@@ -53,6 +55,10 @@ impl QueryMemoryPool {
             rejections: AtomicUsize::new(0),
             headroom: std::sync::OnceLock::new(),
         }
+    }
+    /// Install the same cooperative ledger used by ingress, before serving work.
+    pub fn set_shared_admission(&self, ledger: Arc<brainwire_core::admission::MemoryAdmission>) {
+        let _ = self.shared_admission.set(ledger);
     }
     pub(super) fn new_private(limit_bytes: usize) -> Self {
         Self {
@@ -106,6 +112,7 @@ pub(super) struct Reservation(Arc<ReservationInner>);
 
 pub(super) struct ReservationInner {
     pool: Arc<QueryMemoryPool>,
+    ledger: Option<Arc<brainwire_core::admission::MemoryAdmission>>,
     bytes: AtomicUsize,
     output: Arc<AtomicUsize>,
 }
@@ -118,7 +125,16 @@ impl std::ops::Deref for Reservation {
 impl Reservation {
     pub fn new(pool: Arc<QueryMemoryPool>) -> Self {
         Self(Arc::new(ReservationInner {
+            ledger: pool.shared_admission.get().cloned(),
             pool,
+            bytes: AtomicUsize::new(0),
+            output: Arc::new(AtomicUsize::new(0)),
+        }))
+    }
+    fn fork(&self) -> Self {
+        Self(Arc::new(ReservationInner {
+            pool: Arc::clone(&self.pool),
+            ledger: self.ledger.clone(),
             bytes: AtomicUsize::new(0),
             output: Arc::new(AtomicUsize::new(0)),
         }))
@@ -141,7 +157,7 @@ impl Reservation {
                 limit,
                 attempted: base.saturating_add(live).saturating_add(bytes),
             })?;
-        let reservation = Reservation::new(Arc::clone(&self.pool));
+        let reservation = self.fork();
         if let Err(error) = reservation.grow_to(bytes) {
             self.output.fetch_sub(bytes, Ordering::AcqRel);
             return Err(error);
@@ -161,6 +177,17 @@ impl Reservation {
         // Compare the shared total atomically, so concurrent/small increments cannot
         // each spend the same sampled headroom. Already resident reservations count
         // twice deliberately: an epoch-aware allocator lease can relax this later.
+        let shared_credit = if let Some(ledger) = &self.ledger {
+            Some(ledger.reserve(extra).ok_or_else(|| {
+                self.pool.rejections.fetch_add(1, Ordering::Relaxed);
+                ExecError::ProcessMemoryLimit {
+                    requested: extra,
+                    available: ledger.available(),
+                }
+            })?)
+        } else {
+            None
+        };
         let process_headroom = self.pool.headroom.get().map(|headroom| headroom());
         let capacity = process_headroom
             .map(|available| available.min(self.pool.limit))
@@ -175,6 +202,9 @@ impl Reservation {
                 });
         match result {
             Ok(previous) => {
+                if let Some(credit) = shared_credit {
+                    credit.commit();
+                }
                 self.bytes.store(bytes, Ordering::Relaxed);
                 self.pool
                     .peak
@@ -207,6 +237,14 @@ impl Reservation {
             "worker reservation must have one owner before transfer"
         );
         assert!(Arc::ptr_eq(&self.pool, &other.pool));
+        assert!(
+            match (&self.ledger, &other.ledger) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            },
+            "worker reservations must share admission ownership"
+        );
         let bytes = other.bytes.swap(0, Ordering::Relaxed);
         // Both leases already contribute to the same bounded pool total.
         self.bytes.fetch_add(bytes, Ordering::Relaxed);
@@ -225,9 +263,11 @@ impl Drop for OutputReservation {
 
 impl Drop for ReservationInner {
     fn drop(&mut self) {
-        self.pool
-            .reserved
-            .fetch_sub(self.bytes.load(Ordering::Relaxed), Ordering::Relaxed);
+        let bytes = self.bytes.load(Ordering::Relaxed);
+        self.pool.reserved.fetch_sub(bytes, Ordering::Relaxed);
+        if let Some(ledger) = &self.ledger {
+            ledger.release(bytes);
+        }
     }
 }
 
@@ -452,8 +492,7 @@ impl<'a> Budget<'a> {
     }
     /// Independent lease for one parallel worker; keep it until results are merged.
     pub fn worker_reservation(&self) -> Option<Reservation> {
-        self.reservation
-            .map(|parent| Reservation::new(Arc::clone(&parent.pool)))
+        self.reservation.map(|parent| parent.fork())
     }
     /// A worker gets an equal share of the remaining query allowance and its own
     /// pool lease, so charging workers never concurrently mutate one reservation.
@@ -663,6 +702,68 @@ mod tests {
     #[global_allocator]
     static ACCOUNTING_ALLOCATOR: AccountingAllocator = AccountingAllocator;
 
+    #[test]
+    fn shared_admission_tracks_worker_transfer_and_output_lifetime() {
+        let ledger = brainwire_core::admission::MemoryAdmission::new(Arc::new(|| 1000));
+        let pool = Arc::new(QueryMemoryPool::new(1000));
+        pool.set_shared_admission(Arc::clone(&ledger));
+        let parent = Reservation::new(Arc::clone(&pool));
+        let worker = Reservation::new(Arc::clone(&pool));
+        parent.grow_to(100).unwrap();
+        worker.grow_to(200).unwrap();
+        parent.absorb(worker);
+        assert_eq!(ledger.reserved(), 300);
+        let output = parent.reserve_output(50, 1000).unwrap();
+        drop(parent);
+        assert_eq!(ledger.reserved(), 50);
+        drop(output);
+        assert_eq!(ledger.reserved(), 0);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+    #[test]
+    fn shared_admission_refusal_and_local_failure_release_provisional_credit() {
+        let ledger = brainwire_core::admission::MemoryAdmission::new(Arc::new(|| 100));
+        let pool = Arc::new(QueryMemoryPool::new(50));
+        pool.set_shared_admission(Arc::clone(&ledger));
+        let query = Reservation::new(Arc::clone(&pool));
+        assert!(query.grow_to(60).is_err());
+        assert_eq!(ledger.reserved(), 0);
+        let ingress = ledger.reserve(60).unwrap();
+        assert!(matches!(
+            query.grow_to(50),
+            Err(ExecError::ProcessMemoryLimit { .. })
+        ));
+        assert_eq!(pool.usage().reserved_bytes, 0);
+        drop(ingress);
+        query.grow_to(50).unwrap();
+        assert_eq!(ledger.reserved(), 50);
+        drop(query);
+        assert_eq!(ledger.reserved(), 0);
+    }
+    #[test]
+    fn ledger_installation_does_not_retroactively_charge_existing_lease() {
+        let pool = Arc::new(QueryMemoryPool::new(100));
+        let old = Reservation::new(Arc::clone(&pool));
+        old.grow_to(10).unwrap();
+        let ledger = brainwire_core::admission::MemoryAdmission::new(Arc::new(|| 100));
+        pool.set_shared_admission(Arc::clone(&ledger));
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: 100,
+                timeout: None,
+            },
+            Some(&old),
+        );
+        let worker = budget.worker_reservation().unwrap();
+        worker.grow_to(10).unwrap();
+        old.absorb(worker);
+        let output = old.reserve_output(10, 100).unwrap();
+        drop(budget);
+        drop(old);
+        drop(output);
+        assert_eq!(ledger.reserved(), 0);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
     #[test]
     fn output_vector_growth_is_admitted_before_allocating() {
         use brainwire_store::db::{Resources, StoreConfig};
