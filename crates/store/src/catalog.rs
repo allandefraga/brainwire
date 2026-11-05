@@ -258,6 +258,17 @@ pub fn create_relationship_type(
     from: &str,
     to: &str,
 ) -> Result<(), GraphError> {
+    create_relationship_type_with_keys(txn, name, from, to, None)
+}
+
+/// Declare immutable merge identity for a new type. Existing identity cannot change.
+pub fn create_relationship_type_with_keys(
+    txn: &mut Txn,
+    name: &str,
+    from: &str,
+    to: &str,
+    merge_key_fields: Option<Vec<String>>,
+) -> Result<(), GraphError> {
     if name.is_empty() {
         return Err(rejected("relationship type must not be empty"));
     }
@@ -269,6 +280,16 @@ pub fn create_relationship_type(
             .ok_or_else(|| GraphError::UnknownLabel(label.into()))
     };
     let signature = (id(from)?, id(to)?);
+    // Validate identity even for an existing signature, before returning a no-op.
+    if let Some(keys) = &merge_key_fields {
+        if keys.is_empty()
+            || catalog
+                .edge_type(name)
+                .is_some_and(|ty| &ty.merge_key_fields != keys)
+        {
+            return Err(schema_error(SchemaError::BadMergeKey(name.into())));
+        }
+    }
     if catalog
         .edge_type(name)
         .is_some_and(|ty| ty.signatures.contains(&signature))
@@ -279,12 +300,12 @@ pub fn create_relationship_type(
         label: label.into(),
     };
     let spec = EdgeSpec {
-        merge_key_fields: None,
+        properties: merge_key_fields.clone().unwrap_or_default(),
+        merge_key_fields,
         description: None,
         name: name.into(),
         from: endpoint(from),
         to: endpoint(to),
-        properties: vec![],
     };
     let next =
         Catalog::apply(&mapping(vec![], vec![spec]), Some(&catalog)).map_err(schema_error)?;

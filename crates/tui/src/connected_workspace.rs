@@ -53,6 +53,58 @@ pub enum ConnectedSnapshot {
     Graph(GraphSnapshot),
 }
 
+/// One outcome in the connected principal's current standalone graph history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RequestOutcome {
+    pub committed: bool,
+    pub request_id: String,
+    pub incarnation: String,
+    pub sequence: Option<String>,
+}
+#[derive(Default)]
+struct RequestInspector {
+    input: String,
+    pending: bool,
+    outcome: Option<RequestOutcome>,
+    error: Option<String>,
+}
+impl RequestInspector {
+    fn handle(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Esc => return true,
+            KeyCode::Backspace => {
+                self.input.pop();
+                self.outcome = None;
+                self.error = None;
+            }
+            KeyCode::Char(c) if c.is_ascii_graphic() && self.input.len() < 128 => {
+                self.input.push(c);
+                self.outcome = None;
+                self.error = None;
+            }
+            KeyCode::Enter if !self.input.is_empty() => self.pending = true,
+            KeyCode::Enter => {
+                self.error = Some("Enter 1..128 printable ASCII characters without spaces".into())
+            }
+            _ => {}
+        }
+        false
+    }
+    fn inspect(&mut self, lookup: &mut impl FnMut(&str) -> Result<RequestOutcome, String>) {
+        if !self.pending {
+            return;
+        }
+        self.pending = false;
+        self.outcome = None;
+        self.error = None;
+        match lookup(&self.input) {
+            Ok(outcome) if outcome.request_id == self.input => self.outcome = Some(outcome),
+            Ok(_) => self.error = Some("server returned a different request ID".into()),
+            Err(error) => self.error = Some(error.chars().take(512).collect()),
+        }
+    }
+}
+
 struct Workspace {
     active: ConnectedView,
     ontology: Option<connected::State>,
@@ -62,6 +114,7 @@ struct Workspace {
     attempted: [bool; 4],
     initial_errors: [Option<String>; 4],
     help: bool,
+    request: Option<RequestInspector>,
 }
 impl Workspace {
     fn new() -> Self {
@@ -74,6 +127,7 @@ impl Workspace {
             attempted: [false; 4],
             initial_errors: std::array::from_fn(|_| None),
             help: false,
+            request: None,
         }
     }
     fn refresh(
@@ -154,6 +208,12 @@ impl Workspace {
         if key.kind != event::KeyEventKind::Press {
             return false;
         }
+        if let Some(request) = &mut self.request {
+            if request.handle(key.code) {
+                self.request = None;
+            }
+            return false;
+        }
         if key.code == KeyCode::Char('q') {
             return true;
         }
@@ -165,6 +225,7 @@ impl Workspace {
         }
         match key.code {
             KeyCode::Char('?') => self.help = true,
+            KeyCode::Char('s') => self.request = Some(RequestInspector::default()),
             KeyCode::Tab => self.select(
                 ConnectedView::from_index(
                     self.active.index()
@@ -302,6 +363,9 @@ fn render(
         lines.push(Line::raw(
             lang.choose(" ?    guia rápido", " ?    quick guide"),
         ));
+        lines.push(Line::raw(
+            lang.choose(" s    status de pedido", " s    request status"),
+        ));
         lines.push(Line::raw(lang.choose(" q    sair", " q    quit")));
         frame.render_widget(
             Paragraph::new(lines).block(panel(
@@ -387,8 +451,8 @@ fn render(
         content.height.min(3),
     );
     let navigation = lang.choose(
-        " 1 Ontologia  2 Memória  3 Índices  4 Grafo | r atualiza  ? ajuda  q sai",
-        " 1 Ontology  2 Memory  3 Indexes  4 Graph | r refresh  ? help  q quit",
+        " 1/2/3/4 telas | s status  r atualiza  ? ajuda  q sai",
+        " 1/2/3/4 views | s status  r refresh  ? help  q quit",
     );
     let controls = if !has_sample {
         lang.choose("SEM AMOSTRA / SOMENTE LEITURA", "NO SAMPLE / READ ONLY")
@@ -416,6 +480,87 @@ fn render(
         Paragraph::new(navigation).block(panel(controls, GREEN, no_color)),
         footer,
     );
+    if let Some(request) = &workspace.request {
+        let width = content.width.saturating_sub(2).clamp(1, 88);
+        let height = content.height.saturating_sub(2).clamp(1, 21);
+        let popup = Rect::new(
+            content.x + content.width.saturating_sub(width) / 2,
+            content.y + content.height.saturating_sub(height) / 2,
+            width,
+            height,
+        );
+        frame.render_widget(Clear, popup);
+        let border = panel(
+            lang.choose(
+                "INSPECIONAR PEDIDO / EXPERIMENTAL",
+                "INSPECT REQUEST / EXPERIMENTAL",
+            ),
+            GREEN,
+            no_color,
+        );
+        let inner = border.inner(popup);
+        frame.render_widget(border, popup);
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(6),
+        ])
+        .split(inner);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{} {}\n{}",
+                lang.choose("Grafo:", "Graph:"),
+                terminal_text(graph),
+                lang.choose(
+                    "Ledger standalone experimental; mesmo principal.",
+                    "Experimental standalone ledger; same principal."
+                )
+            ))
+            .wrap(Wrap { trim: false }),
+            sections[0],
+        );
+        frame.render_widget(
+            Paragraph::new(format!(
+                "ID: {}\n{}",
+                terminal_text(&request.input),
+                lang.choose(
+                    "1..128 ASCII visíveis, sem espaços.",
+                    "1..128 printable ASCII characters, no spaces."
+                )
+            ))
+            .wrap(Wrap { trim: false }),
+            sections[1],
+        );
+        let mut result = String::new();
+        if let Some(outcome) = &request.outcome {
+            result.push_str(&format!(
+                "{}: {}\nIncarnation: {}\nSequence: {}",
+                lang.choose("Estado", "Status"),
+                if outcome.committed {
+                    "committed"
+                } else {
+                    "not_recorded"
+                },
+                terminal_text(&outcome.incarnation),
+                outcome
+                    .sequence
+                    .as_deref()
+                    .map(terminal_text)
+                    .unwrap_or_else(|| "—".into())
+            ));
+        }
+        if let Some(error) = &request.error {
+            result.push_str(&terminal_text(error));
+        }
+        frame.render_widget(
+            Paragraph::new(result).wrap(Wrap { trim: false }),
+            sections[2],
+        );
+        frame.render_widget(Paragraph::new(lang.choose(
+            "not_recorded é inconclusivo; não repita escrita.\ncommitted vale apenas para o histórico atual.\nQuorum: cluster request --id <effective-key>.\n\nEnter consulta uma vez; Esc fecha. Somente leitura.",
+            "not_recorded is inconclusive; do not replay a write.\ncommitted refers only to current store history.\nQuorum: cluster request --id <effective-key>.\n\nEnter looks up once; Esc closes. Read only.")).wrap(Wrap { trim: false }), sections[3]);
+    }
     if workspace.help {
         let (title, body) = match workspace.active {
             ConnectedView::Ontology => (
@@ -448,8 +593,8 @@ fn render(
             ),
         };
         let guide = lang.choose(
-            "1 Ontologia  Tipos e ligações\n2 Memória    Orçamento de consultas\n3 Índices    Prontidão das buscas\n4 Grafo      Relações gravadas\n\nTab / Shift+Tab alterna telas. r atualiza.\nEsc fecha ajuda/detalhes; q sempre sai.\nEsta TUI é somente leitura.\n\nNESTA TELA\n",
-            "1 Ontology  Types and allowed links\n2 Memory    Query memory budget\n3 Indexes   Lookup readiness\n4 Graph     Stored connections\n\nTab / Shift+Tab switches views. r refreshes.\nEsc closes help/details; q always quits.\nThis workspace is read only.\n\nTHIS VIEW\n",
+            "1 Ontologia  Tipos e ligações\n2 Memória    Orçamento de consultas\n3 Índices    Prontidão das buscas\n4 Grafo      Relações gravadas\n\nTab / Shift+Tab alterna telas. r atualiza.\ns inspeciona um pedido standalone. Esc fecha; q sai fora do inspetor.\nEsta TUI é somente leitura.\n\nNESTA TELA\n",
+            "1 Ontology  Types and allowed links\n2 Memory    Query memory budget\n3 Indexes   Lookup readiness\n4 Graph     Stored connections\n\nTab / Shift+Tab switches views. r refreshes.\ns inspects one standalone request. Esc closes; q quits outside inspector.\nThis workspace is read only.\n\nTHIS VIEW\n",
         );
         let width = content.width.saturating_sub(4).clamp(1, 88);
         let height = content.height.saturating_sub(2).clamp(1, 24);
@@ -477,7 +622,20 @@ pub fn run_connected_workspace(
     options: &Options,
     address: &str,
     graph: &str,
+    fetch: impl FnMut(ConnectedView) -> Result<ConnectedSnapshot, String>,
+) -> Result<(), String> {
+    run_connected_workspace_with_requests(options, address, graph, fetch, |_| {
+        Err("Request inspection is unavailable in this client".into())
+    })
+}
+
+/// The inspector issues one authenticated, read-only standalone outcome lookup.
+pub fn run_connected_workspace_with_requests(
+    options: &Options,
+    address: &str,
+    graph: &str,
     mut fetch: impl FnMut(ConnectedView) -> Result<ConnectedSnapshot, String>,
+    mut lookup: impl FnMut(&str) -> Result<RequestOutcome, String>,
 ) -> Result<(), String> {
     let lang = Language::parse(&options.lang)?;
     if options.view != "workspace" {
@@ -523,6 +681,9 @@ pub fn run_connected_workspace(
             if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
                 if workspace.handle(key, &mut fetch) {
                     return Ok(());
+                }
+                if let Some(request) = &mut workspace.request {
+                    request.inspect(&mut lookup);
                 }
             }
         }
@@ -950,5 +1111,99 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, "Neo.ClientError.Security.Forbidden");
         assert_eq!(calls, [ConnectedView::Ontology]);
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+    #[test]
+    fn request_input_is_bounded_and_lookup_is_explicit() {
+        let mut workspace = Workspace::new();
+        let mut fetch = |_| panic!("request lookup must not fetch a pane");
+        assert!(!workspace.handle(key(KeyCode::Char('s')), &mut fetch));
+        for _ in 0..140 {
+            workspace.handle(key(KeyCode::Char('q')), &mut fetch);
+        }
+        workspace.handle(key(KeyCode::Char(' ')), &mut fetch);
+        workspace.handle(key(KeyCode::Char('é')), &mut fetch);
+        let request = workspace.request.as_mut().unwrap();
+        assert_eq!(request.input, "q".repeat(128));
+        let mut calls = 0;
+        let mut lookup = |seed: &str| {
+            calls += 1;
+            Ok(RequestOutcome {
+                committed: false,
+                request_id: seed.into(),
+                incarnation: "12345678-1234-4234-8234-123456789abc".into(),
+                sequence: None,
+            })
+        };
+        request.inspect(&mut lookup);
+        request.handle(KeyCode::Enter);
+        request.inspect(&mut lookup);
+        request.inspect(&mut lookup);
+        assert_eq!(calls, 1);
+        assert!(request.outcome.is_some());
+        request.handle(KeyCode::Backspace);
+        assert!(request.outcome.is_none());
+        request.handle(KeyCode::Enter);
+        request.inspect(&mut |_| Err("offline".into()));
+        assert!(request.outcome.is_none());
+        assert_eq!(request.error.as_deref(), Some("offline"));
+        workspace.handle(key(KeyCode::Esc), &mut fetch);
+        assert!(workspace.request.is_none());
+    }
+    #[test]
+    fn empty_and_mismatched_requests_do_not_display_old_outcomes() {
+        let mut request = RequestInspector::default();
+        request.handle(KeyCode::Enter);
+        assert!(!request.pending);
+        assert!(request.error.is_some());
+        request.handle(KeyCode::Char('\''));
+        request.handle(KeyCode::Char('\\'));
+        request.handle(KeyCode::Enter);
+        request.inspect(&mut |_| {
+            Ok(RequestOutcome {
+                committed: true,
+                request_id: "other".into(),
+                incarnation: "x".into(),
+                sequence: Some("1".into()),
+            })
+        });
+        assert!(request.outcome.is_none());
+        assert_eq!(
+            request.error.as_deref(),
+            Some("server returned a different request ID")
+        );
+    }
+    #[test]
+    fn safety_and_escape_remain_visible_with_long_input_and_error() {
+        for lang in [Language::En, Language::PtBr] {
+            let mut workspace = Workspace::new();
+            workspace.request = Some(RequestInspector {
+                input: "a".repeat(128),
+                error: Some("bad\x1b[31m".repeat(64)),
+                ..Default::default()
+            });
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|f| render(f, &mut workspace, "localhost", "test_graph", lang, true))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect();
+            for expected in ["test_graph", "not_recorded", "Quorum:", "Esc", "Enter"] {
+                assert!(text.contains(expected), "{expected}: {text}");
+            }
+            assert!(!text.contains('\x1b'));
+        }
     }
 }

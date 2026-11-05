@@ -11,6 +11,7 @@ DROP INDEX name [IF EXISTS]
 DROP INDEX ON :Label(property)
 CALL db.createLabel('Label')
 CALL db.createRelationshipType('TYPE', 'FromLabel', 'ToLabel')
+CALL db.createRelationshipType('EVENT', 'Person', 'Ticket', ['event_id'])
 CALL db.dropProperty('Label', 'property')
 ```
 
@@ -28,7 +29,13 @@ tight loop.
 
 `db.createLabel` and `db.createRelationshipType` leave existing entries alone
 and add a new signature to an existing relationship type. New labels and types
-are usable by the next transaction.
+are usable by the next transaction. The optional fourth argument declares the
+immutable merge-key fields for a **new** relationship type. Keys become declared
+properties; they must be distinct valid property names. Omitting the argument
+preserves an existing type's identity. An explicit different key, or adding a
+key to an existing unkeyed type, is rejected. Creating the type and its keys is
+atomic with the catalog transaction; it does not create historical revisions.
+See [keyed relationships](temporal-data.md#keyed-relationships).
 
 ## Index states
 

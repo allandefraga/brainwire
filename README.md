@@ -27,14 +27,16 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.15.0-beta.15 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.16.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
-This candidate coordinates query and Bolt input reservations through one atomic
-ledger when process-memory admission is enabled. Each component keeps its own
-budget, and results retain their reservation until released. Memory controls remain cooperative; see
-the [current limits](#current-limits) before relying on them.
+This beta adds online declaration of keyed relationship types and an optional
+request ID for one bounded Python write batch. These tools help applications
+model distinct events and reconcile uncertain writes; they do not automatically
+retry or retain historical revisions. See [keyed relationships](docs/temporal-data.md#keyed-relationships),
+[identified batches](docs/python-client.md#one-identified-batch) and the
+[current limits](#current-limits).
 
 ## What you can build
 
@@ -60,9 +62,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.15 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.16.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.15 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -136,7 +138,9 @@ Open another terminal:
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire brainwire shell --connect 127.0.0.1:7687 --graph demo --node-label Customer --entity-id customer-1 --edge-type IN_SEGMENT --target-label Segment
 ```
 
-**Tab** switches views, **r** refreshes, **?** explains and **q** exits.
+**Tab** switches views, **r** refreshes, **?** explains and **q** exits. Press
+**s** to inspect one experimental standalone request ID; this is not a batch
+monitor and `not_recorded` does not authorize replay.
 Inspect ontology, query memory, indexes and up to 20 outgoing relationships for
 the selected node and type. The connected TUI is read-only. Add `--lang pt-BR`
 for Portuguese. [TUI guide](docs/connected-status.md).
@@ -163,7 +167,7 @@ Start with a rebuildable graph and a tested backup while evaluating this beta.
 
 - **Memory:** budgets and pressure admission reject some work before allocation.
   A local [200,000-node load and restart](docs/benchmarks/2026-11-05-load200k-015b14.md)
-  and [512 MiB pressure smoke](docs/benchmarks/2026-11-05-cgroup-015b14.json)
+  and [512 MiB pressure smoke](docs/benchmarks/2026-11-05-beta16-cgroup.json)
   passed with synthetic data. Two later untraced pressure controls were inconclusive.
   There is no guaranteed process-wide RSS ceiling; earlier pressure and
   RSS-growth observations remain unexplained, and sustained
@@ -211,7 +215,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.15 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.16.0-beta.1 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

@@ -29,6 +29,14 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-05: v0.16.0-beta.1 keyed events and identified batches
+
+- **Done:** support optional immutable keys when declaring a new relationship type online on a standalone server; add a Python request ID to one bounded node or edge batch without automatic retry; add a read-only TUI inspector for one standalone request outcome. Update README, website and guides; retain experimental-ledger and recovery limits.
+- **Verification:** final workspace 1,115 Rust tests passed (3 ignored), 245 Python tests, Clippy and formatting passed. A first concurrent-build workspace run hit an authentication deadline test EOF; ten isolated repeats, the 155-test serial Bolt suite and the full workspace rerun passed. A protected real server validated identified batches, duplicate IDs, pre-commit crash and status after restart; a real interactive 80x24 TUI validated committed/not-recorded and the no-replay warning. A separate ordinary-transaction SIGKILL test submitted commit without reading the acknowledgement and reconciled graph/index state after restart. The identified-batch lost-ack path and power loss were not injected.
+- **Integration:** a synthetic local application-writer snapshot with an externally modified adapter passed online keyed catalog, distinct events, replay, targeted deletion, crash/restart and offline audit on the final candidate. The source timeline compiler and real data were not tested. A separate synthetic 20-label/200,000-node writer scenario, point lookups, forced restart and audit also passed on the final candidate; timings on the shared host are not an SLO. A 10,000-event single-pair hub diagnostic on the preceding pre-TUI candidate passed but exposed increasing batch times consistent with a pair scan. See [evidence](docs/benchmarks/2026-11-05-beta16-integration.md).
+- **Memory:** final candidate passed a traced 512 MiB pressure smoke. This does not establish a hard process RSS ceiling; the earlier pressure discrepancy is unresolved.
+- **Next:** test representative application data and the timeline compiler; implement efficient keyed pair lookup for high-degree relationships; qualify identified lost-ack reconciliation and multi-machine failover. A single request inspector is not a batch monitor and the experimental ledger has backup/restore restrictions.
+
 ## 2026-11-05: v0.15.0-beta.15 shared memory admission
 
 - **Done:** query and Bolt ingress reservations share an atomic ledger against sampled process headroom while retaining component budgets. Credits follow worker and result ownership; refusal and cancellation release them. RESET remains available under pressure.

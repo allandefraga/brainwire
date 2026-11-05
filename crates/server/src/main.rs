@@ -439,7 +439,7 @@ fn main() {
                     }
                     "workspace" => {
                         use brainwire_tui::{ConnectedSnapshot, ConnectedView};
-                        brainwire_tui::run_connected_workspace(&options, &address, graph, |view| {
+                        brainwire_tui::run_connected_workspace_with_requests(&options, &address, graph, |view| {
                             match view {
                                 ConnectedView::Ontology => remote::schema(&address, graph, timeout_ms)
                                     .map(ConnectedSnapshot::Ontology),
@@ -449,7 +449,7 @@ fn main() {
                                     .map(ConnectedSnapshot::Indexes),
                                 ConnectedView::Graph => fetch_graph().map(ConnectedSnapshot::Graph),
                             }
-                        })
+                        }, |seed| remote::request_outcome(&address, graph, timeout_ms, seed))
                     }
                     _ => Err(
                         "--connect requires --view ontology, --view memory, --view indexes, --view graph or --view workspace"

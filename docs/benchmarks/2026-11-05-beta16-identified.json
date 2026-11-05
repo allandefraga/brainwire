@@ -1,0 +1,33 @@
+{
+  "result": "PASS",
+  "scope": "synthetic authenticated standalone request-ledger, owned native server; earlier acknowledged writes preserved across a later precommit crash; no power loss or exactly-once claim",
+  "binary_sha256": "e3c4148634fe7526b5d65a51af7e5538deb709ebf3107c42bfc45f771d8b1ed4",
+  "checks": [
+    "nodes identified commit/status/progress",
+    "duplicate ID refused without mutation",
+    "identified keyed edge batch/status",
+    "oversize preflight has no retained record",
+    "missing endpoint rolled back",
+    "precommit crash discarded staged write",
+    "acknowledged data and request status survived SIGKILL restart"
+  ],
+  "tui": {
+    "result": "PASS",
+    "terminal": "80x24 PTY, real interactive Rust TUI, pt-BR",
+    "checks": [
+      "s input nodes-1 Enter shows committed",
+      "s input missing-1 Enter shows not_recorded",
+      "inconclusive/no-replay warning visible at 80x24",
+      "Esc closes dialog; q exits normally",
+      "credentials never rendered"
+    ],
+    "tui_exited": true
+  },
+  "audit": {
+    "database": "default",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "owned_process_stopped": true,
+  "owned_data_removed": true
+}

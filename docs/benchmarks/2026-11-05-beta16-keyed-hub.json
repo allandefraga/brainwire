@@ -1,0 +1,33 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "image_id": "sha256:61bec108570402d45c5617c4a078ff756e9b44e9ee766ede977d68f15567a2d5",
+  "version": "brainwire 0.16.0-beta.1",
+  "checks": {
+    "keyed_online_catalog_repeated": "PASS",
+    "distinct_keys_and_idempotent_replay": "PASS",
+    "sibling_preserved_on_update": "PASS",
+    "targeted_delete": "PASS",
+    "immutable_key_change_rejected": "PASS",
+    "kill_before_commit_rollback": "PASS",
+    "hub_keyed_delete": "PASS",
+    "restart_replay_committed_prefix_and_resume": "PASS"
+  },
+  "timings_seconds": {
+    "prefix": 22.27,
+    "replay_prefix": 53.198,
+    "remaining": 76.748
+  },
+  "final_counts": {
+    "nodes": 2,
+    "edges": 10000
+  },
+  "audit": {
+    "database": "evaluation",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "elapsed_seconds": 156.142,
+  "cleanup": true,
+  "scope": "Local shared-host synthetic hub with 10,000 keyed relationships on one pair, external application writer and modified adapter; batches of 50. Not a throughput SLO."
+}

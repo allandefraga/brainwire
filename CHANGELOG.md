@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.0-beta.1 — experimental candidate
+
+- Declare immutable merge keys when creating a new relationship type online on
+  a standalone server. Existing relationship identities cannot be changed.
+- Send a single bounded Python node or edge batch with a caller-supplied request
+  ID on supported servers. No automatic replay occurs; reconcile unknown outcomes.
+- Inspect one standalone request outcome in the connected TUI. `not_recorded`
+  is inconclusive and quorum lookup uses a different contract.
+- Record synthetic event, crash and restart checks, including a 10,000-edge
+  high-degree pair where lookup cost increased. Historical revisions, a global
+  batch dashboard and production qualification are not included.
+
+Earlier release details are available in [GitHub Releases](https://github.com/allandefraga/brainwire/releases).
+
 ## 0.15.0-beta.8 — experimental candidate
 
 - Account for temporary row copies and check deadlines during Cypher list

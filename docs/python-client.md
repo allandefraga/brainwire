@@ -127,6 +127,36 @@ request seed before sending and use `write_transaction(..., request_id=...)`
 plus the request lookup contract below. Ordinary convenience calls do not add
 a retained request identity or durable source cursor automatically.
 
+## One identified batch
+
+Use a stable request ID to identify one bounded node or relationship batch:
+
+```python
+seed = "tickets-source-batch-42"  # persist before sending
+graph.load_nodes("Ticket", [
+    {"entity_id": "ticket-42", "status": "open"},
+], request_id=seed)
+```
+
+`load_edges(..., request_id=seed)` has the same one-batch rule and uses the
+relationship type's configured identity. Input must fit the configured row and
+JSON-byte limits; the complete input is validated before a transaction begins.
+An oversized or invalid input writes nothing. Empty input returns zero and does
+not record a request. These bounds are not a limit on Python, Arrow or process
+memory. A callback runs after commit acknowledgment; if it raises, the batch
+has already committed.
+
+This opt-in operation needs a supported quorum leader or an authenticated
+standalone server with the experimental request ledger on a new dedicated
+volume. Standalone `graph.request_status(seed)` and quorum's
+[`cluster request`](quorum-replication.md) are different lookup contracts.
+The helper never retries automatically. `not_recorded` does not prove rollback
+or authorize a retry, and an already committed ID remains an error. Persist the
+seed and reconcile the source state and graph history before deciding what to
+do. Identified node batches do not support `with_acl=True`; identified edge
+batches require all endpoints. See [standalone request outcomes](standalone-requests.md)
+for format, backup, restore and quota restrictions.
+
 ## Typed server failures and standalone status
 
 The helper translates two exact server codes into `MemoryPressureError` and

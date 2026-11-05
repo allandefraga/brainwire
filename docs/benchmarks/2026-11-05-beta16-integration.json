@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "image_id": "sha256:cb8dc7c043faf4c83a1f5a2a58c90f94a146bc0de8a84685d8ad5e659f4c4e39",
+  "version": "brainwire 0.16.0-beta.1",
+  "checks": {
+    "keyed_online_catalog_repeated": "PASS",
+    "distinct_keys_and_idempotent_replay": "PASS",
+    "sibling_preserved_on_update": "PASS",
+    "targeted_delete": "PASS",
+    "immutable_key_change_rejected": "PASS",
+    "kill_before_commit_rollback": "PASS",
+    "restart_replay_committed_prefix_and_resume": "PASS"
+  },
+  "final_counts": {
+    "nodes": 2,
+    "edges": 101
+  },
+  "audit": {
+    "database": "evaluation",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "cleanup": true,
+  "scope": "Synthetic local container; copied external application writer and modified adapter; relationship-key shape supplied directly. Does not validate real source data or the source timeline compiler."
+}

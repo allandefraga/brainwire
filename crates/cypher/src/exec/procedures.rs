@@ -849,8 +849,24 @@ pub(super) fn admin(txn: &mut Txn<'_>, name: &str, args: &[Value]) -> Result<(),
             catalog::create_label(txn, text(0)?)?
         }
         "db.createRelationshipType" => {
-            arity(3..=3)?;
-            catalog::create_relationship_type(txn, text(0)?, text(1)?, text(2)?)?
+            arity(3..=4)?;
+            let keys = match args.get(3) {
+                None => None,
+                Some(Value::List(values)) => Some(
+                    values
+                        .iter()
+                        .map(|value| match value {
+                            Value::Str(key) if key.len() <= 128 => Ok(key.clone()),
+                            Value::Str(_) => {
+                                Err(semantic("merge key field names must not exceed 128 bytes"))
+                            }
+                            _ => Err(semantic("merge key fields must be a list of strings")),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                _ => return Err(semantic("merge key fields must be a list of strings")),
+            };
+            catalog::create_relationship_type_with_keys(txn, text(0)?, text(1)?, text(2)?, keys)?
         }
         "db.dropProperty" => {
             arity(2..=2)?;

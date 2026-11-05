@@ -275,7 +275,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    fn message(tag: u8, value: PackValue) -> Vec<u8> {
+    pub(super) fn message(tag: u8, value: PackValue) -> Vec<u8> {
         let mut bytes = Vec::new();
         pack(
             &PackValue::Struct {
@@ -287,11 +287,11 @@ mod tests {
         encode_message(&bytes)
     }
 
-    fn success_bytes(metadata: Vec<(String, PackValue)>) -> Vec<u8> {
+    pub(super) fn success_bytes(metadata: Vec<(String, PackValue)>) -> Vec<u8> {
         message(0x70, PackValue::Map(metadata))
     }
 
-    fn read_request(stream: &mut TcpStream) -> PackValue {
+    pub(super) fn read_request(stream: &mut TcpStream) -> PackValue {
         let mut body = Vec::new();
         loop {
             let mut size = [0; 2];
@@ -629,5 +629,284 @@ mod tests {
             .contains("deadline"));
         assert!(start.elapsed() < Duration::from_millis(250));
         server.join().unwrap();
+    }
+}
+
+/// Read one outcome through an isolated autocommit CALL, scoped by server auth.
+pub fn request_outcome(
+    address: &str,
+    database: &str,
+    timeout_ms: u64,
+    seed: &str,
+) -> Result<brainwire_tui::RequestOutcome, String> {
+    if seed.is_empty() || seed.len() > 128 || !seed.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err("request ID must be 1..128 printable ASCII characters without spaces".into());
+    }
+    if !(1..=10_000).contains(&timeout_ms) || !crate::databases::valid_name(database) {
+        return Err("invalid request lookup timeout or database".into());
+    }
+    let mut client = BoltClient::connect(address, timeout_ms, 16 * 1024)?;
+    client.send(
+        0x10,
+        vec![
+            PackValue::String("CALL db.requestStatus($seed)".into()),
+            PackValue::Map(vec![("seed".into(), PackValue::String(seed.into()))]),
+            PackValue::Map(vec![("db".into(), PackValue::String(database.into()))]),
+        ],
+    )?;
+    let metadata = success(client.receive()?)?;
+    let fields = PackValue::List(
+        ["status", "requestId", "incarnation", "sequence"]
+            .map(|value| PackValue::String(value.into()))
+            .to_vec(),
+    );
+    if metadata.get("fields") != Some(&fields) {
+        return Err("request outcome RUN returned unexpected fields".into());
+    }
+    client.send(
+        0x3f,
+        vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
+    )?;
+    let outcome = decode_request_outcome(client.receive()?, seed)?;
+    let metadata = success(client.receive()?)?;
+    if !matches!(
+        metadata.get("has_more"),
+        None | Some(PackValue::Bool(false))
+    ) {
+        return Err("request outcome is incomplete".into());
+    }
+    client.finish()?;
+    Ok(outcome)
+}
+
+fn decode_request_outcome(
+    value: PackValue,
+    seed: &str,
+) -> Result<brainwire_tui::RequestOutcome, String> {
+    let invalid = || "invalid request outcome response".to_string();
+    if matches!(&value, PackValue::Struct { tag: 0x7f, .. }) {
+        success(value)?;
+        return Err(invalid());
+    }
+    let PackValue::Struct { tag: 0x71, fields } = value else {
+        return Err(invalid());
+    };
+    let [PackValue::List(values)] = fields.as_slice() else {
+        return Err(invalid());
+    };
+    let [PackValue::String(status), PackValue::String(request_id), PackValue::String(incarnation), sequence] =
+        values.as_slice()
+    else {
+        return Err(invalid());
+    };
+    if request_id != seed || uuid::Uuid::parse_str(incarnation).is_err() {
+        return Err(invalid());
+    }
+    let (committed, sequence) = match (status.as_str(), sequence) {
+        ("committed", PackValue::String(sequence))
+            if !sequence.is_empty()
+                && sequence.len() <= 20
+                && sequence.bytes().all(|b| b.is_ascii_digit())
+                && sequence.parse::<u64>().is_ok() =>
+        {
+            (true, Some(sequence.clone()))
+        }
+        ("not_recorded", PackValue::Null) => (false, None),
+        _ => return Err(invalid()),
+    };
+    Ok(brainwire_tui::RequestOutcome {
+        committed,
+        request_id: request_id.clone(),
+        incarnation: incarnation.clone(),
+        sequence,
+    })
+}
+
+#[cfg(test)]
+mod request_outcome_tests {
+    use super::*;
+    fn record(status: &str, id: &str, incarnation: &str, sequence: PackValue) -> PackValue {
+        PackValue::Struct {
+            tag: 0x71,
+            fields: vec![PackValue::List(vec![
+                PackValue::String(status.into()),
+                PackValue::String(id.into()),
+                PackValue::String(incarnation.into()),
+                sequence,
+            ])],
+        }
+    }
+    #[test]
+    fn validates_committed_and_inconclusive_outcomes() {
+        let uuid = "12345678-1234-4234-8234-123456789abc";
+        let found = decode_request_outcome(
+            record("committed", "a'\\", uuid, PackValue::String("42".into())),
+            "a'\\",
+        )
+        .unwrap();
+        assert!(found.committed);
+        assert_eq!(found.sequence.as_deref(), Some("42"));
+        assert!(
+            !decode_request_outcome(record("not_recorded", "a", uuid, PackValue::Null), "a")
+                .unwrap()
+                .committed
+        );
+        for value in [
+            record("unknown", "a", uuid, PackValue::Null),
+            record("committed", "a", uuid, PackValue::Int(1)),
+            record(
+                "committed",
+                "a",
+                uuid,
+                PackValue::String("18446744073709551616".into()),
+            ),
+            record("committed", "a", uuid, PackValue::String("-1".into())),
+            record("not_recorded", "a", uuid, PackValue::String("1".into())),
+            record("not_recorded", "b", uuid, PackValue::Null),
+            record("not_recorded", "a", "bad", PackValue::Null),
+        ] {
+            assert!(decode_request_outcome(value, "a").is_err());
+        }
+    }
+    #[test]
+    fn invalid_seed_refuses_before_network() {
+        for seed in ["", "has space", "new\nline", "é"] {
+            assert!(request_outcome("invalid-address", "default", 100, seed)
+                .unwrap_err()
+                .contains("request ID"));
+        }
+        assert!(
+            request_outcome("invalid-address", "default", 100, &"a".repeat(129))
+                .unwrap_err()
+                .contains("request ID")
+        );
+    }
+}
+
+#[cfg(test)]
+mod request_wire_tests {
+    use super::tests::{message, read_request, success_bytes};
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        time::Duration,
+    };
+    #[test]
+    fn request_lookup_is_one_parameterized_autocommit_and_rejects_extra_or_failed_results() {
+        for response in ["committed", "not_recorded", "extra", "has_more", "failure"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let seed = "quote'\\;request";
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut handshake = [0; 20];
+                stream.read_exact(&mut handshake).unwrap();
+                stream.write_all(&[0, 0, 4, 5]).unwrap();
+                for expected in [0x01, 0x6a] {
+                    assert!(
+                        matches!(read_request(&mut stream), PackValue::Struct {tag,..} if tag==expected)
+                    );
+                    stream.write_all(&success_bytes(vec![])).unwrap();
+                }
+                let PackValue::Struct { tag: 0x10, fields } = read_request(&mut stream) else {
+                    panic!("RUN expected, no BEGIN");
+                };
+                assert_eq!(
+                    fields[0],
+                    PackValue::String("CALL db.requestStatus($seed)".into())
+                );
+                assert_eq!(
+                    fields[1],
+                    PackValue::Map(vec![("seed".into(), PackValue::String(seed.into()))])
+                );
+                assert_eq!(
+                    fields[2].get("db"),
+                    Some(&PackValue::String("selected".into()))
+                );
+                let fields = PackValue::List(
+                    ["status", "requestId", "incarnation", "sequence"]
+                        .map(|s| PackValue::String(s.into()))
+                        .to_vec(),
+                );
+                stream
+                    .write_all(&success_bytes(vec![("fields".into(), fields)]))
+                    .unwrap();
+                assert!(matches!(
+                    read_request(&mut stream),
+                    PackValue::Struct { tag: 0x3f, .. }
+                ));
+                if response == "failure" {
+                    stream
+                        .write_all(&message(
+                            0x7f,
+                            PackValue::Map(vec![
+                                (
+                                    "code".into(),
+                                    PackValue::String("Neo.ClientError.Request.Invalid".into()),
+                                ),
+                                (
+                                    "message".into(),
+                                    PackValue::String("ledger disabled".into()),
+                                ),
+                            ]),
+                        ))
+                        .unwrap();
+                    return;
+                }
+                let record = message(
+                    0x71,
+                    PackValue::List(vec![
+                        PackValue::String(
+                            if response == "committed" {
+                                "committed"
+                            } else {
+                                "not_recorded"
+                            }
+                            .into(),
+                        ),
+                        PackValue::String(seed.into()),
+                        PackValue::String("12345678-1234-4234-8234-123456789abc".into()),
+                        if response == "committed" {
+                            PackValue::String("42".into())
+                        } else {
+                            PackValue::Null
+                        },
+                    ]),
+                );
+                let mut bytes = record.clone();
+                if response == "extra" {
+                    bytes.extend(record);
+                }
+                bytes.extend(success_bytes(if response == "has_more" {
+                    vec![("has_more".into(), PackValue::Bool(true))]
+                } else {
+                    vec![]
+                }));
+                stream.write_all(&bytes).unwrap();
+                if matches!(response, "committed" | "not_recorded") {
+                    // Finish is GOODBYE, never a transaction COMMIT.
+                    assert!(matches!(
+                        read_request(&mut stream),
+                        PackValue::Struct { tag: 0x02, .. }
+                    ));
+                }
+            });
+            let result = request_outcome(&address, "selected", 2000, seed);
+            match response {
+                "committed" => {
+                    let r = result.unwrap();
+                    assert!(r.committed);
+                    assert_eq!(r.request_id, seed);
+                }
+                "not_recorded" => assert!(!result.unwrap().committed),
+                "failure" => assert!(result.unwrap_err().contains("ledger disabled")),
+                _ => assert!(result.is_err()),
+            }
+            server.join().unwrap();
+        }
     }
 }

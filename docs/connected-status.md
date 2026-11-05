@@ -26,11 +26,25 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
 | Up/Down, `PgUp` / `PgDn` | Move/scroll the current selection |
 | `r` | Refresh the active pane |
 | `?` | Explain the current pane |
+| `s` | Inspect one standalone identified request |
 | `q` | Exit |
 
 Add `--lang pt-BR` for Portuguese. Each pane loads on its first visit and shows
 its sample age. There is no automatic polling. A denied Memory view does not
 prevent you from using authorized Ontology, Indexes or Graph views.
+
+## Inspect one request outcome
+
+In the connected workspace, press `s`, enter the request ID and press Enter.
+Esc closes the inspector. This is a single read, not a list of jobs or a
+live ingestion monitor. It uses the configured Bolt identity and selected graph.
+
+The inspector is for the authenticated, experimental standalone request ledger.
+`committed` refers to the current store history; `not_recorded` is inconclusive
+and does not authorize replay. On a quorum deployment, use the separate
+`brainwire cluster request --id <effective-key>` contract instead. Status
+lookups can be denied by server permissions or configuration. See
+[standalone request outcomes](standalone-requests.md).
 
 ## Select a graph neighborhood
 

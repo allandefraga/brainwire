@@ -18,7 +18,10 @@ mod connected_memory;
 mod connected_workspace;
 pub use connected_indexes::{run_connected_indexes, IndexSummary, IndexesSnapshot};
 pub use connected_memory::{run_connected_memory, MemorySnapshot};
-pub use connected_workspace::{run_connected_workspace, ConnectedSnapshot, ConnectedView};
+pub use connected_workspace::{
+    run_connected_workspace, run_connected_workspace_with_requests, ConnectedSnapshot,
+    ConnectedView, RequestOutcome,
+};
 mod ontology;
 pub use connected::{run_connected_ontology, OntologySnapshot};
 mod overview;

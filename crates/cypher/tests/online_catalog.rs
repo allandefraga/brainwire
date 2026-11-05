@@ -292,6 +292,7 @@ fn catalog_changes_need_instance_admin_and_a_standalone_transaction() {
         "DROP INDEX index_Customer_email",
         "CALL db.createLabel('X')",
         "CALL db.createRelationshipType('R', 'Customer', 'Customer')",
+        "CALL db.createRelationshipType('R', 'Customer', 'Customer', ['event_key'])",
         "CALL db.dropProperty('Customer', 'cpf')",
     ] {
         let mut tx = QueryTransaction::begin(&db).unwrap();
@@ -302,4 +303,154 @@ fn catalog_changes_need_instance_admin_and_a_standalone_transaction() {
         assert!(matches!(refused, Err(ExecError::Forbidden(_))), "{query}");
     }
     assert!(db.catalog().unwrap().unwrap().node_type("X").is_none());
+}
+
+#[test]
+fn keyed_relationship_types_can_be_declared_online_without_merging_distinct_events() {
+    let (dir, db) = setup();
+    run(
+        &db,
+        "CALL db.createRelationshipType('EVENT', 'Customer', 'Customer', ['event_key'])",
+    );
+    let version = db.catalog().unwrap().unwrap().version;
+    run(
+        &db,
+        "CALL db.createRelationshipType('EVENT', 'Customer', 'Customer', ['event_key'])",
+    );
+    run(
+        &db,
+        "CALL db.createRelationshipType('EVENT', 'Customer', 'Customer')",
+    );
+    assert_eq!(db.catalog().unwrap().unwrap().version, version);
+    assert_eq!(
+        db.catalog()
+            .unwrap()
+            .unwrap()
+            .edge_type("EVENT")
+            .unwrap()
+            .merge_key_fields,
+        ["event_key"]
+    );
+    run(
+        &db,
+        "CREATE (:Customer {entity_id:'a'}), (:Customer {entity_id:'b'})",
+    );
+    for key in ["first", "second", "first"] {
+        run(&db, &format!("MATCH (a:Customer {{entity_id:'a'}}), (b:Customer {{entity_id:'b'}}) MERGE (a)-[:EVENT {{event_key:'{key}'}}]->(b)"));
+    }
+    assert_eq!(
+        run(
+            &db,
+            "MATCH ()-[e:EVENT]->() RETURN e.event_key ORDER BY e.event_key"
+        ),
+        vec![vec![text("first")], vec![text("second")]]
+    );
+    assert!(fails(
+        &db,
+        "CALL db.createRelationshipType('EVENT','Customer','Customer',['other'])"
+    )
+    .contains("merge"));
+    assert_eq!(db.catalog().unwrap().unwrap().version, version);
+    check_invariants(&db).unwrap();
+    drop(db);
+    let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+    assert_eq!(
+        db.catalog()
+            .unwrap()
+            .unwrap()
+            .edge_type("EVENT")
+            .unwrap()
+            .merge_key_fields,
+        ["event_key"]
+    );
+    assert_eq!(
+        run(&db, "MATCH ()-[e:EVENT]->() RETURN count(e)"),
+        vec![vec![int(2)]]
+    );
+    run(
+        &db,
+        "CALL db.createRelationshipType('EVENT','Segment','Customer')",
+    );
+    run(
+        &db,
+        "CALL db.createRelationshipType('EVENT','Customer','Segment',['event_key'])",
+    );
+    assert_eq!(
+        db.catalog()
+            .unwrap()
+            .unwrap()
+            .edge_type("EVENT")
+            .unwrap()
+            .merge_key_fields,
+        ["event_key"]
+    );
+    assert!(fails(
+        &db,
+        "CALL db.createRelationshipType('EVENT','Segment','Customer',['changed'])"
+    )
+    .contains("merge"));
+}
+
+#[test]
+fn online_relationship_merge_keys_reject_invalid_or_retroactive_identity() {
+    let (_dir, db) = setup();
+    let version = db.catalog().unwrap().unwrap().version;
+    for keys in [
+        "[]",
+        "['x','x']",
+        "['acl_allow']",
+        "['bad-key']",
+        "[1]",
+        "null",
+        "'x'",
+    ] {
+        assert!(execute(
+            &db,
+            &format!("CALL db.createRelationshipType('BAD','Customer','Customer',{keys})"),
+            &BTreeMap::new()
+        )
+        .is_err());
+        assert_eq!(db.catalog().unwrap().unwrap().version, version);
+        assert!(db.catalog().unwrap().unwrap().edge_type("BAD").is_none());
+    }
+    let mut params = BTreeMap::new();
+    params.insert(
+        "keys".into(),
+        Value::List(vec![Value::Str("x".repeat(129))]),
+    );
+    assert!(execute(
+        &db,
+        "CALL db.createRelationshipType('BAD','Customer','Customer',$keys)",
+        &params
+    )
+    .is_err());
+    run(
+        &db,
+        "CALL db.createRelationshipType('PLAIN','Customer','Customer')",
+    );
+    assert!(execute(
+        &db,
+        "CALL db.createRelationshipType('PLAIN','Customer','Customer',['event_key'])",
+        &BTreeMap::new()
+    )
+    .is_err());
+    assert!(execute(
+        &db,
+        "CALL db.createRelationshipType('PLAIN','Customer','Customer',[])",
+        &BTreeMap::new()
+    )
+    .is_err());
+    let mut tx = QueryTransaction::begin(&db).unwrap();
+    tx.run(
+        "CALL db.createRelationshipType('ROLLED_BACK','Customer','Customer',['event_key'])",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    drop(tx);
+    assert!(db
+        .catalog()
+        .unwrap()
+        .unwrap()
+        .edge_type("ROLLED_BACK")
+        .is_none());
 }

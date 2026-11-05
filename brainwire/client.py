@@ -392,7 +392,7 @@ class GraphClient:
     def upsert_node(self, label, entity_id, properties=None):
         return self.load_nodes(label, [{"entity_id": _entity(entity_id), **_properties({} if properties is None else properties)}])
 
-    def load_nodes(self, label, rows, *, on_batch=None, with_acl=False):
+    def load_nodes(self, label, rows, *, on_batch=None, with_acl=False, request_id=None):
         """Consume an iterable of flat dicts containing entity_id and supplied properties.
 
         ``with_acl=True`` requires an ``acl`` dict per row (``allow``, ``deny``,
@@ -404,10 +404,22 @@ class GraphClient:
         Bounds count compact UTF-8 JSON input bytes, not Bolt wire bytes/RSS.
         For restartable immutable files use the durable-checkpoint importer instead.
         ``on_batch(batch_number, total_rows)`` runs after each successful commit.
-        A full batch commits before the next normalized row is requested.
+        If that callback raises, the batch has already committed.
+        Without ``request_id``, a full batch commits before the next row.
+
+        ``request_id`` identifies one bounded batch on a supported server. All
+        input is validated before a transaction opens; exceeding either batch
+        bound raises without writing a prefix. Empty input sends no request.
+        Requires quorum or opt-in authenticated standalone request-ledger mode.
+        No retry occurs; use the appropriate outcome lookup after uncertainty,
+        and never interpret ``not_recorded`` as permission to replay.
         """
         if on_batch is not None and not callable(on_batch):
             raise ValueError("on_batch must be callable")
+        if request_id is not None:
+            _request_id(request_id)
+            if with_acl:
+                raise ValueError("identified node batches do not support with_acl")
         label = identifier(label)
         total, batch, size = 0, [], 0
         batches, committed_rows = 0, 0
@@ -430,7 +442,9 @@ class GraphClient:
 
         def write_batch(items):
             nonlocal total, batches, committed_rows
-            total += self._write(lambda tx: apply(tx, items))
+            operation = lambda tx: apply(tx, items)
+            total += (self._write(operation) if request_id is None else
+                      self.write_transaction(operation, request_id=request_id))
             batches += 1
             committed_rows += len(items)
             if on_batch is not None:
@@ -449,11 +463,13 @@ class GraphClient:
             if len(encoded) > self.batch_bytes:
                 raise ValueError("one node exceeds the batch byte limit")
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
+                if request_id is not None:
+                    raise ValueError("identified input must fit in one bounded batch")
                 write_batch(batch)
                 batch, size = [], 0
             batch.append(json.loads(encoded))
             size += len(encoded)
-            if len(batch) == self.batch_size or size == self.batch_bytes:
+            if request_id is None and (len(batch) == self.batch_size or size == self.batch_bytes):
                 write_batch(batch)
                 batch, size = [], 0
         if batch:
@@ -616,8 +632,8 @@ class GraphClient:
         return total
 
     def load_edges(self, source_label, relationship, target_label, rows, *, on_batch=None,
-                   require_endpoints=True):
-        """Merge endpoint/type-identified edges from bounded flat dictionaries.
+                   require_endpoints=True, request_id=None):
+        """Merge edges using the type's configured identity from bounded dictionaries.
 
         Each row contains ``source_id`` and ``target_id`` plus edge properties.
         Each batch is atomic; every endpoint must exist or that batch rolls back.
@@ -625,10 +641,22 @@ class GraphClient:
         the return value then counts only the edges actually merged.
         Omitted edge properties are preserved and supplied nulls remove properties.
         ``on_batch(batch_number, total_rows)`` runs after each successful commit.
-        A full batch commits before the next normalized row is requested.
+        If that callback raises, the batch has already committed.
+        Without ``request_id``, a full batch commits before the next row.
+
+        ``request_id`` identifies one bounded batch on a supported server. All
+        input is validated before a transaction opens; exceeding either batch
+        bound raises without writing a prefix. Empty input sends no request.
+        Requires quorum or opt-in authenticated standalone request-ledger mode.
+        No retry occurs; use the appropriate outcome lookup after uncertainty,
+        and never interpret ``not_recorded`` as permission to replay.
         """
         if on_batch is not None and not callable(on_batch):
             raise ValueError("on_batch must be callable")
+        if request_id is not None:
+            _request_id(request_id)
+            if not require_endpoints:
+                raise ValueError("identified edge batches require every endpoint to exist")
         source_label = identifier(source_label)
         target_label = identifier(target_label)
         relationship = identifier(relationship)
@@ -653,7 +681,9 @@ class GraphClient:
 
         def write_batch(items):
             nonlocal total, batches, committed_rows
-            total += self._write(lambda tx: apply(tx, items))
+            operation = lambda tx: apply(tx, items)
+            total += (self._write(operation) if request_id is None else
+                      self.write_transaction(operation, request_id=request_id))
             batches += 1
             committed_rows += len(items)
             if on_batch is not None:
@@ -671,11 +701,13 @@ class GraphClient:
             if len(encoded) > self.batch_bytes:
                 raise ValueError("one edge exceeds the batch byte limit")
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
+                if request_id is not None:
+                    raise ValueError("identified input must fit in one bounded batch")
                 write_batch(batch)
                 batch, size = [], 0
             batch.append(json.loads(encoded))
             size += len(encoded)
-            if len(batch) == self.batch_size or size == self.batch_bytes:
+            if request_id is None and (len(batch) == self.batch_size or size == self.batch_bytes):
                 write_batch(batch)
                 batch, size = [], 0
         if batch:

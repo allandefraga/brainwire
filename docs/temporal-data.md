@@ -60,13 +60,17 @@ changed or removed, and `CREATE` on a keyed type is not supported. The opt-in
 also treats non-key properties in the `MERGE` map as mutable updates, rather
 than as additional identity fields. Matching scans the pair's relationships
 and is subject to query budgets; it is not an indexed key lookup.
+High-degree pairs can be slow: a [synthetic keyed-hub diagnostic](benchmarks/2026-11-05-beta16-keyed-hub.json)
+shows increasing batch times as one pair accumulates events. Measure your own
+fan-out before relying on this path for high-volume timelines.
 
 Declare this policy before creating the type. An existing type cannot be
 converted in place: create a new graph with the ontology and reingest its data
 from an authoritative source. Earlier overwritten events cannot be recovered
-from the current graph. The online `db.createRelationshipType` procedure
-currently declares only the type and endpoints; it does not configure merge
-keys. Create the graph with a keyed ontology first, then connect the application.
+from the current graph. On a standalone server, an administrator may also
+declare a new keyed type online with
+`CALL db.createRelationshipType('HAD_EVENT', 'Person', 'Ticket', ['event_type'])`.
+The labels must exist first. Replicated catalog changes are not supported.
 All writers and voters must support this feature before
 using it. Older versions can ignore its catalog metadata; do not run mixed
 versions or downgrade a keyed graph. Restore a compatible pre-feature backup
