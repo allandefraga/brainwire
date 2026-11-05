@@ -27,16 +27,14 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.15.0-beta.11 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.15.0-beta.12 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
-This release improves memory-pressure recovery and `split()` admission, avoids
-unnecessary copies in several Cypher functions, and preserves large integers in
-`percentileDisc`. It checks Raft commands before logging and on recovery, and
-adds selective Python updates and deletions for keyed timeline relationships.
-An optional Kubernetes profile requests single-pod volume access on compatible
-CSI storage.
+This release improves memory accounting for `DISTINCT`, grouping and `UNION`,
+adds Cypher `nullIf`, and refuses to publish a recovered graph with a conflicting
+catalog. Python can delete selected keyed events in bounded batches, and the
+standalone memory screen has a contextual guide.
 
 ## What you can build
 
@@ -62,9 +60,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.15.0-beta.11 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.15.0-beta.12 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.11 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.12 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -164,13 +162,17 @@ the connected TUI. [View the social card](assets/brainwire-social-preview-v1.jpg
 Start with a rebuildable graph and a tested backup while evaluating this beta.
 
 - **Memory:** query budgets and pressure admission help reject work under load.
+  A [beta.12 pressure smoke failed once](docs/benchmarks/2026-11-05-pressure-investigation.md);
+  controlled repeats passed, but the original decision remains unexplained.
   A [512 MiB synthetic pressure smoke](docs/benchmarks/2026-11-04-cgroup-015b11.json)
   and a [short 100k-node load and restart](docs/benchmarks/2026-11-04-load100k-015b11.json)
   passed on local candidates. A hard process-wide RSS ceiling is not guaranteed;
   a [small 30-minute read soak](docs/benchmarks/2026-11-04-soak-015b9.json)
   showed RSS growth; a [repeat](docs/benchmarks/2026-11-04-soak-015b10.json)
   and a [new candidate repeat](docs/benchmarks/2026-11-04-soak-015b11.json)
-  did not. The earlier growth still needs investigation. Sustained representative
+  did not. A [40,000-node beta.12 diagnostic](docs/benchmarks/2026-11-05-soak-015b12.json)
+  also passed; it remains a small synthetic workload. The earlier growth still
+  needs investigation. Sustained representative
   2/4/8 GiB tests are incomplete. An older failed run cannot be
   explained because its receipt is unavailable.
 - **Queries and search:** Brainwire supports a [documented Cypher subset](docs/local-cypher.md)
@@ -215,7 +217,7 @@ not available.
 
 ## Release status and license
 
-**v0.15.0-beta.11 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.15.0-beta.12 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

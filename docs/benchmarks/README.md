@@ -14,6 +14,28 @@ successful capacity benchmark.
 
 ## Recent pressure-admission smoke
 
+The [beta.12 pressure investigation](2026-11-05-pressure-investigation.md)
+preserves a failed standard smoke and three controlled repeats. Observer
+overhead is a plausible contributing factor, but the original admission's
+decision-time reading is unavailable and its cause remains unresolved.
+
+The [beta.12 read diagnostic](2026-11-05-soak-015b12.json) loaded 40,000
+synthetic nodes and 40,000 relationships with ACLs in a 2 GiB container,
+then ran four readers for 30 minutes. Counts and the offline audit passed; no
+OOM was observed. Median process RSS was about 94.1 MiB in the first five-minute
+window and 88.1 MiB in the last. Writes stopped before the read soak, the
+host was shared, and the host kernel log was unavailable. This is not a
+representative production qualification or a process-wide ceiling.
+This local image predates the optional admission trace added later in the session.
+
+A second [beta.12 local diagnostic](2026-11-05-100k-soak-015b12.json) used a
+4 GiB container, 100,000 synthetic nodes and 100,000 relationships with ACLs,
+then four readers for 15 minutes. Counts and offline audit passed with no OOM
+observed; median process RSS was about 154.7 MiB in the first five-minute
+window and 144.6 MiB in the last. It used the same pre-trace image and a shared
+host, with writes stopped before the soak. This is not a full 4 GiB capacity
+qualification or proof of an RSS ceiling.
+
 The [beta.11 candidate pressure summary](2026-11-04-cgroup-015b11.json)
 records synthetic rejection, rollback and recovery in a 512 MiB container.
 It does not establish a process-wide limit or production capacity.
@@ -73,6 +95,10 @@ RSS ceiling or sustained 2/4/8 GiB qualification. The first inconclusive
 attempt and the repeated run are both recorded.
 
 ## Recent work
+
+The [beta.12 quorum acceptance summary](2026-11-05-quorum-015b12.json) records
+21 passing local-process fault and recovery checks. It does not qualify
+independent machines, snapshots or production throughput.
 
 The [beta.11 quorum acceptance summary](2026-11-04-quorum-015b11.json) records
 21 passing local-process fault and recovery checks on the candidate. It does

@@ -8,7 +8,7 @@ class Result:
         self.count = count
 
     def single(self):
-        return {"processed": self.count, "deleted": self.count, "updated": self.count}
+        return {"processed": self.count, "deleted": self.count, "updated": self.count, "ambiguous": self.count}
 
 
 class QueryResult:
@@ -443,6 +443,137 @@ class ClientTests(unittest.TestCase):
         for rows in [None, "a", b"a", {}]:
             with self.assertRaises(ValueError):
                 graph.delete_edges("Page", "LINK", "Page", rows)
+
+    @staticmethod
+    def keyed_relationships(*fields):
+        return [{"name": "EVENT", "source": "Ticket", "target": "Ticket",
+                 "mergeKeyFields": list(fields or ("kind", "revision"))}]
+
+    def test_delete_keyed_edges_batches_deduplicate_complete_identity_and_parameterize(self):
+        driver = Driver([0, 2, 0, 0], relationships=self.keyed_relationships())
+        graph = GraphClient(driver, "tickets", batch_size=3)
+        first = {"source_id": "a", "target_id": "b", "key": {"kind": "closed", "revision": "r-1"}}
+        second = {"source_id": "a", "target_id": "b", "key": {"revision": "r-2", "kind": "closed"}}
+        self.assertEqual(graph.delete_keyed_edges("Ticket", "EVENT", "Ticket", [first, first, second, first]), 2)
+        self.assertEqual([len(batch) for batch in driver.committed], [3, 3])
+        queries = driver.committed[0]
+        self.assertTrue(queries[0][0].startswith("CALL db.schema()"))
+        for query, params in queries[1:]:
+            self.assertIn("[r:EVENT {kind:row.key_0, revision:row.key_1}]", query)
+            self.assertEqual(params["rows"], [
+                {"source_id": "a", "target_id": "b", "key_0": "closed", "key_1": "r-1"},
+                {"source_id": "a", "target_id": "b", "key_0": "closed", "key_1": "r-2"}])
+        self.assertIn("matched > 1", queries[1][0])
+        self.assertIn("DELETE r RETURN count(*) AS deleted", queries[2][0])
+
+    def test_delete_keyed_edges_rejects_partial_keys_and_ambiguity_before_mutation(self):
+        good = {"source_id": "a", "target_id": "b", "key": {"kind": "closed", "revision": "r-1"}}
+        for key in ({"kind": "closed"}, {"kind": "closed", "revision": "r-1", "extra": "x"}):
+            driver = Driver(relationships=self.keyed_relationships())
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "complete.*key"):
+                GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", [good, {**good, "key": key}])
+            self.assertEqual(driver.committed, [])
+        driver = Driver([1], relationships=self.keyed_relationships())
+        with self.assertRaisesRegex(ValueError, "one .*relationship"):
+            GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", [good])
+        self.assertEqual(driver.committed, [])
+
+    def test_delete_keyed_edges_validates_rows_before_flushing_pending_batch(self):
+        good = {"source_id": "a", "target_id": "b", "key": {"kind": "closed"}}
+        bad_rows = [None, {}, {**good, "extra": 1}, {**good, "source_id": ""},
+                    {**good, "key": {}}, {**good, "key": {"kind": None}},
+                    {**good, "key": {"kind": ""}}, {**good, "key": {"acl_allow": "x"}},
+                    {**good, "key": {"k}]->() DELETE r": "x"}}]
+        for bad in bad_rows:
+            driver = Driver(relationships=self.keyed_relationships("kind"))
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", [good, bad])
+            self.assertEqual(driver.committed, [])
+        for rows in [None, "a", b"a", {}, 1]:
+            driver = Driver()
+            with self.subTest(rows=rows), self.assertRaises(ValueError):
+                GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", rows)
+            self.assertFalse(hasattr(driver, "database"))
+
+    def test_delete_keyed_edges_late_bad_key_preserves_earlier_batches(self):
+        driver = Driver([0, 1], relationships=self.keyed_relationships())
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        row = {"source_id": "a", "target_id": "b", "key": {"kind": "closed", "revision": "r-1"}}
+        with self.assertRaisesRegex(ValueError, "complete.*key"):
+            graph.delete_keyed_edges("Ticket", "EVENT", "Ticket", [row, {**row, "key": {"kind": "closed"}}])
+        self.assertEqual(len(driver.committed), 1)
+
+    def test_delete_keyed_edges_utf8_bound_empty_input_and_caller_mutation(self):
+        import json
+        row = {"source_id": "a", "target_id": "b", "key": {"kind": "é"}}
+        bound = len(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode())
+        driver = Driver([0, 1, 0, 1], relationships=self.keyed_relationships("kind"))
+        graph = GraphClient(driver, "tickets", batch_bytes=bound)
+        self.assertEqual(graph.delete_keyed_edges("Ticket", "EVENT", "Ticket", []), 0)
+        self.assertFalse(hasattr(driver, "database"))
+        self.assertEqual(graph.delete_keyed_edges("Ticket", "EVENT", "Ticket", [row, row]), 2)
+        self.assertEqual(len(driver.committed), 2)
+        with self.assertRaisesRegex(ValueError, "byte limit"):
+            graph.delete_keyed_edges("Ticket", "EVENT", "Ticket", [{**row, "key": {"kind": "éé"}}])
+        driver = Driver([0, 1], relationships=self.keyed_relationships("kind"))
+        def rows():
+            yield row
+            row["key"]["kind"] = "changed"
+        self.assertEqual(GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", rows()), 1)
+        self.assertEqual(driver.committed[0][-1][1]["rows"][0]["key_0"], "é")
+
+    def test_delete_keyed_edges_propagates_schema_denial_and_rechecks_each_batch(self):
+        denied = RuntimeError("schema forbidden")
+        driver = Driver(schema_error=denied)
+        row = {"source_id": "a", "target_id": "b", "key": {"kind": "closed"}}
+        with self.assertRaises(RuntimeError) as raised:
+            GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", [row])
+        self.assertIs(raised.exception, denied)
+        self.assertEqual(driver.committed, [])
+        driver = Driver([0, 1], relationships=self.keyed_relationships("kind"))
+        def rows():
+            yield row
+            driver.relationships = self.keyed_relationships("kind", "revision")
+            yield row
+        with self.assertRaisesRegex(ValueError, "complete.*key"):
+            GraphClient(driver, "tickets", batch_size=1).delete_keyed_edges("Ticket", "EVENT", "Ticket", rows())
+        self.assertEqual(len(driver.committed), 1)
+
+    def test_delete_keyed_edges_selector_names_do_not_overwrite_endpoints(self):
+        driver = Driver([0, 1], relationships=self.keyed_relationships("source_id", "target_id"))
+        row = {"source_id": "left", "target_id": "right",
+               "key": {"source_id": "event-left", "target_id": "event-right"}}
+        self.assertEqual(GraphClient(driver, "tickets").delete_keyed_edges(
+            "Ticket", "EVENT", "Ticket", [row]), 1)
+        query, params = driver.committed[0][-1]
+        self.assertIn("EVENT {source_id:row.key_0, target_id:row.key_1}", query)
+        self.assertEqual(params["rows"], [{"source_id": "left", "target_id": "right",
+                                          "key_0": "event-left", "key_1": "event-right"}])
+
+    def test_delete_keyed_edges_rejects_unkeyed_and_malformed_schema(self):
+        row = {"source_id": "a", "target_id": "b", "key": {"kind": "closed"}}
+        invalid = [None, [], {}, [None], self.keyed_relationships("kind", "kind"),
+                   [{"name": "EVENT", "source": "Ticket", "target": "Ticket"}],
+                   self.keyed_relationships("kind") * 2]
+        for relationships in invalid:
+            driver = Driver(relationships=relationships)
+            with self.subTest(relationships=relationships), self.assertRaises(ValueError):
+                GraphClient(driver, "tickets").delete_keyed_edges("Ticket", "EVENT", "Ticket", [row])
+            self.assertEqual(driver.committed, [])
+
+    def test_delete_keyed_edges_values_are_parameters_and_second_batch_failure_is_local(self):
+        driver = Driver([0, 1], relationships=self.keyed_relationships("kind"))
+        value = "é'}]->() DELETE r //"
+        row = {"source_id": "a", "target_id": "b", "key": {"kind": value}}
+        graph = GraphClient(driver, "tickets", batch_size=1)
+        driver.fail_on_write = 2
+        with self.assertRaisesRegex(RuntimeError, "write failed"):
+            graph.delete_keyed_edges("Ticket", "EVENT", "Ticket", [row, row])
+        self.assertEqual(len(driver.committed), 1)
+        for query, params in driver.committed[0][1:]:
+            self.assertNotIn(value, query)
+            self.assertEqual(params["rows"][0]["key_0"], value)
+        self.assertEqual(driver.managed_calls, 0)
 
     def test_delete_edges_late_invalid_input_preserves_completed_batches(self):
         driver = Driver([1])

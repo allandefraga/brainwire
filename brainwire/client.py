@@ -131,6 +131,22 @@ def _properties(properties, remove=()):
     return result
 
 
+def _declared_relationship_key(tx, source_label, relationship, target_label):
+    schema = tx.run("CALL db.schema() YIELD relationships RETURN relationships").single()
+    relationships = schema.get("relationships") if isinstance(schema, Mapping) else None
+    if not isinstance(relationships, list) or any(not isinstance(item, dict) for item in relationships):
+        raise ValueError("invalid schema response")
+    matches = [item for item in relationships
+               if (item.get("name"), item.get("source"), item.get("target"))
+               == (relationship, source_label, target_label)]
+    fields = matches[0].get("mergeKeyFields") if len(matches) == 1 else None
+    if (not isinstance(fields, list) or not fields
+            or any(not isinstance(field, str) for field in fields)
+            or len(set(fields)) != len(fields)):
+        raise ValueError("key must contain the complete declared relationship key")
+    return tuple(sorted(fields))
+
+
 def _entity(value):
     if not isinstance(value, str) or not value:
         raise ValueError("entity_id must be a nonempty string")
@@ -533,6 +549,72 @@ class GraphClient:
             total += self._write(lambda tx, items=batch: apply(tx, items))
         return total
 
+    def delete_keyed_edges(self, source_label, relationship, target_label, rows):
+        """Delete selected immutable-key events in bounded atomic batches.
+
+        Each row contains only source_id, target_id and a key dictionary with
+        every declared immutable key field as a nonempty string. Missing events
+        count zero; sibling keys and nodes are preserved. Duplicate identities
+        collapse within a batch. Earlier batches survive later failures.
+        Each batch validates its catalog and ambiguity in its write transaction;
+        it uses up to three queries and does not automatically retry.
+        """
+        source_label, relationship, target_label = map(
+            identifier, (source_label, relationship, target_label))
+        if isinstance(rows, (str, bytes, bytearray, Mapping)):
+            raise ValueError("rows must be an iterable of keyed endpoint dictionaries")
+        try:
+            rows = iter(rows)
+        except TypeError as error:
+            raise ValueError("rows must be an iterable of keyed endpoint dictionaries") from error
+        total, batch, size = 0, [], 0
+
+        def apply(tx, items):
+            names = _declared_relationship_key(tx, source_label, relationship, target_label)
+            key_names = set(names)
+            if any(set(item["key"]) != key_names for item in items):
+                raise ValueError("key must contain the complete declared relationship key")
+            identities = dict.fromkeys((item["source_id"], item["target_id"],
+                                       *(item["key"][name] for name in names)) for item in items)
+            records = [{"source_id": identity[0], "target_id": identity[1],
+                        **{f"key_{index}": value for index, value in enumerate(identity[2:])}}
+                       for identity in identities]
+            fields = ", ".join(f"{name}:row.key_{index}" for index, name in enumerate(names))
+            pattern = (f"UNWIND $rows AS row MATCH (a:{source_label} {{entity_id:row.source_id}})"
+                       f"-[r:{relationship} {{{fields}}}]->(b:{target_label} {{entity_id:row.target_id}})")
+            ambiguous = tx.run(pattern + " WITH row, count(*) AS matched WHERE matched > 1 "
+                               "RETURN count(*) AS ambiguous", rows=records).single()["ambiguous"]
+            if ambiguous != 0:
+                raise ValueError("edge mutation requires one merged relationship per selection")
+            count = tx.run(pattern + " DELETE r RETURN count(*) AS deleted", rows=records).single()["deleted"]
+            if count > len(records):
+                raise ValueError("edge mutation requires one merged relationship per selection")
+            return count
+
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {"source_id", "target_id", "key"}:
+                raise ValueError("each keyed deletion row must contain only source_id, target_id and key")
+            key = row["key"]
+            if (not isinstance(key, dict) or not key
+                    or any(not isinstance(value, str) or not value for value in key.values())):
+                raise ValueError("key must be a nonempty dictionary of nonempty strings")
+            normalized = {"source_id": _entity(row["source_id"]), "target_id": _entity(row["target_id"]),
+                          "key": _properties(key)}
+            encoded = json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            if len(encoded) > self.batch_bytes:
+                raise ValueError("one edge exceeds the batch byte limit")
+            if batch and size + len(encoded) > self.batch_bytes:
+                total += self._write(lambda tx, items=batch: apply(tx, items))
+                batch, size = [], 0
+            batch.append(normalized)
+            size += len(encoded)
+            if len(batch) == self.batch_size or size == self.batch_bytes:
+                total += self._write(lambda tx, items=batch: apply(tx, items))
+                batch, size = [], 0
+        if batch:
+            total += self._write(lambda tx, items=batch: apply(tx, items))
+        return total
+
     def load_edges(self, source_label, relationship, target_label, rows, *, on_batch=None,
                    require_endpoints=True):
         """Merge endpoint/type-identified edges from bounded flat dictionaries.
@@ -637,17 +719,8 @@ class GraphClient:
         def apply(tx):
             if require_existing:
                 if key is not None:
-                    schema = tx.run("CALL db.schema() YIELD relationships RETURN relationships").single()
-                    relationships = schema.get("relationships") if isinstance(schema, Mapping) else None
-                    if not isinstance(relationships, list) or any(not isinstance(item, dict) for item in relationships):
-                        raise ValueError("invalid schema response")
-                    matches = [item for item in relationships
-                               if (item.get("name"), item.get("source"), item.get("target"))
-                               == (relationship, left, right)]
-                    fields = matches[0].get("mergeKeyFields") if len(matches) == 1 else None
-                    if (not isinstance(fields, list) or not fields
-                            or any(not isinstance(field, str) for field in fields)
-                            or len(set(fields)) != len(fields) or set(fields) != set(key)):
+                    fields = _declared_relationship_key(tx, left, relationship, right)
+                    if set(fields) != set(key):
                         raise ValueError("key must contain the complete declared relationship key")
                 pattern = (f"MATCH (a:{left} {{entity_id:$source}})"
                            f"-[r:{relationship}{key_fields}]->(b:{right} {{entity_id:$target}})")

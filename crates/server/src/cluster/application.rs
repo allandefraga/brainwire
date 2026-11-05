@@ -118,18 +118,25 @@ impl GraphApplication {
     fn materialize(&self, graphs: &BTreeMap<String, Vec<u8>>) -> Result<(), String> {
         for (name, bytes) in graphs {
             let database = self.databases.create(name)?;
+            let mapping =
+                serde_json::from_slice(bytes).map_err(|_| "invalid committed ontology")?;
+            let expected =
+                Catalog::apply(&mapping, None).map_err(|_| "invalid initial ontology")?;
             // Only a committed entry may initialize an unpublished store. Publish
             // the registry afterwards, so startup never recreates a lost graph.
-            if database
+            match database
                 .catalog()
                 .map_err(|_| "cannot inspect graph ontology")?
-                .is_none()
             {
-                let mapping =
-                    serde_json::from_slice(bytes).map_err(|_| "invalid committed ontology")?;
-                database
-                    .apply_ontology(&mapping)
-                    .map_err(|_| "cannot initialize committed ontology")?;
+                Some(existing) if existing != expected => {
+                    return Err("unpublished graph catalog changed; refusing recovery".into());
+                }
+                Some(_) => {}
+                None => {
+                    database
+                        .apply_ontology(&mapping)
+                        .map_err(|_| "cannot initialize committed ontology")?;
+                }
             }
         }
         Ok(())
@@ -340,6 +347,102 @@ mod tests {
         let databases = Arc::new(Databases::open_replica(&config).unwrap());
         assert!(GraphApplication::open(databases, temp.path()).is_err());
         assert!(!temp.path().join("pages").exists());
+    }
+    #[test]
+    fn conflicting_unpublished_catalog_cannot_publish_a_registry() {
+        for create_graph in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let config = config(temp.path());
+            let databases = Arc::new(Databases::open_replica(&config).unwrap());
+            let app = GraphApplication::open(databases.clone(), temp.path()).unwrap();
+            if create_graph {
+                app.apply(&Command::Bootstrap {
+                    request_id: "initialize".into(),
+                    graphs: BTreeMap::from([("initial".into(), schema())]),
+                })
+                .unwrap();
+            }
+            let registry_before = fs::read(&app.registry_path).ok();
+            let conflicting: GraphMapping = serde_json::from_slice(
+                br#"{"version":"1","nodes":[{"label":"Other","properties":[]}],"edges":[]}"#,
+            )
+            .unwrap();
+            let original = databases
+                .create("pages")
+                .unwrap()
+                .apply_ontology(&conflicting)
+                .unwrap();
+            drop(app);
+            drop(databases);
+
+            // Recovery must not adopt an orphan initialized with another schema.
+            let databases = Arc::new(Databases::open_replica(&config).unwrap());
+            let app = GraphApplication::open(databases.clone(), temp.path()).unwrap();
+            let command = if create_graph {
+                Command::CreateGraph {
+                    request_id: "create".into(),
+                    graph: "pages".into(),
+                    schema: schema(),
+                }
+            } else {
+                Command::Bootstrap {
+                    request_id: "initialize".into(),
+                    graphs: BTreeMap::from([("pages".into(), schema())]),
+                }
+            };
+            assert!(app.apply(&command).is_err(), "create_graph={create_graph}");
+            assert_eq!(fs::read(&app.registry_path).ok(), registry_before);
+            assert!(!app.graphs.lock().unwrap().contains_key("pages"));
+            assert_eq!(
+                databases.get("pages").unwrap().catalog().unwrap(),
+                Some(original)
+            );
+            drop(app);
+            drop(databases);
+            let databases = Arc::new(Databases::open_replica(&config).unwrap());
+            GraphApplication::open(databases.clone(), temp.path()).unwrap();
+            assert_eq!(
+                databases.names(),
+                if create_graph {
+                    vec!["initial"]
+                } else {
+                    vec![]
+                }
+            );
+        }
+    }
+    #[test]
+    fn matching_unpublished_catalog_allows_create_graph_replay() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = config(temp.path());
+        let databases = Arc::new(Databases::open_replica(&config).unwrap());
+        let app = GraphApplication::open(databases.clone(), temp.path()).unwrap();
+        app.apply(&Command::Bootstrap {
+            request_id: "initialize".into(),
+            graphs: BTreeMap::from([("initial".into(), schema())]),
+        })
+        .unwrap();
+        app.materialize(&BTreeMap::from([("pages".into(), schema())]))
+            .unwrap();
+        drop(app);
+        drop(databases);
+
+        let databases = Arc::new(Databases::open_replica(&config).unwrap());
+        let app = GraphApplication::open(databases.clone(), temp.path()).unwrap();
+        assert!(databases.get("pages").is_none());
+        let command = Command::CreateGraph {
+            request_id: "create".into(),
+            graph: "pages".into(),
+            schema: schema(),
+        };
+        assert_eq!(app.apply(&command).unwrap(), Reply::Initialized);
+        assert_eq!(app.apply(&command).unwrap(), Reply::Initialized);
+        drop(app);
+        drop(databases);
+
+        let databases = Arc::new(Databases::open_replica(&config).unwrap());
+        GraphApplication::open(databases.clone(), temp.path()).unwrap();
+        assert_eq!(databases.names(), vec!["initial", "pages"]);
     }
     #[test]
     fn invalid_schema_or_batch_is_a_deterministic_rejection() {

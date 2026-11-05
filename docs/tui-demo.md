@@ -26,7 +26,7 @@ The first build needs Rust and native RocksDB build dependencies. Use
 `brainwire` for readability; replace it with `./target/release/brainwire` if
 the binary is not on your PATH.
 
-With the [Docker demo](container.md#fastest-local-start) already running:
+With the [Docker demo](container.md#start-a-local-demo-with-one-command) already running:
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \

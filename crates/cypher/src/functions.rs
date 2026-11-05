@@ -14,6 +14,7 @@ pub const SCALAR: &[&str] = &[
     "length",
     "size",
     "coalesce",
+    "nullif",
     "tolower",
     "toupper",
     "tostring",
@@ -69,7 +70,7 @@ pub fn arity(name: &str) -> (usize, usize) {
         "percentilecont" | "percentiledisc" => (2, 2),
         "replace" => (3, 3),
         "substring" | "range" => (2, 3),
-        "left" | "right" | "split" => (2, 2),
+        "left" | "right" | "split" | "nullif" => (2, 2),
         "round" => (1, 2),
         _ => (1, 1),
     }

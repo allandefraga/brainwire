@@ -11,10 +11,13 @@ import contextlib
 import json
 import math
 import os
+import re
+import select
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -27,10 +30,223 @@ LIMIT = 512 * MIB
 PRESSURE_CODE = 'Neo.TransientError.General.MemoryPressure'
 INJECTION_PERCENT = 96
 SAFETY_PERCENT = 98
+OBSERVER_MAX_BYTES = 64 << 10
+OBSERVER_MAX_SAMPLES = 256
+OBSERVER_MAX_WINDOW_BYTES = 256 << 10
+OBSERVER_TIMEOUT = 2.0
 
 
 class SmokeInconclusive(RuntimeError):
     pass
+
+
+def parse_observer_snapshot(text):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate field')
+            result[key] = value
+        return result
+    def integer(value):
+        if (not isinstance(value, str) or not value.isascii() or not value.isdigit()
+                or len(value) > 20 or int(value) > (1 << 64) - 1):
+            raise ValueError('invalid unsigned reading')
+        return int(value)
+    try:
+        if len(text) > OBSERVER_MAX_BYTES:
+            raise ValueError('oversized observer snapshot')
+        raw = json.loads(text, object_pairs_hook=unique)
+        required = {'uptime', 'memory.current', 'memory.max', 'memory.peak',
+                    'memory.swap.max', 'memory.high', 'inactive_file_values', 'events'}
+        if not isinstance(raw, dict) or set(raw) != required:
+            raise ValueError('missing observer field')
+        if not isinstance(raw['uptime'], str) or not re.fullmatch(r'[0-9]{1,20}(\.[0-9]{1,9})?', raw['uptime']):
+            raise ValueError('invalid uptime')
+        values = {key: integer(raw[key]) for key in
+                  ('memory.current', 'memory.max', 'memory.peak', 'memory.swap.max')}
+        values['memory.high'] = 'max' if raw['memory.high'] == 'max' else integer(raw['memory.high'])
+        inactive = raw['inactive_file_values']
+        if not isinstance(inactive, list) or len(inactive) != 1:
+            raise ValueError('inactive_file missing or duplicated')
+        inactive = integer(inactive[0])
+        events = {}
+        if not isinstance(raw['events'], list) or len(raw['events']) > 64:
+            raise ValueError('invalid event readings')
+        for item in raw['events']:
+            if (not isinstance(item, list) or len(item) != 2 or not isinstance(item[0], str)
+                    or not re.fullmatch(r'[a-z_]{1,64}', item[0]) or item[0] in events):
+                raise ValueError('invalid or duplicate event')
+            events[item[0]] = integer(item[1])
+        if not {'oom', 'oom_kill', 'oom_group_kill'} <= set(events):
+            raise ValueError('missing OOM events')
+        values.update({'memory.events': events, 'memory.stat.inactive_file': inactive,
+                       'observer_uptime_seconds': raw['uptime'],
+                       'diagnostic_working_set': {
+                           'bytes': max(0, values['memory.current'] - inactive), 'unit': 'bytes',
+                           'source': 'memory.current minus inactive_file from persistent shell builtins',
+                           'scope': 'sequential readings; no per-sample exec; not an atomic runtime sample'}})
+        return values
+    except (ValueError, TypeError, KeyError, RecursionError) as error:
+        raise SmokeInconclusive('persistent observer returned an invalid snapshot') from error
+
+
+def observer_readline(fd, timeout, cancelled=None):
+    deadline, data = time.monotonic() + timeout, bytearray()
+    while True:
+        if cancelled is not None and cancelled.is_set():
+            raise SmokeInconclusive('persistent observer cancelled')
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SmokeInconclusive('persistent observer timed out')
+        if not select.select([fd], [], [], min(remaining, .05))[0]:
+            continue
+        try:
+            chunk = os.read(fd, min(4096, OBSERVER_MAX_BYTES + 1 - len(data)))
+        except BlockingIOError:
+            continue
+        if not chunk:
+            raise SmokeInconclusive('persistent observer closed before a full snapshot')
+        data.extend(chunk)
+        if len(data) > OBSERVER_MAX_BYTES:
+            raise SmokeInconclusive('persistent observer snapshot exceeds byte limit')
+        if b'\n' in data:
+            line, extra = bytes(data).split(b'\n', 1)
+            if extra:
+                raise SmokeInconclusive('persistent observer returned extra output')
+            return line
+
+
+OBSERVER_SCRIPT = r'''while IFS= read -r command; do
+if [ "$command" = sample ]; then
+ read -r uptime rest < /proc/uptime || exit 70
+ read -r current < /sys/fs/cgroup/memory.current || exit 70
+ read -r maximum < /sys/fs/cgroup/memory.max || exit 70
+ read -r peak < /sys/fs/cgroup/memory.peak || exit 70
+ read -r swap < /sys/fs/cgroup/memory.swap.max || exit 70
+ read -r high < /sys/fs/cgroup/memory.high || exit 70
+ printf '{"uptime":"%s","memory.current":"%s","memory.max":"%s","memory.peak":"%s","memory.swap.max":"%s","memory.high":"%s","inactive_file_values":[' "$uptime" "$current" "$maximum" "$peak" "$swap" "$high"
+ sep=''
+ while read -r key value rest; do
+  if [ "$key" = inactive_file ]; then printf '%s"%s"' "$sep" "$value"; sep=,; fi
+  :
+ done < /sys/fs/cgroup/memory.stat || exit 70
+ printf '],"events":['
+ sep=''
+ while read -r key value; do printf '%s["%s","%s"]' "$sep" "$key" "$value"; sep=,; done < /sys/fs/cgroup/memory.events || exit 70
+ printf ']}\n'
+fi
+done'''
+
+
+class PersistentCgroupObserver:
+    """One owned shell before baseline; no child process for each snapshot."""
+    def __init__(self, name, run_id):
+        state = inspect_owned('container', name, run_id)
+        if state is None:
+            raise SmokeInconclusive('owned server disappeared before observer startup')
+        self.name, self.identity = name, state['Id']
+        self.lock, self.closed = threading.Lock(), threading.Event()
+        self.windows = []
+        try:
+            self.process = subprocess.Popen(
+                ['docker', 'exec', '-i', self.identity, '/bin/sh', '-c', OBSERVER_SCRIPT],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            raise SmokeInconclusive('cannot start persistent observer') from error
+        try:
+            os.set_blocking(self.process.stdin.fileno(), False)
+            os.set_blocking(self.process.stdout.fileno(), False)
+        except OSError as error:
+            self.close()
+            raise SmokeInconclusive('cannot configure persistent observer') from error
+
+    def sample(self, name, current_first=False, cancelled=None):
+        if name not in (self.name, self.identity):
+            raise SmokeInconclusive('observer target changed')
+        deadline = time.monotonic() + OBSERVER_TIMEOUT
+        while not self.lock.acquire(timeout=.05):
+            if self.closed.is_set() or (cancelled is not None and cancelled.is_set()):
+                raise SmokeInconclusive('persistent observer cancelled')
+            if time.monotonic() >= deadline:
+                raise SmokeInconclusive('persistent observer lock timed out')
+        try:
+            if self.closed.is_set() or (cancelled is not None and cancelled.is_set()):
+                raise SmokeInconclusive('persistent observer cancelled')
+            start, wall = time.monotonic_ns(), time.time_ns()
+            try:
+                if os.write(self.process.stdin.fileno(), b'sample\n') != 7:
+                    raise OSError('incomplete observer request')
+                line = observer_readline(self.process.stdout.fileno(), max(0, deadline - time.monotonic()), cancelled)
+                value = parse_observer_snapshot(line)
+            except (OSError, ValueError) as error:
+                raise SmokeInconclusive('persistent observer I/O unavailable') from error
+            value.update(observer_monotonic_start_ns=start, observer_monotonic_end_ns=time.monotonic_ns(),
+                         observer_wall_start_ns=wall)
+            return value
+        finally:
+            self.lock.release()
+
+    @contextlib.contextmanager
+    def window(self, phase=None):
+        if len(self.windows) >= 8:
+            raise SmokeInconclusive('persistent observer window limit reached')
+        window = {'wall_start_ns': time.time_ns(), 'monotonic_start_ns': time.monotonic_ns(), 'samples': []}
+        if phase is not None:
+            window['phase'] = phase
+        self.windows.append(window)
+        stop = threading.Event()
+        def observe():
+            sample_bytes = 0
+            for _ in range(OBSERVER_MAX_SAMPLES):
+                if stop.is_set():
+                    return
+                try:
+                    sample = self.sample(self.name, cancelled=self.closed)
+                    sample_bytes += len(json.dumps(sample, separators=(',', ':')).encode())
+                    if sample_bytes > OBSERVER_MAX_WINDOW_BYTES:
+                        window['observer_error'] = 'SampleByteLimitReached'
+                        return
+                    window['samples'].append(sample)
+                except Exception as error:
+                    window['observer_error'] = type(error).__name__
+                    return
+                if stop.wait(.005):
+                    return
+            window['observer_error'] = 'SampleLimitReached'
+        thread = threading.Thread(target=observe, daemon=True, name='brainwire-cgroup-observer')
+        thread.start()
+        window['operation_monotonic_start_ns'] = time.monotonic_ns()
+        window['operation_wall_start_ns'] = time.time_ns()
+        try:
+            yield window
+        finally:
+            window['operation_monotonic_end_ns'] = time.monotonic_ns()
+            window['operation_wall_end_ns'] = time.time_ns()
+            stop.set()
+            thread.join(OBSERVER_TIMEOUT + 1)
+            if thread.is_alive():
+                self.close()
+                thread.join(OBSERVER_TIMEOUT + 1)
+                if thread.is_alive():
+                    raise RuntimeError('persistent observer thread did not stop')
+            window['monotonic_end_ns'] = time.monotonic_ns()
+
+    def close(self):
+        self.closed.set()
+        try:
+            if self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
+        finally:
+            try:
+                self.process.stdin.close()
+            finally:
+                self.process.stdout.close()
 
 
 def command(*args, timeout=60, check=True):
@@ -120,8 +336,9 @@ def pressured(snapshot):
     return used * 100 >= cap * 95
 
 
-def fill_to_pressure(name, fill, samples):
-    snapshot = cgroup(name)
+def fill_to_pressure(name, fill, samples, sample=None):
+    sample = sample or cgroup
+    snapshot = sample(name)
     if snapshot['memory.max'] != LIMIT or not isinstance(snapshot['memory.current'], int):
         raise SmokeInconclusive('finite cgroup-v2 reading disappeared during injection')
     current = snapshot.get('diagnostic_working_set', {}).get('bytes')
@@ -136,7 +353,7 @@ def fill_to_pressure(name, fill, samples):
         docker('exec', name, 'dd', 'if=/dev/zero', f'of={fill}', 'bs=1048576',
                f'count={first}', 'oflag=append', 'conv=notrunc', 'status=none', timeout=60)
     for _ in range(40):
-        snapshot = cgroup(name)
+        snapshot = sample(name)
         samples.append(snapshot)
         raw = snapshot['memory.current']
         current = snapshot.get('diagnostic_working_set', {}).get('bytes')
@@ -153,21 +370,50 @@ def fill_to_pressure(name, fill, samples):
     raise SmokeInconclusive('pressure target not reached within bounded fill loop')
 
 
-def require_pressure_error(name, operation, checks):
-    before = cgroup(name)
+def require_pressure_error(name, operation, checks, sample=None, observer=None, phase=None, trace=False):
+    sample = sample or cgroup
+    before = sample(name)
     failure = None
-    try:
-        operation()
-    except Exception as error:
-        failure = error
-    after = cgroup(name, current_first=True)
+    operation_start_ns = None
+    operation_end_ns = None
+    with (observer.window(phase) if observer is not None else contextlib.nullcontext(None)) as window:
+        try:
+            if trace:
+                operation_start_ns = time.time_ns()
+            operation()
+        except Exception as error:
+            failure = error
+        finally:
+            if trace:
+                operation_end_ns = time.time_ns()
+    observer_error = window and window.get('observer_error')
+    after, after_error = {}, None
+    if not observer_error:
+        try:
+            after = sample(name, current_first=True)
+        except SmokeInconclusive as error:
+            if observer is None:
+                raise
+            after_error = error
     evidence = {'before': before, 'after': after,
                 'pressure_basis': 'memory.current minus inactive_file (matching runtime estimate)',
                 'scope': 'point-in-time samples; no continuous usage guarantee'}
     checks.append(evidence)
+    if phase is not None:
+        evidence['phase'] = phase
+    if trace:
+        evidence['operation_wall_start_ns'] = operation_start_ns
+        evidence['operation_wall_end_ns'] = operation_end_ns
+    if window is not None:
+        evidence['observer_window'] = window
+    if after_error is not None:
+        evidence['observer_after_error'] = type(after_error).__name__
     if failure is not None:
         if getattr(failure, 'code', None) != PRESSURE_CODE:
             raise AssertionError(f'expected {PRESSURE_CODE}; got {type(failure).__name__} code={getattr(failure, "code", None)}') from failure
+    if observer_error or after_error is not None:
+        raise SmokeInconclusive('persistent observer failed during RUN; pressure evidence unavailable')
+    if failure is not None:
         parsed = MemoryPressureError(failure)
         evidence.update({'code': failure.code, 'type': type(failure).__name__,
                          'reason': parsed.reason, 'rolled_back': parsed.rolled_back})
@@ -212,7 +458,11 @@ def finalize(report, run_id, name, volume, created, event_process, events_path):
                 report['cleanup_cgroup'] = snapshot
         def capture_logs():
             logs = command('docker', 'logs', state['Id'])
-            return [line for line in (logs.stdout + logs.stderr).splitlines()
+            lines = (logs.stdout + logs.stderr).splitlines()
+            if report.get('admission_trace_enabled'):
+                report['cleanup_admission_trace_lines'] = [line for line in lines
+                    if 'memory pressure decision: trace ' in line][:64]
+            return [line for line in lines
                     if 'memory pressure admission' in line or 'memory pressure decision' in line][-40:]
         captured = attempt('capture logs', capture_logs)
         if captured is not None:
@@ -278,6 +528,8 @@ def run(args, report):
     volume = name + '-data'
     fill = f'/pressure/smoke-fill-{run_id}'
     event_process = None
+    observer = None
+    sample = cgroup
     report.update({'run_id': run_id, 'driver': neo4j.__version__, 'image': args.image,
                    'memory_limit_bytes': LIMIT, 'threshold_percent': 95,
                    'pressure_basis': 'memory.current minus inactive_file; raw usage retained for injection safety',
@@ -298,6 +550,9 @@ def run(args, report):
                       '-e', 'BRAINWIRE_SERVER_DEFAULT_DATABASE=demo',
                       '-e', 'BRAINWIRE_MEMORY_CACHE=64MiB', '-e', 'BRAINWIRE_MEMORY_MEMTABLES=8MiB',
                       '-e', 'BRAINWIRE_MEMORY_QUERY=32MiB', '-e', 'BRAINWIRE_MEMORY_INGRESS=16MiB']
+            if getattr(args, 'trace_admission', False):
+                common.extend(['-e', 'BRAINWIRE_TRACE_CGROUP_ADMISSION=1'])
+                report['admission_trace_enabled'] = True
             docker('run', '--rm', '--name', name + '-init', *common, report['image_id'],
                    'db', 'create', 'demo', '--ontology', '/opt/brainwire/example-schema.json', timeout=120)
             with events_path.open('w') as event_file:
@@ -321,7 +576,17 @@ def run(args, report):
                             if time.monotonic() >= deadline:
                                 raise RuntimeError('owned server startup did not become ready')
                             time.sleep(.1)
-                    report['before'] = cgroup(name)
+                    if getattr(args, 'persistent_observer', False):
+                        observer = PersistentCgroupObserver(name, run_id)
+                        sample = observer.sample
+                        report['pressure_sampling_method'] = 'persistent_shell_builtins'
+                        report['observer_run_windows'] = observer.windows
+                        report['observer_limits'] = {'samples_per_window': OBSERVER_MAX_SAMPLES,
+                                                     'bytes_per_snapshot': OBSERVER_MAX_BYTES,
+                                                     'bytes_per_window': OBSERVER_MAX_WINDOW_BYTES,
+                                                     'max_windows': 8}
+                        report['limitations'].append('persistent observer has fixed memory overhead; samples are not decision-time atomic')
+                    report['before'] = sample(name)
                     before = report['before']
                     if before['memory.max'] != LIMIT or not isinstance(before['memory.current'], int) or not isinstance(before['memory.events'], dict):
                         report['result'] = 'UNSUPPORTED'
@@ -336,18 +601,24 @@ def run(args, report):
                         with session.begin_transaction(timeout=120) as tx:
                             tx.run("CREATE (:Customer {entity_id:'pending-before-pressure'})").consume()
                             report['pressure_samples'] = []
-                            fill_to_pressure(name, fill, report['pressure_samples'])
+                            fill_to_pressure(name, fill, report['pressure_samples'], sample=sample)
+                            report['pressure_phase'] = 'transaction_run'
                             report['rejected_transaction_run'] = require_pressure_error(name,
                                 lambda: tx.run("CREATE (:Customer {entity_id:'rejected-under-pressure'})").consume(),
-                                report.setdefault('run_pressure_checks', []))
+                                report.setdefault('run_pressure_checks', []), sample=sample, observer=observer,
+                                phase='transaction_run', trace=getattr(args, 'trace_admission', False))
                             tx.rollback()
-                        report['after_transaction_rollback'] = cgroup(name)
-                        fill_to_pressure(name, fill, report['pressure_samples'])
+                        report['after_transaction_rollback'] = sample(name)
+                        fill_to_pressure(name, fill, report['pressure_samples'], sample=sample)
                         # An independent session must also be denied. Driver
                         # callbacks are never automatically retried by this smoke.
                         with driver.session(database='demo') as other:
+                            report['pressure_phase'] = 'new_session_run'
                             report['rejected_new_run'] = require_pressure_error(name, lambda: other.run('RETURN 1').consume(),
-                                                                                report.setdefault('run_pressure_checks', []))
+                                                                                report.setdefault('run_pressure_checks', []),
+                                                                                sample=sample, observer=observer,
+                                                                                phase='new_session_run',
+                                                                                trace=getattr(args, 'trace_admission', False))
                         docker('exec', name, 'rm', '--', fill)
                         recovered = None
                         deadline = time.monotonic() + 15
@@ -368,7 +639,7 @@ def run(args, report):
                         if counts != {'acknowledged': 1, 'pending-before-pressure': 0, 'rejected-under-pressure': 0}:
                             raise AssertionError(f'transaction rollback/recovery mismatch: {counts}')
                         report['recovered_counts'] = counts
-                    report['after_relief'] = cgroup(name)
+                    report['after_relief'] = sample(name)
                     for point in [report['before'], *report['pressure_samples'], report['after_relief']]:
                         events = point['memory.events']
                         if not isinstance(events, dict) or any(events.get(key, 0) for key in ('oom', 'oom_kill', 'oom_group_kill')):
@@ -380,6 +651,9 @@ def run(args, report):
                 logs = log_result.stdout + log_result.stderr
                 report['pressure_log_lines'] = [line for line in logs.splitlines()
                     if 'memory pressure admission' in line or 'memory pressure decision' in line][-30:]
+                if report.get('admission_trace_enabled'):
+                    report['admission_trace_lines'] = [line for line in logs.splitlines()
+                        if 'memory pressure decision: trace ' in line][:64]
                 docker('stop', '--time', '30', name, timeout=40)
                 report['offline_audit'] = json.loads(docker('run', '--rm', '--name', name + '-audit',
                                                           *common, report['image_id'], 'db', 'check', 'demo', '--json', timeout=120))
@@ -397,7 +671,19 @@ def run(args, report):
                 raise AssertionError('Docker event stream reported OOM')
             report['result'] = 'PASS'
         finally:
-            finalize(report, run_id, name, volume, created, event_process, events_path)
+            observer_error = None
+            if observer is not None:
+                try:
+                    observer.close()
+                except Exception as error:
+                    observer_error = {'operation': 'stop persistent observer', 'error_type': type(error).__name__}
+            try:
+                finalize(report, run_id, name, volume, created, event_process, events_path)
+            finally:
+                if observer_error is not None:
+                    report.setdefault('cleanup_errors', []).append(observer_error)
+                    report['owned_resources_cleaned'] = False
+                    report['result'] = 'FAIL'
 
 
 def main():
@@ -405,6 +691,10 @@ def main():
     parser.add_argument('--image')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--self-check', action='store_true')
+    parser.add_argument('--persistent-observer', action='store_true',
+                        help='opt-in diagnostic: sample with one owned shell instead of per-sample execs')
+    parser.add_argument('--trace-admission', action='store_true',
+                        help='opt-in: log a bounded number of server admission decisions')
     args = parser.parse_args()
     if args.self_check:
         self_check()

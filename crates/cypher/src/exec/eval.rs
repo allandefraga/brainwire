@@ -838,6 +838,14 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
     let first = || args.first().cloned().unwrap_or(Val::Null);
     let one = |args: &[Val]| arity(name, args, 1, 1);
     Ok(match name {
+        "nullif" => {
+            arity(name, &args, 2, 2)?;
+            if equals(&args[0], &args[1]) == Some(true) {
+                Val::Null
+            } else {
+                args.swap_remove(0)
+            }
+        }
         "id" => {
             one(&args)?;
             match first() {

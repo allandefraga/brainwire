@@ -113,6 +113,15 @@ impl Fixture {
             let _ = task.await;
         }
     }
+    fn diagnostics(&self) -> String {
+        format!(
+            "{:?}",
+            self.rafts
+                .iter()
+                .map(|raft| raft.metrics().borrow().clone())
+                .collect::<Vec<_>>()
+        )
+    }
     fn altered(
         &self,
         node: u64,
@@ -281,18 +290,35 @@ async fn real_three_peer_quorum_proposal_lookup_and_status() {
             ..
         }
     ));
-    assert!(matches!(
-        request(
-            &fixture.settings[0],
-            leader,
-            RpcRequest::Lookup {
-                request_id: "test-1".into()
-            }
-        )
-        .await
-        .unwrap(),
-        RpcResponse::Lookup(Some(Reply::Applied { revision: 1 }))
-    ));
+    let lookup = request(
+        &fixture.settings[0],
+        leader,
+        RpcRequest::Lookup {
+            request_id: "test-1".into(),
+        },
+    )
+    .await;
+    assert!(
+        matches!(
+            lookup,
+            Ok(RpcResponse::Lookup(Some(Reply::Applied { revision: 1 })))
+        ),
+        "acknowledged request lookup at node {leader}: {lookup:?}; {}",
+        fixture.diagnostics()
+    );
+    let absent = request(
+        &fixture.settings[0],
+        leader,
+        RpcRequest::Lookup {
+            request_id: "never-proposed".into(),
+        },
+    )
+    .await;
+    assert!(
+        matches!(absent, Ok(RpcResponse::Lookup(None))),
+        "leader {leader} missing request: {absent:?}; {}",
+        fixture.diagnostics()
+    );
     assert!(
         matches!(request(&fixture.settings[0], leader, RpcRequest::Status).await.unwrap(), RpcResponse::Status(s) if s.membership == vec![1,2,3] && s.committed_index.is_some() && s.running && s.max_log_bytes == 32 << 20 && s.log_bytes > 0 && s.log_remaining_bytes == s.max_log_bytes - s.log_bytes)
     );
@@ -307,9 +333,21 @@ async fn real_three_peer_quorum_proposal_lookup_and_status() {
         assert!(began.elapsed() < Duration::from_secs(5));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(
-        matches!(request(&fixture.settings[0], follower, RpcRequest::Lookup { request_id: "test-1".into() }).await.unwrap(), RpcResponse::Rejected { code, leader: Some(id) } if code == "lookup_unavailable" && id == leader)
-    );
+    for request_id in ["test-1", "never-proposed"] {
+        let outcome = request(
+            &fixture.settings[0],
+            follower,
+            RpcRequest::Lookup {
+                request_id: request_id.into(),
+            },
+        )
+        .await;
+        assert!(
+            matches!(outcome, Ok(RpcResponse::Rejected { ref code, leader: Some(id) }) if code == "lookup_unavailable" && id == leader),
+            "follower {follower} lookup for {request_id}: {outcome:?}; {}",
+            fixture.diagnostics()
+        );
+    }
     // Without quorum, even an absent ID must never become an authoritative None.
     for id in 1..=3 {
         if id != leader {
@@ -328,7 +366,8 @@ async fn real_three_peer_quorum_proposal_lookup_and_status() {
         .await;
         assert!(
             matches!(outcome, Err(_) | Ok(RpcResponse::Rejected { .. })),
-            "isolated leader must not expose local lookup as authoritative"
+            "isolated node {leader} must not expose {request_id} as authoritative: {outcome:?}; {}",
+            fixture.diagnostics()
         );
     }
     fixture.shutdown().await;

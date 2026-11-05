@@ -22,13 +22,23 @@ pub(crate) struct State {
     pub(crate) snapshot: MemorySnapshot,
     pub(crate) sampled: Instant,
     pub(crate) error: Option<String>,
+    help: bool,
 }
+
+#[derive(Debug, PartialEq, Eq)]
+enum Action {
+    None,
+    Refresh,
+    Quit,
+}
+
 impl State {
     pub(crate) fn new(snapshot: MemorySnapshot) -> Self {
         Self {
             snapshot,
             sampled: Instant::now(),
             error: None,
+            help: false,
         }
     }
     pub(crate) fn refresh(&mut self, result: Result<MemorySnapshot, String>) {
@@ -39,6 +49,23 @@ impl State {
                 self.error = None;
             }
             Err(error) => self.error = Some(error),
+        }
+    }
+
+    fn key(&mut self, key: KeyCode) -> Action {
+        match key {
+            KeyCode::Char('q') => Action::Quit,
+            KeyCode::Esc if self.help => {
+                self.help = false;
+                Action::None
+            }
+            KeyCode::Esc => Action::Quit,
+            KeyCode::Char('?') | KeyCode::F(1) => {
+                self.help = !self.help;
+                Action::None
+            }
+            KeyCode::Char('r') => Action::Refresh,
+            _ => Action::None,
         }
     }
 }
@@ -175,6 +202,37 @@ pub(crate) fn render_at(
             )),
         areas[1],
     );
+    frame.render_widget(
+        Paragraph::new(if state.help {
+            lang.choose(
+                " ? F1 Esc fecha • r atualiza • q sai",
+                " ? F1 Esc close • r refresh • q quit",
+            )
+        } else {
+            lang.choose(
+                " r atualiza • ? ajuda • q sai",
+                " r refresh • ? help • q quit",
+            )
+        })
+        .block(panel("", GREEN, no_color)),
+        areas[3],
+    );
+    if state.help {
+        frame.render_widget(
+            Paragraph::new(lang.choose(
+                "Pool do servidor: todos os grafos.\nNão é RSS, RAM ou cache do RocksDB.\n\nLIMITE: teto; não é RAM alocada.\nRESERVADO: inclui esta consulta.\nPICO: maior reserva desde o início.\nREJEIÇÕES: recusas desde o início.\n\nPode durar até o fim da transação.\nr atualiza; falhas mantêm dados antigos.",
+                "The server's pool spans all graphs.\nNot RSS, RAM or the RocksDB cache.\n\nLIMIT: cap, not allocated RAM.\nRESERVED: includes this sampling query.\nPEAK: highest since server start.\nREJECTIONS: refusals since start.\n\nMay last until transaction end.\nr refreshes; errors keep stale data.",
+            ))
+            .wrap(Wrap { trim: false })
+            .block(panel(
+                lang.choose("GUIA RÁPIDO / MEMÓRIA", "QUICK GUIDE / MEMORY"),
+                CYAN,
+                no_color,
+            )),
+            areas[2],
+        );
+        return;
+    }
     let unknown = lang.choose("desconhecido", "unknown");
     let values = [
         state.snapshot.pool_limit_bytes,
@@ -261,11 +319,6 @@ pub(crate) fn render_at(
             )),
         areas[2],
     );
-    frame.render_widget(
-        Paragraph::new(lang.choose(" r atualiza • q sai", " r refresh • q quit"))
-            .block(panel("", GREEN, no_color)),
-        areas[3],
-    );
 }
 
 /// Replace one complete sample on refresh; failures retain and mark the old sample.
@@ -318,10 +371,10 @@ pub fn run_connected_memory(
             if key.kind != event::KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('r') => state.refresh(fetch()),
-                _ => {}
+            match state.key(key.code) {
+                Action::Quit => return Ok(()),
+                Action::Refresh => state.refresh(fetch()),
+                Action::None => {}
             }
         }
     }
@@ -390,6 +443,70 @@ mod tests {
                 .count(),
             5
         );
+    }
+
+    #[test]
+    fn contextual_help_keys_preserve_sample_and_quit_behavior() {
+        let mut state = State::new(sample());
+        let sampled = state.sampled;
+        for key in [KeyCode::Char('?'), KeyCode::F(1)] {
+            assert_eq!(state.key(key), Action::None);
+            assert!(state.help);
+            assert_eq!(state.key(KeyCode::Char('r')), Action::Refresh);
+            assert!(state.help);
+            assert_eq!(state.key(KeyCode::Char('q')), Action::Quit);
+            assert_eq!(state.key(KeyCode::Esc), Action::None);
+            assert!(!state.help);
+            assert_eq!(state.snapshot, sample());
+            assert_eq!(state.sampled, sampled);
+            assert_eq!(state.key(key), Action::None);
+            assert_eq!(state.key(key), Action::None);
+            assert!(!state.help);
+        }
+        assert_eq!(state.key(KeyCode::Esc), Action::Quit);
+        assert_eq!(state.key(KeyCode::Char('q')), Action::Quit);
+        assert_eq!(state.key(KeyCode::Down), Action::None);
+    }
+
+    #[test]
+    fn contextual_help_explains_scope_and_controls_in_both_languages() {
+        let mut state = State::new(sample());
+        state.key(KeyCode::F(1));
+        for stale in [false, true] {
+            if stale {
+                state.refresh(Err("offline".into()));
+            }
+            for lang in [Language::En, Language::PtBr] {
+                for width in [40, 80] {
+                    let rendered = text(&state, lang, width, 24);
+                    for expected in [
+                        lang.choose("GUIA RÁPIDO", "QUICK GUIDE"),
+                        lang.choose("todos os grafos", "all graphs"),
+                        lang.choose("LIMITE:", "LIMIT:"),
+                        lang.choose("RESERVADO:", "RESERVED:"),
+                        lang.choose("PICO:", "PEAK:"),
+                        lang.choose("REJEIÇÕES:", "REJECTIONS:"),
+                        lang.choose("fim da transação", "transaction end"),
+                        "RSS",
+                        "RocksDB",
+                        "Esc",
+                        lang.choose("r atualiza", "r refresh"),
+                        lang.choose("q sai", "q quit"),
+                    ] {
+                        assert!(
+                            rendered.contains(expected),
+                            "{width}: {expected}: {rendered}"
+                        );
+                    }
+                    if stale {
+                        assert!(rendered.contains(lang.choose("DESATUALIZADO", "STALE")));
+                    }
+                }
+            }
+        }
+        for (w, h) in [(40, 24), (40, 12), (1, 1)] {
+            let _ = text(&state, Language::En, w, h);
+        }
     }
     #[test]
     fn bilingual_narrow_render_keeps_all_counters_and_scope() {

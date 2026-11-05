@@ -90,6 +90,9 @@ jobs:
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Test cgroup diagnostic safety
+        run: python -m unittest discover -s crates/server/tests -p 'test_cgroup*.py'
+
       - name: Validate documentation links and site
         run: |
           python scripts/check_docs_links.py

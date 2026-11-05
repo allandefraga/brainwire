@@ -13,7 +13,7 @@
 <div class="shell">
   <aside class="sidebar">
     <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="720" height="160"></a>
-    <p class="version"><span class="version-label">Documentation</span>v0.15.0-beta.11 <!-- brainwire-release-version --></p>
+    <p class="version"><span class="version-label">Documentation</span>v0.15.0-beta.12 <!-- brainwire-release-version --></p>
     <nav aria-label="Documentation sections">
       <a href="#start"><span>01</span> Start the database</a>
       <a href="#python"><span>02</span> Write from Python</a>
@@ -26,7 +26,7 @@
     <div class="sidebar-foot"><span>RUST / ROCKSDB / CYPHER</span><a href="https://github.com/allandefraga/brainwire">Repository ↗</a></div>
   </aside>
   <main id="main">
-    <header class="topbar"><span><a href="#overview">Docs</a><b aria-hidden="true">/</b>Getting started</span><span class="status"><i aria-hidden="true"></i> v0.15.0-beta.11 · evolving <!-- brainwire-release-version --></span></header>
+    <header class="topbar"><span><a href="#overview">Docs</a><b aria-hidden="true">/</b>Getting started</span><span class="status"><i aria-hidden="true"></i> v0.15.0-beta.12 · evolving <!-- brainwire-release-version --></span></header>
     <section id="overview" class="hero">
       <p class="eyebrow"><span aria-hidden="true">●</span> OPEN SOURCE · BUILT IN RUST</p>
       <h1>Your data has<br><em>connections.</em></h1>
@@ -38,9 +38,9 @@
 
     <section id="start" class="content-section">
       <div class="section-heading"><span class="section-kicker">01 / START THE DATABASE</span><h2>Start locally with Docker Compose.</h2><p>Install Docker and Compose, then use the published image. This demo runs locally with a persistent volume.</p></div>
-      <div class="code"><div class="code-head"><span>terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.15.0-beta.11 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+      <div class="code"><div class="code-head"><span>terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.15.0-beta.12 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.11 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.15.0-beta.12 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --pull always --wait --wait-timeout 900</code></pre></div>
       <div class="connection-grid" aria-label="Demo connection details"><div><span>ADDRESS</span><code>bolt://127.0.0.1:7687</code></div><div><span>DATABASE</span><code>demo</code></div><div><span>STORAGE</span><strong>Persistent Docker volume</strong></div></div>
@@ -106,7 +106,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire brai
       <div class="section-heading"><span class="section-kicker">06 / CAPABILITIES &amp; BOUNDARIES</span><h2>Know what you are running.</h2><p>Use the beta for a controlled trial. These boundaries help you choose the right workload and the checks to run before relying on it.</p></div>
       <div class="evaluation-note"><span class="evaluation-mark" aria-hidden="true">↗</span><div><strong>Evaluate your actual workload.</strong><p>Keep an authoritative source and a tested backup. Validate the same release, queries, data volume and deployment that your application will use.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/beta-operator-checklist.md">Trial checklist →</a></div>
       <div class="limit-list">
-        <article><span class="card-label">01 / MEMORY</span><h3>Budgeted query work</h3><p>Query and ingress budgets account for parts of memory. Pressure admission can reject new work and recover after a spike; <code>split()</code> budgets output before allocation.</p><div class="boundary"><strong>Plan for</strong><p>No guaranteed process-wide RSS ceiling. An earlier small read soak showed RSS growth; a repeat did not reproduce it. Sustained 2/4/8 GiB qualification remains open.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/memory-defaults.md">Memory settings →</a></article>
+        <article><span class="card-label">01 / MEMORY</span><h3>Budgeted query work</h3><p>Query and ingress budgets account for parts of memory. Pressure admission can reject new work; DISTINCT and UNION account for retained key copies.</p><div class="boundary"><strong>Plan for</strong><p>No guaranteed process-wide RSS ceiling. A pressure smoke failed once; controlled repeats passed, but the original decision is unexplained. Sustained 2/4/8 GiB qualification remains open.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/2026-11-05-pressure-investigation.md">Pressure investigation →</a></article>
         <article><span class="card-label">02 / CYPHER &amp; INDEXES</span><h3>A documented query subset</h3><p>Scalar equality, <code>IN</code> and supported string range/prefix predicates can use indexes.</p><div class="boundary"><strong>Plan for</strong><p>One fixed node label. Incomplete subqueries and temporal/spatial types. Numeric ranges can scan; regex uses a bounded Rust subset.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Supported Cypher →</a></article>
         <article><span class="card-label">03 / SECURITY</span><h3>Authentication and grants</h3><p>Use an auth policy to control graph access. The local demo deliberately disables authentication.</p><div class="boundary"><strong>Plan for</strong><p>Shared deployments require a verified encrypted boundary. Native Bolt TLS is not implemented.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md">Protected deployment →</a></article>
         <article><span class="card-label">04 / HISTORY &amp; INGESTION</span><h3>Explicit event identity</h3><p>New relationship types can opt in to immutable keys; Python can update or delete a single keyed event. Existing types need a new graph and source reingestion.</p><div class="boundary"><strong>Plan for</strong><p>No native <code>AS OF</code> reads or revision retention. Pair-only DuckLake synchronization does not support keyed types.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Timeline and migration →</a></article>
@@ -120,7 +120,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire brai
       <div class="guide-grid"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md"><strong>Run Docker</strong><small>Images, volumes, ports and restarts</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md"><strong>Install Python</strong><small>Local package and driver setup</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md"><strong>Load and change data</strong><small>Nodes, edges, patches and batches</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md"><strong>Query the graph</strong><small>CLI, parameters and supported syntax</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/connected-status.md"><strong>Inspect the terminal UI</strong><small>Real schema, indexes and graph sample</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/indexes.md"><strong>Use indexes</strong><small>Declarations, readiness and query paths</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/ducklake-incremental.md"><strong>Sync a source</strong><small>Pinned snapshots and resume behavior</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md"><strong>Run graph algorithms</strong><small>Sparse projections and bounded procedures</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md"><strong>Run an application pilot</strong><small>Ingestion, recovery and safety checks</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/beta-operator-checklist.md"><strong>Evaluate a deployment</strong><small>Security, recovery and qualification</small></a></div>
       <details class="pages-note"><summary>What is GitHub Pages?</summary><p>GitHub Pages serves this static documentation folder as a website. It does not run Brainwire or host a database. Publication depends on the repository's Pages settings, access policy and workflow. To preview this site locally from the checkout, run <code>python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1</code>, then open <code>http://127.0.0.1:8000</code>.</p></details>
     </section>
-    <footer><span>Brainwire / v0.15.0-beta.11 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes ↗</a></footer>
+    <footer><span>Brainwire / v0.15.0-beta.12 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes ↗</a></footer>
   </main>
 </div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>

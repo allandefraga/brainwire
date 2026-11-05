@@ -1,0 +1,66 @@
+{
+  "scope": "synthetic single-container cgroup-v2 pressure; same locally built candidate image",
+  "memory_limit_bytes": 536870912,
+  "threshold_percent": 95,
+  "results": {
+    "standard_trace": {
+      "result": "PASS",
+      "image_id": "sha256:ad282d18d71f7fc4685ea6bcad581a8b5bfbc8ac166a408cac9a6f753aeffa15",
+      "trace_lines": 14,
+      "trace_refused_effective_bytes": [
+        515801088,
+        516349952
+      ],
+      "transaction_refusal": "Neo.TransientError.General.MemoryPressure",
+      "new_session_refusal": "Neo.TransientError.General.MemoryPressure",
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "audit": "ok",
+      "owned_resources_cleaned": true
+    },
+    "persistent_trace": {
+      "result": "PASS",
+      "image_id": "sha256:ad282d18d71f7fc4685ea6bcad581a8b5bfbc8ac166a408cac9a6f753aeffa15",
+      "trace_lines": 14,
+      "trace_refused_effective_bytes": [
+        516169728,
+        512139264
+      ],
+      "transaction_refusal": "Neo.TransientError.General.MemoryPressure",
+      "new_session_refusal": "Neo.TransientError.General.MemoryPressure",
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "audit": "ok",
+      "owned_resources_cleaned": true
+    },
+    "standard_trace_off": {
+      "result": "PASS",
+      "image_id": "sha256:ad282d18d71f7fc4685ea6bcad581a8b5bfbc8ac166a408cac9a6f753aeffa15",
+      "trace_lines": 0,
+      "trace_refused_effective_bytes": [],
+      "transaction_refusal": "Neo.TransientError.General.MemoryPressure",
+      "new_session_refusal": "Neo.TransientError.General.MemoryPressure",
+      "recovered_counts": {
+        "acknowledged": 1,
+        "pending-before-pressure": 0,
+        "rejected-under-pressure": 0
+      },
+      "audit": "ok",
+      "owned_resources_cleaned": true
+    }
+  },
+  "limitations": [
+    "does not explain the earlier failed standard smoke",
+    "trace is opt-in and synchronous logging can perturb timing",
+    "trace timestamps follow sequential kernel readings; host and VM clocks may differ",
+    "not a global RSS ceiling, sustained capacity or distributed failover qualification",
+    "host kernel logs were not independently verified"
+  ],
+  "source": "beta.12 candidate before release commit; not a published image"
+}

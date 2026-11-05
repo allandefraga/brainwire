@@ -10,6 +10,95 @@ use crate::process_memory::ProcessMemory;
 use brainwire_bolt::session::EngineError;
 
 const PRESSURE_PERCENT: u128 = 95;
+const ADMISSION_TRACE_LIMIT: usize = 64;
+
+fn admission_trace_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+struct AdmissionTrace {
+    enabled: bool,
+    emitted: AtomicUsize,
+}
+
+#[derive(Clone, Copy)]
+enum TraceDecision {
+    Cgroup(PressureObservation),
+    ProcessLimit { rss_bytes: u64, cap_bytes: u64 },
+}
+
+#[derive(Clone, Copy)]
+struct AdmissionTraceRecord {
+    sequence: usize,
+    logged_unix_time_ns: Option<u128>,
+    decision: TraceDecision,
+}
+
+impl AdmissionTrace {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            emitted: AtomicUsize::new(0),
+        }
+    }
+
+    fn record(&self, decision: TraceDecision) -> Option<AdmissionTraceRecord> {
+        if !self.enabled {
+            return None;
+        }
+        let previous = self
+            .emitted
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                if count < ADMISSION_TRACE_LIMIT {
+                    Some(count + 1)
+                } else {
+                    None
+                }
+            })
+            .ok()?;
+        Some(AdmissionTraceRecord {
+            sequence: previous + 1,
+            // Logging time follows the decision; cgroup files are sequential samples.
+            logged_unix_time_ns: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|elapsed| elapsed.as_nanos()),
+            decision,
+        })
+    }
+
+    fn emit(&self, decision: TraceDecision) {
+        if let Some(record) = self.record(decision) {
+            // Opt-in diagnostics only: synchronous stderr can perturb pressure/timing.
+            record.write_best_effort(&mut std::io::stderr().lock());
+        }
+    }
+}
+
+impl AdmissionTraceRecord {
+    fn write_best_effort(&self, writer: &mut impl std::io::Write) {
+        // Diagnostic output failure must not alter the admission decision.
+        let _ = writeln!(writer, "{self}");
+    }
+}
+
+impl std::fmt::Display for AdmissionTraceRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "brainwire memory pressure decision: trace sequence={} logged_unix_time_ns={:?} ",
+            self.sequence, self.logged_unix_time_ns
+        )?;
+        match self.decision {
+            TraceDecision::Cgroup(observed) => write!(f,
+                "pressure_refused={} basis=cgroup status={:?} selected={:?} cache={:?}",
+                matches!(observed.status, PressureStatus::Pressured { .. }), observed.status,
+                observed.reading, observed.cache_reading),
+            TraceDecision::ProcessLimit { rss_bytes, cap_bytes } => write!(f,
+                "pressure_refused=true basis=process_limit rss_bytes={rss_bytes} cap_bytes={cap_bytes} cgroup_status=not_sampled"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PressureStatus {
@@ -52,6 +141,7 @@ pub(crate) struct PressureGuard {
     cache_pressure_admissions: AtomicUsize,
     probe: Box<dyn Fn() -> PressureObservation + Send + Sync>,
     process: fn() -> Option<&'static Arc<ProcessMemory>>,
+    trace: AdmissionTrace,
 }
 
 impl PressureGuard {
@@ -69,7 +159,13 @@ impl PressureGuard {
             let mut guard = Self::new(move || {
                 sample_observed(&groups, |path| std::fs::read_to_string(path).ok())
             });
-            Arc::get_mut(&mut guard).expect("new guard").process = crate::process_memory::installed;
+            let shared = Arc::get_mut(&mut guard).expect("new guard");
+            shared.process = crate::process_memory::installed;
+            shared.trace = AdmissionTrace::new(admission_trace_enabled(
+                std::env::var("BRAINWIRE_TRACE_CGROUP_ADMISSION")
+                    .ok()
+                    .as_deref(),
+            ));
             guard
         }))
     }
@@ -78,6 +174,7 @@ impl PressureGuard {
         Arc::new(Self {
             probe: Box::new(probe),
             process: || None,
+            trace: AdmissionTrace::new(false),
             denied_runs: AtomicUsize::new(0),
             unavailable_samples: AtomicUsize::new(0),
             cache_pressure_admissions: AtomicUsize::new(0),
@@ -114,6 +211,10 @@ impl PressureGuard {
     pub(crate) fn refusal(&self) -> Option<EngineError> {
         let mut cgroup_reading = None;
         let refusal = if let Some((rss, cap)) = (self.process)().and_then(|p| p.refusal()) {
+            self.trace.emit(TraceDecision::ProcessLimit {
+                rss_bytes: rss,
+                cap_bytes: cap,
+            });
             EngineError::memory_refused(
                 "process_limit",
                 0,
@@ -123,6 +224,7 @@ impl PressureGuard {
         } else {
             let observed = self.observe();
             if let PressureStatus::Pressured { current, limit } = observed.status {
+                self.trace.emit(TraceDecision::Cgroup(observed));
                 cgroup_reading = observed.reading;
                 let cap = (u128::from(limit) * PRESSURE_PERCENT / 100) as u64;
                 EngineError::memory_refused(
@@ -132,6 +234,7 @@ impl PressureGuard {
                     "cgroup admission threshold at 95% (memory.high or memory.max); RUN rejected before execution",
                 )
             } else {
+                self.trace.emit(TraceDecision::Cgroup(observed));
                 if let (PressureStatus::Available { .. }, Some(reading)) =
                     (observed.status, observed.cache_reading)
                 {
@@ -309,6 +412,219 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
+
+    #[test]
+    fn admission_trace_ignores_writer_failure() {
+        struct FailedWriter(usize);
+        impl std::io::Write for FailedWriter {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                self.0 += 1;
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut writer = FailedWriter(0);
+        AdmissionTraceRecord {
+            sequence: 1,
+            logged_unix_time_ns: None,
+            decision: TraceDecision::ProcessLimit {
+                rss_bytes: 99,
+                cap_bytes: 95,
+            },
+        }
+        .write_best_effort(&mut writer);
+        assert_eq!(writer.0, 1);
+    }
+
+    #[test]
+    fn admission_trace_is_disabled_unless_the_flag_is_exactly_one() {
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some("1 "),
+            Some("01"),
+        ] {
+            assert!(!admission_trace_enabled(value));
+        }
+        assert!(admission_trace_enabled(Some("1")));
+        let trace = AdmissionTrace::new(false);
+        assert!(trace
+            .record(TraceDecision::Cgroup(PressureObservation {
+                status: PressureStatus::Unavailable,
+                reading: None,
+                cache_reading: None,
+            }))
+            .is_none());
+        assert_eq!(trace.emitted.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn concurrent_admission_trace_is_bounded_to_sixty_four_unique_records() {
+        let trace = Arc::new(AdmissionTrace::new(true));
+        let sequences = Arc::new(std::sync::Mutex::new(Vec::new()));
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let trace = Arc::clone(&trace);
+                let sequences = Arc::clone(&sequences);
+                scope.spawn(move || {
+                    for _ in 0..100 {
+                        if let Some(record) =
+                            trace.record(TraceDecision::Cgroup(PressureObservation {
+                                status: PressureStatus::Unavailable,
+                                reading: None,
+                                cache_reading: None,
+                            }))
+                        {
+                            sequences.lock().unwrap().push(record.sequence);
+                        }
+                    }
+                });
+            }
+        });
+        let mut sequences = sequences.lock().unwrap().clone();
+        sequences.sort_unstable();
+        assert_eq!(sequences, (1..=64).collect::<Vec<_>>());
+        assert_eq!(trace.emitted.load(Ordering::Relaxed), 64);
+        trace.emitted.store(usize::MAX, Ordering::Relaxed);
+        assert!(trace
+            .record(TraceDecision::ProcessLimit {
+                rss_bytes: 99,
+                cap_bytes: 95
+            })
+            .is_none());
+    }
+
+    #[test]
+    fn admission_trace_formats_only_observed_inputs_and_explicit_unsampled_states() {
+        let reading = CgroupReading {
+            limit_source: LimitSource::Max,
+            raw_bytes: 99,
+            inactive_file_bytes: 10,
+            effective_bytes: 89,
+            limit_bytes: 100,
+        };
+        let line = AdmissionTraceRecord {
+            sequence: 1,
+            logged_unix_time_ns: None,
+            decision: TraceDecision::Cgroup(PressureObservation {
+                status: PressureStatus::Available {
+                    current: 89,
+                    limit: 100,
+                },
+                reading: Some(reading),
+                cache_reading: Some(reading),
+            }),
+        }
+        .to_string();
+        assert!(line.starts_with("brainwire memory pressure decision: trace sequence=1 "));
+        for field in [
+            "pressure_refused=false",
+            "basis=cgroup",
+            "raw_bytes: 99",
+            "inactive_file_bytes: 10",
+            "effective_bytes: 89",
+            "limit_source: Max",
+        ] {
+            assert!(line.contains(field), "{line}");
+        }
+        assert!(!line.contains('/'));
+        let process = AdmissionTraceRecord {
+            sequence: 2,
+            logged_unix_time_ns: Some(123),
+            decision: TraceDecision::ProcessLimit {
+                rss_bytes: 97,
+                cap_bytes: 95,
+            },
+        }
+        .to_string();
+        assert!(process.contains("pressure_refused=true basis=process_limit"));
+        assert!(process.contains("cgroup_status=not_sampled"));
+        assert!(!process.contains("raw_bytes"));
+        let unavailable = AdmissionTraceRecord {
+            sequence: 3,
+            logged_unix_time_ns: None,
+            decision: TraceDecision::Cgroup(PressureObservation {
+                status: PressureStatus::Unavailable,
+                reading: None,
+                cache_reading: None,
+            }),
+        }
+        .to_string();
+        assert!(unavailable.contains("pressure_refused=false basis=cgroup status=Unavailable"));
+        assert!(unavailable.contains("selected=None cache=None"));
+        assert!(!unavailable.contains("raw_bytes"));
+    }
+
+    #[test]
+    fn tracing_preserves_decisions_counters_and_one_cgroup_probe_per_check() {
+        for status in [
+            PressureStatus::Unavailable,
+            PressureStatus::Available {
+                current: 89,
+                limit: 100,
+            },
+            PressureStatus::Pressured {
+                current: 95,
+                limit: 100,
+            },
+        ] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let observed_calls = Arc::clone(&calls);
+            let mut guard = PressureGuard::new(move || {
+                observed_calls.fetch_add(1, Ordering::Relaxed);
+                PressureObservation {
+                    status,
+                    reading: None,
+                    cache_reading: None,
+                }
+            });
+            Arc::get_mut(&mut guard).unwrap().trace = AdmissionTrace::new(true);
+            for _ in 0..3 {
+                assert_eq!(
+                    guard.refusal().is_some(),
+                    matches!(status, PressureStatus::Pressured { .. })
+                );
+            }
+            assert_eq!(calls.load(Ordering::Relaxed), 3);
+            assert_eq!(guard.trace.emitted.load(Ordering::Relaxed), 3);
+            assert_eq!(
+                guard.usage().denied_runs,
+                if matches!(status, PressureStatus::Pressured { .. }) {
+                    3
+                } else {
+                    0
+                }
+            );
+            assert_eq!(
+                guard.usage().unavailable_samples,
+                if status == PressureStatus::Unavailable {
+                    3
+                } else {
+                    0
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn traced_process_refusal_does_not_sample_the_cgroup() {
+        fn process() -> Option<&'static Arc<ProcessMemory>> {
+            static PROCESS: OnceLock<Arc<ProcessMemory>> = OnceLock::new();
+            Some(PROCESS.get_or_init(|| ProcessMemory::new(0)))
+        }
+        let mut guard = PressureGuard::new(|| panic!("process refusal must not read cgroup"));
+        let changed = Arc::get_mut(&mut guard).unwrap();
+        changed.process = process;
+        changed.trace = AdmissionTrace::new(true);
+        assert!(guard.refusal().is_some());
+        assert_eq!(guard.usage().denied_runs, 1);
+        assert_eq!(guard.usage().unavailable_samples, 0);
+        assert_eq!(guard.trace.emitted.load(Ordering::Relaxed), 1);
+    }
 
     fn group(path: &str, v2: bool) -> MemoryGroup {
         MemoryGroup {

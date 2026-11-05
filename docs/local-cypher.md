@@ -195,6 +195,10 @@ its retained values count against the query budget, so large aggregates may be
 refused. With `DISTINCT`, numerically equal integer and float inputs share a key
 and the first representative is kept.
 
+**Conditional value.** `nullIf(a, b)` returns `null` when the two values are
+equal; otherwise it returns `a`. Comparisons that evaluate to unknown, such as
+`nullIf(1, null)`, return the first value.
+
 **Procedures.** `db.labels`, `db.relationshipTypes`, `db.propertyKeys`,
 `dbms.components`, `db.schema`, `db.indexes`, `db.commitState`,
 `db.checkpoint`, `db.memory`, `db.setNodeAcl(s)`, `db.nodeAcls`,

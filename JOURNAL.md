@@ -29,6 +29,34 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-05: v0.15.0-beta.12 memory, events and recovery
+
+- **Done:** admit DISTINCT and UNION key copies before allocating; account for
+  both grouped-key copies; add Cypher `nullIf`; add bounded keyed-event batch
+  deletion; reject conflicting orphan catalogs during Raft materialization;
+  improve quorum test diagnostics; add contextual help to standalone memory
+  view. Add an optional persistent cgroup observer and bounded opt-in trace.
+- **Verification:** 1,074 Rust tests passed (3 ignored), full Clippy and
+  formatting passed, along with 233 Python, 108 script and 43 cgroup tests.
+  Bolt tests cover keyed events, authorization, catalog conflicts and restart;
+  an isolated application-writer parity test passed on a copied source tree.
+- **Memory evidence:** a standard 512 MiB pressure smoke failed once on a local
+  pre-trace image. Controlled repeats and later standard/observer runs on the
+  final traced image passed; the original decision remains unexplained. See
+  [pressure investigation](docs/benchmarks/2026-11-05-pressure-investigation.md).
+  A 40,000-node/edge 30-minute read soak at 2 GiB and a 100,000-node/edge
+  15-minute read soak at 4 GiB passed on the earlier pre-trace image. Neither
+  qualifies production capacity, mixed writes or a global RSS ceiling. The
+  final traced image passed standard and persistent observer runs with trace
+  on, plus a standard run with trace off; logs confirmed refusal using the
+  server's own readings in those runs.
+- **Next step:** investigate the original pressure discrepancy and the earlier
+  CI quorum lookup failure; qualify representative sustained mixed workloads,
+  CSI volume behavior and failover across independent machines.
+- **Blockers:** sampled admission is not a hard RSS cap; native Bolt TLS,
+  historical revisions and production-qualified multi-machine failover remain
+  open. Do not describe the beta as production ready.
+
 ## 2026-11-04: v0.15.0-beta.11 memory, quorum and event editing
 
 - **Done:** allow sampled memory admission to recover under concurrent low RSS

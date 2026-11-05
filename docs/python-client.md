@@ -229,9 +229,24 @@ graph.delete_edge(("Person", "p-1"), "HAD_EVENT", ("Ticket", "t-1"),
                   key={"event_type": "closed"})
 ```
 
-The keyed `update_edge` and `delete_edge` helpers validate the complete key
+To delete selected events in bounded batches, pass a complete key per row:
+
+```python
+removed = graph.delete_keyed_edges("Person", "HAD_EVENT", "Ticket", [
+    {"source_id": "p-1", "target_id": "t-1", "key": {"event_type": "closed"}},
+    {"source_id": "p-1", "target_id": "t-1", "key": {"event_type": "reopened"}},
+])
+```
+
+The count is the number of physical edges deleted; missing events count zero.
+Duplicates are collapsed within each batch, and sibling keys are preserved.
+Each batch commits separately: a later failure does not undo prior batches.
+Replaying a deletion can remove an event recreated in the meantime, so reconcile
+the source state before retrying an unknown commit outcome.
+
+The keyed `update_edge`, `delete_edge` and `delete_keyed_edges` helpers validate the complete key
 against the catalog and check for ambiguity in the same transaction as the
-mutation. Each uses up to three queries and is intended for individual edits.
+mutation. Each batch uses up to three queries.
 Use a credential with graph-write permission and without delegated read
 visibility: delegated-visibility transactions are read-only. The schema lookup
 and relationship scans remain subject to query limits; this helper does not

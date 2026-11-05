@@ -97,23 +97,58 @@ pub(super) fn execute_rows(
         if distinct && seen.is_none() {
             // A plain UNION deduplicates everything, including the first branch.
             let mut set = HashSet::new();
-            rows.retain(|row| set.insert(Key(row.clone())));
+            let mut error = None;
+            rows.retain_mut(|row| {
+                if error.is_some() {
+                    return false;
+                }
+                match retain_union_key(&mut set, std::mem::take(row), env.budget) {
+                    Ok(Some(kept)) => {
+                        *row = kept;
+                        true
+                    }
+                    Ok(None) => false,
+                    Err(failed) => {
+                        error = Some(failed);
+                        false
+                    }
+                }
+            });
+            if let Some(error) = error {
+                return Err(error);
+            }
             seen = Some(set);
         }
         let produced = run_part(txn, env, part, &mut wrote)?;
         if part.columns.is_empty() {
             continue;
         }
-        for projected in produced {
+        for mut projected in produced {
             if let Some(set) = seen.as_mut() {
-                if !set.insert(Key(projected.clone())) {
+                let Some(kept) = retain_union_key(set, projected, env.budget)? else {
                     continue;
-                }
+                };
+                projected = kept;
             }
             rows.push(projected);
         }
     }
     Ok((plan.parts[0].columns.clone(), rows, wrote))
+}
+
+fn retain_union_key(
+    seen: &mut HashSet<Key>,
+    row: Row,
+    budget: &Budget<'_>,
+) -> Result<Option<Row>, ExecError> {
+    let key = Key(row);
+    if seen.contains(&key) {
+        return Ok(None);
+    }
+    budget.retain_row(&key.0)?;
+    let row = key.0.clone();
+    seen.insert(key);
+    Ok(Some(row))
 }
 
 /// The one part of a plan that can run lazily: write-free, no UNION, and no operator
@@ -486,9 +521,14 @@ impl<'p> Accumulator<'p> {
             let index = match self.groups.get(&lookup) {
                 Some(index) => *index,
                 None => {
+                    let key_bytes = lookup
+                        .0
+                        .iter()
+                        .fold(0usize, |bytes, value| bytes.saturating_add(value.bytes()));
                     ctx.budget.retain(
-                        lookup.0.iter().map(Val::bytes).sum::<usize>()
-                            + 128 * agg.aggs.len().max(1),
+                        key_bytes
+                            .saturating_mul(2)
+                            .saturating_add(128 * agg.aggs.len().max(1)),
                     )?;
                     let group = Group {
                         key: lookup.0.clone(),
@@ -507,7 +547,7 @@ impl<'p> Accumulator<'p> {
             let group = &mut self.group_list[index];
             for ((spec, state), seen) in agg.aggs.iter().zip(&mut group.states).zip(&mut group.seen)
             {
-                let value = match &spec.arg {
+                let mut value = match &spec.arg {
                     None => {
                         if let AggState::Count(n) = state {
                             *n += 1;
@@ -520,26 +560,37 @@ impl<'p> Accumulator<'p> {
                     continue;
                 }
                 if let Some(seen) = seen {
-                    if !seen.insert(Key(vec![value.clone()])) {
+                    let key = Key(vec![value]);
+                    if seen.contains(&key) {
                         continue;
                     }
-                    ctx.budget.retain(value.bytes())?;
+                    // Admit the retained key copy before cloning its payload.
+                    ctx.budget.retain(key.0[0].bytes())?;
+                    value = key.0[0].clone();
+                    seen.insert(key);
                 }
                 update(state, value, ctx)?;
             }
             return Ok(());
         }
-        let values = self
+        let mut values = self
             .plan
             .items
             .iter()
             .map(|(expr, _)| eval(expr, &row, ctx))
             .collect::<Result<Vec<_>, _>>()?;
-        if self.plan.distinct && !self.distinct.insert(Key(values.clone())) {
-            return Ok(());
-        }
         if self.plan.distinct {
-            ctx.budget.retain(values.iter().map(Val::bytes).sum())?;
+            let key = Key(values);
+            if self.distinct.contains(&key) {
+                return Ok(());
+            }
+            ctx.budget.retain(
+                key.0
+                    .iter()
+                    .fold(0usize, |bytes, value| bytes.saturating_add(value.bytes())),
+            )?;
+            values = key.0.clone();
+            self.distinct.insert(key);
         }
         let mut next = row;
         for ((_, slot), value) in self.plan.items.iter().zip(values) {
@@ -1863,6 +1914,228 @@ pub(super) fn pattern_exists(
 #[cfg(test)]
 mod merge_budget_tests {
     use super::*;
+
+    fn with_projection_context(limit: usize, check: impl FnOnce(&Context<'_, '_>)) {
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let params = BTreeMap::new();
+        let vars = Vars::default();
+        let param_vals = BTreeMap::from([("payload".into(), Val::Str("x".repeat(16 << 10)))]);
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: limit,
+                timeout: None,
+            },
+            None,
+        );
+        let context = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: None,
+            param_vals: Some(&param_vals),
+            partition: None,
+        };
+        check(&context);
+    }
+
+    fn projection(distinct: bool, aggregate: Option<AggPlan>) -> ProjectPlan {
+        ProjectPlan {
+            items: vec![(Expr::Param("payload".into()), 0)],
+            aggregate,
+            distinct,
+            order: vec![],
+            skip: None,
+            limit: None,
+            where_: None,
+            presorted: false,
+        }
+    }
+
+    #[test]
+    fn distinct_refusal_does_not_store_an_unadmitted_key() {
+        with_projection_context(24 << 10, |ctx| {
+            let plan = projection(true, None);
+            let mut acc = Accumulator::new(&plan, ctx).unwrap();
+            assert!(matches!(
+                acc.push(ctx, vec![Val::Null]),
+                Err(Flow::Error(ExecError::MemoryLimit { .. }))
+            ));
+            assert!(
+                acc.distinct.is_empty(),
+                "refused DISTINCT retained its deep-cloned key"
+            );
+            assert!(acc.rows.is_empty());
+        });
+    }
+
+    #[test]
+    fn aggregate_distinct_refusal_does_not_store_an_unadmitted_key() {
+        with_projection_context(24 << 10, |ctx| {
+            let plan = projection(
+                false,
+                Some(AggPlan {
+                    keys: vec![],
+                    aggs: vec![AggSpec {
+                        func: "count".into(),
+                        distinct: true,
+                        arg: Some(Expr::Param("payload".into())),
+                        fraction: None,
+                        slot: 0,
+                    }],
+                }),
+            );
+            let mut acc = Accumulator::new(&plan, ctx).unwrap();
+            assert!(matches!(
+                acc.push(ctx, vec![Val::Null]),
+                Err(Flow::Error(ExecError::MemoryLimit { .. }))
+            ));
+            assert!(
+                acc.group_list[0].seen[0].as_ref().unwrap().is_empty(),
+                "refused aggregate DISTINCT retained its deep-cloned key"
+            );
+            assert!(matches!(acc.group_list[0].states[0], AggState::Count(0)));
+        });
+    }
+
+    #[test]
+    fn grouping_admits_both_retained_key_copies() {
+        with_projection_context(40 << 10, |ctx| {
+            let plan = projection(
+                false,
+                Some(AggPlan {
+                    keys: vec![0],
+                    aggs: vec![AggSpec {
+                        func: "count".into(),
+                        distinct: false,
+                        arg: None,
+                        fraction: None,
+                        slot: 1,
+                    }],
+                }),
+            );
+            let mut acc = Accumulator::new(&plan, ctx).unwrap();
+            assert!(matches!(
+                acc.push(ctx, vec![Val::Null; 2]),
+                Err(Flow::Error(ExecError::MemoryLimit { .. }))
+            ));
+            assert!(acc.groups.is_empty());
+            assert!(acc.group_list.is_empty());
+        });
+    }
+
+    #[test]
+    fn duplicate_distinct_inputs_do_not_reserve_again() {
+        for aggregate in [false, true] {
+            with_projection_context(96 << 10, |ctx| {
+                let agg = aggregate.then(|| AggPlan {
+                    keys: vec![],
+                    aggs: vec![AggSpec {
+                        func: "count".into(),
+                        distinct: true,
+                        arg: Some(Expr::Param("payload".into())),
+                        fraction: None,
+                        slot: 0,
+                    }],
+                });
+                let plan = projection(!aggregate, agg);
+                let mut acc = Accumulator::new(&plan, ctx).unwrap();
+                assert!(acc.push(ctx, vec![Val::Null]).is_ok());
+                let remaining = ctx.budget.remaining();
+                for _ in 0..3 {
+                    assert!(acc.push(ctx, vec![Val::Null]).is_ok());
+                }
+                assert_eq!(ctx.budget.remaining(), remaining);
+                if aggregate {
+                    assert!(matches!(acc.group_list[0].states[0], AggState::Count(1)));
+                } else {
+                    assert_eq!(acc.rows.len(), 1);
+                }
+            });
+        }
+    }
+
+    fn run_union_with_budget(query: &str, limit: usize) -> (Result<usize, ExecError>, usize) {
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let mut txn = db.begin();
+        let catalog = Catalog {
+            version: 1,
+            node_types: vec![],
+            edge_types: vec![],
+            streams: vec![],
+        };
+        let params = BTreeMap::from([
+            ("left".into(), Value::Str("x".repeat(16 << 10))),
+            ("right".into(), Value::Str("y".repeat(16 << 10))),
+        ]);
+        let vars = Vars::default();
+        let param_vals = BTreeMap::from([
+            ("left".into(), Val::Str("x".repeat(16 << 10))),
+            ("right".into(), Val::Str("y".repeat(16 << 10))),
+        ]);
+        let budget = Budget::new(
+            ExecutionLimits {
+                memory_bytes: limit,
+                timeout: None,
+            },
+            None,
+        );
+        let context = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: None,
+            param_vals: Some(&param_vals),
+            partition: None,
+        };
+        let plan = plan::plan(&parse(query).unwrap(), &context).unwrap();
+        let env = Env {
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &plan.vars,
+            cache: NodeCache::default(),
+            param_vals: &param_vals,
+        };
+        let result = execute_rows(&mut txn, &env, &plan).map(|(_, rows, _)| rows.len());
+        (result, budget.high_water())
+    }
+
+    #[test]
+    fn union_distinct_admits_its_retained_key_copies() {
+        let all = "RETURN $left AS x UNION ALL RETURN $right AS x";
+        let unique = "RETURN $left AS x UNION RETURN $right AS x";
+        let (result, peak) = run_union_with_budget(all, 1 << 20);
+        assert_eq!(result.unwrap(), 2);
+        let limit = peak + (8 << 10);
+        assert_eq!(run_union_with_budget(all, limit).0.unwrap(), 2);
+        assert!(matches!(
+            run_union_with_budget(unique, limit).0,
+            Err(ExecError::MemoryLimit { .. })
+        ));
+    }
 
     #[test]
     fn terminal_projection_moves_unique_payloads_and_only_clones_repeated_slots() {

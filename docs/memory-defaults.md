@@ -177,6 +177,11 @@ real expansion can still be refused. Timeout checks remain cooperative.
 it scans the input twice and may refuse large output under the query budget.
 `size()`, `isEmpty()` and `exists()` inspect already-evaluated arguments
 without an additional deep copy. Argument evaluation itself can still copy data.
+Projection and aggregate `DISTINCT` admit retained key payloads before cloning
+them; grouped projections account for both retained key copies, and `UNION`
+accounts for the copies used to deduplicate branches. These are conservative
+query-accounting checks, not a complete allocator or RSS limit. `UNION ALL`
+does not create that deduplication set.
 
 A fresh RUN RSS reading that exceeds the current sample also reduces the
 shared reservation headroom until a later sampler reading confirms relief. A
@@ -198,6 +203,9 @@ The [beta.9 candidate receipt](benchmarks/2026-11-04-cgroup-015b9.json) records
 another passing run with the same scope and limitations.
 The [beta.11 candidate summary](benchmarks/2026-11-04-cgroup-015b11.json)
 records a fresh synthetic pressure rejection, rollback and recovery.
+The [beta.12 investigation](benchmarks/2026-11-05-pressure-investigation.md)
+records a failed smoke, controlled repeats and the optional decision trace;
+the original failure remains unexplained.
 In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
 the median process RSS rose by about 53 MiB between the first and last
 five-minute windows. This observation needs investigation; it does not prove
@@ -218,6 +226,14 @@ later authorization, query or storage work succeeds. Missing/unreadable required
 inputs remain unavailable and do not manufacture an admission sample. Missing
 inactive-file data retains the existing conservative fallback of zero reclaimable bytes. These
 logs do not diagnose older receipts retroactively or establish a global RSS cap.
+
+For a short controlled investigation, set `BRAINWIRE_TRACE_CGROUP_ADMISSION=1`
+before starting the server. It logs at most 64 pressure-guard decisions using
+the readings already taken, without query text, identities or filesystem paths.
+An allowed pressure-guard decision does not mean the query or its authorization
+succeeded. This opt-in writes synchronously to stderr, which can perturb timing
+and memory; leave it off for normal operation. It is not a continuous trace or
+an atomic measurement.
 
 New Bolt RUNs are checked before copying query parameters and again before
 execution. If the working set (controller usage minus the inactive file cache

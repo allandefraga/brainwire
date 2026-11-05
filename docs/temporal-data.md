@@ -84,6 +84,9 @@ The key must include exactly all declared key fields. The client checks the
 catalog and the number of matching edges in the same transaction as the change;
 each operation uses up to three queries and is intended for individual edits. Key
 fields cannot be changed. These operations do not preserve prior revisions.
+For several selected events, [`delete_keyed_edges`](python-client.md#delete-edges-while-keeping-nodes)
+uses bounded batches and keeps sibling keys. Pair-only DuckLake sync still does
+not support keyed types; this helper does not implement CDC or reconciliation.
 
 ## What the engine versions today
 

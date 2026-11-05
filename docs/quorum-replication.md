@@ -299,6 +299,9 @@ request ledger remain necessary. This is not batch-wide transactional atomicity.
 Normal commands are also validated before appending to the Raft log and when
 reopening retained entries. A malformed command refuses the append or startup;
 it is not repaired automatically. Validation adds work on both paths.
+When materializing a committed graph, a pre-existing catalog must match its
+committed schema before the graph registry is published. A mismatch stops
+application and needs investigation; the server does not replace or repair it.
 Command-size validation stops serializing once the 2 MiB limit is exceeded,
 and request digests are computed incrementally without a full JSON copy. The
 serialized bytes and SHA-256 request identity remain compatible with previous

@@ -6,7 +6,7 @@ The workspace is read-only; use Python or the CLI to write data.
 
 ## Open the workspace
 
-After starting the [Docker demo](container.md#fastest-local-start), use either a
+After starting the [Docker demo](container.md#start-a-local-demo-with-one-command), use either a
 locally built binary:
 
 ```sh
@@ -111,6 +111,10 @@ These values are not process RSS, host RAM, RocksDB cache or memtable usage.
 A graph name selects the authorized context; it does not make the pool counters
 per-graph. Missing pool telemetry is shown as unknown. Restart resets peak and
 rejection counters.
+
+In the standalone `--view memory` screen, press `?` or F1 for a short guide to
+these counters, and Esc to close it. `r` refreshes the sample; a failed refresh
+keeps the last sample and marks it stale.
 
 The user needs graph read access **and `instance_admin: true`** for this pane.
 A normal graph reader can still inspect ontology, indexes and the selected graph

@@ -96,6 +96,61 @@ def verify_streaming(driver, expected_rows):
     ) == [{"n": 0}]
 
 
+def verify_keyed_events(driver, cycle):
+    graph = GraphClient(driver, "timeline")
+    query = "MATCH (:Customer {entity_id:'a'})-[r:EVENT]->(:Customer {entity_id:'b'}) RETURN r.revision AS revision"
+    if cycle == 0:
+        for entity in ("a", "b"):
+            graph.upsert_node("Customer", entity, {})
+        for revision in ("r-1", "r-2", "r-3"):
+            graph.upsert_edge(("Customer", "a"), "EVENT", ("Customer", "b"),
+                              {"kind": "closed", "revision": revision})
+        def event(revision):
+            return {"source_id": "a", "target_id": "b", "key": {"kind": "closed", "revision": revision}}
+        try:
+            graph.delete_keyed_edges("Customer", "EVENT", "Customer", [event("r-1"),
+                {"source_id": "a", "target_id": "b", "key": {"kind": "closed"}}])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("partial key must roll back the entire deletion batch")
+        assert len(graph.run_cypher(query)) == 3
+
+        original_write = graph._write
+        def interleaved_write(operation):
+            def invoke(tx):
+                class Proxy:
+                    def run(self, statement, **params):
+                        result = tx.run(statement, **params)
+                        if statement.startswith("CALL db.schema()"):
+                            record = result.single()
+                            # Publish a catalog change after this transaction has
+                            # consumed its snapshot and before it attempts deletion.
+                            with driver.session(database="timeline") as admin:
+                                admin.run("CREATE INDEX timeline_title FOR (n:Customer) ON (n.title)").consume()
+                            class Saved:
+                                def single(self):
+                                    return record
+                            return Saved()
+                        return result
+                return operation(Proxy())
+            return original_write(invoke)
+        graph._write = interleaved_write
+        try:
+            graph.delete_keyed_edges("Customer", "EVENT", "Customer", [event("r-1")])
+        except Neo4jError as error:
+            assert error.code == "Neo.TransientError.Transaction.Outdated", error
+        else:
+            raise AssertionError("catalog change must conflict with the keyed deletion transaction")
+        finally:
+            graph._write = original_write
+        assert len(graph.run_cypher(query)) == 3
+        selected = [event("r-2"), event("r-2"), event("absent"), event("r-3")]
+        assert graph.delete_keyed_edges("Customer", "EVENT", "Customer", selected) == 2
+        assert graph.delete_keyed_edges("Customer", "EVENT", "Customer", selected) == 0
+    assert graph.run_cypher(query) == [{"revision": "r-1"}]
+
+
 def run(binary, rows, batch_size, query_mib):
     with tempfile.TemporaryDirectory(prefix="brainwire-python-ingestion-") as temporary:
         root = Path(temporary)
@@ -127,6 +182,12 @@ limit = "2GiB"
 
         for graph in ("ingestion", "isolated", "example"):
             cli("db", "create", graph, "--ontology", str(ontology))
+        timeline_ontology = root / "timeline.json"
+        timeline_ontology.write_text(json.dumps({"version": "1", "nodes": [
+            {"label": "Customer", "properties": ["title"]}], "edges": [{"type": "EVENT",
+            "from": {"label": "Customer"}, "to": {"label": "Customer"},
+            "properties": ["kind", "revision"], "merge_key_fields": ["kind", "revision"]}]}))
+        cli("db", "create", "timeline", "--ontology", str(timeline_ontology))
         process = None
         durations = []
         read_timings = {}
@@ -154,6 +215,7 @@ limit = "2GiB"
                                            check=True, capture_output=True, text=True)
                     with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
                         driver.verify_connectivity()
+                        verify_keyed_events(driver, cycle)
                         with driver.session(database="ingestion") as session:
                             memory = session.run(
                                 "CALL db.memory() YIELD processLimitBytes,processRssBytes "
@@ -309,6 +371,7 @@ limit = "2GiB"
                               "replay_seconds": durations[1], "recovered_nodes": graph["nodes"],
                               "cleanup_nodes": cleanup_count, "delete_seconds": deletion_seconds,
                               "relationship_delete_replay": "PASS",
+                              "keyed_batch_delete_recovery": "PASS", "keyed_batch_catalog_conflict": "PASS",
                               "sst_files_before_crash": sst_before_crash,
                               "read_timings": read_timings, "driver": __import__("neo4j").__version__, "query_guard_rollback": "PASS", "numeric_index_recovery": "PASS", "result": "PASS"}, indent=2))
         finally:
