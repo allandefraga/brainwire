@@ -74,6 +74,7 @@ fn create_list_and_apply_ontology_survive_process_reopen() {
     assert_eq!(schema["catalog"]["version"], 1);
     assert_eq!(schema["catalog"]["node_types"][0]["label"], "Customer");
     assert_eq!(schema["secondary_index_status"], "scalar_equality_ready");
+    assert_eq!(schema["secondary_index_scope"], "node");
     assert_eq!(schema["temporal_history_status"], "not_implemented");
     assert_eq!(schema["maintenance_status"], "not_implemented");
     let metrics = command(&dir)
@@ -274,6 +275,7 @@ fn overview_reports_multiple_independent_graphs() {
         }));
     }
     assert_eq!(graphs[2]["secondary_index_status"], "scalar_equality_ready");
+    assert_eq!(graphs[2]["secondary_index_scope"], "node");
     assert_eq!(graphs[2]["cache_budget_bytes"], 64 << 20);
     assert_eq!(graphs[2]["query_budget_enforced"], false);
     assert_eq!(graphs[2]["query_allocation_guard_enforced"], true);
@@ -349,7 +351,7 @@ fn ontology_view_reads_real_catalog_signatures_properties_and_empty_graphs() {
         .unwrap();
     assert!(empty.status.success(), "{empty:?}");
     assert!(!String::from_utf8_lossy(&empty.stdout).contains("Customer"));
-    assert!(String::from_utf8_lossy(&empty.stdout).contains("no declared indexes"));
+    assert!(String::from_utf8_lossy(&empty.stdout).contains("no declared node indexes"));
     let after = command(&dir)
         .args(["db", "stats", "ontology", "--json"])
         .output()

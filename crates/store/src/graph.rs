@@ -18,6 +18,8 @@ use brainwire_core::value::Value;
 use crate::db::{Database, StoreError};
 use crate::txn::{Cf, Txn, TxnError};
 
+pub use crate::relationship_index::visit as visit_relationship_index;
+
 pub(crate) const CATALOG_KEY: &[u8] = b"catalog";
 pub(crate) const INDEX_READY_KEY: &[u8] = b"scalar-index-v2-ready";
 pub(crate) const MAX_ATOMIC_BACKFILL_KEYS: usize = 100_000;
@@ -407,6 +409,23 @@ impl Database {
             None => None,
         };
         let mut next = Catalog::apply(mapping, previous.as_ref()).map_err(catalog_error)?;
+        let relationship_names: HashSet<_> = next
+            .edge_types
+            .iter()
+            .flat_map(|ty| ty.property_indexes.iter().map(|index| index.name.as_str()))
+            .collect();
+        if !relationship_names.is_empty() {
+            for ty in &next.node_types {
+                for field in &ty.indexed {
+                    let name = ty.index_name(field);
+                    if relationship_names.contains(name.as_str()) {
+                        return Err(GraphError::Catalog(format!(
+                            "an index named {name} already exists"
+                        )));
+                    }
+                }
+            }
+        }
         let mut rebuilt = Vec::new();
         let was_ready = scalar_indexes_ready(txn)?;
         let mut backfilled = 0;
@@ -491,7 +510,7 @@ pub(crate) fn index_field_prefix(ty: TypeId, field: &str) -> Vec<u8> {
     key
 }
 
-fn index_value(value: &Value) -> Option<Vec<u8>> {
+pub(crate) fn index_value(value: &Value) -> Option<Vec<u8>> {
     match value {
         // Integral finite floats share the exact i64 key when representable.
         // This matches Cypher's precise int/float comparison, including -0.0.
@@ -573,7 +592,9 @@ fn edge_key(a: NodeId, ty: EdgeTypeId, b: NodeId, id: EdgeId) -> Vec<u8> {
     key
 }
 
-fn decode_edge_key(key: &[u8]) -> Result<(NodeId, EdgeTypeId, NodeId, EdgeId), StoreError> {
+pub(crate) fn decode_edge_key(
+    key: &[u8],
+) -> Result<(NodeId, EdgeTypeId, NodeId, EdgeId), StoreError> {
     let mut input = key;
     let a = get_u64(&mut input)?;
     let ty = get_u16(&mut input)?;
@@ -1335,7 +1356,7 @@ pub fn merge_edge(
     write_edge(txn, catalog, src, edge_type, dst, EdgeId::MERGED, props)
 }
 
-fn row_property<'a>(row: &'a Row, ty: &EdgeType, name: &str) -> Option<&'a Value> {
+pub(crate) fn row_property<'a>(row: &'a Row, ty: &EdgeType, name: &str) -> Option<&'a Value> {
     row.extra.get(name).or_else(|| {
         ty.columns
             .iter()
@@ -1481,6 +1502,10 @@ fn write_edge(
     }
     row.schema_version = catalog.version;
     apply_props(&mut row, &et.columns, props);
+    if txn.has_relationship_index_format() {
+        crate::relationship_index::track_definition(txn, et)?;
+        crate::relationship_index::update(txn, et, &out, &row)?;
+    }
     txn.put(Cf::Out, out, encode_row(&row));
     txn.put(Cf::In, edge_key(dst, et.id, src, id), Vec::new());
     Ok(())
@@ -1602,6 +1627,21 @@ pub fn delete_edge(
     })?;
     txn.visit_prefix_for_update::<StoreError>(Cf::In, &incoming, |_, _| Ok(()))?;
     if exists {
+        let mut removals = Vec::new();
+        if txn.has_relationship_index_format() {
+            let catalog = crate::catalog::load(txn)?;
+            collect_relationship_index_removals(
+                &catalog,
+                txn,
+                edge_type,
+                &out,
+                |_| Ok::<_, GraphError>(()),
+                &mut removals,
+            )?;
+        }
+        for key in removals {
+            txn.delete(Cf::RelationshipIdx, key);
+        }
         txn.delete(Cf::Out, out);
         txn.delete(Cf::In, incoming);
     }
@@ -1610,23 +1650,74 @@ pub fn delete_edge(
 
 pub fn detach_delete(txn: &mut Txn, id: NodeId) -> Result<(), GraphError> {
     let (entity_id, row) = read_node(txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
-    if let Some(bytes) = txn.get(Cf::Meta, CATALOG_KEY)? {
-        let catalog: Catalog = serde_json::from_slice(&bytes).map_err(catalog_error)?;
+    let catalog: Option<Catalog> = txn
+        .get_for_update(Cf::Meta, CATALOG_KEY)?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()
+        .map_err(catalog_error)?;
+    let outgoing = edges_for_update(txn, Cf::Out, id)?;
+    let incoming = edges_for_update(txn, Cf::In, id)?;
+    let mut removals = Vec::new();
+    if let Some(catalog) = &catalog {
+        if txn.has_relationship_index_format() {
+            for edge in &outgoing {
+                let key = edge_key(id, edge.edge_type, edge.other, edge.id);
+                collect_relationship_index_removals(
+                    catalog,
+                    txn,
+                    edge.edge_type,
+                    &key,
+                    |_| Ok::<_, GraphError>(()),
+                    &mut removals,
+                )?;
+            }
+            for edge in &incoming {
+                if edge.other != id {
+                    let key = edge_key(edge.other, edge.edge_type, id, edge.id);
+                    collect_relationship_index_removals(
+                        catalog,
+                        txn,
+                        edge.edge_type,
+                        &key,
+                        |_| Ok::<_, GraphError>(()),
+                        &mut removals,
+                    )?;
+                }
+            }
+        }
         if let Some(ty) = catalog.node_types.iter().find(|ty| ty.id == id.type_id()) {
             update_node_indexes(txn, ty, id, &row, &Row::default());
         }
     }
-    for e in edges_for_update(txn, Cf::Out, id)? {
+    for key in removals {
+        txn.delete(Cf::RelationshipIdx, key);
+    }
+    for e in outgoing {
         txn.delete(Cf::Out, edge_key(id, e.edge_type, e.other, e.id));
         txn.delete(Cf::In, edge_key(e.other, e.edge_type, id, e.id));
     }
-    for e in edges_for_update(txn, Cf::In, id)? {
+    for e in incoming {
         txn.delete(Cf::In, edge_key(id, e.edge_type, e.other, e.id));
         txn.delete(Cf::Out, edge_key(e.other, e.edge_type, id, e.id));
     }
     txn.delete(Cf::Pk, pk_key(&entity_id, id.type_id()));
     txn.delete(Cf::Node, node_key(id));
     txn.delete(Cf::Acl, node_key(id));
+    Ok(())
+}
+
+fn collect_relationship_index_removals<E: From<StoreError>>(
+    catalog: &Catalog,
+    txn: &mut Txn,
+    ty_id: EdgeTypeId,
+    edge: &[u8],
+    control: impl FnMut(usize) -> Result<(), E>,
+    removals: &mut Vec<Vec<u8>>,
+) -> Result<(), E> {
+    if let Some(ty) = catalog.edge_types.iter().find(|ty| ty.id == ty_id) {
+        crate::relationship_index::track_definition(txn, ty)?;
+        crate::relationship_index::removal_keys(txn, ty, edge, control, removals)?;
+    }
     Ok(())
 }
 
@@ -1661,7 +1752,35 @@ pub fn detach_delete_with_control<E: From<GraphError> + From<StoreError>>(
     )?;
     let outgoing = edges_for_delete_with_control(txn, Cf::Out, id, &[], &mut control)?;
     let incoming = edges_for_delete_with_control(txn, Cf::In, id, &outgoing, &mut control)?;
+    let mut removals = Vec::new();
+    if txn.has_relationship_index_format() {
+        for edge in &outgoing {
+            let key = edge_key(id, edge.edge_type, edge.other, edge.id);
+            collect_relationship_index_removals(
+                catalog,
+                txn,
+                edge.edge_type,
+                &key,
+                &mut control,
+                &mut removals,
+            )?;
+        }
+        for edge in &incoming {
+            let key = edge_key(edge.other, edge.edge_type, id, edge.id);
+            collect_relationship_index_removals(
+                catalog,
+                txn,
+                edge.edge_type,
+                &key,
+                &mut control,
+                &mut removals,
+            )?;
+        }
+    }
 
+    for key in removals {
+        txn.delete(Cf::RelationshipIdx, key);
+    }
     if let Some(ty) = ty {
         update_node_indexes(txn, ty, id, &record.row, &Row::default());
     }
@@ -1733,6 +1852,9 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
         .map(|bytes| serde_json::from_slice(&bytes))
         .transpose()
         .map_err(|e| err(&e))?;
+    if let Some(catalog) = &catalog {
+        crate::relationship_index::check(&txn, catalog).map_err(|e| err(&e))?;
+    }
     let ready = scalar_indexes_ready(&txn).map_err(|e| err(&e))?;
     let mut seen = HashSet::new();
     for (key, value) in txn.scan_prefix(Cf::Pk, &[]).map_err(|e| err(&e))? {

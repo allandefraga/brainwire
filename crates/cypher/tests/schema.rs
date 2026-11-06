@@ -184,6 +184,7 @@ fn merge_key_metadata_is_counted_for_schema_limits() {
     let mut c = catalog();
     c.edge_types.push(EdgeType {
         merge_key_fields: vec!["k".repeat(600_000)],
+        property_indexes: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "EVENT".into(),
@@ -248,6 +249,7 @@ fn rejects_oversized_schema_and_dangling_endpoints() {
     c = catalog();
     c.edge_types.push(EdgeType {
         merge_key_fields: vec![],
+        property_indexes: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
@@ -359,6 +361,7 @@ fn caps_count_repeated_endpoints_and_relationship_properties() {
     c.node_types[0].label = "x".repeat(200_000);
     c.edge_types.push(EdgeType {
         merge_key_fields: vec![],
+        property_indexes: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
@@ -435,6 +438,7 @@ fn accumulated_node_and_relationship_descriptions_obey_schema_string_cap() {
     c.edge_types = (1..=257)
         .map(|id| EdgeType {
             merge_key_fields: vec![],
+            property_indexes: vec![],
             id: EdgeTypeId(id),
             name: format!("LINK{id}"),
             description: Some("x".repeat(4096)),
@@ -456,6 +460,7 @@ fn endpoint_lookup_preserves_sparse_ids_and_first_duplicate_in_catalog_order() {
     c.node_types = vec![node("First", 1), node("Duplicate", 1), node("Last", 4095)];
     c.edge_types.push(EdgeType {
         merge_key_fields: vec![],
+        property_indexes: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),
@@ -492,6 +497,7 @@ fn dense_schema_preserves_every_relationship_without_scanning_instances() {
     c.node_types = (0..4096).map(|id| node(&format!("Type{id}"), id)).collect();
     c.edge_types.push(EdgeType {
         merge_key_fields: vec![],
+        property_indexes: vec![],
         description: None,
         id: EdgeTypeId(1),
         name: "LINK".into(),

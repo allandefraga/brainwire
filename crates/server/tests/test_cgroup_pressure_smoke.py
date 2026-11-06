@@ -15,6 +15,14 @@ import cgroup_pressure_smoke as smoke
 
 
 class SmokeOwnershipTests(unittest.TestCase):
+    def test_cli_rejects_unapproved_memory_limit_without_running(self):
+        with patch.object(sys, 'argv', ['smoke', '--memory-mib', '4096']), \
+             patch.object(smoke, 'run') as run, contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                smoke.main()
+        self.assertEqual(error.exception.code, 2)
+        run.assert_not_called()
+
     def test_timeout_cleanup_removes_all_owned_containers(self):
         resources = {'server': {'Id': 'server'}, 'server-init': {'Id': 'server-init'}, 'server-audit': {'Id': 'server-audit'}, 'volume': {}}
         removed = []
@@ -74,6 +82,9 @@ class SmokeOwnershipTests(unittest.TestCase):
              patch.object(smoke, 'command'), patch.object(smoke, 'stop_events'):
             with self.assertRaises(subprocess.TimeoutExpired):
                 smoke.run(argparse.Namespace(image='moving:latest'), report)
+        self.assertIn('--memory=512m', runs[0])
+        self.assertIn('--memory-swap=512m', runs[0])
+        self.assertEqual(report['memory_limit_bytes'], smoke.LIMIT)
         self.assertIn(image_id, runs[0])
         self.assertNotIn('moving:latest', runs[0])
         self.assertFalse(resources)
@@ -83,7 +94,8 @@ class SmokeOwnershipTests(unittest.TestCase):
     def test_server_and_audit_use_same_local_image_id_and_cleanup_on_audit_timeout(self):
         image_id = 'sha256:' + 'b'*64
         resources, runs = {}, []
-        snapshot = {'memory.max': smoke.LIMIT, 'memory.current': 1000,
+        limit = 3072 * smoke.MIB
+        snapshot = {'memory.max': limit, 'memory.current': 1000,
                     'memory.swap.max': 0, 'memory.events': {'oom': 0, 'oom_kill': 0}}
         def docker(*args, **kwargs):
             if args[:2] == ('volume', 'create'):
@@ -112,13 +124,20 @@ class SmokeOwnershipTests(unittest.TestCase):
              patch.object(smoke, 'docker', side_effect=docker), \
              patch.object(smoke, 'inspect_owned', side_effect=lambda kind,name,identity: resources.get(name)), \
              patch.object(smoke, 'cgroup', return_value=snapshot), \
-             patch.object(smoke, 'fill_to_pressure'), patch.object(smoke, 'require_pressure_error'), \
+             patch.object(smoke, 'fill_to_pressure') as fill, \
+             patch.object(smoke, 'require_pressure_error') as pressure, \
              patch.object(smoke, 'command', return_value=subprocess.CompletedProcess([], 0, '', '')), \
              patch.object(smoke, 'stop_events'), patch.object(smoke.subprocess, 'Popen'):
             with self.assertRaises(subprocess.TimeoutExpired):
-                smoke.run(argparse.Namespace(image='moving:latest'), report)
+                smoke.run(argparse.Namespace(image='moving:latest', memory_mib=3072), report)
         self.assertEqual(len(runs), 3)
+        self.assertEqual(report['memory_limit_bytes'], limit)
+        self.assertIn('/pressure:rw,size=3072m,mode=1777', runs[1])
+        for hook in (fill, pressure):
+            self.assertEqual([call.kwargs['limit'] for call in hook.call_args_list], [limit, limit])
         for call in runs:
+            self.assertIn('--memory=3072m', call)
+            self.assertIn('--memory-swap=3072m', call)
             self.assertIn(image_id, call)
             self.assertNotIn('moving:latest', call)
         self.assertTrue(report['owned_resources_cleaned'])
@@ -296,12 +315,22 @@ class SmokeOwnershipTests(unittest.TestCase):
                     smoke.require_pressure_error('owned', lambda: None, [])
 
     def test_fill_never_crosses_raw_safety_margin_to_offset_cache(self):
-        sample = {'memory.max': smoke.LIMIT, 'memory.current': smoke.LIMIT * 96 // 100,
-                  'diagnostic_working_set': {'bytes': smoke.LIMIT // 2}}
-        with patch.object(smoke, 'cgroup', return_value=sample), \
-             patch.object(smoke, 'docker') as docker:
-            with self.assertRaises(smoke.SmokeInconclusive):
-                smoke.fill_to_pressure('owned', '/owned-fill', [])
+        for limit in (smoke.LIMIT, 2048 * smoke.MIB, 3072 * smoke.MIB):
+            sample = {'memory.max': limit, 'memory.current': limit * 96 // 100,
+                      'diagnostic_working_set': {'bytes': limit // 2}}
+            with self.subTest(limit=limit), patch.object(smoke, 'docker') as docker:
+                with self.assertRaisesRegex(smoke.SmokeInconclusive, 'raw-usage safety margin'):
+                    smoke.fill_to_pressure('owned', '/owned-fill', [], sample=lambda _: sample,
+                                           limit=limit)
+                docker.assert_not_called()
+
+    def test_fill_rejects_cgroup_with_a_different_limit(self):
+        sample = {'memory.max': smoke.LIMIT, 'memory.current': 32 * smoke.MIB,
+                  'diagnostic_working_set': {'bytes': 32 * smoke.MIB}}
+        with patch.object(smoke, 'docker') as docker:
+            with self.assertRaisesRegex(smoke.SmokeInconclusive, 'finite cgroup-v2'):
+                smoke.fill_to_pressure('owned', '/owned-fill', [], sample=lambda _: sample,
+                                       limit=2048 * smoke.MIB)
         docker.assert_not_called()
 
     def test_cgroup_pressure_hint_passes_even_without_external_bracketing_samples(self):

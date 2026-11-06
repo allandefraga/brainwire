@@ -21,6 +21,8 @@ pub struct Databases {
     checkpoint_dir: Option<PathBuf>,
     index_workers: AtomicBool,
     request_ledger: bool,
+    relationship_indexes: bool,
+    standalone: bool,
 }
 
 /// Runs online index builds and drops of one database in bounded batches.
@@ -80,6 +82,9 @@ impl Databases {
     }
 
     pub(crate) fn open_replica(config: &Config) -> Result<Self, String> {
+        if config.server.relationship_indexes {
+            return Err("relationship indexes require standalone storage".into());
+        }
         if config.server.request_ledger {
             return Err("experimental request ledger cannot serve a replica".into());
         }
@@ -116,6 +121,8 @@ impl Databases {
             checkpoint_dir: config.server.checkpoint_dir.clone(),
             index_workers: AtomicBool::new(false),
             request_ledger: config.server.request_ledger,
+            relationship_indexes: config.server.relationship_indexes,
+            standalone: discover,
         };
         if !discover {
             return Ok(registry);
@@ -202,7 +209,7 @@ impl Databases {
             }
             _ => {}
         }
-        let db = Arc::new(if self.request_ledger {
+        let mut db = if self.request_ledger {
             let result = if path.exists() {
                 Database::open_with_request_ledger(&path, &self.resources)
             } else {
@@ -219,7 +226,15 @@ impl Databases {
         } else {
             Database::open(&path, &self.resources)
                 .map_err(|e| format!("cannot open database {name}: {e}"))?
-        });
+        };
+        if !self.standalone && db.has_relationship_index_format() {
+            return Err("relationship indexes require standalone storage".into());
+        }
+        if self.relationship_indexes {
+            db.enable_relationship_index_format(&self.resources)
+                .map_err(|error| format!("cannot enable relationship indexes: {error}"))?;
+        }
+        let db = Arc::new(db);
         if self.index_workers.load(Ordering::SeqCst) {
             spawn_index_worker(name, &db);
         }

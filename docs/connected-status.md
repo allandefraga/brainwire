@@ -137,20 +137,24 @@ budgets and their current limitations.
 
 ## Index declarations and readiness
 
-Indexes fetches `CALL db.indexes()` with `label`, `property` and `state`.
+Indexes fetches `CALL db.indexes()` with `label`, `property`, `state` and, on
+new servers, `entityType`. It distinguishes node and relationship declarations.
 Select and scroll declarations with Up/Down or PgUp/PgDn:
 
 | Server state | Display | Meaning |
 | --- | --- | --- |
-| `scalar_equality_ready` | READY | A supported scalar index is ready |
+| `scalar_equality_ready` | READY | A supported node scalar index is ready |
+| `scalar_range_ready` | RANGE READY | A relationship index is ready for supported equality and range queries |
+| `failed_value_too_large` | VALUE TOO LARGE | A relationship index build stopped; queries continue to scan |
 | `populating` | POPULATING | Online backfill has not completed |
 | `declared_only` | DECLARED | Declaration exists; queries use scans |
 
 The state is not a percentage or a promise that all property types/predicates
 are indexed. Equality and `IN` support scalar strings, Booleans and finite
 numbers; supported string ranges and prefixes can also use index candidates.
-Numeric ranges use scans for correctness. See the [index guide](indexes.md)
-for exact planner rules. Viewing a declaration does not build or modify it.
+Numeric node ranges use scans for correctness. Relationship index paths and
+format restrictions differ; see [relationship indexes](relationship-property-indexes.md).
+See the [node index guide](indexes.md) for its planner rules. Viewing a declaration does not build or modify it.
 
 ## Refresh, bounds and failures
 

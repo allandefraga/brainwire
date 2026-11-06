@@ -25,6 +25,8 @@ use crate::graph::{
 };
 use crate::txn::{Cf, Txn, TxnError};
 
+pub use crate::relationship_index::create as create_relationship_index;
+
 const BUILD_JOB: &[u8] = b"index-build/";
 const DROP_JOB: &[u8] = b"index-drop/";
 /// Nodes (or index keys, when dropping) handled per background transaction.
@@ -47,11 +49,11 @@ fn schema_error(error: SchemaError) -> GraphError {
     }
 }
 
-fn job_key(tag: &[u8], prefix: &[u8]) -> Vec<u8> {
+pub(crate) fn job_key(tag: &[u8], prefix: &[u8]) -> Vec<u8> {
     [tag, prefix].concat()
 }
 
-fn load(txn: &mut Txn) -> Result<Catalog, GraphError> {
+pub(crate) fn load(txn: &mut Txn) -> Result<Catalog, GraphError> {
     match txn.get_for_update(Cf::Meta, CATALOG_KEY)? {
         Some(bytes) => Ok(serde_json::from_slice(&bytes).map_err(catalog_error)?),
         None => {
@@ -67,13 +69,13 @@ fn load(txn: &mut Txn) -> Result<Catalog, GraphError> {
     }
 }
 
-fn store(txn: &mut Txn, catalog: &Catalog) -> Result<(), GraphError> {
+pub(crate) fn store(txn: &mut Txn, catalog: &Catalog) -> Result<(), GraphError> {
     let bytes = serde_json::to_vec(catalog).map_err(catalog_error)?;
     txn.put(Cf::Meta, CATALOG_KEY.to_vec(), bytes);
     Ok(())
 }
 
-fn store_next(txn: &mut Txn, catalog: &mut Catalog) -> Result<(), GraphError> {
+pub(crate) fn store_next(txn: &mut Txn, catalog: &mut Catalog) -> Result<(), GraphError> {
     catalog.version = catalog
         .version
         .checked_add(1)
@@ -90,6 +92,14 @@ fn mapping(nodes: Vec<NodeSpec>, edges: Vec<EdgeSpec>) -> GraphMapping {
     }
 }
 
+pub(crate) fn index_name_exists(catalog: &Catalog, name: &str) -> bool {
+    find_index(catalog, &IndexTarget::Name(name)).is_some()
+        || catalog
+            .edge_types
+            .iter()
+            .any(|ty| ty.property_indexes.iter().any(|index| index.name == name))
+}
+
 fn find_index(catalog: &Catalog, target: &IndexTarget) -> Option<(TypeId, String)> {
     catalog.node_types.iter().find_map(|ty| {
         ty.indexed
@@ -104,7 +114,7 @@ fn find_index(catalog: &Catalog, target: &IndexTarget) -> Option<(TypeId, String
     })
 }
 
-enum Stop {
+pub(crate) enum Stop {
     Full,
     Store(StoreError),
 }
@@ -115,7 +125,7 @@ impl From<StoreError> for Stop {
 }
 
 /// Collect up to `limit` keys a visit yields, stopping the scan when full.
-fn take_keys(
+pub(crate) fn take_keys(
     limit: usize,
     scan: impl FnOnce(&mut dyn FnMut(&[u8]) -> Result<(), Stop>) -> Result<(), Stop>,
 ) -> Result<Vec<Vec<u8>>, StoreError> {
@@ -157,7 +167,7 @@ pub fn create_index(
     if name.is_empty() {
         return Err(rejected("index name must not be empty"));
     }
-    if find_index(&catalog, &IndexTarget::Name(&name)).is_some() {
+    if index_name_exists(&catalog, &name) {
         return match if_not_exists {
             true => Ok(()),
             false => Err(rejected(format!("an index named {name} already exists"))),
@@ -204,6 +214,11 @@ pub fn create_index(
 /// Remove an index from the catalog at once; its keys go in background batches.
 pub fn drop_index(txn: &mut Txn, target: IndexTarget, if_exists: bool) -> Result<(), GraphError> {
     let mut catalog = load(txn)?;
+    if let IndexTarget::Name(name) = &target {
+        if crate::relationship_index::drop(txn, &mut catalog, name)? {
+            return Ok(());
+        }
+    }
     let Some((type_id, field)) = find_index(&catalog, &target) else {
         if if_exists {
             return Ok(());
@@ -429,7 +444,12 @@ impl Database {
         let batch = batch.clamp(1, INDEX_BATCH);
         let mut txn = self.begin();
         let mut job = None;
-        for tag in [DROP_JOB, BUILD_JOB] {
+        for tag in [
+            DROP_JOB,
+            crate::relationship_index::DROP_JOB,
+            BUILD_JOB,
+            crate::relationship_index::BUILD_JOB,
+        ] {
             job = take_keys(1, |visit| {
                 txn.visit_prefix(Cf::Meta, tag, |key, _| visit(key))
             })?
@@ -443,8 +463,10 @@ impl Database {
         };
         if job.starts_with(DROP_JOB) {
             drop_batch(&mut txn, &job, batch)?;
-        } else {
+        } else if job.starts_with(BUILD_JOB) {
             build_batch(&mut txn, &job, batch)?;
+        } else {
+            crate::relationship_index::step(&mut txn, &job, batch)?;
         }
         match txn.commit() {
             Ok(_) | Err(TxnError::Conflict) => Ok(true),

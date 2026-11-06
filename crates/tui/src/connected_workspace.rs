@@ -729,6 +729,7 @@ mod tests {
             ConnectedView::Indexes => ConnectedSnapshot::Indexes(IndexesSnapshot {
                 indexes: (0..20)
                     .map(|i| IndexSummary {
+                        entity_type: "node".into(),
                         label: format!("Type{i}"),
                         property: "name".into(),
                         state: "scalar_equality_ready".into(),

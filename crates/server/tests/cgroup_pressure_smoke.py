@@ -3,7 +3,7 @@
 
 Run with a Python environment containing Neo4j 5.28.8, after the image build
 has stopped. Every container/volume has a UUID ownership label; existing data
-is never opened. Filling tmpfs deliberately approaches the 512 MiB limit.
+is never opened. Filling tmpfs deliberately approaches the selected container limit.
 """
 from __future__ import annotations
 import argparse
@@ -26,7 +26,9 @@ from brainwire.client import MemoryPressureError
 
 LABEL = 'brainwire.pressure-smoke'
 MIB = 1 << 20
-LIMIT = 512 * MIB
+DEFAULT_MEMORY_MIB = 512
+MEMORY_MIB_CHOICES = (DEFAULT_MEMORY_MIB, 2048, 3072)
+LIMIT = DEFAULT_MEMORY_MIB * MIB
 PRESSURE_CODE = 'Neo.TransientError.General.MemoryPressure'
 INJECTION_PERCENT = 96
 SAFETY_PERCENT = 98
@@ -336,18 +338,18 @@ def pressured(snapshot):
     return used * 100 >= cap * 95
 
 
-def fill_to_pressure(name, fill, samples, sample=None):
+def fill_to_pressure(name, fill, samples, sample=None, *, limit=LIMIT):
     sample = sample or cgroup
     snapshot = sample(name)
-    if snapshot['memory.max'] != LIMIT or not isinstance(snapshot['memory.current'], int):
+    if snapshot['memory.max'] != limit or not isinstance(snapshot['memory.current'], int):
         raise SmokeInconclusive('finite cgroup-v2 reading disappeared during injection')
     current = snapshot.get('diagnostic_working_set', {}).get('bytes')
     if type(current) is not int:
         raise SmokeInconclusive('working-set estimate unavailable during injection')
-    target, first = pressure_steps(current, LIMIT)
-    if snapshot['memory.current'] > LIMIT * SAFETY_PERCENT // 100:
+    target, first = pressure_steps(current, limit)
+    if snapshot['memory.current'] > limit * SAFETY_PERCENT // 100:
         raise SmokeInconclusive('usage already above the injection safety margin')
-    if snapshot['memory.current'] + max(0, target - current) > LIMIT * SAFETY_PERCENT // 100:
+    if snapshot['memory.current'] + max(0, target - current) > limit * SAFETY_PERCENT // 100:
         raise SmokeInconclusive('cannot reach working-set target within the raw-usage safety margin')
     if first:
         docker('exec', name, 'dd', 'if=/dev/zero', f'of={fill}', 'bs=1048576',
@@ -357,20 +359,20 @@ def fill_to_pressure(name, fill, samples, sample=None):
         samples.append(snapshot)
         raw = snapshot['memory.current']
         current = snapshot.get('diagnostic_working_set', {}).get('bytes')
-        if type(raw) is not int or type(current) is not int or snapshot['memory.max'] != LIMIT:
+        if type(raw) is not int or type(current) is not int or snapshot['memory.max'] != limit:
             raise SmokeInconclusive('cgroup reading disappeared or max changed during injection')
-        if raw > LIMIT * SAFETY_PERCENT // 100:
+        if raw > limit * SAFETY_PERCENT // 100:
             raise SmokeInconclusive('usage exceeded the injection safety margin')
         if current >= target:
             return snapshot
-        if raw + MIB > LIMIT * SAFETY_PERCENT // 100:
+        if raw + MIB > limit * SAFETY_PERCENT // 100:
             raise SmokeInconclusive('refusing another increment with insufficient headroom')
         docker('exec', name, 'dd', 'if=/dev/zero', f'of={fill}', 'bs=1048576',
                'count=1', 'oflag=append', 'conv=notrunc', 'status=none', timeout=10)
     raise SmokeInconclusive('pressure target not reached within bounded fill loop')
 
 
-def require_pressure_error(name, operation, checks, sample=None, observer=None, phase=None, trace=False):
+def require_pressure_error(name, operation, checks, sample=None, observer=None, phase=None, trace=False, *, limit=LIMIT):
     sample = sample or cgroup
     before = sample(name)
     failure = None
@@ -420,7 +422,7 @@ def require_pressure_error(name, operation, checks, sample=None, observer=None, 
         if parsed.reason != 'cgroup' or parsed.rolled_back is not True:
             raise SmokeInconclusive('memory refusal did not confirm cgroup pressure and rollback in a valid server hint') from failure
         return evidence
-    if before.get('memory.max') != LIMIT or after.get('memory.max') != LIMIT:
+    if before.get('memory.max') != limit or after.get('memory.max') != limit:
         raise SmokeInconclusive('configured cgroup limit was unavailable or changed around the admitted RUN')
     if pressured(before) is not True or pressured(after) is not True:
         raise SmokeInconclusive('RUN admitted without confirmed 95% working-set pressure in both bracketing samples')
@@ -514,15 +516,19 @@ def finalize(report, run_id, name, volume, created, event_process, events_path):
     report['owned_resources_cleaned'] = not errors
 
 
-def self_check():
-    target, first = pressure_steps(40 * MIB, LIMIT)
-    assert target == (LIMIT * 96 + 99) // 100
+def self_check(limit=LIMIT):
+    target, first = pressure_steps(40 * MIB, limit)
+    assert target == (limit * 96 + 99) // 100
     assert 40 * MIB + first * MIB <= target - 8 * MIB
-    assert pressure_steps(LIMIT, LIMIT)[1] == 0
+    assert pressure_steps(limit, limit)[1] == 0
     print('self-check PASS; no Docker resources started')
 
 
 def run(args, report):
+    memory_mib = getattr(args, 'memory_mib', DEFAULT_MEMORY_MIB)
+    if type(memory_mib) is not int or memory_mib not in MEMORY_MIB_CHOICES:
+        raise ValueError('unsupported memory limit')
+    limit = memory_mib * MIB
     from neo4j import GraphDatabase
     import neo4j
     run_id = uuid.uuid4().hex
@@ -533,7 +539,7 @@ def run(args, report):
     observer = None
     sample = cgroup
     report.update({'run_id': run_id, 'driver': neo4j.__version__, 'image': args.image,
-                   'memory_limit_bytes': LIMIT, 'threshold_percent': 95,
+                   'memory_limit_bytes': limit, 'threshold_percent': 95,
                    'pressure_basis': 'memory.current minus inactive_file; raw usage retained for injection safety',
                    'injection_target_percent': INJECTION_PERCENT, 'injection_safety_percent': SAFETY_PERCENT,
                    'scope': 'synthetic single-container Linux cgroup-v2 RUN admission',
@@ -547,7 +553,8 @@ def run(args, report):
             docker('volume', 'create', '--label', f'{LABEL}={run_id}', volume)
             created = True
             report['image_id'] = json.loads(docker('image', 'inspect', args.image))[0]['Id']
-            common = ['--pull=never', '--label', f'{LABEL}={run_id}', '--memory=512m', '--memory-swap=512m',
+            common = ['--pull=never', '--label', f'{LABEL}={run_id}', f'--memory={memory_mib}m',
+                      f'--memory-swap={memory_mib}m',
                       '--mount', f'type=volume,src={volume},dst=/data',
                       '-e', 'BRAINWIRE_SERVER_DEFAULT_DATABASE=demo',
                       '-e', 'BRAINWIRE_MEMORY_CACHE=64MiB', '-e', 'BRAINWIRE_MEMORY_MEMTABLES=8MiB',
@@ -560,7 +567,7 @@ def run(args, report):
             with events_path.open('w') as event_file:
                 event_process = subprocess.Popen(['docker', 'events', '--filter', f'container={name}',
                                                   '--format', '{{json .}}'], stdout=event_file, stderr=subprocess.DEVNULL)
-                docker('run', '-d', '--name', name, *common, '--tmpfs', '/pressure:rw,size=512m,mode=1777',
+                docker('run', '-d', '--name', name, *common, '--tmpfs', f'/pressure:rw,size={memory_mib}m,mode=1777',
                        '-p', '127.0.0.1::7687', report['image_id'], 'serve', '--allow-unauthenticated-remote')
                 state = inspect_owned('container', name, run_id)
                 if state is None or state.get('Image') != report['image_id']:
@@ -590,7 +597,7 @@ def run(args, report):
                         report['limitations'].append('persistent observer has fixed memory overhead; samples are not decision-time atomic')
                     report['before'] = sample(name)
                     before = report['before']
-                    if before['memory.max'] != LIMIT or not isinstance(before['memory.current'], int) or not isinstance(before['memory.events'], dict):
+                    if before['memory.max'] != limit or not isinstance(before['memory.current'], int) or not isinstance(before['memory.events'], dict):
                         report['result'] = 'UNSUPPORTED'
                         report['reason'] = 'required finite cgroup-v2 current/max/events unavailable'
                         return
@@ -603,15 +610,15 @@ def run(args, report):
                         with session.begin_transaction(timeout=120) as tx:
                             tx.run("CREATE (:Customer {entity_id:'pending-before-pressure'})").consume()
                             report['pressure_samples'] = []
-                            fill_to_pressure(name, fill, report['pressure_samples'], sample=sample)
+                            fill_to_pressure(name, fill, report['pressure_samples'], sample=sample, limit=limit)
                             report['pressure_phase'] = 'transaction_run'
                             report['rejected_transaction_run'] = require_pressure_error(name,
                                 lambda: tx.run("CREATE (:Customer {entity_id:'rejected-under-pressure'})").consume(),
                                 report.setdefault('run_pressure_checks', []), sample=sample, observer=observer,
-                                phase='transaction_run', trace=getattr(args, 'trace_admission', False))
+                                phase='transaction_run', trace=getattr(args, 'trace_admission', False), limit=limit)
                             tx.rollback()
                         report['after_transaction_rollback'] = sample(name)
-                        fill_to_pressure(name, fill, report['pressure_samples'], sample=sample)
+                        fill_to_pressure(name, fill, report['pressure_samples'], sample=sample, limit=limit)
                         # An independent session must also be denied. Driver
                         # callbacks are never automatically retried by this smoke.
                         with driver.session(database='demo') as other:
@@ -620,7 +627,7 @@ def run(args, report):
                                                                                 report.setdefault('run_pressure_checks', []),
                                                                                 sample=sample, observer=observer,
                                                                                 phase='new_session_run',
-                                                                                trace=getattr(args, 'trace_admission', False))
+                                                                                trace=getattr(args, 'trace_admission', False), limit=limit)
                         docker('exec', name, 'rm', '--', fill)
                         recovered = None
                         deadline = time.monotonic() + 15
@@ -692,6 +699,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image')
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--memory-mib', type=int, choices=MEMORY_MIB_CHOICES, default=DEFAULT_MEMORY_MIB,
+                        help='container memory limit in MiB (default: %(default)s)')
     parser.add_argument('--self-check', action='store_true')
     parser.add_argument('--persistent-observer', action='store_true',
                         help='opt-in diagnostic: sample with one owned shell instead of per-sample execs')
@@ -699,7 +708,7 @@ def main():
                         help='opt-in: log a bounded number of server admission decisions')
     args = parser.parse_args()
     if args.self_check:
-        self_check()
+        self_check(args.memory_mib * MIB)
         return 0
     if not args.image or args.output is None:
         parser.error('--image and --output are required')

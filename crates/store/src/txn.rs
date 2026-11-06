@@ -28,6 +28,7 @@ pub enum Cf {
     Event,
     Acl,
     Note,
+    RelationshipIdx,
 }
 
 impl Cf {
@@ -44,6 +45,7 @@ impl Cf {
             Cf::Event => "event",
             Cf::Acl => "acl",
             Cf::Note => "note",
+            Cf::RelationshipIdx => crate::db::RELATIONSHIP_INDEX_FAMILY,
         }
     }
 }
@@ -375,6 +377,10 @@ impl<'db> Txn<'db> {
         self.snapshot_commit_sequence
     }
 
+    pub(crate) fn has_relationship_index_format(&self) -> bool {
+        self.db.has_relationship_index_format()
+    }
+
     /// Conservative O(1) overlay/dependency estimate, excluding RocksDB internals.
     pub fn estimated_memory_bytes(&self) -> usize {
         self.estimated_bytes
@@ -684,6 +690,11 @@ impl<'db> Txn<'db> {
         limits: crate::replicated_apply::ApplyLimits,
     ) -> Result<Option<crate::replicated_apply::Batch>, crate::replicated_apply::ApplyError> {
         use crate::replicated_apply::{ApplyError, Batch, Mutation};
+        if self.db.has_relationship_index_format() {
+            return Err(ApplyError::Invalid(
+                "relationship indexes require standalone storage",
+            ));
+        }
         if self.db.committer.lock().unknown_write {
             return Err(ApplyError::Invalid(
                 "uncertain storage write requires reopen",

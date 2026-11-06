@@ -27,16 +27,15 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.16.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.16.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
-This beta adds online declaration of keyed relationship types and an optional
-request ID for one bounded Python write batch. These tools help applications
-model distinct events and reconcile uncertain writes; they do not automatically
-retry or retain historical revisions. See [keyed relationships](docs/temporal-data.md#keyed-relationships),
-[identified batches](docs/python-client.md#one-identified-batch) and the
-[current limits](#current-limits).
+This beta speeds up relationship-type scans and adds an experimental, opt-in
+index for relationship properties. See the [measured example](docs/benchmarks/2026-11-06-relationship-count.md)
+and [how to enable relationship indexes](docs/relationship-property-indexes.md).
+The index changes the on-disk format: back up first, and use it only on a
+standalone server. Quorum and downgrade are not supported for upgraded volumes.
 
 ## What you can build
 
@@ -62,9 +61,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.16.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.16.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.2 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -175,7 +174,9 @@ Start with a rebuildable graph and a tested backup while evaluating this beta.
   [test history](docs/benchmarks/README.md).
 - **Queries and search:** Brainwire supports a [documented Cypher subset](docs/local-cypher.md)
   and reranks explicit candidates. Nodes have one fixed label; native ANN and
-  BM25 indexes are not yet available.
+  BM25 indexes are not yet available. Relationship-type scans are narrowed by
+  catalog signatures, not constant-time counts. The experimental relationship
+  property index supports selected query shapes and standalone stores only.
 - **History and ingestion:** DuckLake synchronization compares pinned snapshots.
   Full reconciliation applies missing-key deletions in bounded Python batches.
   Confirmed rolled-back transaction conflicts receive bounded retries.
@@ -215,7 +216,7 @@ not available.
 
 ## Release status and license
 
-**v0.16.0-beta.1 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.16.0-beta.2 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

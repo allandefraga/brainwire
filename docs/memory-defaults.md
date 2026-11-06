@@ -216,7 +216,7 @@ shared reservation headroom until a later sampler reading confirms relief. A
 sampler read already in progress cannot replace an intervening higher reading.
 This narrows one sampling window; it is not a process-wide memory ceiling.
 
-The synthetic 512 MiB admission smoke compares the same working-set estimate
+The synthetic admission smoke supports 512 MiB, 2 GiB and 3 GiB limits. It compares the same working-set estimate
 as the server and records raw usage separately for the injection safety limit.
 It only accepts a structured cgroup refusal as a confirmed cgroup rejection;
 missing or different evidence is inconclusive. The previous failed run remains

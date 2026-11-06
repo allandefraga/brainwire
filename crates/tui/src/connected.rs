@@ -109,11 +109,11 @@ pub(crate) fn render_at(
         .iter()
         .any(|n| !n.indexed_fields.is_empty());
     let indexes = if !indexed {
-        lang.choose("sem índices declarados", "no declared indexes")
+        lang.choose("sem índices de nós", "no declared node indexes")
     } else if state.snapshot.indexes_ready {
-        lang.choose("índices prontos", "indexes ready")
+        lang.choose("índices prontos (nós)", "node indexes ready")
     } else {
-        lang.choose("índices pendentes", "indexes pending")
+        lang.choose("índices pendentes (nós)", "node indexes pending")
     };
     let mut status = format!(
         " {} • schema v{} • {} {}s • {}",

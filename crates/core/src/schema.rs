@@ -120,6 +120,23 @@ pub struct EdgeType {
     pub columns: Vec<Column>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub merge_key_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub property_indexes: Vec<RelationshipPropertyIndex>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelationshipPropertyIndex {
+    pub property: String,
+    pub name: String,
+    pub state: RelationshipIndexState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationshipIndexState {
+    Populating,
+    Ready,
+    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +422,7 @@ impl Catalog {
                         signatures: vec![sig],
                         columns: merge_columns(&[], &[], &spec.properties, &spec.name)?,
                         merge_key_fields,
+                        property_indexes: vec![],
                     });
                 }
             }
@@ -656,6 +674,7 @@ mod tests {
                 signatures: vec![(TypeId(1), TypeId(2))],
                 columns: vec![],
                 merge_key_fields: vec![],
+                property_indexes: vec![],
             }],
             streams: vec![],
         };

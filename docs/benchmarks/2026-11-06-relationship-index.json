@@ -1,0 +1,130 @@
+{
+  "run": "d3c1735148d94d97a81f244c0388783d",
+  "result": "PASS",
+  "image": "brainwire-session17:final",
+  "rows": 100000,
+  "batch": 500,
+  "samples": 9,
+  "memory_gib": 3,
+  "cpus": 2,
+  "scope": "synthetic Bolt queries on one local standalone container",
+  "plan_evidence": "populating-state correctness and timing only; EXPLAIN/PROFILE unavailable",
+  "image_id": "sha256:43435bd68f7e7d44b95bb4266733a319adb58e2f6ceaa2afd76dd67c588c73d4",
+  "before_ddl": {
+    "range": {
+      "p50_ms": 132.78854099917226,
+      "p95_ms": 243.5597090225201,
+      "samples_ms": [
+        167.29125002166256,
+        121.97691699839197,
+        105.21641600644216,
+        120.15962501754984,
+        154.0427090076264,
+        243.5597090225201,
+        132.35570798860863,
+        189.92933401023038,
+        132.78854099917226
+      ]
+    },
+    "equality": {
+      "p50_ms": 83.88483402086422,
+      "p95_ms": 132.54270900506526,
+      "samples_ms": [
+        90.42858399334364,
+        132.54270900506526,
+        82.24949997384101,
+        71.81962500908412,
+        83.88483402086422,
+        72.39883299916983,
+        104.99829199397936,
+        113.71441601659171,
+        77.37279200227931
+      ]
+    }
+  },
+  "observed_populating": true,
+  "ready_after_s": 0.6848174999759067,
+  "ready_measurements": {
+    "range": {
+      "p50_ms": 1.3500839995685965,
+      "p95_ms": 2.368749992456287,
+      "samples_ms": [
+        2.368749992456287,
+        1.1475830106064677,
+        1.0495840106159449,
+        1.3500839995685965,
+        1.445957983378321,
+        1.8675420142244548,
+        1.541542005725205,
+        0.8984160085674375,
+        0.9536659927107394
+      ]
+    },
+    "equality": {
+      "p50_ms": 1.2449999921955168,
+      "p95_ms": 10.307125019608065,
+      "samples_ms": [
+        1.1721250193659216,
+        1.2001660070382059,
+        0.8852090104483068,
+        10.307125019608065,
+        1.2559999886434525,
+        2.5932920107152313,
+        1.390625024214387,
+        1.2449999921955168,
+        0.8353750163223594
+      ]
+    },
+    "forced_scan_range": {
+      "p50_ms": 174.82600000221282,
+      "p95_ms": 212.37987498170696,
+      "samples_ms": [
+        175.6829999794718,
+        135.7519159791991,
+        148.32912501879036,
+        196.40837499173358,
+        136.94929200573824,
+        212.37987498170696,
+        183.53375000879169,
+        174.82600000221282,
+        152.95899999910034
+      ]
+    },
+    "forced_scan_equality": {
+      "p50_ms": 113.00912502338178,
+      "p95_ms": 165.79445797833614,
+      "samples_ms": [
+        101.12195799592882,
+        113.00912502338178,
+        165.79445797833614,
+        122.89941700873896,
+        96.642000018619,
+        145.1540410052985,
+        117.78370902175084,
+        96.49708401411772,
+        104.20508301467635
+      ]
+    }
+  },
+  "reopen_counts": {
+    "range": 9,
+    "deleted_value": 0,
+    "staged_value": 1
+  },
+  "older_reopen_refusal": {
+    "image": "ghcr.io/allandefraga/brainwire:v0.16.0-beta.1",
+    "image_id": "sha256:331dd52bc0c5528b2c3fe3b25d225851b4ccd391a65b79d7df13651803e0add6",
+    "exit_code": 1,
+    "reason": "error: cannot open database bench: Invalid argument: Column families not opened: relationship_index_v1",
+    "sequence_before": "312",
+    "sequence_after": "312"
+  },
+  "integrity": {
+    "database": "bench",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "reopen_after_offline_checks": true,
+  "drop_scan_equivalence": true,
+  "cleanup": true
+}

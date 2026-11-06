@@ -34,6 +34,8 @@ pub(crate) fn load_commit_sequence(db: &DB) -> Result<Option<u64>, StoreError> {
     )))
 }
 
+pub(crate) const RELATIONSHIP_INDEX_FAMILY: &str = "relationship_index_v1";
+
 pub const COLUMN_FAMILIES: [&str; 11] = [
     "meta", "node", "pk", "out", "in", "lbl", "idx", "ident", "event", "acl", "note",
 ];
@@ -164,10 +166,15 @@ impl Database {
         opts.increase_parallelism(cpus.max(2));
         opts.set_max_background_jobs(cpus.clamp(4, 16));
         opts.set_max_subcompactions(4);
+        let relationship_indexes = path.join("CURRENT").is_file()
+            && DB::list_cf(&opts, path)?
+                .iter()
+                .any(|name| name == RELATIONSHIP_INDEX_FAMILY);
         let families = COLUMN_FAMILIES
             .iter()
             .copied()
             .chain(ledger.then_some(request_ledger::FAMILY))
+            .chain(relationship_indexes.then_some(RELATIONSHIP_INDEX_FAMILY))
             .map(|name| ColumnFamilyDescriptor::new(name, family_options(res)));
         let db = DB::open_cf_descriptors(&opts, path, families)?;
         let sequence = load_commit_sequence(&db)?;
@@ -178,6 +185,28 @@ impl Database {
             id_block: res.config.id_block,
             request_ledger: None,
         })
+    }
+
+    /// Enable the relationship index format before sharing this database.
+    /// Creating the column family makes older binaries refuse the volume.
+    pub fn enable_relationship_index_format(&mut self, res: &Resources) -> Result<(), StoreError> {
+        if crate::replicated_apply::applied_state(self)
+            .map_err(|error| StoreError::Catalog(error.to_string()))?
+            .is_some()
+        {
+            return Err(StoreError::Catalog(
+                "cannot enable relationship indexes on replicated storage".into(),
+            ));
+        }
+        if !self.has_relationship_index_format() {
+            self.db
+                .create_cf(RELATIONSHIP_INDEX_FAMILY, &family_options(res))?;
+        }
+        Ok(())
+    }
+
+    pub fn has_relationship_index_format(&self) -> bool {
+        self.db.cf_handle(RELATIONSHIP_INDEX_FAMILY).is_some()
     }
 
     /// Native consistent checkpoint of committed data. Never overwrites a path.
@@ -251,7 +280,10 @@ impl Database {
             ("level0_files", "rocksdb.num-files-at-level0"),
         ];
         let mut families = BTreeMap::new();
-        for name in COLUMN_FAMILIES {
+        for name in COLUMN_FAMILIES.into_iter().chain(
+            self.has_relationship_index_format()
+                .then_some(RELATIONSHIP_INDEX_FAMILY),
+        ) {
             let cf = self.cf(name)?;
             let mut metrics = BTreeMap::new();
             for (label, property) in PROPERTIES {

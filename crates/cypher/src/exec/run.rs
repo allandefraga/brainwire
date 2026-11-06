@@ -7,7 +7,7 @@ use super::eval::{eval, predicate};
 use super::plan::*;
 use super::val::{Key, Val};
 use super::*;
-use brainwire_core::ids::TypeId;
+use brainwire_core::{ids::TypeId, schema::RelationshipIndexState};
 use brainwire_store::graph::{self as store, EdgeRef};
 use std::collections::{HashMap, HashSet};
 
@@ -1039,6 +1039,14 @@ fn steps(ctx: &Context<'_, '_>, list: &[Step], row: Row, emit: &mut Emit<'_>) ->
     let Some((step, rest)) = list.split_first() else {
         return emit(row);
     };
+    if let StepKind::Anchor(node) = &step.kind {
+        if scan_relationship_index(ctx, node, step, rest, &row, emit)? {
+            return Ok(());
+        }
+        if let Some(scan) = edge_scan(ctx, node, step, rest) {
+            return scan_edges(ctx, node, scan, row, rest, emit);
+        }
+    }
     let mut next = |row: Row| -> Result<(), Flow> {
         if filters_pass(ctx, step, &row)? {
             steps(ctx, rest, row, emit)
@@ -1047,12 +1055,7 @@ fn steps(ctx: &Context<'_, '_>, list: &[Step], row: Row, emit: &mut Emit<'_>) ->
         }
     };
     match &step.kind {
-        StepKind::Anchor(node) => {
-            if let Some(scan) = label_edge_scan(ctx, node, step, rest) {
-                return scan_edges(ctx, node, scan, row, rest, emit);
-            }
-            anchor(ctx, node, row, &mut next)
-        }
+        StepKind::Anchor(node) => anchor(ctx, node, row, &mut next),
         StepKind::Expand(expand) => expand_from(ctx, expand, row, &mut next),
         StepKind::Path { slot, nodes, rels } => {
             let mut ids = vec![];
@@ -1071,18 +1074,165 @@ fn steps(ctx: &Context<'_, '_>, list: &[Step], row: Row, emit: &mut Emit<'_>) ->
     }
 }
 
-/// A label scan immediately expanded over one direction needs no node reads:
-/// stream the adjacency column family across the label's id range instead.
-fn label_edge_scan<'s>(
+/// Probe only when an index supplies a conservative set of physical edges.
+fn scan_relationship_index(
+    ctx: &Context<'_, '_>,
+    node: &NodeStep,
+    anchor_step: &Step,
+    rest: &[Step],
+    row: &[Val],
+    emit: &mut Emit<'_>,
+) -> Result<bool, Flow> {
+    if !ctx.txn.database().has_relationship_index_format()
+        || ctx.partition.is_some()
+        || node.bound
+        || !matches!(node.access, Access::Scan)
+        || !node.props.is_empty()
+        || !anchor_step.filters.is_empty()
+    {
+        return Ok(false);
+    }
+    let Some((expand_step, after)) = rest.split_first() else {
+        return Ok(false);
+    };
+    let StepKind::Expand(expand) = &expand_step.kind else {
+        return Ok(false);
+    };
+    if expand.from != node.slot || expand.rel_bound || expand.to.bound || expand.length.is_some() {
+        return Ok(false);
+    }
+    let [type_id] = expand.types.as_slice() else {
+        return Ok(false);
+    };
+    let Some(ty) = ctx.catalog.edge_types.iter().find(|ty| ty.id == *type_id) else {
+        return Ok(false);
+    };
+    let constant = |expr: &Expr| matches!(expr, Expr::Param(_) | Expr::Literal(_));
+    let ready = |field: &str| {
+        ty.property_indexes
+            .iter()
+            .any(|idx| idx.property == field && idx.state == RelationshipIndexState::Ready)
+    };
+    let from_pattern = expand.rel_props.iter().find_map(|(field, expr)| {
+        (ready(field) && constant(expr)).then_some((field.as_str(), CmpOp::Eq, expr))
+    });
+    fn relationship_property<'e>(expr: &'e Expr, vars: &Vars, slot: usize) -> Option<&'e str> {
+        match expr {
+            Expr::Prop(base, field) if matches!(base.as_ref(), Expr::Var(name) if vars.slot(name) == Some(slot)) => {
+                Some(field.as_str())
+            }
+            _ => None,
+        }
+    }
+    let filters = || {
+        expand_step.filters.iter().filter_map(|filter| {
+            let Expr::Cmp(left, op, right) = filter else {
+                return None;
+            };
+            if *op == CmpOp::Ne {
+                return None;
+            }
+            if let Some(field) = relationship_property(left, ctx.vars, expand.rel)
+                .filter(|field| ready(field) && constant(right))
+            {
+                return Some((field, *op, right.as_ref()));
+            }
+            let field = relationship_property(right, ctx.vars, expand.rel)
+                .filter(|field| ready(field) && constant(left))?;
+            let reversed = match op {
+                CmpOp::Eq => CmpOp::Eq,
+                CmpOp::Lt => CmpOp::Gt,
+                CmpOp::Le => CmpOp::Ge,
+                CmpOp::Gt => CmpOp::Lt,
+                CmpOp::Ge => CmpOp::Le,
+                CmpOp::Ne => return None,
+            };
+            Some((field, reversed, left.as_ref()))
+        })
+    };
+    let Some((field, op, expr)) = from_pattern.or_else(|| filters().next()) else {
+        return Ok(false);
+    };
+    let _scope = ctx.budget.scope();
+    let value = eval(expr, row, ctx)?.into_value()?;
+    let mut equality = None;
+    let mut lower = None;
+    let mut upper = None;
+    match op {
+        CmpOp::Eq => equality = Some(value),
+        CmpOp::Gt | CmpOp::Ge => {
+            lower = Some(value);
+            if let Some((_, _, expr)) = filters().find(|(candidate, op, _)| {
+                *candidate == field && matches!(op, CmpOp::Lt | CmpOp::Le)
+            }) {
+                upper = Some(eval(expr, row, ctx)?.into_value()?);
+            }
+        }
+        CmpOp::Lt | CmpOp::Le => {
+            upper = Some(value);
+            if let Some((_, _, expr)) = filters().find(|(candidate, op, _)| {
+                *candidate == field && matches!(op, CmpOp::Gt | CmpOp::Ge)
+            }) {
+                lower = Some(eval(expr, row, ctx)?.into_value()?);
+            }
+        }
+        CmpOp::Ne => return Ok(false),
+    }
+    store::visit_relationship_index::<Flow>(
+        ctx.txn,
+        ty,
+        field,
+        equality.as_ref(),
+        lower.as_ref(),
+        upper.as_ref(),
+        |(source, edge_type, target, id)| {
+            ctx.budget.tick()?;
+            let mut orientation = |from, other, cf| {
+                let _scope = ctx.budget.scope();
+                ctx.budget.charge(16)?;
+                let mut row = row.to_vec();
+                row[node.slot] = Val::Node(from);
+                if !node_ok(ctx, node, from, &row)? {
+                    return Ok(());
+                }
+                let edge = EdgeRef {
+                    edge_type,
+                    other,
+                    id,
+                };
+                try_edge(ctx, expand, &row, from, edge, cf, &mut |row| {
+                    if filters_pass(ctx, expand_step, &row)? {
+                        steps(ctx, after, row, emit)
+                    } else {
+                        Ok(())
+                    }
+                })
+            };
+            if matches!(expand.direction, Direction::Out | Direction::Both) {
+                orientation(source, target, Cf::Out)?;
+            }
+            if expand.direction == Direction::In
+                || (expand.direction == Direction::Both && source != target)
+            {
+                orientation(target, source, Cf::In)?;
+            }
+            Ok(())
+        },
+    )
+}
+
+/// A directional expansion can stream adjacency across owner label ranges
+/// instead of visiting every node and seeking each one's edges.
+fn edge_scan<'s>(
     ctx: &Context<'_, '_>,
     node: &NodeStep,
     step: &Step,
     rest: &'s [Step],
 ) -> Option<&'s Expand> {
-    if ctx.visibility.is_some()
-        || node.bound
+    if node.bound
         || !matches!(node.access, Access::Scan)
-        || node.labels.len() != 1
+        || node.labels.len() > 1
+        || (ctx.visibility.is_some() && !node.labels.is_empty())
         || !node.props.is_empty()
         || !step.filters.is_empty()
     {
@@ -1093,7 +1243,10 @@ fn label_edge_scan<'s>(
             if expand.from == node.slot
                 && expand.length.is_none()
                 && !expand.rel_bound
-                && expand.direction != Direction::Both =>
+                && expand.direction != Direction::Both
+                && (!node.labels.is_empty()
+                    || expand.types.len() == 1
+                    || expand.no_matching_types) =>
         {
             Some(expand)
         }
@@ -1112,19 +1265,21 @@ fn scan_edges(
     if expand.no_matching_types {
         return Ok(());
     }
-    let ty = ctx
-        .catalog
-        .node_type(&node.labels[0])
-        .expect("validated label");
     let cf = if expand.direction == Direction::Out {
         Cf::Out
     } else {
         Cf::In
     };
     let (expand_step, after) = rest.split_first().expect("expand step follows");
-    let visit = |owner: NodeId, edge: EdgeRef| {
+    let mut visit = |owner: NodeId, edge: EdgeRef| {
         let _scope = ctx.budget.scope();
         ctx.budget.charge(16)?;
+        if node.labels.is_empty() {
+            if ctx.visibility.is_some() && !graph::visible(ctx, owner)? {
+                return Ok(());
+            }
+            ctx.budget.row(&row)?;
+        }
         let mut row = row.clone();
         row[node.slot] = Val::Node(owner);
         try_edge(ctx, expand, &row, owner, edge, cf, &mut |row| {
@@ -1135,12 +1290,46 @@ fn scan_edges(
             }
         })
     };
-    match ctx.partition.filter(|(slot, _, _)| *slot == node.slot) {
-        Some((_, lo, hi)) => {
-            store::visit_edges_in_range::<Flow>(ctx.txn, cf, lo, hi, &expand.types, visit)
-        }
-        None => store::visit_edges_of_label::<Flow>(ctx.txn, cf, ty.id, &expand.types, visit),
+    if let Some(label) = node.labels.first() {
+        let ty = ctx.catalog.node_type(label).expect("validated label");
+        return match ctx.partition.filter(|(slot, _, _)| *slot == node.slot) {
+            Some((_, lo, hi)) => {
+                store::visit_edges_in_range::<Flow>(ctx.txn, cf, lo, hi, &expand.types, visit)
+            }
+            None => store::visit_edges_of_label::<Flow>(ctx.txn, cf, ty.id, &expand.types, visit),
+        };
     }
+
+    let edge_type = ctx
+        .catalog
+        .edge_types
+        .iter()
+        .find(|ty| ty.id == expand.types[0])
+        .expect("validated relationship type");
+    let mut visit_typed = |owner, edge: EdgeRef| {
+        if edge.edge_type == edge_type.id {
+            visit(owner, edge)
+        } else {
+            // Also check cancellation while skipping unrelated edges.
+            ctx.budget.tick().map_err(Flow::from)
+        }
+    };
+    if let Some((_, lo, hi)) = ctx.partition.filter(|(slot, _, _)| *slot == node.slot) {
+        return store::visit_edges_in_range::<Flow>(ctx.txn, cf, lo, hi, &[], visit_typed);
+    }
+
+    // Keep the original anchor scan order and visit each label just once,
+    // even when several signatures share an endpoint label.
+    for ty in &ctx.catalog.node_types {
+        if edge_type
+            .signatures
+            .iter()
+            .any(|&(source, target)| ty.id == if cf == Cf::Out { source } else { target })
+        {
+            store::visit_edges_of_label::<Flow>(ctx.txn, cf, ty.id, &[], &mut visit_typed)?;
+        }
+    }
+    Ok(())
 }
 
 fn node_ok(
@@ -1962,6 +2151,70 @@ mod merge_budget_tests {
             partition: None,
         };
         check(&context);
+    }
+
+    #[test]
+    fn unlabeled_relationship_scan_respects_owner_partition() {
+        use brainwire_core::schema::GraphMapping;
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"A"},{"label":"B"}],"edges":[{"type":"LINK","from":{"label":"A"},"to":{"label":"B"}}]}"#,
+        )
+        .unwrap();
+        db.apply_ontology(&mapping).unwrap();
+        let params = BTreeMap::new();
+        crate::execute(
+            &db,
+            "CREATE (a:A {entity_id:'a'}), (b:A {entity_id:'b'}), (c:B {entity_id:'c'}), (a)-[:LINK]->(c), (b)-[:LINK]->(c)",
+            &params,
+        )
+        .unwrap();
+
+        let txn = db.begin();
+        let catalog = db.catalog().unwrap().unwrap();
+        let budget = Budget::new(ExecutionLimits::default(), None);
+        let vars = Vars::default();
+        let context = Context {
+            txn: &txn,
+            catalog: &catalog,
+            params: &params,
+            budget: &budget,
+            visibility: None,
+            checkpoint_dir: None,
+            vars: &vars,
+            cache: None,
+            param_vals: None,
+            partition: None,
+        };
+        let plan = plan::plan(&parse("MATCH (n)-[:LINK]->() RETURN n").unwrap(), &context).unwrap();
+        let Op::Match(matched) = &plan.parts[0].ops[0] else {
+            panic!("expected match");
+        };
+        let owner_slot = plan.vars.slot("n").unwrap();
+        let a = store::find_by_entity_id(&txn, "a", None).unwrap()[0];
+        let b = store::find_by_entity_id(&txn, "b", None).unwrap()[0];
+        let context = Context {
+            vars: &plan.vars,
+            partition: Some((owner_slot, b, NodeId(b.0 + 1))),
+            ..context
+        };
+        let mut owners = Vec::new();
+        finish(run_match(
+            &context,
+            matched,
+            vec![Val::Null; plan.vars.len()],
+            &mut |row| {
+                owners.push(row[owner_slot].clone());
+                Ok(())
+            },
+        ))
+        .unwrap();
+        assert_ne!(a, b);
+        assert_eq!(owners, vec![Val::Node(b)]);
     }
 
     fn projection(distinct: bool, aggregate: Option<AggPlan>) -> ProjectPlan {

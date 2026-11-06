@@ -125,7 +125,7 @@ fn storage_details(g: &GraphSummary, view: OverviewView, lang: Language) -> Stri
             g.commit_sequence.map_or_else(|| lang.choose("não rastreado", "untracked").to_string(), |sequence| sequence.to_string()),
             lang.choose("Último commit deste store, lido offline. Inclui reservas de IDs e escritas de ontologia; não é contagem de nós nem posição de replicação global.\n\nNo servidor, CALL informa o snapshot da transação:\nCALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked, scope",
                 "Latest commit of this store, read offline. Includes ID reservations and ontology writes; not a node count or global replication position.\n\nOn the server, CALL reports the transaction snapshot:\nCALL db.commitState() YIELD sequence, tracked, scope RETURN sequence, tracked, scope"),
-            lang.choose("Índice escalar", "Scalar equality index"),
+            lang.choose("Índice escalar de nó", "Node scalar equality index"),
             if g.index_declarations == 0 { lang.choose("nenhum", "none") } else if g.indexes_ready { lang.choose("pronto", "ready") } else { lang.choose("pendente (scan)", "pending (scan)") },
             g.indexed_fields.join(", "),
             lang.choose("MERGE usa entity_id estável. SET troca campos; null remove.\n\nLEITURAS\nWHERE c.email=$email: índice escalar pronto. AND mantém filtros restantes. OR/NOT/faixa sozinhos: scan.\nCALL db.indexes() YIELD label, property, state RETURN label, property, state\n\nLeituras simples: uma linha por vez; LIMIT para a leitura.\nEscritas, agrupamentos e CALL ainda acumulam linhas.\n\nCSR: graph.project, graph.degree, graph.pagerank, graph.reachable, graph.shortestPath.\nPainel explicativo; não executa consultas.",
@@ -420,11 +420,11 @@ fn render_overview(
     if view == OverviewView::Ontology {
         if let Some(graph) = graphs.get(state.graph) {
             let indexes = if graph.index_declarations == 0 {
-                lang.choose("sem índices declarados", "no declared indexes")
+                lang.choose("sem índices de nós", "no declared node indexes")
             } else if graph.indexes_ready {
-                lang.choose("índices prontos", "indexes ready")
+                lang.choose("índices prontos (nós)", "node indexes ready")
             } else {
-                lang.choose("índices pendentes", "indexes pending")
+                lang.choose("índices pendentes (nós)", "node indexes pending")
             };
             header.push(Span::raw(format!(
                 " • {} • {indexes}",
@@ -625,7 +625,7 @@ fn render_overview(
             } else {
                 graph.edge_labels.join(", ")
             },
-            lang.choose("Índices declarados", "Declared indexes"),
+            lang.choose("Índices de nós declarados", "Declared node indexes"),
             graph.index_declarations,
             lang.choose("Fluxos de timeline", "Timeline streams"),
             graph.timeline_streams,
@@ -1297,7 +1297,7 @@ mod tests {
         assert!(text.contains("tickets"));
         assert!(text.contains("v3"));
         assert!(text.contains("Ticket"));
-        assert!(text.contains("Declared indexes"));
+        assert!(text.contains("Declared node indexes"));
         assert!(text.contains("42"));
         assert!(text.contains("real data"));
     }

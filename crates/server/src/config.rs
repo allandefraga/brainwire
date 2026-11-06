@@ -42,6 +42,7 @@ pub struct ServerSection {
     pub checkpoint_dir: Option<PathBuf>,
     /// Experimental standalone request ledger; new graphs only, authenticated.
     pub request_ledger: bool,
+    pub relationship_indexes: bool,
 }
 
 impl Default for ServerSection {
@@ -59,6 +60,7 @@ impl Default for ServerSection {
             auth_file: None,
             checkpoint_dir: None,
             request_ledger: false,
+            relationship_indexes: false,
         }
     }
 }
@@ -124,7 +126,7 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 16] = [
+pub(crate) const KEYS: [&str; 17] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -136,6 +138,7 @@ pub(crate) const KEYS: [&str; 16] = [
     "server.auth_file",
     "server.checkpoint_dir",
     "server.request_ledger",
+    "server.relationship_indexes",
     "memory.cache",
     "memory.memtables",
     "memory.query",
@@ -196,6 +199,7 @@ struct FileServerSection {
     checkpoint_dir: Option<PathBuf>,
     #[serde(default)]
     request_ledger: Option<bool>,
+    relationship_indexes: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -328,6 +332,13 @@ fn apply_file(
         config.server.checkpoint_dir = Some(nonblank_path("server.checkpoint_dir", path_value)?);
         sources.insert("server.checkpoint_dir", Source::File(path.to_path_buf()));
     }
+    if let Some(value) = file.server.relationship_indexes {
+        config.server.relationship_indexes = value;
+        sources.insert(
+            "server.relationship_indexes",
+            Source::File(path.to_path_buf()),
+        );
+    }
     if let Some(value) = file.server.request_ledger {
         config.server.request_ledger = value;
         sources.insert("server.request_ledger", Source::File(path.to_path_buf()));
@@ -435,6 +446,15 @@ fn apply_env(
             PathBuf::from(value),
         )?);
         sources.insert("server.checkpoint_dir", Source::Env(var));
+    }
+
+    let var = env_var_name("server.relationship_indexes");
+    if let Some(value) = env.get(&var) {
+        config.server.relationship_indexes = value.parse().map_err(|_| ConfigError::BadValue {
+            key: "server.relationship_indexes".into(),
+            message: "must be true or false".into(),
+        })?;
+        sources.insert("server.relationship_indexes", Source::Env(var));
     }
 
     let var = env_var_name("server.request_ledger");
@@ -621,6 +641,7 @@ pub fn default_file() -> String {
          # Experimental request outcome ledger: new stores only, authentication required.\n\
          # Checkpoints, restore/fork and automatic replay are not qualified.\n\
          # request_ledger = false\n\
+         # relationship_indexes = false\n\
          \n\
          [memory]\n\
          # Leave these unset for detected host/container defaults. Commented values are legacy examples, not detected defaults.\n\
@@ -772,6 +793,7 @@ fn value_text(config: &Config, key: &str) -> String {
         "server.query_timeout_ms" => config.server.query_timeout_ms.to_string(),
         "server.shutdown_grace_ms" => config.server.shutdown_grace_ms.to_string(),
         "server.request_ledger" => config.server.request_ledger.to_string(),
+        "server.relationship_indexes" => config.server.relationship_indexes.to_string(),
         "server.auth_file" => config
             .server
             .auth_file
@@ -1504,6 +1526,7 @@ mod tests {
                 ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
                 ("BRAINWIRE_SERVER_CHECKPOINT_DIR", "/backups"),
                 ("BRAINWIRE_SERVER_REQUEST_LEDGER", "false"),
+                ("BRAINWIRE_SERVER_RELATIONSHIP_INDEXES", "true"),
                 ("BRAINWIRE_MEMORY_CACHE", "1GiB"),
                 ("BRAINWIRE_MEMORY_MEMTABLES", "64MiB"),
                 ("BRAINWIRE_MEMORY_QUERY", "128MiB"),
@@ -1523,6 +1546,7 @@ mod tests {
         assert_eq!(loaded.config.server.io_timeout_ms, 12000);
         assert_eq!(loaded.config.server.query_timeout_ms, 1250);
         assert_eq!(loaded.config.server.shutdown_grace_ms, 20000);
+        assert!(loaded.config.server.relationship_indexes);
         assert_eq!(
             loaded.config.server.auth_file.as_deref(),
             Some(Path::new("/run/secrets/policy.json"))

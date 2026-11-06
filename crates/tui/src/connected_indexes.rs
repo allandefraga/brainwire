@@ -10,6 +10,7 @@ use std::time::Instant;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IndexSummary {
+    pub entity_type: String,
     pub label: String,
     pub property: String,
     pub state: String,
@@ -36,16 +37,18 @@ impl State {
     pub(crate) fn refresh(&mut self, result: Result<IndexesSnapshot, String>) {
         match result {
             Ok(snapshot) => {
-                self.selected =
-                    self.snapshot
-                        .indexes
-                        .get(self.selected)
-                        .and_then(|old| {
-                            snapshot.indexes.iter().position(|new| {
-                                new.label == old.label && new.property == old.property
-                            })
+                self.selected = self
+                    .snapshot
+                    .indexes
+                    .get(self.selected)
+                    .and_then(|old| {
+                        snapshot.indexes.iter().position(|new| {
+                            new.entity_type == old.entity_type
+                                && new.label == old.label
+                                && new.property == old.property
                         })
-                        .unwrap_or(0);
+                    })
+                    .unwrap_or(0);
                 self.snapshot = snapshot;
                 self.sampled = Instant::now();
                 self.error = None;
@@ -135,12 +138,19 @@ pub(crate) fn render_at(
             let status = match index.state.as_str() {
                 "scalar_equality_ready" => lang.choose("PRONTO", "READY"),
                 "populating" => lang.choose("POPULANDO", "POPULATING"),
+                "scalar_range_ready" => lang.choose("FAIXA PRONTA", "RANGE READY"),
+                "failed_value_too_large" => lang.choose("VALOR GRANDE", "VALUE TOO LARGE"),
                 _ => lang.choose("DECLARADO", "DECLARED"),
             };
             Row::new(vec![
                 format!(
-                    "{} {}",
+                    "{} {}{}",
                     if selected { ">" } else { " " },
+                    if index.entity_type == "relationship" {
+                        "↗ "
+                    } else {
+                        ""
+                    },
                     display(&index.label)
                 ),
                 display(&index.property),
@@ -161,7 +171,7 @@ pub(crate) fn render_at(
         ],
     )
     .header(Row::new([
-        lang.choose("TIPO", "LABEL"),
+        lang.choose("NÓ / RELAÇÃO", "NODE / RELATIONSHIP"),
         lang.choose("PROPRIEDADE", "PROPERTY"),
         lang.choose("ESTADO", "STATE"),
     ]))
@@ -276,6 +286,7 @@ mod tests {
         IndexesSnapshot {
             indexes: (0..count)
                 .map(|i| IndexSummary {
+                    entity_type: "node".into(),
                     label: format!("Type{i}"),
                     property: "name".into(),
                     state: if i % 2 == 0 {
@@ -306,6 +317,36 @@ mod tests {
             .map(|c| c.symbol())
             .collect()
     }
+    #[test]
+    fn relationship_selection_survives_refresh_and_explains_each_state() {
+        let mut node = sample(1).indexes.remove(0);
+        node.state = "scalar_equality_ready".into();
+        let relationship = |state: &str| IndexSummary {
+            entity_type: "relationship".into(),
+            state: state.into(),
+            ..node.clone()
+        };
+        let mut state = State::new(IndexesSnapshot {
+            indexes: vec![node.clone(), relationship("populating")],
+        });
+        state.selected = 1;
+        for (raw, display) in [
+            ("scalar_range_ready", "RANGE READY"),
+            ("failed_value_too_large", "VALUE TOO LARGE"),
+            ("populating", "POPULATING"),
+        ] {
+            state.refresh(Ok(IndexesSnapshot {
+                indexes: vec![relationship(raw), node.clone()],
+            }));
+            assert_eq!(state.selected, 0);
+            assert_eq!(
+                state.snapshot.indexes[state.selected].entity_type,
+                "relationship"
+            );
+            assert!(text(&mut state, Language::En, 120, 30).contains(display));
+        }
+    }
+
     #[test]
     fn bilingual_narrow_and_stale_keep_explanations_and_escape_untrusted_text() {
         for lang in [Language::En, Language::PtBr] {

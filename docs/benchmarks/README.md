@@ -32,7 +32,13 @@ A [beta.15 integration diagnostic](2026-11-05-integration-015b15.md) covers 200,
 
 A [beta.16 integration diagnostic](2026-11-05-beta16-integration.md) checks online keyed types, identified batches and local interruption recovery on synthetic fixtures.
 
+A [wide-graph relationship count comparison](2026-11-06-relationship-count.md) records a 2-million-node synthetic baseline and scan candidate.
+
+A [relationship property index diagnostic](2026-11-06-relationship-index.md) measures a 100,000-edge synthetic standalone fixture and checks restart and downgrade refusal.
+
 ## Recent pressure-admission smoke
+
+A scan candidate passed synthetic pressure/refusal/recovery with [2 GiB](2026-11-06-pressure-2g-scan-candidate.json) and [3 GiB](2026-11-06-pressure-3g-scan-candidate.json) cgroup limits. Injection used tmpfs and exercises cgroup admission, not a hard RSS ceiling or sustained workload.
 
 The [beta.16 candidate](2026-11-05-beta16-cgroup.json) passed a traced 512 MiB synthetic pressure, rollback and recovery smoke with a persistent observer. It is not a global RSS ceiling or capacity qualification.
 

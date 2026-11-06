@@ -353,6 +353,11 @@ pub fn apply(
     batch: &Batch,
     limits: ApplyLimits,
 ) -> Result<ApplyReceipt, ApplyError> {
+    if database.has_relationship_index_format() {
+        return Err(ApplyError::Invalid(
+            "relationship indexes require standalone storage",
+        ));
+    }
     let (entries, _) = batch.prepare(limits)?;
     let mut hash = Sha256::new();
     batch.encode(&entries, |bytes| hash.update(bytes));

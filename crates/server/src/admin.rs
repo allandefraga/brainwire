@@ -325,6 +325,7 @@ pub fn overview(json: bool, estimated: bool, config: Option<&Path>) -> Result<()
                     "edge_labels": g.edge_labels,
                     "index_declarations": g.index_declarations,
                     "timeline_streams": g.timeline_streams,
+                    "secondary_index_scope": "node",
                     "secondary_index_status": if g.index_declarations == 0 { "none" } else if g.indexes_ready { "scalar_equality_ready" } else { "declared_only" },
                     "indexed_fields": g.indexed_fields,
                     "storage": g.storage,
@@ -419,6 +420,7 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
             serde_json::json!({
                 "database": name,
                 "catalog": catalog,
+                "secondary_index_scope": "node",
                 "secondary_index_status": index_status,
                 "temporal_history_status": "not_implemented",
                 "maintenance_status": "not_implemented",
@@ -439,7 +441,7 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
                 stream.event_type, stream.timestamp_field
             );
         }
-        println!("secondary indexes: {index_status}");
+        println!("node secondary indexes: {index_status}");
         println!("temporal history and maintenance jobs: not implemented");
     } else {
         println!("database={name} has no ontology catalog");

@@ -35,6 +35,11 @@ python crates/server/tests/cgroup_pressure_smoke.py \
   --image YOUR_LOCAL_IMAGE --output /tmp/brainwire-pressure-new.json
 ```
 
+For a larger isolated smoke, add `--memory-mib 2048` or `--memory-mib 3072`.
+These tests deliberately fill tmpfs near the selected cgroup limit: verify Docker
+host memory is available and run them serially. They do not qualify a 2/3 GiB
+production workload.
+
 Use a new output path. The script creates uniquely labelled temporary resources,
 uses a random loopback port, cleans up only its own container and volume, and
 stops if the measurement or injection is unsafe or unavailable. It may return

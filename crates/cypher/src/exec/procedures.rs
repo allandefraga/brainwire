@@ -25,7 +25,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "sourceTable",
             "sources",
         ]),
-        "db.indexes" => Ok(&["label", "property", "state", "name"]),
+        "db.indexes" => Ok(&["label", "property", "state", "name", "entityType"]),
         "db.labels" => Ok(&["label"]),
         "db.relationshipTypes" => Ok(&["relationshipType"]),
         "db.propertyKeys" => Ok(&["propertyKey"]),
@@ -623,21 +623,43 @@ pub(super) fn run(
                 "declared_only"
             }
         };
-        return ctx
-            .catalog
-            .node_types
-            .iter()
-            .flat_map(|ty| {
-                ty.indexed.iter().map(|field| {
-                    bind(vec![
-                        value(Value::Str(ty.label.clone())),
-                        value(Value::Str(field.clone())),
-                        value(Value::Str(state(ty, field).into())),
-                        value(Value::Str(ty.index_name(field))),
-                    ])
-                })
-            })
-            .collect();
+        let mut rows = Vec::new();
+        for ty in &ctx.catalog.node_types {
+            for field in &ty.indexed {
+                rows.push(bind(vec![
+                    value(Value::Str(ty.label.clone())),
+                    value(Value::Str(field.clone())),
+                    value(Value::Str(state(ty, field).into())),
+                    value(Value::Str(ty.index_name(field))),
+                    value(Value::Str("node".into())),
+                ])?);
+            }
+        }
+        for ty in &ctx.catalog.edge_types {
+            for index in &ty.property_indexes {
+                rows.push(bind(vec![
+                    value(Value::Str(ty.name.clone())),
+                    value(Value::Str(index.property.clone())),
+                    value(Value::Str(
+                        match index.state {
+                            brainwire_core::schema::RelationshipIndexState::Populating => {
+                                "populating"
+                            }
+                            brainwire_core::schema::RelationshipIndexState::Ready => {
+                                "scalar_range_ready"
+                            }
+                            brainwire_core::schema::RelationshipIndexState::Failed => {
+                                "failed_value_too_large"
+                            }
+                        }
+                        .into(),
+                    )),
+                    value(Value::Str(index.name.clone())),
+                    value(Value::Str("relationship".into())),
+                ])?);
+            }
+        }
+        return Ok(rows);
     }
     if name == "knowledge.rank" {
         return knowledge::run(args, ctx, bind);
@@ -823,12 +845,16 @@ pub(super) fn admin(txn: &mut Txn<'_>, name: &str, args: &[Value]) -> Result<(),
     };
     match name {
         "db.createIndex" => {
-            arity(2..=4)?;
+            arity(2..=5)?;
             let index_name = match args.get(2) {
                 None | Some(Value::Null) => None,
                 Some(_) => Some(text(2)?),
             };
-            catalog::create_index(txn, text(0)?, text(1)?, index_name, flag(3)?)?
+            if flag(4)? {
+                catalog::create_relationship_index(txn, text(0)?, text(1)?, index_name, flag(3)?)?
+            } else {
+                catalog::create_index(txn, text(0)?, text(1)?, index_name, flag(3)?)?
+            }
         }
         "db.dropIndex" => {
             arity(1..=2)?;

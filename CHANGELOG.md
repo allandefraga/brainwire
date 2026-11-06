@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.0-beta.2 — experimental candidate
+
+- Narrow eligible relationship-type scans to catalog endpoint labels, including
+  endpoint access checks. This is not a constant-time count store.
+- Add opt-in relationship property indexes for standalone graphs, with online
+  population and TUI status. Enabling them changes the disk format; read the
+  [upgrade and rollback guide](docs/relationship-property-indexes.md).
+- Record a synthetic wide-graph comparison and short 2/3 GiB container
+  pressure checks. These do not establish production memory or failover limits.
+
 ## 0.16.0-beta.1 — experimental candidate
 
 - Declare immutable merge keys when creating a new relationship type online on

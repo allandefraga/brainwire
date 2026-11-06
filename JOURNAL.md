@@ -29,6 +29,23 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-06: v0.16.0-beta.2 relationship scans and indexes
+
+- **Done:** narrow eligible directed relationship scans using catalog endpoint
+  labels; add opt-in standalone relationship property indexes, bounded online
+  population and TUI index status. The index upgrades the on-disk format;
+  older binaries and quorum cannot open upgraded graphs. Back up before use.
+- **Verification:** integrated Rust workspace passed 1,130 tests (3 ignored),
+  Clippy and formatting; Python suites passed 245 tests (7 skipped), 108 script
+  tests, 21 pressure-harness tests and 12 Kubernetes manifest tests. A synthetic
+  2 million-node comparison measured the integrated beta.2 image; short
+  2/3 GiB pressure checks are container smoke tests, not RSS qualification.
+  See the benchmark receipts for conditions and limitations.
+- **Next:** qualify the integrated image and representative workloads, test
+  sustained memory pressure, and evaluate replicated indexes separately.
+  Relationship counts are not O(1); shared deployments still need transport
+  encryption, and production multi-machine failover is not qualified.
+
 ## 2026-11-05: v0.16.0-beta.1 keyed events and identified batches
 
 - **Done:** support optional immutable keys when declaring a new relationship type online on a standalone server; add a Python request ID to one bounded node or edge batch without automatic retry; add a read-only TUI inspector for one standalone request outcome. Update README, website and guides; retain experimental-ledger and recovery limits.

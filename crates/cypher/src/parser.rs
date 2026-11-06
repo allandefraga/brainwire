@@ -415,6 +415,7 @@ impl<'a> Parser<'a> {
         self.advance(); // CREATE
         self.advance(); // INDEX
         let mut if_not_exists = false;
+        let mut relationship = false;
         let (label, key, name) = if self.eat_keyword("ON") {
             let (label, key) = self.parse_legacy_index_target()?;
             (label, key, None)
@@ -431,10 +432,26 @@ impl<'a> Parser<'a> {
             }
             self.expect_keyword("FOR")?;
             self.expect(Tok::LParen, "'('")?;
-            let var = self.expect_ident("a variable")?;
-            self.expect(Tok::Colon, "':'")?;
-            let label = self.expect_ident("a label")?;
-            self.expect(Tok::RParen, "')'")?;
+            let (var, label) = if self.check(&Tok::RParen) {
+                self.advance();
+                relationship = true;
+                self.expect(Tok::Minus, "'-'")?;
+                self.expect(Tok::LBracket, "'['")?;
+                let var = self.expect_ident("a variable")?;
+                self.expect(Tok::Colon, "':'")?;
+                let label = self.expect_ident("a relationship type")?;
+                self.expect(Tok::RBracket, "']'")?;
+                self.expect(Tok::Minus, "'-'")?;
+                self.expect(Tok::LParen, "'('")?;
+                self.expect(Tok::RParen, "')'")?;
+                (var, label)
+            } else {
+                let var = self.expect_ident("a variable")?;
+                self.expect(Tok::Colon, "':'")?;
+                let label = self.expect_ident("a label")?;
+                self.expect(Tok::RParen, "')'")?;
+                (var, label)
+            };
             self.expect_keyword("ON")?;
             self.expect(Tok::LParen, "'('")?;
             let owner = self.expect_ident("a variable")?;
@@ -453,14 +470,18 @@ impl<'a> Parser<'a> {
             return Err(self.error_here("not supported yet: index OPTIONS"));
         }
         let text = |value: String| Expr::Literal(Value::Str(value));
+        let mut args = vec![
+            text(label),
+            text(key),
+            name.map(text).unwrap_or(Expr::Literal(Value::Null)),
+            Expr::Literal(Value::Bool(if_not_exists)),
+        ];
+        if relationship {
+            args.push(Expr::Literal(Value::Bool(true)));
+        }
         Ok(Clause::Call {
             name: "db.createIndex".into(),
-            args: vec![
-                text(label),
-                text(key),
-                name.map(text).unwrap_or(Expr::Literal(Value::Null)),
-                Expr::Literal(Value::Bool(if_not_exists)),
-            ],
+            args,
             yields: vec![],
             where_: None,
         })

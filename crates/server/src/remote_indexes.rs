@@ -3,8 +3,9 @@ use crate::probe::{success, BoltClient};
 use brainwire_bolt::packstream::PackValue;
 use brainwire_tui::{IndexSummary, IndexesSnapshot};
 
-const QUERY: &str = "CALL db.indexes() YIELD label, property, state RETURN label, property, state";
-const FIELDS: [&str; 3] = ["label", "property", "state"];
+const QUERY: &str = "CALL db.indexes()";
+const LEGACY_FIELDS: [&str; 4] = ["label", "property", "state", "name"];
+const FIELDS: [&str; 5] = ["label", "property", "state", "name", "entityType"];
 const MAX_WIRE: usize = 128 * 1024;
 const MAX_ROWS: usize = 200;
 
@@ -28,15 +29,21 @@ pub fn indexes(address: &str, graph: &str, timeout_ms: u64) -> Result<IndexesSna
         ],
     )?;
     let metadata = success(client.receive()?)?;
-    let expected = PackValue::List(
-        FIELDS
-            .iter()
-            .map(|s| PackValue::String((*s).into()))
-            .collect(),
-    );
-    if metadata.get("fields") != Some(&expected) {
+    let fields = |names: &[&str]| {
+        PackValue::List(
+            names
+                .iter()
+                .map(|name| PackValue::String((*name).into()))
+                .collect(),
+        )
+    };
+    let has_entity_type = if metadata.get("fields") == Some(&fields(&FIELDS)) {
+        true
+    } else if metadata.get("fields") == Some(&fields(&LEGACY_FIELDS)) {
+        false
+    } else {
         return Err("indexes RUN returned unexpected fields".into());
-    }
+    };
     client.send(
         0x3f,
         vec![PackValue::Map(vec![("n".into(), PackValue::Int(-1))])],
@@ -48,12 +55,12 @@ pub fn indexes(address: &str, graph: &str, timeout_ms: u64) -> Result<IndexesSna
             if snapshot.indexes.len() >= MAX_ROWS {
                 return Err("index snapshot exceeds 200 rows".into());
             }
-            let index = decode_record(response)?;
-            if snapshot
-                .indexes
-                .iter()
-                .any(|old| old.label == index.label && old.property == index.property)
-            {
+            let index = decode_record(response, has_entity_type)?;
+            if snapshot.indexes.iter().any(|old| {
+                old.entity_type == index.entity_type
+                    && old.label == index.label
+                    && old.property == index.property
+            }) {
                 return Err("duplicate index declaration".into());
             }
             snapshot.indexes.push(index);
@@ -70,25 +77,42 @@ pub fn indexes(address: &str, graph: &str, timeout_ms: u64) -> Result<IndexesSna
     Ok(snapshot)
 }
 
-fn decode_record(value: PackValue) -> Result<IndexSummary, String> {
+fn decode_record(value: PackValue, has_entity_type: bool) -> Result<IndexSummary, String> {
     let PackValue::Struct { tag: 0x71, fields } = value else {
         return Err("expected index RECORD".into());
     };
     let [PackValue::List(row)] = fields.as_slice() else {
         return Err("expected one index row list".into());
     };
-    let [PackValue::String(label), PackValue::String(property), PackValue::String(state)] =
-        row.as_slice()
-    else {
-        return Err("index row must contain three strings".into());
+    let (label, property, state, entity_type) = match row.as_slice() {
+        [PackValue::String(label), PackValue::String(property), PackValue::String(state), PackValue::String(_)]
+            if !has_entity_type =>
+        {
+            (label, property, state, "node")
+        }
+        [PackValue::String(label), PackValue::String(property), PackValue::String(state), PackValue::String(_), PackValue::String(entity_type)]
+            if has_entity_type =>
+        {
+            (label, property, state, entity_type.as_str())
+        }
+        _ => return Err("unexpected index row layout".into()),
     };
-    if !matches!(
-        state.as_str(),
-        "scalar_equality_ready" | "declared_only" | "populating"
-    ) {
-        return Err("unknown index state".into());
+    let valid = match entity_type {
+        "node" => matches!(
+            state.as_str(),
+            "scalar_equality_ready" | "declared_only" | "populating"
+        ),
+        "relationship" => matches!(
+            state.as_str(),
+            "scalar_range_ready" | "populating" | "failed_value_too_large"
+        ),
+        _ => false,
+    };
+    if !valid {
+        return Err("unknown index entity or state".into());
     }
     Ok(IndexSummary {
+        entity_type: entity_type.into(),
         label: label.clone(),
         property: property.clone(),
         state: state.clone(),
@@ -203,7 +227,7 @@ mod tests {
 
     fn fields() -> PackValue {
         PackValue::List(
-            FIELDS
+            LEGACY_FIELDS
                 .iter()
                 .map(|s| PackValue::String((*s).into()))
                 .collect(),
@@ -214,6 +238,7 @@ mod tests {
             PackValue::String(label.into()),
             PackValue::String("name".into()),
             PackValue::String(state.into()),
+            PackValue::String("idx".into()),
         ])
     }
     fn record(row: PackValue) -> PackValue {
@@ -224,10 +249,10 @@ mod tests {
     }
     #[test]
     fn strict_row_shape_and_states_preserve_catalog_strings() {
-        let decoded = decode_record(record(row("\x1b[31m", "declared_only"))).unwrap();
+        let decoded = decode_record(record(row("\x1b[31m", "declared_only")), false).unwrap();
         assert_eq!(decoded.label, "\x1b[31m");
         assert_eq!(
-            decode_record(record(row("", "scalar_equality_ready")))
+            decode_record(record(row("", "scalar_equality_ready")), false)
                 .unwrap()
                 .label,
             ""
@@ -238,14 +263,49 @@ mod tests {
             PackValue::List(vec![PackValue::Null; 3]),
             PackValue::String("A".into()),
         ] {
-            assert!(decode_record(record(bad)).is_err());
+            assert!(decode_record(record(bad), false).is_err());
         }
-        assert!(decode_record(PackValue::Struct {
-            tag: 0x71,
-            fields: vec![row("A", "declared_only"), PackValue::Null]
-        })
+        assert!(decode_record(
+            PackValue::Struct {
+                tag: 0x71,
+                fields: vec![row("A", "declared_only"), PackValue::Null]
+            },
+            false
+        )
         .is_err());
     }
+    #[test]
+    fn modern_snapshot_keeps_node_and_relationship_indexes_with_the_same_property() {
+        let modern = |state, entity| {
+            let PackValue::List(mut record) = row("Item", state) else {
+                unreachable!()
+            };
+            record.push(PackValue::String(entity));
+            PackValue::List(record)
+        };
+        let mut bytes = message(0x71, modern("scalar_equality_ready", "node".into()));
+        bytes.extend(message(
+            0x71,
+            modern("scalar_range_ready", "relationship".into()),
+        ));
+        bytes.extend(success_bytes(vec![]));
+        let fields = PackValue::List(
+            FIELDS
+                .iter()
+                .map(|name| PackValue::String((*name).into()))
+                .collect(),
+        );
+        let (address, server) = fake(bytes, fields);
+        let snapshot = indexes(&address, "selected", 1000).unwrap();
+        assert_eq!(snapshot.indexes.len(), 2);
+        assert_eq!(snapshot.indexes[0].entity_type, "node");
+        assert_eq!(snapshot.indexes[1].entity_type, "relationship");
+        server.join().unwrap();
+        assert!(
+            decode_record(record(modern("scalar_range_ready", "unknown".into())), true).is_err()
+        );
+    }
+
     #[test]
     fn accepts_empty_and_200_rows_rejects_excess_partial_wrong_fields_and_wire() {
         for count in [0, 200, 201] {
