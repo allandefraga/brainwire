@@ -145,6 +145,12 @@ concurrently, each with its own bounded request deadline; a slow or unavailable
 voter does not postpone contacting the others. Report entries remain ordered by
 voter ID regardless of response order. Independent status samples do not
 prove quorum or readiness for the next write; transaction barriers remain authoritative.
+
+Probe and inspect reports also include `retained_log_capacity`: `normal`,
+`warning` at 80%, `critical` at 95%, or `unknown` when the sample cannot be
+validated. It describes the configured retained Raft log cap, not free disk
+space. The warning is advisory: it neither reserves capacity nor guarantees the
+next write will fit. Current experimental replication does not purge this log.
 When all three initialized voters report committed and applied indexes,
 `replication_progress` shows the sampled min/max/spread and each voter's lag
 behind the highest sampled index. These requests run concurrently but are not

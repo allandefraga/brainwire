@@ -18,6 +18,8 @@ returned/deterministic event ID before retrying; no managed retries occur here.
 Read at most 100 milestones in chronological order with read_events(). Equal
 timestamps are ordered by event ID. This caps returned rows; the server may
 still scan and sort the subject's full timeline within its query budget.
+Use read_event_page() for a timezone-aware time window and keyset cursor. Pages
+are separate snapshots; the application must keep event time and ID immutable.
 """
 import argparse
 from datetime import datetime, timezone
@@ -31,6 +33,16 @@ def _text(value, name, limit=1000):
     if not isinstance(value, str) or not value or len(value.encode("utf-8")) > limit:
         raise ValueError(f"{name} must be a nonempty string of at most {limit} UTF-8 bytes")
     return value
+
+
+def _timestamp(value, name):
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if instant.tzinfo is None or instant.utcoffset() is None:
+            raise ValueError()
+        return instant.astimezone(timezone.utc).isoformat()
+    except (AttributeError, ValueError, TypeError, OverflowError):
+        raise ValueError(f"{name} must be an ISO timestamp with a timezone") from None
 
 
 def event_id(subject, key):
@@ -69,13 +81,7 @@ def record_event(driver, database, subject, key, kind, occurred_at, payload):
         raise ValueError("subject label must differ from TimelineEvent")
     _text(database, "database")
     kind = _text(kind, "event kind", 128)
-    try:
-        instant = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-        if instant.tzinfo is None or instant.utcoffset() is None:
-            raise ValueError()
-        timestamp = instant.astimezone(timezone.utc).isoformat()
-    except (AttributeError, ValueError, TypeError, OverflowError):
-        raise ValueError("occurred_at must be an ISO timestamp with a timezone") from None
+    timestamp = _timestamp(occurred_at, "occurred_at")
     if not isinstance(payload, dict):
         raise ValueError("payload must be a JSON object")
     try:
@@ -135,6 +141,86 @@ def read_events(driver, database, subject, *, limit=50):
             "e.payload_json AS payload_json ORDER BY e.occurred_at, e.entity_id LIMIT $limit",
             {"subject": subject_id, "limit": limit})
         return [dict(row) for row in rows]
+
+
+def read_event_page(driver, database, subject, *, start_at=None, end_at=None,
+                    after=None, limit=50):
+    """Read explicit milestones in [start_at, end_at), ordered by time and ID.
+
+    Bounds accept timezone-aware ISO timestamps and normalize to the UTC format
+    written by record_event(). Pass the returned next_cursor as after, retaining
+    the same subject and bounds. An extra visible row determines whether a
+    next_cursor is returned; no hidden counts or identities are queried.
+
+    Keep event time and identity immutable in the application. Each call has its
+    own read snapshot: concurrent insertions, updates and deletions can change
+    later pages. LIMIT bounds output rows, not server scan/sort work, response
+    bytes or process memory. This reads current explicit events, not AS OF data.
+    """
+    if not isinstance(subject, tuple) or len(subject) != 2:
+        raise ValueError("subject must be (label, entity_id)")
+    label = identifier(subject[0])
+    if label == "TimelineEvent":
+        raise ValueError("subject label must differ from TimelineEvent")
+    subject_id = _text(subject[1], "subject entity_id")
+    _text(database, "database")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be an integer between 1 and 100")
+    start = None if start_at is None else _timestamp(start_at, "start_at")
+    end = None if end_at is None else _timestamp(end_at, "end_at")
+    if start is not None and end is not None and start >= end:
+        raise ValueError("start_at must be earlier than end_at")
+    position = None
+    if after is not None:
+        if not isinstance(after, dict) or set(after) != {"occurred_at", "id"}:
+            raise ValueError("after must be a returned cursor with occurred_at and id")
+        timestamp = _timestamp(after["occurred_at"], "cursor occurred_at")
+        if timestamp != after["occurred_at"]:
+            raise ValueError("cursor occurred_at must use the returned canonical UTC format")
+        identity = _text(after["id"], "cursor event id")
+        if (start is not None and timestamp < start) or (end is not None and timestamp >= end):
+            raise ValueError("cursor must be inside the requested time window")
+        position = (timestamp, identity)
+
+    parameters = {"subject": subject_id, "limit": limit + 1}
+    predicates = []
+    if start is not None:
+        predicates.append("e.occurred_at >= $start_at")
+        parameters["start_at"] = start
+    if end is not None:
+        predicates.append("e.occurred_at < $end_at")
+        parameters["end_at"] = end
+    if position is not None:
+        predicates.append("(e.occurred_at > $after_at OR "
+                          "(e.occurred_at = $after_at AND e.entity_id > $after_id))")
+        parameters.update(after_at=position[0], after_id=position[1])
+    where = "WHERE " + " AND ".join(predicates) + " " if predicates else ""
+    query = (f"MATCH (s:{label} {{entity_id:$subject}})-[:HAS_EVENT]->(e:TimelineEvent) "
+             f"{where}RETURN e.entity_id AS id, e.kind AS kind, e.occurred_at AS occurred_at, "
+             "e.payload_json AS payload_json ORDER BY e.occurred_at, e.entity_id LIMIT $limit")
+    rows = []
+    with driver.session(database=database, default_access_mode="READ",
+                        fetch_size=min(limit + 1, 100)) as session:
+        for record in session.run(query, parameters):
+            if len(rows) >= limit + 1:
+                raise ValueError("timeline query returned more than the requested row bound")
+            row = dict(record)
+            timestamp = _timestamp(row.get("occurred_at"), "stored occurred_at")
+            if timestamp != row["occurred_at"]:
+                raise ValueError("stored events must use record_event's canonical UTC format")
+            identity = _text(row.get("id"), "stored event id")
+            current = (timestamp, identity)
+            if position is not None and current <= position:
+                raise ValueError("timeline rows must be strictly ordered after the cursor")
+            if (start is not None and timestamp < start) or (end is not None and timestamp >= end):
+                raise ValueError("timeline query returned an event outside the time window")
+            position = current
+            rows.append(row)
+    next_cursor = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_cursor = {"occurred_at": rows[-1]["occurred_at"], "id": rows[-1]["id"]}
+    return {"events": rows, "next_cursor": next_cursor}
 
 
 def main(argv=None):

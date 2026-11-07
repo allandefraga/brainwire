@@ -55,6 +55,33 @@ fn valid_running_state(status: &network::ClusterStatus) -> bool {
             .is_none_or(|issue| matches!(issue, "storage_error" | "panic" | "stopped"))
 }
 
+fn retained_log_capacity(status: Option<&network::ClusterStatus>) -> serde_json::Value {
+    let valid = status.filter(|status| {
+        ((1 << 20)..=(64_u64 << 30)).contains(&status.max_log_bytes)
+            && status.log_bytes <= status.max_log_bytes
+            && status.log_remaining_bytes == status.max_log_bytes - status.log_bytes
+    });
+    let state = valid.map_or("unknown", |status| {
+        let used = u128::from(status.log_bytes) * 100;
+        let capacity = u128::from(status.max_log_bytes);
+        if used >= capacity * 95 {
+            "critical"
+        } else if used >= capacity * 80 {
+            "warning"
+        } else {
+            "normal"
+        }
+    });
+    serde_json::json!({
+        "state":state,
+        "used_bytes":valid.map(|status| status.log_bytes),
+        "limit_bytes":valid.map(|status| status.max_log_bytes),
+        "remaining_bytes":valid.map(|status| status.log_remaining_bytes),
+        "warning_percent":80,"critical_percent":95,
+        "scope":"advisory status sample; no space is reserved and the next write may still fail; retained logs cannot currently be purged"
+    })
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Peer {
@@ -365,6 +392,7 @@ pub(crate) fn control(config: &ClusterConfig, request: RpcRequest) -> Result<Rpc
 }
 
 pub(crate) fn probe(config: &ClusterConfig, kind: &str) -> Result<(), String> {
+    let mut log_capacity = retained_log_capacity(None);
     let outcome = (|| {
         let settings = config.transport().map_err(|_| "transport_unavailable")?;
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -383,6 +411,7 @@ pub(crate) fn probe(config: &ClusterConfig, kind: &str) -> Result<(), String> {
             if !valid_running_state(&status) {
                 return Err("invalid_status");
             }
+            log_capacity = retained_log_capacity(Some(&status));
             if !status.running {
                 return Err(match running_diagnostic(&status) {
                     "fatal_storage_error" => "fatal_storage_error",
@@ -418,6 +447,7 @@ pub(crate) fn probe(config: &ClusterConfig, kind: &str) -> Result<(), String> {
         "{}",
         serde_json::json!({"kind":"raft_probe","node_id":config.node_id,
         "probe_kind":kind,"success":outcome.is_ok(),"reason":outcome.err().unwrap_or(if kind == "liveness" { "running" } else { "quorum_read_barrier_passed" }),
+        "retained_log_capacity":log_capacity,
         "scope":"Raft only; does not verify graphs, Bolt authentication, or future writes"})
     );
     if outcome.is_err() {
@@ -470,13 +500,16 @@ pub(crate) fn inspect(config: &ClusterConfig) -> Result<(), String> {
                     if valid {
                         serde_json::json!({"node_id":node_id,"response_time_ms":response_time_ms,
                             "initialized":initialized,
+                            "retained_log_capacity":retained_log_capacity(Some(&status)),
                             "diagnostic":if status.running { "sampled" } else { running_diagnostic(&status) },"status":status})
                     } else {
                         serde_json::json!({"node_id":node_id,"response_time_ms":response_time_ms,
+                            "retained_log_capacity":retained_log_capacity(None),
                             "diagnostic":"invalid_status","status":null})
                     }
                 }
                 _ => serde_json::json!({"node_id":node_id,"response_time_ms":response_time_ms,
+                    "retained_log_capacity":retained_log_capacity(None),
                     "diagnostic":"unavailable","status":null}),
             };
             samples.push(sample);
@@ -719,7 +752,79 @@ pub(crate) fn provision(cluster: &ClusterConfig, config_path: &Path) -> Result<(
 
 #[cfg(test)]
 mod config_tests {
-    use super::ClusterConfig;
+    use super::{retained_log_capacity, ClusterConfig};
+    use brainwire_replication::network::ClusterStatus;
+
+    fn capacity_sample(used: u64, limit: u64) -> ClusterStatus {
+        ClusterStatus {
+            cluster_id: "test".into(),
+            node_id: 1,
+            state: "Leader".into(),
+            current_term: 1,
+            leader: Some(1),
+            last_log_index: Some(1),
+            last_applied: Some(1),
+            committed_index: Some(1),
+            membership: vec![1, 2, 3],
+            log_bytes: used,
+            max_log_bytes: limit,
+            log_remaining_bytes: limit.saturating_sub(used),
+            running: true,
+            running_issue: None,
+        }
+    }
+
+    #[test]
+    fn retained_log_advisory_uses_exact_thresholds_and_preserves_bytes() {
+        let limit = 100 * (1 << 20);
+        for (used, state) in [
+            (0, "normal"),
+            (limit * 80 / 100 - 1, "normal"),
+            (limit * 80 / 100, "warning"),
+            (limit * 95 / 100 - 1, "warning"),
+            (limit * 95 / 100, "critical"),
+            (limit, "critical"),
+        ] {
+            let result = retained_log_capacity(Some(&capacity_sample(used, limit)));
+            assert_eq!(result["state"], state);
+            assert_eq!(result["used_bytes"], used);
+            assert_eq!(result["limit_bytes"], limit);
+            assert_eq!(result["remaining_bytes"], limit - used);
+            assert_eq!(result["warning_percent"], 80);
+            assert_eq!(result["critical_percent"], 95);
+            assert!(result["scope"]
+                .as_str()
+                .unwrap()
+                .contains("no space is reserved"));
+        }
+        let largest = 64_u64 << 30;
+        assert_eq!(
+            retained_log_capacity(Some(&capacity_sample(largest, largest)))["state"],
+            "critical"
+        );
+    }
+
+    #[test]
+    fn retained_log_advisory_does_not_present_invalid_capacity_as_healthy() {
+        let limit = 1 << 20;
+        let mut inconsistent = capacity_sample(0, limit);
+        inconsistent.log_remaining_bytes = limit - 1;
+        let invalid = [
+            None,
+            Some(capacity_sample(0, 0)),
+            Some(capacity_sample(0, limit - 1)),
+            Some(capacity_sample(0, (64_u64 << 30) + 1)),
+            Some(capacity_sample(limit + 1, limit)),
+            Some(inconsistent),
+        ];
+        for sample in invalid {
+            let result = retained_log_capacity(sample.as_ref());
+            assert_eq!(result["state"], "unknown");
+            for field in ["used_bytes", "limit_bytes", "remaining_bytes"] {
+                assert!(result[field].is_null(), "invalid field {field} was exposed");
+            }
+        }
+    }
 
     #[test]
     fn static_peer_listener_requires_a_fixed_nonzero_port() {

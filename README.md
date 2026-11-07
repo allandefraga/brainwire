@@ -27,15 +27,19 @@
 Brainwire connects people, projects, documents and events in named graphs.
 The engine is written in Rust, stores data in RocksDB and speaks Bolt.
 
-> **v0.16.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
+> **v0.16.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
 > Memory and distributed recovery qualification remain open. Read the
 > [current limits](#current-limits) before choosing a deployment.
 
-This beta speeds up relationship-type scans and adds an experimental, opt-in
-index for relationship properties. See the [measured example](docs/benchmarks/2026-11-06-relationship-count.md)
-and [how to enable relationship indexes](docs/relationship-property-indexes.md).
+This beta improves memory accounting for keyed relationship writes. When an
+eligible relationship property index is ready, keyed `MERGE` can also use it
+to find existing events between the same endpoints. See
+[how to enable relationship indexes](docs/relationship-property-indexes.md).
 The index changes the on-disk format: back up first, and use it only on a
 standalone server. Quorum and downgrade are not supported for upgraded volumes.
+
+The beta also includes a [paginated timeline example](docs/temporal-data.md),
+the `SHOW INDEXES` Cypher alias, and an advisory for retained Raft log capacity.
 
 ## What you can build
 
@@ -61,9 +65,9 @@ and [supported Cypher](docs/local-cypher.md).
 You need **Git** and **Docker with Compose**. Start a local demo:
 
 ```sh
-git clone --branch v0.16.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.16.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.2 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.3 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -216,7 +220,7 @@ not available.
 
 ## Release status and license
 
-**v0.16.0-beta.2 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
+**v0.16.0-beta.3 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
 
 [Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
 terms. Repository and image visibility control access separately.

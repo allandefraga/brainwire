@@ -29,6 +29,41 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-07: v0.16.0-beta.3 keyed write efficiency
+
+- **Done:** reuse an eligible ready relationship property index for keyed
+  MERGE; retain the pair scan when no such index is ready. Decode only key
+  fields for scan candidates and charge temporary decoding by peak. Keep
+  matched-record admission, complete key checks and transactional conflicts.
+  Add a paginated explicit-event example, a standalone `SHOW INDEXES` alias,
+  and an advisory retained-log capacity status in Raft diagnostics.
+- **Verification:** the integrated workspace passed 1,148 Rust tests (three
+  ignored), Clippy and formatting; Python client and script suites passed. A
+  temporary authenticated server checked timeline pagination and ACL isolation.
+  New synthetic hub diagnostics compare 10,000 events with and without an
+  index. The indexed format remains standalone-only and opt-in; see
+  [benchmark conditions](docs/benchmarks/2026-11-07-keyed-hub.md).
+- **Final candidate:** the local three-process quorum/partition and bounded log
+  recovery acceptance passed; this does not qualify multi-machine operation.
+  The final image passed a two-minute mixed-load/restart test with progress
+  windows, a short synthetic 2 GiB pressure smoke and an isolated synthetic
+  application-adapter scenario. The final image did not run the earlier
+  one-hour diagnostic.
+- **Mixed-load evidence:** one hour of concurrent synthetic reads and writes,
+  exact data checks and quiescent SIGKILL/restart passed on an intermediate
+  candidate predating the later Cypher and Raft changes. The run measured
+  aggregate progress, not progress windows; see the [receipt and limits](docs/benchmarks/2026-11-07-mixed-1h.md).
+- **Next:** qualify large catalogs, sustained representative mixed load and
+  multi-machine replication. The indexed path reads the transaction's catalog
+  and is not a constant-time guarantee; the fallback scans the pair.
+- **Deferred:** cgroup membership refresh was prototyped but not shipped: a
+  real cgroup v2 root can legitimately lack memory control files, and namespace
+  views can hide ancestors. Before changing admission, preserve I/O error kinds
+  and distinguish no visible limit from unknown. See the Linux kernel's
+  [memory interface](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)
+  and [cgroup namespace behavior](https://man7.org/linux/man-pages/man7/cgroup_namespaces.7.html).
+  The existing RSS and distributed-production limits remain open.
+
 ## 2026-11-06: v0.16.0-beta.2 relationship scans and indexes
 
 - **Done:** narrow eligible directed relationship scans using catalog endpoint

@@ -3,6 +3,12 @@
 Use an experimental relationship property index to find edges by a value such
 as an event timestamp. Indexes are available on opted-in standalone stores.
 
+For a relationship type with immutable merge keys, an index on one of its key
+properties can also narrow the search used by `MERGE`. Wait until the index is
+ready first. If no eligible index is ready, `MERGE` scans the endpoint pair.
+The indexed path still checks the complete key and the current catalog; it is
+not a constant-time guarantee.
+
 ## Enable on a standalone server
 
 Take a backup before enabling this option and verify that you can reopen it.

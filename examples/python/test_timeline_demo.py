@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from examples.python.timeline_demo import event_id, ontology, read_events, record_event
+from examples.python.timeline_demo import event_id, ontology, read_event_page, read_events, record_event
 
 
 class TimelineTest(unittest.TestCase):
@@ -105,6 +105,85 @@ class TimelineTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     read_events(driver, "demo", subject, limit=limit)
                 driver.session.assert_not_called()
+
+    def test_event_page_uses_parameterized_window_and_keyset_cursor(self):
+        driver = MagicMock()
+        session = driver.session.return_value.__enter__.return_value
+        at = "2026-11-03T10:00:00+00:00"
+        records = [{"id": f"timeline:{key}", "kind": "changed", "occurred_at": at,
+                    "payload_json": "{}"} for key in ("b", "c", "d")]
+        session.run.return_value = iter(records)
+        result = read_event_page(driver, "demo", ("Ticket", "t' OR true"),
+            start_at="2026-11-03T11:00:00+01:00", end_at="2026-11-04T00:00:00Z",
+            after={"occurred_at": at, "id": "timeline:a' OR true"}, limit=2)
+        self.assertEqual(result["events"], records[:2])
+        self.assertEqual(result["next_cursor"], {"occurred_at": at, "id": "timeline:c"})
+        query, params = session.run.call_args.args
+        self.assertNotIn("t' OR true", query)
+        self.assertNotIn("timeline:a' OR true", query)
+        self.assertIn("e.occurred_at >= $start_at", query)
+        self.assertIn("e.occurred_at < $end_at", query)
+        self.assertIn("e.occurred_at = $after_at AND e.entity_id > $after_id", query)
+        self.assertIn("ORDER BY e.occurred_at, e.entity_id LIMIT $limit", query)
+        self.assertEqual(params, {"subject": "t' OR true", "limit": 3,
+            "start_at": at, "end_at": "2026-11-04T00:00:00+00:00",
+            "after_at": at, "after_id": "timeline:a' OR true"})
+        driver.session.assert_called_once_with(database="demo", default_access_mode="READ", fetch_size=3)
+
+    def test_event_page_only_returns_a_cursor_when_another_visible_row_exists(self):
+        at = "2026-11-03T10:00:00+00:00"
+        records = [{"id": "timeline:a", "kind": "opened", "occurred_at": at,
+                    "payload_json": "{}"}]
+        for rows in ([], records):
+            driver = MagicMock()
+            driver.session.return_value.__enter__.return_value.run.return_value = iter(rows)
+            self.assertEqual(read_event_page(driver, "demo", ("Ticket", "t"), limit=1),
+                {"events": rows, "next_cursor": None})
+
+    def test_event_page_validation_precedes_connection(self):
+        at = "2026-11-03T10:00:00+00:00"
+        invalid = [
+            {"start_at": "2026-11-03T10:00:00"},
+            {"end_at": "yesterday"},
+            {"start_at": at, "end_at": at},
+            {"start_at": "2026-11-04T00:00:00Z", "end_at": at},
+            {"limit": True}, {"limit": 0}, {"limit": 101},
+            {"after": []}, {"after": {}},
+            {"after": {"occurred_at": at, "id": ""}},
+            {"after": {"occurred_at": "2026-11-03T10:00:00Z", "id": "a"}},
+            {"after": {"occurred_at": at, "id": "a", "extra": 1}},
+            {"after": {"occurred_at": at, "id": "x" * 1001}},
+            {"after": {"occurred_at": at, "id": "a"}, "start_at": "2026-11-04T00:00:00Z"},
+            {"after": {"occurred_at": at, "id": "a"}, "end_at": at},
+        ]
+        for options in invalid:
+            with self.subTest(options=options):
+                driver = MagicMock()
+                with self.assertRaises(ValueError):
+                    read_event_page(driver, "demo", ("Ticket", "t"), **options)
+                driver.session.assert_not_called()
+
+    def test_event_page_rejects_invalid_order_or_noncanonical_stored_times(self):
+        at = "2026-11-03T10:00:00+00:00"
+        for rows in (
+            [{"id": "a", "occurred_at": "2026-11-03T10:00:00Z"}],
+            [{"id": "b", "occurred_at": at}, {"id": "a", "occurred_at": at}],
+            [{"id": "a", "occurred_at": at}, {"id": "a", "occurred_at": at}],
+        ):
+            driver = MagicMock()
+            session = driver.session.return_value.__enter__.return_value
+            session.run.return_value = iter(rows)
+            with self.assertRaises(ValueError):
+                read_event_page(driver, "demo", ("Ticket", "t"))
+            driver.session.return_value.__exit__.assert_called_once()
+
+    def test_event_page_propagates_read_failure_and_closes_the_session(self):
+        driver = MagicMock()
+        session = driver.session.return_value.__enter__.return_value
+        session.run.side_effect = OSError("connection lost")
+        with self.assertRaises(OSError):
+            read_event_page(driver, "demo", ("Ticket", "t"))
+        driver.session.return_value.__exit__.assert_called_once()
 
 
 if __name__ == "__main__":

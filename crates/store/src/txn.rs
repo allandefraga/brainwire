@@ -472,7 +472,7 @@ impl<'db> Txn<'db> {
             }
         }
     }
-    fn depend_prefix(&mut self, cf: Cf, prefix: &[u8]) {
+    pub(crate) fn depend_prefix(&mut self, cf: Cf, prefix: &[u8]) {
         self.touch();
         if self.depends_prefix.insert((cf, prefix.to_vec())) {
             self.estimated_bytes = self.estimated_bytes.saturating_add(128 + prefix.len());

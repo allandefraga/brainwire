@@ -36,6 +36,10 @@ A [wide-graph relationship count comparison](2026-11-06-relationship-count.md) r
 
 A [relationship property index diagnostic](2026-11-06-relationship-index.md) measures a 100,000-edge synthetic standalone fixture and checks restart and downgrade refusal.
 
+A [keyed relationship diagnostic](2026-11-07-keyed-hub.md) compares high-degree writes with and without an eligible index on local beta candidates.
+
+A [one-hour mixed-load diagnostic](2026-11-07-mixed-1h.md) checks a 100,000-node synthetic standalone graph and restart on an intermediate beta.3 candidate.
+
 ## Recent pressure-admission smoke
 
 A scan candidate passed synthetic pressure/refusal/recovery with [2 GiB](2026-11-06-pressure-2g-scan-candidate.json) and [3 GiB](2026-11-06-pressure-3g-scan-candidate.json) cgroup limits. Injection used tmpfs and exercises cgroup admission, not a hard RSS ceiling or sustained workload.

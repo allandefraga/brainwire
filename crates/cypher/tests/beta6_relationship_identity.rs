@@ -48,6 +48,61 @@ fn event(db: &Database, key: &str, summary: &str) {
 }
 
 #[test]
+fn keyed_merge_reuses_temporary_decode_budget_across_candidates() {
+    let (_dir, db) = setup();
+    let padding = "x".repeat(1024);
+    for i in 0..180 {
+        event(&db, &format!("{i:04}-{padding}"), "small");
+    }
+    let query = "MATCH (a:Ticket {entity_id:'a'}), (b:Ticket {entity_id:'b'}) \
+        MERGE (a)-[:EVENT {event_key:$key}]->(b)";
+    let params = BTreeMap::from([("key".into(), Value::Str("new-event".into()))]);
+    brainwire_cypher::execute_with_limits(
+        &db,
+        query,
+        &params,
+        brainwire_cypher::ExecutionLimits {
+            memory_bytes: 128 * 1024,
+            ..Default::default()
+        },
+    )
+    .expect("temporary candidates should not accumulate for the entire scan");
+    assert_eq!(
+        run(&db, "MATCH (:Ticket)-[r:EVENT]->(:Ticket) RETURN count(r)"),
+        vec![vec![Out::Value(Value::Int(181))]]
+    );
+}
+
+#[test]
+fn keyed_merge_still_admits_the_matched_payload_before_updating() {
+    let (_dir, db) = setup();
+    event(&db, "existing", &"x".repeat(256 * 1024));
+    let query = "MATCH (a:Ticket {entity_id:'a'}), (b:Ticket {entity_id:'b'}) \
+        MERGE (a)-[r:EVENT {event_key:'existing'}]->(b) SET r.summary='changed'";
+    let error = brainwire_cypher::execute_with_limits(
+        &db,
+        query,
+        &BTreeMap::new(),
+        brainwire_cypher::ExecutionLimits {
+            memory_bytes: 64 * 1024,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        brainwire_cypher::ExecError::MemoryLimit { .. }
+    ));
+    assert_eq!(
+        run(
+            &db,
+            "MATCH (:Ticket)-[r:EVENT]->(:Ticket) RETURN size(r.summary)"
+        ),
+        vec![vec![Out::Value(Value::Int(256 * 1024))]]
+    );
+}
+
+#[test]
 fn undeclared_merge_identity_preserves_legacy_property_upserts() {
     let (_dir, db) = setup();
     for summary in ["first", "updated"] {

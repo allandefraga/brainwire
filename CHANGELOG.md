@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0-beta.3 — experimental candidate
+
+- Reuse a ready relationship property index for eligible keyed `MERGE` calls;
+  otherwise retain the pair scan. Full key validation and conflict detection
+  remain in place. No new on-disk format is introduced by this optimization.
+- Account for peak temporary key decoding rather than summing allocations
+  already released during a keyed scan; the matched full record is still
+  admitted before an update.
+- Add a paginated explicit-event timeline example, a standalone `SHOW INDEXES`
+  alias and advisory retained-log capacity in Raft diagnostics.
+- Add reproducible synthetic diagnostics for high-degree keyed writes and
+  mixed reads and writes followed by an abrupt restart.
+
 ## 0.16.0-beta.2 — experimental candidate
 
 - Narrow eligible relationship-type scans to catalog endpoint labels, including

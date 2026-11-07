@@ -450,3 +450,89 @@ fn keyed_parallel_same_value_remain_distinct_before_and_after_build() {
     );
     brainwire_store::graph::check_invariants(&db).unwrap();
 }
+
+#[test]
+fn indexed_keyed_merge_guard_failure_rolls_back_and_releases_query_pool() {
+    use brainwire_cypher::{ExecError, ExecutionLimits, QueryMemoryPool, QueryTransaction};
+    use std::sync::Arc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let resources = Resources::new(StoreConfig::for_tests());
+    let mut db = Database::open(dir.path(), &resources).unwrap();
+    db.enable_relationship_index_format(&resources).unwrap();
+    run(&db, "CALL db.createLabel('Item')");
+    run(
+        &db,
+        "CALL db.createRelationshipType('EVENT', 'Item', 'Item', ['event_id'])",
+    );
+    run(
+        &db,
+        "CREATE (:Item {entity_id:'a'}), (:Item {entity_id:'b'})",
+    );
+    let payload = "x".repeat(256 * 1024);
+    execute(
+        &db,
+        "MATCH (a:Item {entity_id:'a'}), (b:Item {entity_id:'b'}) \
+         MERGE (a)-[r:EVENT {event_id:'first'}]->(b) SET r.payload=$payload",
+        &BTreeMap::from([("payload".into(), Value::Str(payload))]),
+    )
+    .unwrap();
+    run(
+        &db,
+        "CREATE INDEX by_event_id FOR ()-[r:EVENT]-() ON (r.event_id)",
+    );
+    db.build_pending_indexes().unwrap();
+
+    let query = "MATCH (a:Item {entity_id:'a'}), (b:Item {entity_id:'b'}) \
+        MERGE (a)-[r:EVENT {event_id:'first'}]->(b) SET r.payload='changed'";
+    let pool = Arc::new(QueryMemoryPool::new(128 * 1024));
+    let mut transaction = QueryTransaction::begin_with_pool(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 64 * 1024,
+            timeout: None,
+        },
+        Arc::clone(&pool),
+    )
+    .unwrap();
+    transaction
+        .run("CREATE (:Item {entity_id:'rollback'})", &BTreeMap::new())
+        .unwrap();
+    assert!(matches!(
+        transaction.run(query, &BTreeMap::new()),
+        Err(ExecError::MemoryLimit { .. })
+    ));
+    assert!(transaction.commit().is_err());
+    assert_eq!(pool.usage().reserved_bytes, 0);
+    assert_eq!(
+        run(&db, "MATCH (n:Item {entity_id:'rollback'}) RETURN count(n)"),
+        vec![vec![Out::Value(Value::Int(0))]]
+    );
+    assert_eq!(
+        run(&db, "MATCH ()-[r:EVENT]->() RETURN size(r.payload)"),
+        vec![vec![Out::Value(Value::Int(256 * 1024))]]
+    );
+
+    let mut expired = QueryTransaction::begin_with_pool(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 64 * 1024,
+            timeout: Some(std::time::Duration::ZERO),
+        },
+        Arc::clone(&pool),
+    )
+    .unwrap();
+    assert!(matches!(
+        expired.run(query, &BTreeMap::new()),
+        Err(ExecError::TimedOut)
+    ));
+    assert!(expired.commit().is_err());
+    assert_eq!(pool.usage().reserved_bytes, 0);
+
+    run(&db, query);
+    assert_eq!(
+        run(&db, "MATCH ()-[r:EVENT]->() RETURN r.payload"),
+        vec![vec![Out::Value(Value::Str("changed".into()))]]
+    );
+    brainwire_store::graph::check_invariants(&db).unwrap();
+}

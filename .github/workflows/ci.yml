@@ -114,6 +114,9 @@ jobs:
       - name: Verify context evidence and ACL isolation
         run: python crates/server/tests/context_rerank.py --binary target/debug/brainwire
 
+      - name: Verify timeline pagination and ACL isolation
+        run: python crates/server/tests/timeline_page.py --binary target/debug/brainwire
+
       - name: Verify quorum failover and identified-write recovery
         timeout-minutes: 10
         run: >-

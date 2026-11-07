@@ -23,10 +23,25 @@ rejected. A subject must already exist. Generate a starter ontology with
 `python -m examples.python.timeline_demo --print-ontology`; the example's
 module help shows how to record an event.
 
-Call `read_events(driver, database, (label, entity_id), limit=50)` to read the
-first milestones in timestamp order, with event ID as a tie breaker. The limit
-is 1–100 returned rows; the server may still scan and sort a larger timeline.
-This example does not provide pagination or a snapshot across calls.
+Call `read_events(driver, database, (label, entity_id), limit=50)` for the first
+milestones. To continue through a timeline, use the example's `read_event_page`:
+
+```python
+from examples.python.timeline_demo import read_event_page
+
+page = read_event_page(driver, "demo", ("Ticket", "ticket-1"),
+                       start_at="2026-01-01T00:00:00Z", limit=50)
+if page["next_cursor"] is not None:
+    next_page = read_event_page(driver, "demo", ("Ticket", "ticket-1"),
+                                start_at="2026-01-01T00:00:00Z",
+                                after=page["next_cursor"], limit=50)
+```
+
+Pages use timestamp and event ID as a stable ordering key. The optional
+`end_at` is exclusive. Keep event timestamps immutable while paginating.
+Calls do not share a snapshot: concurrent changes can affect later pages. The
+limit is 1–100 returned rows; the server may still scan and sort a larger
+timeline. This helper is an example, not automatic graph history.
 
 The event and link commit together. Conflicts and unknown commit outcomes are
 returned to the caller, who must reconcile before retrying. The example does

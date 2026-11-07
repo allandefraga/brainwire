@@ -489,6 +489,48 @@ pub(crate) fn check(txn: &Txn, catalog: &Catalog) -> Result<(), StoreError> {
 
 pub type PhysicalRelationship = (NodeId, EdgeTypeId, NodeId, EdgeId);
 
+/// Seek a ready equality index for one directed endpoint pair and track phantoms.
+/// The caller validates the current catalog and rechecks the complete merge key.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn visit_equality_pair_for_update<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    ty: &EdgeType,
+    field: &str,
+    value: &Value,
+    source: NodeId,
+    target: NodeId,
+    mut callback: impl FnMut(&[u8], &[u8]) -> Result<(), E>,
+) -> Result<bool, E> {
+    if !ty
+        .property_indexes
+        .iter()
+        .any(|index| index.property == field && index.state == RelationshipIndexState::Ready)
+    {
+        return Ok(false);
+    }
+    let Some(value) = encoded_value(value) else {
+        return Ok(false);
+    };
+    track_definition(txn, ty)?;
+    let edge = crate::graph::edge_key(source, ty.id, target, EdgeId::MERGED);
+    let pair = &edge[..EDGE_KEY_BYTES - 8];
+    let prefix = [prefix(ty.id, field).as_slice(), b"f", &value, pair].concat();
+    txn.depend_prefix(Cf::RelationshipIdx, &prefix);
+    txn.visit_prefix(Cf::RelationshipIdx, &prefix, |key, _| {
+        if key.len() != prefix.len() + 8 {
+            return Err(StoreError::Corrupt("invalid relationship pair index key".into()).into());
+        }
+        let physical = &key[key.len() - EDGE_KEY_BYTES..];
+        txn.with_get(Cf::Out, physical, |raw| {
+            let raw = raw.ok_or_else(|| {
+                StoreError::Corrupt("relationship index points to missing edge".into())
+            })?;
+            callback(physical, raw)
+        })
+    })?;
+    Ok(true)
+}
+
 /// Visit a conservative candidate set for a ready relationship index.
 /// The caller must recheck the predicate and endpoint visibility.
 pub fn visit<E: From<GraphError> + From<StoreError>>(

@@ -16,6 +16,7 @@
 //!            | CALL name ('.' name)* '(' [expr (',' expr)*] ')' [YIELD name [AS name] (',' ...)* [WHERE expr]]
 //!            | CREATE INDEX [name] [IF NOT EXISTS] FOR (v:Label) ON (v.key)
 //!            | DROP INDEX name [IF EXISTS] | DROP INDEX ON :Label(key)
+//!            | SHOW INDEXES             (standalone inventory alias)
 //! projection:= [DISTINCT] ('*' | item) (',' item)* [ORDER BY expr [ASC|DESC] (',' ...)*] [SKIP expr] [LIMIT expr]
 //! pattern   := [var '='] node (rel node)*
 //! node      := '(' [var] (':' label)* [map] ')'
@@ -293,6 +294,7 @@ impl<'a> Parser<'a> {
                 Ok(Clause::Return(self.parse_projection(false)?))
             }
             "CALL" => self.parse_call(),
+            "SHOW" => self.parse_show_indexes(),
             "FOREACH" | "LOAD" | "USE" | "EXPLAIN" | "PROFILE" => {
                 Err(self.error_here(format!("not supported yet: {}", kw.to_ascii_uppercase())))
             }
@@ -373,6 +375,25 @@ impl<'a> Parser<'a> {
             args,
             yields,
             where_,
+        })
+    }
+
+    fn parse_show_indexes(&mut self) -> Result<Clause, ParseError> {
+        if self.pos != 0 {
+            return Err(self.error_here("SHOW INDEXES must be a standalone query"));
+        }
+        self.advance(); // SHOW
+        self.expect_keyword("INDEXES")?;
+        if !self.is_eof() && !self.check(&Tok::Semicolon) {
+            return Err(self.error_here(
+                "only standalone SHOW INDEXES is supported; use CALL db.indexes() for projections and filters",
+            ));
+        }
+        Ok(Clause::Call {
+            name: "db.indexes".into(),
+            args: Vec::new(),
+            yields: Vec::new(),
+            where_: None,
         })
     }
 
@@ -1537,7 +1558,7 @@ impl<'a> Parser<'a> {
 }
 
 const EXPECTED_CLAUSE: &str =
-    "expected a clause (MATCH, OPTIONAL MATCH, MERGE, CREATE, SET, REMOVE, DELETE, UNWIND, WITH, CALL or RETURN)";
+    "expected a clause (MATCH, OPTIONAL MATCH, MERGE, CREATE, SET, REMOVE, DELETE, UNWIND, WITH, CALL, SHOW INDEXES or RETURN)";
 
 fn tok_desc(t: &Tok) -> String {
     match t {

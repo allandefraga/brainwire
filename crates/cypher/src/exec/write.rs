@@ -260,6 +260,7 @@ fn write_pattern(
             }
             let (source, target, id, was_created) = {
                 let _scope = env.budget.scope();
+                let mut decode_peak = 0usize;
                 store::merge_keyed_edge::<ExecError>(
                     txn,
                     env.catalog,
@@ -270,7 +271,10 @@ fn write_pattern(
                     &values,
                     |bytes| {
                         env.budget.tick()?;
-                        env.budget.charge(bytes.saturating_mul(2))
+                        let bytes = bytes.saturating_mul(2);
+                        env.budget.charge(bytes.saturating_sub(decode_peak))?;
+                        decode_peak = decode_peak.max(bytes);
+                        Ok(())
                     },
                 )?
             };

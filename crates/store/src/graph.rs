@@ -11,7 +11,9 @@ use brainwire_core::codec::{
 };
 use brainwire_core::ids::{EdgeId, EdgeTypeId, IdError, NodeId, TypeId};
 use brainwire_core::keys::{get_bytes, get_u16, get_u64, put_bytes, put_u16, put_u64};
-use brainwire_core::schema::{Catalog, Column, EdgeType, GraphMapping, NodeType};
+use brainwire_core::schema::{
+    Catalog, Column, EdgeType, GraphMapping, NodeType, RelationshipIndexState,
+};
 use brainwire_core::sparse::{SparseMatrix, SparseMatrixError};
 use brainwire_core::value::Value;
 
@@ -583,7 +585,7 @@ fn pk_key(entity_id: &str, ty: TypeId) -> Vec<u8> {
     key
 }
 
-fn edge_key(a: NodeId, ty: EdgeTypeId, b: NodeId, id: EdgeId) -> Vec<u8> {
+pub(crate) fn edge_key(a: NodeId, ty: EdgeTypeId, b: NodeId, id: EdgeId) -> Vec<u8> {
     let mut key = Vec::with_capacity(26);
     put_u64(&mut key, a.0);
     put_u16(&mut key, ty.0);
@@ -1371,8 +1373,8 @@ fn key_error(name: &str) -> GraphError {
     ))
 }
 
-/// Merge one opted-in keyed relationship; the callback accounts for each row
-/// before decoding. Pair-range dependencies reject concurrent duplicate keys.
+/// Merge one opted-in keyed relationship; admit only key fields while scanning
+/// and the matching row before mutation. Pair dependencies reject duplicate keys.
 #[allow(clippy::too_many_arguments)]
 pub fn merge_keyed_edge<E: From<GraphError> + From<StoreError>>(
     txn: &mut Txn,
@@ -1396,23 +1398,72 @@ pub fn merge_keyed_edge<E: From<GraphError> + From<StoreError>>(
             return Err(key_error(field).into());
         }
     }
+    let index_field = if txn.has_relationship_index_format()
+        && ty.property_indexes.iter().any(|index| {
+            index.state == RelationshipIndexState::Ready
+                && ty.merge_key_fields.contains(&index.property)
+        }) {
+        txn.with_get(Cf::Meta, CATALOG_KEY, |bytes| {
+            control(bytes.map_or(0, |bytes| {
+                bytes.len().saturating_mul(16).saturating_add(4096)
+            }))
+        })?;
+        let current = crate::catalog::load(txn)?;
+        if current.version != catalog.version {
+            return Err(GraphError::Catalog("catalog changed; reload catalog".into()).into());
+        }
+        current.edge_type(edge_type).and_then(|current| {
+            current
+                .property_indexes
+                .iter()
+                .find(|index| {
+                    index.state == RelationshipIndexState::Ready
+                        && ty.merge_key_fields.contains(&index.property)
+                })
+                .map(|index| index.property.clone())
+        })
+    } else {
+        None
+    };
+    let lookup_bytes = index_field.as_ref().map_or(0, |field| {
+        let value_bytes = match props.get(field) {
+            Some(Value::Str(value)) => value.len().min(64 * 1024),
+            _ => 0,
+        };
+        // Escaping and iterator bounds can retain several copies of the search prefix.
+        4096 + field.len().saturating_mul(8) + value_bytes.saturating_mul(24)
+    });
+    if index_field.is_some() {
+        control(lookup_bytes)?;
+    }
     let mut found = None;
     let orientations = [(src, dst), (dst, src)];
     let count = if either_direction && src != dst { 2 } else { 1 };
     for (source, target) in orientations.into_iter().take(count) {
         let prefix = edge_key(source, ty.id, target, EdgeId::MERGED);
-        txn.visit_prefix_for_update::<E>(Cf::Out, &prefix[..18], |key, bytes| {
-            control(estimate_row_allocation(bytes).map_err(StoreError::from)?)?;
-            let row = decode_row(bytes).map_err(StoreError::from)?;
+        let mut visit = |key: &[u8], bytes: &[u8]| {
             let mut matches = true;
             for field in &ty.merge_key_fields {
-                let Some(Value::Str(actual)) = row_property(&row, ty, field) else {
+                let column = ty
+                    .columns
+                    .iter()
+                    .find(|column| column.name == *field)
+                    .map(|column| column.id);
+                control(
+                    lookup_bytes.saturating_add(
+                        estimate_row_field_allocation(bytes, column, field)
+                            .map_err(StoreError::from)?
+                            .unwrap_or(0),
+                    ),
+                )?;
+                let actual = decode_row_field(bytes, column, field).map_err(StoreError::from)?;
+                let Some(Value::Str(value)) = actual.as_ref() else {
                     return Err(key_error(field).into());
                 };
-                if actual.is_empty() {
+                if value.is_empty() {
                     return Err(key_error(field).into());
                 }
-                matches &= row_property(&row, ty, field) == props.get(field);
+                matches &= actual.as_ref() == props.get(field);
             }
             if matches {
                 if found.is_some() {
@@ -1421,11 +1472,32 @@ pub fn merge_keyed_edge<E: From<GraphError> + From<StoreError>>(
                     )
                     .into());
                 }
+                // write_edge decodes the matching row to preserve unrelated properties.
+                control(
+                    lookup_bytes
+                        .saturating_add(estimate_row_allocation(bytes).map_err(StoreError::from)?),
+                )?;
                 let (_, _, _, id) = decode_edge_key(key).map_err(GraphError::from)?;
                 found = Some((source, target, id));
             }
             Ok(())
-        })?;
+        };
+        let indexed = if let Some(field) = &index_field {
+            crate::relationship_index::visit_equality_pair_for_update(
+                txn,
+                ty,
+                field,
+                &props[field],
+                source,
+                target,
+                &mut visit,
+            )?
+        } else {
+            false
+        };
+        if !indexed {
+            txn.visit_prefix_for_update::<E>(Cf::Out, &prefix[..18], visit)?;
+        }
     }
     let created = found.is_none();
     let (source, target, id) = match found {
@@ -2640,6 +2712,559 @@ mod tests {
         let back = in_edges(&r, k).unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].other, c);
+    }
+
+    fn indexed_keyed_fixture() -> (
+        tempfile::TempDir,
+        Resources,
+        Database,
+        Catalog,
+        NodeId,
+        NodeId,
+    ) {
+        let (dir, resources, mut db, mut cat) = setup();
+        cat.edge_types
+            .iter_mut()
+            .find(|ty| ty.name == "WORKS_AT")
+            .unwrap()
+            .merge_key_fields = vec!["role".into(), "event".into()];
+        let mut seed = db.begin();
+        crate::catalog::store(&mut seed, &cat).unwrap();
+        let source = merge_node(&mut seed, &cat, "Customer", "source", &BTreeMap::new()).unwrap();
+        let target = merge_node(&mut seed, &cat, "Company", "target", &BTreeMap::new()).unwrap();
+        seed.commit().unwrap();
+        db.enable_relationship_index_format(&resources).unwrap();
+        let mut ddl = db.begin();
+        crate::catalog::create_relationship_index(
+            &mut ddl,
+            "WORKS_AT",
+            "role",
+            Some("role_index"),
+            false,
+        )
+        .unwrap();
+        ddl.commit().unwrap();
+        db.build_pending_indexes().unwrap();
+        let cat = db.catalog().unwrap().unwrap();
+        (dir, resources, db, cat, source, target)
+    }
+
+    #[test]
+    fn keyed_index_and_fallback_writers_conflict_in_either_commit_order() {
+        for indexed_first in [false, true] {
+            let (_dir, _resources, db, cat, source, target) = indexed_keyed_fixture();
+            let mut fallback_catalog = cat.clone();
+            // The populating planner takes the legacy scan while maintaining entries.
+            for index in &mut fallback_catalog
+                .edge_types
+                .iter_mut()
+                .find(|ty| ty.name == "WORKS_AT")
+                .unwrap()
+                .property_indexes
+            {
+                index.state = RelationshipIndexState::Populating;
+            }
+            let properties = props(&[
+                ("role", Value::Str("same".into())),
+                ("event", Value::Str("first".into())),
+            ]);
+            let mut indexed = db.begin();
+            let mut fallback = db.begin();
+            assert!(
+                merge_keyed_edge::<GraphError>(
+                    &mut indexed,
+                    &cat,
+                    source,
+                    "WORKS_AT",
+                    target,
+                    false,
+                    &properties,
+                    |_| Ok(())
+                )
+                .unwrap()
+                .3
+            );
+            assert!(
+                merge_keyed_edge::<GraphError>(
+                    &mut fallback,
+                    &fallback_catalog,
+                    source,
+                    "WORKS_AT",
+                    target,
+                    false,
+                    &properties,
+                    |_| Ok(())
+                )
+                .unwrap()
+                .3
+            );
+            let (first, second) = if indexed_first {
+                (indexed, fallback)
+            } else {
+                (fallback, indexed)
+            };
+            first.commit().unwrap();
+            assert!(matches!(second.commit(), Err(TxnError::Conflict)));
+            assert_eq!(out_edges(&db.begin(), source).unwrap().len(), 1);
+            check_invariants(&db).unwrap();
+        }
+    }
+
+    #[test]
+    fn keyed_index_and_endpoint_detach_conflict_in_either_commit_order() {
+        for detach_source in [false, true] {
+            for indexed_first in [false, true] {
+                let (_dir, _resources, db, cat, source, target) = indexed_keyed_fixture();
+                let properties = props(&[
+                    ("role", Value::Str("same".into())),
+                    ("event", Value::Str("first".into())),
+                ]);
+                let mut indexed = db.begin();
+                let mut detach = db.begin();
+                merge_keyed_edge::<GraphError>(
+                    &mut indexed,
+                    &cat,
+                    source,
+                    "WORKS_AT",
+                    target,
+                    false,
+                    &properties,
+                    |_| Ok(()),
+                )
+                .unwrap();
+                detach_delete(&mut detach, if detach_source { source } else { target }).unwrap();
+                let (first, second) = if indexed_first {
+                    (indexed, detach)
+                } else {
+                    (detach, indexed)
+                };
+                first.commit().unwrap();
+                assert!(matches!(second.commit(), Err(TxnError::Conflict)));
+                check_invariants(&db).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn keyed_index_replay_survives_store_reopen() {
+        let (dir, resources, db, cat, source, target) = indexed_keyed_fixture();
+        let properties = props(&[
+            ("role", Value::Str("same".into())),
+            ("event", Value::Str("first".into())),
+        ]);
+        let mut seed = db.begin();
+        let id = merge_keyed_edge::<GraphError>(
+            &mut seed,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties,
+            |_| Ok(()),
+        )
+        .unwrap()
+        .2;
+        seed.commit().unwrap();
+        drop(db);
+        let reopened = Database::open(dir.path(), &resources).unwrap();
+        let cat = reopened.catalog().unwrap().unwrap();
+        let mut replay = reopened.begin();
+        let (_, _, actual, created) = merge_keyed_edge::<GraphError>(
+            &mut replay,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(actual, id);
+        assert!(!created);
+        replay.commit().unwrap();
+        check_invariants(&reopened).unwrap();
+    }
+
+    #[test]
+    fn keyed_index_conflicts_on_same_identity_but_allows_disjoint_values() {
+        let (_dir, _resources, db, cat, source, target) = indexed_keyed_fixture();
+        let properties = |role: &str| {
+            props(&[
+                ("role", Value::Str(role.into())),
+                ("event", Value::Str("first".into())),
+            ])
+        };
+        let mut first = db.begin();
+        let mut second = db.begin();
+        for tx in [&mut first, &mut second] {
+            assert!(
+                merge_keyed_edge::<GraphError>(
+                    tx,
+                    &cat,
+                    source,
+                    "WORKS_AT",
+                    target,
+                    false,
+                    &properties("same"),
+                    |_| Ok(())
+                )
+                .unwrap()
+                .3
+            );
+        }
+        first.commit().unwrap();
+        assert!(matches!(second.commit(), Err(TxnError::Conflict)));
+
+        let mut first = db.begin();
+        let mut second = db.begin();
+        merge_keyed_edge::<GraphError>(
+            &mut first,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties("a"),
+            |_| Ok(()),
+        )
+        .unwrap();
+        merge_keyed_edge::<GraphError>(
+            &mut second,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties("b"),
+            |_| Ok(()),
+        )
+        .unwrap();
+        first.commit().unwrap();
+        second.commit().unwrap();
+        assert_eq!(out_edges(&db.begin(), source).unwrap().len(), 3);
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn keyed_index_rechecks_truncated_values_and_tracks_deletion() {
+        let (_dir, _resources, db, cat, source, target) = indexed_keyed_fixture();
+        let stem = "\0".repeat(65 * 1024);
+        let properties = |suffix: &str| {
+            props(&[
+                ("role", Value::Str(format!("{stem}{suffix}"))),
+                ("event", Value::Str("first".into())),
+            ])
+        };
+        let mut seed = db.begin();
+        let first = merge_keyed_edge::<GraphError>(
+            &mut seed,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties("a"),
+            |_| Ok(()),
+        )
+        .unwrap()
+        .2;
+        let second = merge_keyed_edge::<GraphError>(
+            &mut seed,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties("b"),
+            |_| Ok(()),
+        )
+        .unwrap()
+        .2;
+        assert_ne!(first, second);
+        seed.commit().unwrap();
+        let mut replay = db.begin();
+        assert_eq!(
+            merge_keyed_edge::<GraphError>(
+                &mut replay,
+                &cat,
+                source,
+                "WORKS_AT",
+                target,
+                false,
+                &properties("b"),
+                |_| Ok(())
+            )
+            .unwrap()
+            .2,
+            second
+        );
+        let mut remove = db.begin();
+        assert!(delete_edge(
+            &mut remove,
+            source,
+            cat.edge_type("WORKS_AT").unwrap().id,
+            target,
+            second
+        )
+        .unwrap());
+        remove.commit().unwrap();
+        assert!(matches!(replay.commit(), Err(TxnError::Conflict)));
+        let mut recreate = db.begin();
+        let (_, _, replacement, created) = merge_keyed_edge::<GraphError>(
+            &mut recreate,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties("b"),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(created);
+        assert_ne!(replacement, second);
+        recreate.commit().unwrap();
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn keyed_index_rejects_stale_ready_catalog_after_drop_and_recreate() {
+        let (_dir, _resources, db, stale, source, target) = indexed_keyed_fixture();
+        let properties = props(&[
+            ("role", Value::Str("engineer".into())),
+            ("event", Value::Str("first".into())),
+        ]);
+        let mut seed = db.begin();
+        let id = merge_keyed_edge::<GraphError>(
+            &mut seed,
+            &stale,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties,
+            |_| Ok(()),
+        )
+        .unwrap()
+        .2;
+        seed.commit().unwrap();
+        let mut drop = db.begin();
+        crate::catalog::drop_index(
+            &mut drop,
+            crate::catalog::IndexTarget::Name("role_index"),
+            false,
+        )
+        .unwrap();
+        drop.commit().unwrap();
+        db.build_pending_indexes().unwrap();
+        let mut recreate = db.begin();
+        crate::catalog::create_relationship_index(
+            &mut recreate,
+            "WORKS_AT",
+            "role",
+            Some("role_index"),
+            false,
+        )
+        .unwrap();
+        recreate.commit().unwrap();
+        let mut old = db.begin();
+        assert!(merge_keyed_edge::<GraphError>(
+            &mut old,
+            &stale,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties,
+            |_| Ok(())
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("reload catalog"));
+        let current = db.catalog().unwrap().unwrap();
+        let mut fallback = db.begin();
+        let (_, _, replay, created) = merge_keyed_edge::<GraphError>(
+            &mut fallback,
+            &current,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &properties,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(replay, id);
+        assert!(!created);
+        fallback.commit().unwrap();
+        db.build_pending_indexes().unwrap();
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn ready_relationship_index_bounds_keyed_merge_candidates_and_preserves_replay() {
+        let (_d, resources, mut db, mut cat) = setup();
+        cat.edge_types
+            .iter_mut()
+            .find(|ty| ty.name == "WORKS_AT")
+            .unwrap()
+            .merge_key_fields = vec!["role".into(), "event".into()];
+        let mut seed = db.begin();
+        crate::catalog::store(&mut seed, &cat).unwrap();
+        let source = merge_node(&mut seed, &cat, "Customer", "source", &BTreeMap::new()).unwrap();
+        let target = merge_node(&mut seed, &cat, "Company", "target", &BTreeMap::new()).unwrap();
+        for number in 0..100 {
+            merge_keyed_edge::<GraphError>(
+                &mut seed,
+                &cat,
+                source,
+                "WORKS_AT",
+                target,
+                false,
+                &props(&[
+                    ("role", Value::Str(format!("role-{number}"))),
+                    ("event", Value::Str("first".into())),
+                ]),
+                |_| Ok(()),
+            )
+            .unwrap();
+        }
+        seed.commit().unwrap();
+        db.enable_relationship_index_format(&resources).unwrap();
+        let mut ddl = db.begin();
+        crate::catalog::create_relationship_index(
+            &mut ddl,
+            "WORKS_AT",
+            "role",
+            Some("role_index"),
+            false,
+        )
+        .unwrap();
+        ddl.commit().unwrap();
+        db.build_pending_indexes().unwrap();
+        let cat = db.catalog().unwrap().unwrap();
+
+        let mut tx = db.begin();
+        let mut visits = 0;
+        let wanted = props(&[
+            ("role", Value::Str("role-50".into())),
+            ("event", Value::Str("second".into())),
+        ]);
+        let (_, _, second, created) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &wanted,
+            |_| {
+                visits += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(created);
+        assert!(
+            visits < 10,
+            "unrelated key candidates were scanned: {visits}"
+        );
+        let (actual_source, actual_target, replay, created) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            target,
+            "WORKS_AT",
+            source,
+            true,
+            &wanted,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            (actual_source, actual_target, replay),
+            (source, target, second)
+        );
+        assert!(!created);
+        tx.commit().unwrap();
+        check_invariants(&db).unwrap();
+    }
+
+    #[test]
+    fn keyed_relationship_scan_does_not_decode_unrelated_payloads() {
+        let (_d, _r, db, mut cat) = setup();
+        cat.edge_types
+            .iter_mut()
+            .find(|ty| ty.name == "WORKS_AT")
+            .unwrap()
+            .merge_key_fields = vec!["role".into()];
+        let mut tx = db.begin();
+        let source = merge_node(&mut tx, &cat, "Customer", "source", &BTreeMap::new()).unwrap();
+        let target = merge_node(&mut tx, &cat, "Company", "target", &BTreeMap::new()).unwrap();
+        let large = props(&[
+            ("role", Value::Str("engineer".into())),
+            ("payload", Value::Str("x".repeat(2 << 20))),
+        ]);
+        let (_, _, first, _) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &large,
+            |_| Ok(()),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let mut tx = db.begin();
+        let mut largest_admission = 0;
+        let (_, _, second, created) = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &props(&[("role", Value::Str("reviewer".into()))]),
+            |bytes| {
+                largest_admission = largest_admission.max(bytes);
+                if bytes > 4096 {
+                    return Err(GraphError::Catalog("test decode budget exceeded".into()));
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(created);
+        assert_ne!(first, second);
+        assert!(largest_admission > 0);
+        assert!(largest_admission < 4096);
+        tx.commit().unwrap();
+        check_invariants(&db).unwrap();
+
+        // Updating the matching large row still admits its complete mutation decode.
+        let mut tx = db.begin();
+        let error = merge_keyed_edge::<GraphError>(
+            &mut tx,
+            &cat,
+            source,
+            "WORKS_AT",
+            target,
+            false,
+            &props(&[("role", Value::Str("engineer".into()))]),
+            |bytes| {
+                if bytes > 4096 {
+                    Err(GraphError::Catalog("test decode budget exceeded".into()))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("test decode budget exceeded"));
     }
 
     #[test]

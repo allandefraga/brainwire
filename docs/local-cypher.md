@@ -139,6 +139,10 @@ query), `CREATE`, `MERGE ... ON CREATE SET / ON MATCH SET`, `SET`
 `DETACH DELETE` (nodes, relationships, paths), `CALL ... YIELD ... WHERE`, and
 `CREATE INDEX` / `DROP INDEX` (mapped to catalog procedures).
 
+`SHOW INDEXES` is a standalone alias for `CALL db.indexes()` and returns
+Brainwire's existing index columns. `SHOW INDEXES YIELD`, filtering and other
+`SHOW` variants are not implemented.
+
 **Patterns.** Several hops in one pattern, comma-separated patterns, variable
 length `*`, `*n`, `*n..m` (bound 64), untyped relationships `-[r]->`,
 alternative types `[:A|B]`, undirected `-[r]-`, unlabeled `MATCH (n)`,
