@@ -55,6 +55,58 @@ The offline `brainwire cypher` command opens a local database directory.
 Stop a server that owns that store before using offline commands. A connected
 client or TUI talks to the server over Bolt instead of opening its files.
 
+## RocksDB files, levels and compaction
+
+RocksDB is an embedded key/value engine inside the Brainwire process. It stores
+graph records, adjacency, catalog information and indexes in column families.
+Each column family has its own memtables and SST organization; the same graph
+can therefore have many SST files. A storage level does not represent a node
+label, a traversal depth or an application-visible historical revision.
+
+### From a write to files
+
+1. Brainwire commits its changes and local commit sequence in one synchronous
+   RocksDB write batch. The WAL records the write for local recovery, while
+   memtables hold the recent key/value updates in RAM.
+2. Background flushes turn memtables into immutable, sorted SST files. The WAL
+   is a recovery log, rather than the main file format queried for graph reads.
+3. Background compaction merges SST contents and writes replacement files.
+   Obsolete files can be removed when RocksDB no longer needs them.
+
+The code uses RocksDB's default leveled compaction style. Newly flushed files
+enter **L0**, where key ranges can overlap. Within **L1 and later levels**, SST
+key ranges do not overlap within a level; ranges can still overlap across
+different levels. Deeper levels have larger target sizes. The number of levels
+and files is an internal storage detail, not a fixed capacity promise.
+
+Updates add a newer value and deletions add a deletion marker. Compaction can
+discard older versions and markers only when they are no longer needed; open
+snapshots can delay reclamation. Deleting records does not imply an immediate
+drop in disk usage. The [RocksDB leveled-compaction guide](https://github.com/facebook/rocksdb/wiki/Leveled-Compaction)
+explains the underlying organization.
+
+### Reads, memory and disk pressure
+
+Reads resolve the requested snapshot from memtables and relevant SST data.
+Cached SST blocks can satisfy reads from memory; a cache miss may need disk
+I/O. Memtables and the block cache serve different purposes: one buffers writes,
+and the other caches reads. Brainwire shares their configured resources across
+its graph stores and accounts memtable reservations inside the cache budget.
+Neither budget measures all memory allocated by the process.
+
+The current store uses 16 KiB table blocks, LZ4 compression and Zstandard for
+the bottommost level. Flush and compaction jobs run in the background, with
+parallelism derived from available CPUs. If compaction falls behind, RocksDB
+can slow or stop writes until it catches up. It also needs temporary free space
+while old and replacement files coexist. Monitor disk headroom and write
+latency during large imports; increasing memory alone cannot fix saturated
+storage.
+
+The synchronous local batch supports recovery from the persistent store after a
+process restart. It does not replace backups or protect against losing the
+volume, and it does not establish distributed durability. Keep a verified backup
+on independent storage and evaluate quorum separately.
+
 ## Memory and query execution
 
 Brainwire uses query and ingress accounting, shared reservations and sampled

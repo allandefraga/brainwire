@@ -18,7 +18,7 @@
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.17.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.17.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
@@ -46,6 +46,34 @@ This diagram shows the standard single-instance deployment. The separate
 [three-voter Raft setup](docs/quorum-replication.md) is experimental. Read the
 [architecture guide](docs/architecture.md) for memory, storage and recovery.
 
+### How RocksDB stores the graph
+
+RocksDB stores Brainwire's records and indexes as key/value data. Writes first
+enter a **write-ahead log (WAL)** on disk and a **memtable** in memory. A flush
+writes the memtable into sorted, immutable **SST files**:
+
+```mermaid
+flowchart LR
+    write["Committed write batch"] --> wal["WAL · recovery log"]
+    write --> memory["Memtable · RAM"]
+    memory -->|flush| l0["L0 · new SST files"]
+    l0 -->|compaction| l1["L1 · sorted key ranges"]
+    l1 -->|compaction| deeper["L2 and deeper · larger levels"]
+```
+
+- **L0** receives new files; their key ranges can overlap.
+- **L1 and deeper levels** organize files into non-overlapping key ranges within
+  each level. Deeper levels normally hold more data.
+- **Compaction** merges files, keeping the versions still needed by reads and
+  eventually reclaiming obsolete values and deletion markers.
+
+These are storage levels, not node types, graph hops or history versions. Reads
+combine memory and the relevant SST files; a shared block cache can avoid disk
+reads. Compaction uses CPU, disk bandwidth and temporary disk space, so heavy
+ingestion can slow down when storage cannot keep up. Keep the persistent volume
+and leave disk headroom. See [storage details](docs/architecture.md#rocksdb-files-levels-and-compaction)
+for local durability, memory budgets and the current settings.
+
 ## What you can build
 
 - **Agent context:** explore ontology and visible record paths, combine ranked IDs from configured providers, then return authorized records and sources.
@@ -61,9 +89,9 @@ See the [architecture](docs/architecture.md), [agent context](docs/context-api.m
 Install Git and Docker with Compose, then start a local demo:
 
 ```sh
-git clone --branch v0.17.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.17.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.2 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.3 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 

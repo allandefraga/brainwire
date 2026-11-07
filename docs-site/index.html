@@ -14,7 +14,7 @@
 <div class="docs-layout">
   <aside class="sidebar">
     <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="500" height="128"></a>
-    <div class="edition"><span class="edition-label">Documentation</span><span>v0.17.0-beta.2 <!-- brainwire-release-version --></span></div>
+    <div class="edition"><span class="edition-label">Documentation</span><span>v0.17.0-beta.3 <!-- brainwire-release-version --></span></div>
     <nav class="section-nav" aria-label="Documentation sections">
       <span class="nav-label">GET STARTED</span>
       <a href="#overview">Introduction</a>
@@ -41,15 +41,15 @@
       <h1>Connected data.<br>Useful context.</h1>
       <p class="intro-copy">Brainwire stores entities and their relationships in a durable graph. Write from Python, query with Cypher, and inspect the data in your terminal.</p>
       <div class="actions"><a class="button primary" href="#start">Run Brainwire <span aria-hidden="true">→</span></a><a class="button secondary" href="#architecture">Understand the architecture</a></div>
-      <p class="release-line"><span class="badge">Experimental beta</span> v0.17.0-beta.2 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
+      <p class="release-line"><span class="badge">Experimental beta</span> v0.17.0-beta.3 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
       <div class="entry-grid"><a href="#start"><span class="entry-number">01</span><strong>Start a graph</strong><span>Docker, a local port, a persistent volume</span><b aria-hidden="true">↗</b></a><a href="#python"><span class="entry-number">02</span><strong>Connect your application</strong><span>Python helpers and parameterized Cypher</span><b aria-hidden="true">↗</b></a><a href="#terminal"><span class="entry-number">03</span><strong>Inspect the connections</strong><span>Schema, indexes, memory and a graph sample</span><b aria-hidden="true">↗</b></a></div>
     </section>
 
     <section id="start" class="doc-section">
       <div class="section-head"><p class="eyebrow">QUICKSTART</p><h2>Run a local graph.</h2><p>You need Git and Docker with Compose. The demo creates a graph, starts the server and keeps its files in a named volume.</p></div>
-      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.17.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.17.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.2 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.3 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --pull always --wait --wait-timeout 900</code></pre></div>
       <dl class="connection-details"><div><dt>Connection</dt><dd><code>bolt://127.0.0.1:7687</code></dd></div><div><dt>Graph</dt><dd><code>demo</code></dd></div><div><dt>Data</dt><dd>Persistent Docker volume</dd></div></dl>
@@ -154,7 +154,7 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
       <div class="guide-columns"><div><h3>Get started</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.md">Getting started</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker and images</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md">Python installation</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot</a></div><div><h3>Build</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python writes and batches</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Cypher reference</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context for agents</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Events and timelines</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md">Graph algorithms</a></div><div><h3>Operate</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md">Deployments</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/README.md">Performance evidence</a></div></div>
       <details class="pages-note"><summary>What does GitHub Pages host?</summary><p>This static documentation website. It does not run Brainwire or host your graph. Preview it locally with <code>python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1</code>, then open <code>http://127.0.0.1:8000</code>.</p></details>
     </section>
-    <footer><span>Brainwire · v0.17.0-beta.2 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
+    <footer><span>Brainwire · v0.17.0-beta.3 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
   </main>
 </div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>

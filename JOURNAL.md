@@ -29,6 +29,16 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-07: v0.17.0-beta.3 storage explanation
+
+- **Done:** explain the RocksDB write path, memtables, SST levels, reads and
+  compaction in the README and architecture guide. The diagram distinguishes
+  storage levels from graph structure and describes disk and recovery limits.
+- **Verification:** checked the explanations against the storage configuration
+  and upstream RocksDB documentation; documentation/link checks passed. This
+  is a documentation-only increment on beta.2.
+- **Next:** continue representative memory and multi-machine recovery testing.
+
 ## 2026-11-07: v0.17.0-beta.2 documentation, memory and recovery
 
 - **Done:** avoid redundant deep copies in `reverse`, `head`, `last`, `tail`

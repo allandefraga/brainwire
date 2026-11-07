@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0-beta.3 — experimental candidate
+
+- Explain the RocksDB write path, SST levels and compaction with a diagram in
+  the README and practical storage guidance in the architecture guide.
+- Retain the query-memory and quorum recovery improvements in beta.2.
+
 ## 0.17.0-beta.2 — experimental candidate
 
 - Reduce avoidable intermediate copies in Cypher value inspection and list
