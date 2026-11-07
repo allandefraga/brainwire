@@ -22,16 +22,19 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
 
 | Key | Action |
 | --- | --- |
-| `Tab` / `Shift+Tab`, or `1`–`4` | Switch panes |
+| `Tab` / `Shift+Tab`, `←` / `→`, or `1`–`4` | Switch panes |
 | Up/Down, `PgUp` / `PgDn` | Move/scroll the current selection |
+| `Home` / `End` | Select the first/last relationship in Graph |
 | `r` | Refresh the active pane |
-| `?` | Explain the current pane |
+| `?` or `F1` | Open help (`F1` opens the selected type details in Ontology) |
 | `s` | Inspect one standalone identified request |
 | `q` | Exit |
 
-Add `--lang pt-BR` for Portuguese. Each pane loads on its first visit and shows
-its sample age. There is no automatic polling. A denied Memory view does not
-prevent you from using authorized Ontology, Indexes or Graph views.
+The view bar names all four panes and marks the current one, including on
+compact terminals. Add `--lang pt-BR` for Portuguese. Each pane loads on its
+first visit and shows its sample age. There is no automatic polling. A denied
+Memory view does not prevent you from using authorized Ontology, Indexes or
+Graph views.
 
 ## Inspect one request outcome
 
@@ -72,7 +75,9 @@ are then read in one transaction. At most **20 relationship rows** are kept; a
 21st row is used only to decide whether to show MORE AVAILABLE. This is not full
 graph degree, arbitrary graph exploration or a count of distinct neighbors.
 Parallel relationships may repeat a target. The drawing groups duplicates and
-preserves self-links; the list retains each sampled relationship row.
+preserves self-links; the list retains each sampled relationship row. The
+relationship count and distinct target IDs refer to the sample, not global
+graph degree. The selected position is shown within that sample.
 
 A missing source is displayed as missing. A source with no rows for the selected
 signature may still have other links. The view reads identity strings, not

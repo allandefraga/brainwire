@@ -218,14 +218,19 @@ impl Workspace {
             return true;
         }
         if self.help {
-            if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
+            if matches!(key.code, KeyCode::Char('?') | KeyCode::F(1) | KeyCode::Esc) {
                 self.help = false;
             }
             return false;
         }
         match key.code {
             KeyCode::Char('?') => self.help = true,
+            KeyCode::F(1) if self.active != ConnectedView::Ontology => self.help = true,
             KeyCode::Char('s') => self.request = Some(RequestInspector::default()),
+            KeyCode::Right => {
+                self.select(ConnectedView::from_index(self.active.index() + 1), fetch)
+            }
+            KeyCode::Left => self.select(ConnectedView::from_index(self.active.index() + 3), fetch),
             KeyCode::Tab => self.select(
                 ConnectedView::from_index(
                     self.active.index()
@@ -379,10 +384,17 @@ fn render(
     } else {
         area
     };
+    // The named view bar needs two rows even when the sidebar is collapsed.
+    let pane_area = Rect::new(
+        content.x,
+        content.y,
+        content.width,
+        content.height.saturating_sub(1),
+    );
     let has_sample = match workspace.active {
         ConnectedView::Ontology => {
             if let Some(state) = &mut workspace.ontology {
-                connected::render_at(frame, content, state, address, graph, lang, no_color);
+                connected::render_at(frame, pane_area, state, address, graph, lang, no_color);
                 true
             } else {
                 false
@@ -390,7 +402,9 @@ fn render(
         }
         ConnectedView::Memory => {
             if let Some(state) = &workspace.memory {
-                connected_memory::render_at(frame, content, state, address, graph, lang, no_color);
+                connected_memory::render_at(
+                    frame, pane_area, state, address, graph, lang, no_color,
+                );
                 true
             } else {
                 false
@@ -398,7 +412,9 @@ fn render(
         }
         ConnectedView::Indexes => {
             if let Some(state) = &mut workspace.indexes {
-                connected_indexes::render_at(frame, content, state, address, graph, lang, no_color);
+                connected_indexes::render_at(
+                    frame, pane_area, state, address, graph, lang, no_color,
+                );
                 true
             } else {
                 false
@@ -406,7 +422,7 @@ fn render(
         }
         ConnectedView::Graph => {
             if let Some(state) = &mut workspace.graph {
-                connected_graph::render_at(frame, content, state, address, graph, lang, no_color);
+                connected_graph::render_at(frame, pane_area, state, address, graph, lang, no_color);
                 true
             } else {
                 false
@@ -419,7 +435,7 @@ fn render(
             Constraint::Min(0),
             Constraint::Length(3),
         ])
-        .split(content);
+        .split(pane_area);
         frame.render_widget(
             Paragraph::new(format!(
                 " BRAINWIRE / {} / {} @ {}",
@@ -443,17 +459,24 @@ fn render(
             sections[1],
         );
     }
-    // Reuse the existing footer space so narrow panes retain their explanations.
+    // Keep view names and actions visible when the sidebar is collapsed.
     let footer = Rect::new(
         content.x,
-        content.bottom().saturating_sub(3).max(content.y),
+        content.bottom().saturating_sub(4).max(content.y),
         content.width,
-        content.height.min(3),
+        content.height.min(4),
     );
-    let navigation = lang.choose(
-        " 1/2/3/4 telas | s status  r atualiza  ? ajuda  q sai",
-        " 1/2/3/4 views | s status  r refresh  ? help  q quit",
-    );
+    let navigation = if workspace.active == ConnectedView::Ontology {
+        lang.choose(
+            " Tab/←→ telas  r atualiza  s pedido  ? ajuda  q sai",
+            " Tab/←→ views  r refresh  s request  ? help  q quit",
+        )
+    } else {
+        lang.choose(
+            " Tab/←→ telas  r atualiza  s pedido  ? ajuda / F1  q sai",
+            " Tab/←→ views  r refresh  s request  ? help / F1  q quit",
+        )
+    };
     let controls = if !has_sample {
         lang.choose("SEM AMOSTRA / SOMENTE LEITURA", "NO SAMPLE / READ ONLY")
     } else {
@@ -471,13 +494,40 @@ fn render(
                 "↑↓ select index • Tab next view",
             ),
             ConnectedView::Graph => lang.choose(
-                "↑↓ escolhe relação • Tab próxima tela",
-                "↑↓ select relationship • Tab next view",
+                "↑↓ relação • Home/End início/fim • Tab próxima tela",
+                "↑↓ relationship • Home/End first/last • Tab next view",
             ),
         }
     };
+    let views = [
+        ConnectedView::Ontology,
+        ConnectedView::Memory,
+        ConnectedView::Indexes,
+        ConnectedView::Graph,
+    ]
+    .into_iter()
+    .map(|view| {
+        let selected = workspace.active == view;
+        Span::styled(
+            format!(
+                " {}{} {}{} ",
+                if selected { "[" } else { " " },
+                view.index() + 1,
+                view.name(lang),
+                if selected { "]" } else { " " },
+            ),
+            if selected {
+                selection_style(no_color)
+            } else {
+                crate::overview::text_style(MUTED, no_color)
+            },
+        )
+    })
+    .collect::<Vec<_>>();
+    frame.render_widget(Clear, footer);
     frame.render_widget(
-        Paragraph::new(navigation).block(panel(controls, GREEN, no_color)),
+        Paragraph::new(vec![Line::from(views), Line::raw(navigation)])
+            .block(panel(controls, GREEN, no_color)),
         footer,
     );
     if let Some(request) = &workspace.request {
@@ -587,14 +637,14 @@ fn render(
             ConnectedView::Graph => (
                 lang.choose("Guia rápido / Grafo", "Quick guide / Graph"),
                 lang.choose(
-                    "Uma amostra limitada de relações reais do nó configurado. O limite de 20 relações não é o grau total do nó.\n\n↑↓ escolhe uma relação; PgUp/PgDn percorre a lista.",
-                    "A bounded sample of real relationships for the configured node. The 20-relationship sample is not the node's total degree.\n\n↑↓ selects a relationship; PgUp/PgDn moves through the list.",
+                    "Uma amostra limitada de relações reais do nó configurado. O limite de 20 relações não é o grau total do nó. IDs de destino podem repetir.\n\n↑↓ escolhe uma relação; PgUp/PgDn percorre a lista; Home/End vai ao início/fim.",
+                    "A bounded sample of real relationships for the configured node. The 20-relationship sample is not the node's total degree. Target IDs can repeat.\n\n↑↓ selects a relationship; PgUp/PgDn moves through the list; Home/End jumps to first/last.",
                 ),
             ),
         };
         let guide = lang.choose(
-            "1 Ontologia  Tipos e ligações\n2 Memória    Orçamento de consultas\n3 Índices    Prontidão das buscas\n4 Grafo      Relações gravadas\n\nTab / Shift+Tab alterna telas. r atualiza.\ns inspeciona um pedido standalone. Esc fecha; q sai fora do inspetor.\nEsta TUI é somente leitura.\n\nNESTA TELA\n",
-            "1 Ontology  Types and allowed links\n2 Memory    Query memory budget\n3 Indexes   Lookup readiness\n4 Graph     Stored connections\n\nTab / Shift+Tab switches views. r refreshes.\ns inspects one standalone request. Esc closes; q quits outside inspector.\nThis workspace is read only.\n\nTHIS VIEW\n",
+            "1 Ontologia  Entenda os tipos e ligações permitidas\n2 Memória    Leia o orçamento de consultas\n3 Índices    Confira se uma busca está pronta\n4 Grafo      Veja as relações gravadas\n\nTab / Shift+Tab ou ←→ alterna telas. r atualiza.\ns inspeciona um pedido standalone. Esc fecha; q sai fora do inspetor.\nEsta TUI é somente leitura.\n\nNESTA TELA\n",
+            "1 Ontology  Understand types and allowed links\n2 Memory    Read the query memory budget\n3 Indexes   Check whether a lookup is ready\n4 Graph     Inspect stored connections\n\nTab / Shift+Tab or ←→ switches views. r refreshes.\ns inspects one standalone request. Esc closes; q quits outside inspector.\nThis workspace is read only.\n\nTHIS VIEW\n",
         );
         let width = content.width.saturating_sub(4).clamp(1, 88);
         let height = content.height.saturating_sub(2).clamp(1, 24);
@@ -798,6 +848,70 @@ mod tests {
         );
         workspace.handle(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), &mut fetch);
         assert_eq!(workspace.active, ConnectedView::Memory);
+    }
+
+    #[test]
+    fn horizontal_arrows_switch_views_and_keep_inspector_input_local() {
+        let mut workspace = Workspace::new();
+        workspace.refresh(&mut fetch);
+        workspace.handle(key(KeyCode::Right), &mut fetch);
+        assert_eq!(workspace.active, ConnectedView::Memory);
+        workspace.handle(key(KeyCode::Left), &mut fetch);
+        assert_eq!(workspace.active, ConnectedView::Ontology);
+        workspace.handle(key(KeyCode::Left), &mut fetch);
+        assert_eq!(workspace.active, ConnectedView::Graph);
+        workspace.handle(key(KeyCode::Char('s')), &mut fetch);
+        workspace.handle(key(KeyCode::Left), &mut fetch);
+        assert_eq!(workspace.active, ConnectedView::Graph);
+        assert!(workspace.request.is_some());
+    }
+
+    #[test]
+    fn narrow_workspace_keeps_named_views_visible_without_opening_help() {
+        for (lang, pages) in [
+            (
+                Language::En,
+                ["1 Ontology", "2 Memory", "3 Indexes", "4 Graph"],
+            ),
+            (
+                Language::PtBr,
+                ["1 Ontologia", "2 Memória", "3 Índices", "4 Grafo"],
+            ),
+        ] {
+            for view in [
+                ConnectedView::Ontology,
+                ConnectedView::Memory,
+                ConnectedView::Indexes,
+                ConnectedView::Graph,
+            ] {
+                let mut workspace = Workspace::new();
+                workspace.select(view, &mut fetch);
+                for (width, height) in [(80, 24), (120, 36)] {
+                    let output = text(&mut workspace, lang, width, height, true);
+                    for page in pages {
+                        assert!(output.contains(page), "missing {page}: {output}");
+                    }
+                    assert!(output.contains("Tab/←→"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn f1_explains_non_ontology_panes_without_changing_samples() {
+        for view in [
+            ConnectedView::Memory,
+            ConnectedView::Indexes,
+            ConnectedView::Graph,
+        ] {
+            let mut workspace = Workspace::new();
+            workspace.select(view, &mut fetch);
+            workspace.handle(key(KeyCode::F(1)), &mut fetch);
+            assert!(workspace.help);
+            workspace.handle(key(KeyCode::F(1)), &mut fetch);
+            assert!(!workspace.help);
+            assert_eq!(workspace.active, view);
+        }
     }
 
     #[test]

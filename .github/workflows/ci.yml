@@ -114,6 +114,15 @@ jobs:
       - name: Verify context evidence and ACL isolation
         run: python crates/server/tests/context_rerank.py --binary target/debug/brainwire
 
+      - name: Verify provider search and ACL isolation
+        run: python crates/server/tests/context_search.py --binary target/debug/brainwire
+
+      - name: Verify semantic paths and agent evidence
+        run: python crates/server/tests/semantic_paths.py --binary target/debug/brainwire
+
+      - name: Verify visible instance paths
+        run: python crates/server/tests/context_paths.py --binary target/debug/brainwire
+
       - name: Verify timeline pagination and ACL isolation
         run: python crates/server/tests/timeline_page.py --binary target/debug/brainwire
 

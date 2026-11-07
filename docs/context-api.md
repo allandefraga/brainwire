@@ -73,6 +73,126 @@ filtering remain on the ordinary read path. The candidate cap bounds logical
 inputs and output, not storage reads: the selected execution plan can scan more
 records, and server memory/deadline limits remain necessary.
 
+## A context workflow
+
+An application can use these helpers together:
+
+1. Explore **declared types** with `schema_paths` to see which connections the
+   ontology allows.
+2. Ask its configured search providers for candidate IDs, then use
+   `search_context` to retrieve and rank only records visible to the caller.
+3. Use `trace_paths` to sample **stored connections** between known visible
+   records, and return source references alongside the evidence.
+
+The calls have separate snapshots. Schema routes, record paths and reported
+sources each have different meanings; none is a guarantee that an agent's
+answer is correct. Let the application decide how to use this untrusted context.
+
+To try the workflow against the local demo, first write the records in the
+[quickstart](../README.md#write-and-query-from-python), then run:
+
+```sh
+.venv-brainwire/bin/python -m examples.python.agent_context_demo
+```
+
+The example reads existing records and uses a fixed demo ID as its provider;
+it does not perform text or vector search.
+
+## Explore the ontology before searching
+
+`schema_paths` helps an application find the relationships the ontology
+allows between two labels. It uses one authenticated catalog read; it does
+not query stored nodes or create Cypher.
+
+```python
+from brainwire import schema_paths
+
+paths = schema_paths(graph, "Person", "Project", max_hops=3, max_paths=10)
+for path in paths["paths"]:
+    print([rel["name"] for rel in path["relationships"]])
+```
+
+Every result is marked `schema_only`: a declared path does not prove records
+exist or are visible to the caller. Catalog metadata is available to graph
+readers and is not filtered by node ACL; do not put secrets in descriptions or
+treat them as trusted instructions. Walks are directed and can repeat labels,
+stop on reaching the target and are bounded to four hops, 20 results and 8,192
+extensions. Equal source and target returns a zero-hop path. `truncated` means
+an additional path was found beyond the requested limit; exceeding the work
+budget raises `ContextLimitError`, not a partial answer. `max_bytes` bounds
+the encoded result, not memory used by the driver when fetching the catalog.
+
+## Trace visible connections
+
+`trace_paths` reads a small sample of directed paths between two known records:
+
+```python
+from brainwire import trace_paths
+
+result = trace_paths(graph, ("Person", "person-1"), ("Project", "project-1"),
+                     max_hops=3, limit=3)
+for path in result["paths"]:
+    print(path["nodes"], path["relationships"])
+```
+
+The graph's normal read grants and node visibility apply at each hop. Paths
+contain node identities and relationship types, not source citations or edge
+properties. They are unordered samples, not necessarily shortest or exhaustive.
+An empty result does not distinguish hidden, missing or disconnected records.
+`max_hops` is at most four and `limit` at most five. These bounds constrain
+returned paths, not traversal work; configure server query budgets and timeouts.
+The helper's own timeout is cooperative and cannot interrupt blocked Bolt I/O.
+`max_bytes` bounds encoded output after driver decoding, not process RSS.
+Separate calls do not share a snapshot; timing and resource errors can depend on
+graph topology. This API does not establish timing non-interference or provide
+historical `AS OF` reads.
+
+## Search with configured providers
+
+`search_context` combines ranked candidate IDs from application-configured
+providers. It reads the candidates through the caller's graph credentials,
+removes hidden or missing records, then ranks the visible records and returns
+their reported sources. Providers can represent lexical, vector or other
+search systems; the application supplies and configures them.
+
+```python
+from brainwire import search_context
+
+# These functions are implemented by your application. They return IDs for the
+# supplied graph and label, ranked by the external source.
+def lexical_search(query, *, graph_name, label, limit, timeout):
+    return my_lexical_index.search_ids(query, graph_name, label, limit, timeout)
+
+def vector_search(query, *, graph_name, label, limit, timeout):
+    return my_vector_index.search_ids(query, graph_name, label, limit, timeout)
+
+result = search_context(
+    graph, "Document", "release blocker",
+    providers={"lexical": lexical_search, "vector": vector_search},
+    source_fields={"title": "title", "url": "source_url"},
+    properties=["title", "body"], limit=10,
+)
+for record in result["records"]:
+    print(record["properties"], record["citation_id"], record["matches"])
+```
+
+Each callback returns a list or tuple of at most 100 IDs scoped to the supplied
+graph and label. There can be at most four providers and 100 distinct candidates
+in total. Duplicate IDs within a provider are ignored. Provider failures abort
+the search; no partial context is returned. The result is bounded by `max_bytes`
+and includes only sources for returned records. Citations identify current
+records, not immutable revisions or independently verified sources.
+
+Providers are trusted application code, not a sandbox. They may use network
+services and can receive the query. Configure their credentials and access
+separately. The deadline is cooperative: a blocked callback or Bolt request
+cannot be forcibly interrupted by this helper. External indexes and the graph
+do not share a snapshot, so candidates can be stale. This does not create
+native ANN/BM25 indexes, generate embeddings, guarantee recall or authorize
+agent actions. Returned text remains untrusted input for a model.
+The intermediate graph read is capped at 1 MiB; the driver may still decode
+an individual property before it can be checked. These are not RSS limits.
+
 ## Experimental hybrid candidate reranking
 
 `brainwire.rerank.rerank_context` combines lexical and vector evidence for an

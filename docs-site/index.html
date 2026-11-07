@@ -3,130 +3,162 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Install Brainwire, write a graph from Python, and inspect it in the terminal. Practical documentation for the source beta.">
-  <title>Brainwire · Documentation</title>
+  <meta name="description" content="Brainwire documentation: run the Rust graph database, write from Python, query with Cypher, and inspect connected data.">
+  <meta name="theme-color" content="#0b0f0d">
+  <title>Brainwire documentation · Start, build, operate</title>
   <link rel="icon" href="assets/brainwire-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to documentation</a>
-<div class="shell">
+<div class="docs-layout">
   <aside class="sidebar">
-    <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="720" height="160"></a>
-    <p class="version"><span class="version-label">Documentation</span>v0.16.0-beta.3 <!-- brainwire-release-version --></p>
-    <nav aria-label="Documentation sections">
-      <a href="#start"><span>01</span> Start the database</a>
-      <a href="#python"><span>02</span> Write from Python</a>
-      <a href="#terminal"><span>03</span> Open the terminal UI</a>
-      <a href="#cli">Use the CLI</a>
-      <a href="#operate">Keep and inspect data</a>
-      <a href="#limits">Current limits</a>
-      <a href="#guides">Documentation index</a>
+    <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="500" height="128"></a>
+    <div class="edition"><span class="edition-label">Documentation</span><span>v0.17.0-beta.1 <!-- brainwire-release-version --></span></div>
+    <nav class="section-nav" aria-label="Documentation sections">
+      <span class="nav-label">GET STARTED</span>
+      <a href="#overview">Introduction</a>
+      <a href="#start">Run with Docker</a>
+      <a href="#python">Write and query</a>
+      <span class="nav-label">UNDERSTAND</span>
+      <a href="#architecture">Architecture</a>
+      <a href="#features">Capabilities</a>
+      <a href="#use-cases">Use cases</a>
+      <a href="#terminal">Terminal workspace</a>
+      <span class="nav-label">GO FURTHER</span>
+      <a href="#operate">Operate a graph</a>
+      <a href="#limits">Beta boundaries</a>
+      <a href="#guides">All guides</a>
     </nav>
-    <div class="sidebar-foot"><span>RUST / ROCKSDB / CYPHER</span><a href="https://github.com/allandefraga/brainwire">Repository ↗</a></div>
+    <div class="sidebar-footer"><span>Apache 2.0 · Rust · RocksDB</span><a href="https://github.com/allandefraga/brainwire">View repository <span aria-hidden="true">↗</span></a></div>
   </aside>
+
   <main id="main">
-    <header class="topbar"><span><a href="#overview">Docs</a><b aria-hidden="true">/</b>Getting started</span><span class="status"><i aria-hidden="true"></i> v0.16.0-beta.3 · evolving <!-- brainwire-release-version --></span></header>
-    <section id="overview" class="hero">
-      <p class="eyebrow"><span aria-hidden="true">●</span> OPEN SOURCE · BUILT IN RUST</p>
-      <h1>Your data has<br><em>connections.</em></h1>
-      <p class="lede">Keep entities and relationships in one durable graph. Write from Python, query with Cypher, and inspect what is connected.</p>
-      <div class="hero-actions"><a class="button primary" href="#start">Start with Docker <span aria-hidden="true">↓</span></a><a class="button" href="#guides">Browse the guides</a></div>
-      <div class="beta-note"><strong>Start with a controlled trial.</strong><p>Use a rebuildable graph and a tested backup. Confirm your release and image digest, then validate your queries and recovery workflow. <a href="#limits">See what to evaluate →</a></p></div>
-      <div class="start-path" aria-label="Getting started path"><a href="#start"><span>01</span><strong>Run locally</strong><small>Docker + a persistent volume</small></a><a href="#python"><span>02</span><strong>Write your first graph</strong><small>Python + supported Cypher</small></a><a href="#terminal"><span>03</span><strong>See the connections</strong><small>A read-only terminal workspace</small></a></div>
+    <header class="topbar"><span>Docs <span class="crumb" aria-hidden="true">/</span> Overview</span><div><a href="https://github.com/allandefraga/brainwire/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://github.com/allandefraga/brainwire/issues">Get help <span aria-hidden="true">↗</span></a></div></header>
+
+    <section id="overview" class="intro">
+      <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> OPEN SOURCE GRAPH DATABASE</p>
+      <h1>Connected data.<br>Useful context.</h1>
+      <p class="intro-copy">Brainwire stores entities and their relationships in a durable graph. Write from Python, query with Cypher, and inspect the data in your terminal.</p>
+      <div class="actions"><a class="button primary" href="#start">Run Brainwire <span aria-hidden="true">→</span></a><a class="button secondary" href="#architecture">Understand the architecture</a></div>
+      <p class="release-line"><span class="badge">Experimental beta</span> v0.17.0-beta.1 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
+      <div class="entry-grid"><a href="#start"><span class="entry-number">01</span><strong>Start a graph</strong><span>Docker, a local port, a persistent volume</span><b aria-hidden="true">↗</b></a><a href="#python"><span class="entry-number">02</span><strong>Connect your application</strong><span>Python helpers and parameterized Cypher</span><b aria-hidden="true">↗</b></a><a href="#terminal"><span class="entry-number">03</span><strong>Inspect the connections</strong><span>Schema, indexes, memory and a graph sample</span><b aria-hidden="true">↗</b></a></div>
     </section>
 
-    <section id="start" class="content-section">
-      <div class="section-heading"><span class="section-kicker">01 / START THE DATABASE</span><h2>Start locally with Docker Compose.</h2><p>Install Docker and Compose, then use the published image. This demo runs locally with a persistent volume.</p></div>
-      <div class="code"><div class="code-head"><span>terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.16.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+    <section id="start" class="doc-section">
+      <div class="section-head"><p class="eyebrow">QUICKSTART</p><h2>Run a local graph.</h2><p>You need Git and Docker with Compose. The demo creates a graph, starts the server and keeps its files in a named volume.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.17.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --pull always --wait --wait-timeout 900</code></pre></div>
-      <div class="connection-grid" aria-label="Demo connection details"><div><span>ADDRESS</span><code>bolt://127.0.0.1:7687</code></div><div><span>DATABASE</span><code>demo</code></div><div><span>STORAGE</span><strong>Persistent Docker volume</strong></div></div>
-      <div class="note"><strong>This is a local demo.</strong><p>It uses a bundled synthetic ontology and explicitly disables authentication on the published loopback port. Use an auth policy and an encrypted connection boundary before connecting shared or customer data. If port 7687 is busy, prefix the command with <code>BRAINWIRE_BIND_PORT=17687</code> and use that port in clients.</p></div>
-      <div class="option-grid"><article><h3>Need image details?</h3><p>Choose a release and pin its digest for reproducible deployment. Public images can be pulled without logging in.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Images, volumes and Docker commands ↗</a></article><article><h3>Prefer a native process?</h3><p>Build the server, CLI and TUI from Rust source. Homebrew and an Electron desktop installer are planned; there is no published installer for them yet.</p><a href="#cli">Build and use the CLI ↓</a></article></div>
+      <dl class="connection-details"><div><dt>Connection</dt><dd><code>bolt://127.0.0.1:7687</code></dd></div><div><dt>Graph</dt><dd><code>demo</code></dd></div><div><dt>Data</dt><dd>Persistent Docker volume</dd></div></dl>
+      <aside class="callout"><span class="callout-icon" aria-hidden="true">i</span><div><strong>A local demo, with synthetic data.</strong><p>Authentication is disabled and the port is bound to host loopback. For shared access, use an <a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md">auth policy</a> and a <a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-transport.md">verified encrypted boundary</a>. If port 7687 is busy, set <code>BRAINWIRE_BIND_PORT=17687</code> before starting.</p></div></aside>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker guide: ports, images, volumes and troubleshooting <span aria-hidden="true">→</span></a></p>
     </section>
 
-    <section id="python" class="content-section">
-      <div class="section-heading"><span class="section-kicker">02 / WRITE AND READ</span><h2>Install the Python helper.</h2><p>Run these commands from the checkout. <code>pip install .</code> installs the local <code>brainwire</code> helper and the Neo4j Bolt driver. It does not start the server. A public <code>pip install brainwire</code> distribution is not available yet.</p></div>
-      <div class="code"><div class="code-head"><span>terminal / repository root</span><button type="button" data-copy="python-install" aria-label="Copy Python installation">Copy</button></div><pre><code id="python-install">python3 -m venv .venv
-.venv/bin/python -m pip install .</code></pre></div>
-      <div class="code"><div class="code-head"><span>python / with the Docker demo running</span><button type="button" data-copy="python-code" aria-label="Copy Python example">Copy</button></div><pre><code id="python-code">from brainwire import GraphClient
-from neo4j import GraphDatabase
+    <section id="python" class="doc-section">
+      <div class="section-head"><p class="eyebrow">WRITE AND QUERY</p><h2>Connect from Python.</h2><p>Install this checkout's helper in a new environment. It uses the Neo4j Bolt driver; a public PyPI package is not available yet.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="python-install" aria-label="Copy Python setup">Copy</button></div><pre><code id="python-install">python3 scripts/setup_python.py</code></pre></div>
+      <p>Run the example with <code>.venv-brainwire/bin/python</code> while the Docker demo is running:</p>
+      <div class="code-block"><div class="code-header"><span>Python</span><button type="button" data-copy="python-code" aria-label="Copy Python graph example">Copy</button></div><pre><code id="python-code">from brainwire import connect
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
-    graph = GraphClient(driver, "demo", batch_size=100)
+with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
     graph.upsert_node("Customer", "customer-1", {"name": "Ada"})
-
-    with driver.session(database="demo") as session:
-        record = session.run(
-            "MATCH (n:Customer {entity_id: $id}) RETURN n.name AS name",
-            id="customer-1",
-        ).single()
-        print(record["name"])  # Ada</code></pre></div>
-      <p>Use parameters for values. Each bounded batch commits separately; a full batch commits before the next normalized row is requested. Earlier batches remain committed if a later batch fails. When a commit response is lost, reconcile stable source keys before retrying the mutation.</p>
-      <p class="text-links"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md">Install the helper ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Nodes, edges and batch writes ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Supported Cypher ↗</a></p>
+    graph.upsert_node("Segment", "segment-1", {"name": "beta"})
+    graph.upsert_edge(
+        ("Customer", "customer-1"), "IN_SEGMENT", ("Segment", "segment-1")
+    )
+    print(graph.run_cypher("""
+        MATCH (c:Customer)-[:IN_SEGMENT]->(s:Segment)
+        RETURN c.name AS customer, s.name AS segment
+    """))</code></pre></div>
+      <div class="result"><span>Result</span><code>[{'customer': 'Ada', 'segment': 'beta'}]</code></div>
+      <p>The demo already declares these types. For your own graph, start with an ontology. Use parameters for values and bounded batches for imports. If a write's commit outcome is unknown, reconcile it before retrying.</p>
+      <div class="inline-links"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python and batches →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Supported Cypher →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/online-catalog.md">Declare your schema →</a></div>
     </section>
 
-    <section id="terminal" class="content-section">
-      <span class="section-kicker">03 / INSPECT THE RUNNING GRAPH</span><h2>Open the terminal workspace.</h2><p>Build the native binary using the command in the next section. Then connect it to the Docker demo. This command reads a bounded sample around the Customer created above.</p>
-      <div class="code"><div class="code-head"><span>terminal / repository root</span><button type="button" data-copy="tui-code" aria-label="Copy connected TUI command">Copy</button></div><pre><code id="tui-code">./target/debug/brainwire shell --connect 127.0.0.1:7687 --graph demo \
-  --node-label Customer --entity-id customer-1 \
-  --edge-type IN_SEGMENT --target-label Segment</code></pre></div>
-      <p>The example Customer has no relationship yet, so its graph sample can be empty. Use the <a href="https://github.com/allandefraga/brainwire#write-from-python">full Python relationship example</a> to add a Segment and a link.</p>
-      <div class="pane-grid"><article><span>1 / ONTOLOGY</span><h3>Allowed connections</h3><p>Inspect the labels, properties and relationship signatures in the catalog.</p></article><article><span>2 / MEMORY</span><h3>Query reservations</h3><p>See the shared query budget, peak and rejected reservations. These counters are not process RSS.</p></article><article><span>3 / INDEXES</span><h3>Index readiness</h3><p>Inspect declarations and their state before relying on an index.</p></article><article><span>4 / GRAPH</span><h3>Stored relationships</h3><p>See up to 20 outgoing relationship rows for one configured source and signature.</p></article></div>
-      <p><code>Tab</code> or <code>1–4</code> changes panes; <code>r</code> refreshes, <code>?</code> opens help, <code>s</code> inspects one experimental standalone request ID, and <code>q</code> exits. A not-recorded outcome does not authorize replay. Add <code>--lang pt-BR</code> for Portuguese interface text. The connected workspace is read-only and does not expand nodes or edit properties.</p>
-      <p class="caption">Protected servers require a private credential file and suitable grants. Memory telemetry requires instance-admin permission. The native TUI uses plaintext Bolt, so connect on trusted loopback or through a qualified encrypted tunnel.</p>
-      <p class="text-links"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/connected-status.md">Connected workspace and permissions ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/tui-demo.md">Synthetic demo and offline modes ↗</a></p>
+    <section id="architecture" class="doc-section">
+      <div class="section-head"><p class="eyebrow">ARCHITECTURE</p><h2>One engine, clear layers.</h2><p>Your application connects over Bolt. The Rust engine executes the supported Cypher subset and stores graph records in RocksDB on persistent disk.</p></div>
+      <figure class="architecture" aria-labelledby="architecture-caption">
+        <div class="architecture-top"><div class="architecture-node"><span class="layer">YOUR APPLICATION</span><strong>Python or a Bolt client</strong><span>Writes · queries · agent context</span></div><div class="architecture-node"><span class="layer">TERMINAL WORKSPACE</span><strong>Inspect the running graph</strong><span>Schema · indexes · memory · sample</span></div></div>
+        <div class="architecture-link"><span>Bolt connection</span><span aria-hidden="true">↓</span></div>
+        <div class="architecture-engine"><span class="layer">BRAINWIRE · RUST</span><strong>Graph engine</strong><div><span>Authentication &amp; ACL</span><span>Cypher execution</span><span>Catalog &amp; indexes</span><span>Transactions &amp; budgets</span></div></div>
+        <div class="architecture-link"><span>Durable storage</span><span aria-hidden="true">↓</span></div>
+        <div class="architecture-storage"><strong>RocksDB</strong><span>WAL · memtables · SST files</span><code>Persistent local volume</code></div>
+        <figcaption id="architecture-caption">Standard Docker, Kubernetes and Swarm profiles run one instance. An optional three-voter Raft path is experimental; multi-machine failover still needs qualification.</figcaption>
+      </figure>
+      <div class="two-column"><article><h3>When you write</h3><p>The server checks access, executes a transaction and commits changes through the storage layer. The write-ahead log supports recovery before memory buffers flush into disk tables.</p></article><article><h3>When you read</h3><p>The engine uses the query's transaction view, visibility rules and available indexes. Query budgets and timeouts bound supported work; some query shapes still scan.</p></article></div>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/architecture.md">Architecture guide →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/quorum-replication.md">Experimental replication →</a></p>
     </section>
 
-    <section id="cli" class="content-section">
-      <span class="section-kicker">04 / USE THE COMMAND LINE</span><h2>One binary, several entry points.</h2><p>A source build needs Rust and the native RocksDB build dependencies, including a C++ compiler, libclang, CMake and pkg-config. Fetch dependencies once, then build:</p>
-      <div class="code"><div class="code-head"><span>terminal / repository root</span><button type="button" data-copy="build-code" aria-label="Copy native build commands">Copy</button></div><pre><code id="build-code">cargo fetch --locked
-cargo build --locked --offline -p brainwire-server --bin brainwire
-./target/debug/brainwire --help</code></pre></div>
-      <div class="command-list"><article><code>brainwire serve</code><p>Run the Bolt server over named graphs in the configured data directory.</p></article><article><code>brainwire cypher</code><p>Query a local database directory while the server is stopped.</p></article><article><code>brainwire shell --demo</code><p>Explore a synthetic UI demonstration; it does not query your database.</p></article><article><code>brainwire shell --overview</code><p>Inspect real local graphs and files with the server stopped.</p></article><article><code>brainwire config show</code><p>Read effective configuration, its sources and configured-memory diagnostics.</p></article><article><code>brainwire db check NAME</code><p>Run an offline graph and index integrity check.</p></article></div>
-      <div class="note"><strong>One process owns each local database.</strong><p>The server holds RocksDB's lock. Do not point the embedded CLI or offline TUI at the same directory while it is running. Use the connected TUI or a Bolt client instead.</p></div>
-      <p class="text-links"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Run a local Cypher query ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration ↗</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/multi-graph-backoffice.md">Offline inspection ↗</a></p>
-    </section>
-
-    <section id="operate" class="content-section">
-      <span class="section-kicker">05 / KEEP YOUR DATA</span><h2>Check the server. Keep the volume.</h2>
-      <div class="code"><div class="code-head"><span>terminal / Docker demo</span><button type="button" data-copy="operate-code" aria-label="Copy Docker inspection commands">Copy</button></div><pre><code id="operate-code">docker compose -p brainwire-demo -f deploy/compose.demo.yaml ps
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail=100 brainwire
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire brainwire probe --mode ready</code></pre></div>
-      <p>To stop the demo while keeping its data:</p>
-      <div class="code"><div class="code-head"><span>terminal / keep the named volume</span><button type="button" data-copy="stop-code" aria-label="Copy demo stop command">Copy</button></div><pre><code id="stop-code">docker compose -p brainwire-demo -f deploy/compose.demo.yaml down</code></pre></div>
-      <p>Do not add <code>--volumes</code> unless you intend to delete the demo data. Starting the same Compose project again reuses its named volume.</p>
-      <div class="option-grid"><article><h3>Back up separately</h3><p>A persistent volume survives a container restart but is not a backup. Create a checkpoint, copy it to independent storage, and test restoring it before relying on it.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Checkpoint and restore ↗</a></article><article><h3>Check readiness and integrity</h3><p>A ready probe checks whether the graph can serve a request. It does not audit all data. Stop the server before using the offline integrity check.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/termination-recovery.md">Shutdown and recovery ↗</a></article></div>
-    </section>
-
-    <section id="limits" class="content-section">
-      <div class="section-heading"><span class="section-kicker">06 / CAPABILITIES &amp; BOUNDARIES</span><h2>Know what you are running.</h2><p>Use the beta for a controlled trial. These boundaries help you choose the right workload and the checks to run before relying on it.</p></div>
-      <div class="evaluation-note"><span class="evaluation-mark" aria-hidden="true">↗</span><div><strong>Evaluate your actual workload.</strong><p>Keep an authoritative source and a tested backup. Validate the same release, queries, data volume and deployment that your application will use.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/beta-operator-checklist.md">Trial checklist →</a></div>
-      <div class="note"><strong>New in v0.16 beta</strong><p>Declare a keyed relationship type online on a standalone server, or send one bounded Python batch with a request ID on a supported server. Identified writes do not automatically retry; consult the appropriate outcome contract.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md#one-identified-batch">Identified batches ↗</a> · <a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md#keyed-relationships">Keyed relationships ↗</a></div>
-      <div class="limit-list">
-        <article><span class="card-label">01 / MEMORY</span><h3>Coordinated memory budgets</h3><p>With process-memory admission enabled, queries and Bolt input share one reservation ledger. Each component keeps its own budget; retained results keep their reservation.</p><div class="boundary"><strong>Plan for</strong><p>No guaranteed process-wide RSS ceiling. A pressure smoke failed once; controlled repeats passed, but the original decision is unexplained. Sustained 2/4/8 GiB qualification remains open.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/memory-defaults.md">Memory settings and evidence →</a></article>
-        <article><span class="card-label">02 / CYPHER &amp; INDEXES</span><h3>A documented query subset</h3><p>Node indexes support selected predicates. A ready relationship property index can also accelerate keyed event merges.</p><div class="boundary"><strong>Plan for</strong><p>One fixed node label. Some query shapes still scan. Relationship indexes are experimental, standalone-only, opt-in and change the disk format; back up before enabling.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/relationship-property-indexes.md">Relationship indexes →</a> · <a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Supported Cypher →</a></article>
-        <article><span class="card-label">03 / SECURITY</span><h3>Authentication and grants</h3><p>Use an auth policy to control graph access. The local demo deliberately disables authentication.</p><div class="boundary"><strong>Plan for</strong><p>Shared deployments require a verified encrypted boundary. Native Bolt TLS is not implemented.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md">Protected deployment →</a></article>
-        <article><span class="card-label">04 / HISTORY &amp; INGESTION</span><h3>Explicit event identity</h3><p>New relationship types can opt in to immutable keys; Python can update or delete a single keyed event. Existing types need a new graph and source reingestion.</p><div class="boundary"><strong>Plan for</strong><p>No native <code>AS OF</code> reads or revision retention. Pair-only DuckLake synchronization does not support keyed types.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Timeline and migration →</a></article>
-        <article><span class="card-label">05 / DISTRIBUTION</span><h3>Experimental quorum</h3><p>An optional three-voter path supports local replication and recovery testing. Raft bounds inbound encoded frame buffers and validates commands before persisting and reopening the log.</p><div class="boundary"><strong>Plan for</strong><p>Standard Docker, Kubernetes and Swarm profiles run one instance. Multi-machine failover still needs qualification.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/docs/quorum-replication.md">Replication boundaries →</a></article>
-        <article><span class="card-label">06 / PERFORMANCE</span><h3>Reproducible receipts</h3><p>Benchmark reports describe synthetic workloads, conditions and measured results.</p><div class="boundary"><strong>Plan for</strong><p>These are not production SLOs or a general ranking against other databases. Measure your application.</p></div><a href="https://github.com/allandefraga/brainwire/blob/main/BENCHMARKS.md">Methods and results →</a></article>
+    <section id="features" class="doc-section">
+      <div class="section-head"><p class="eyebrow">CAPABILITIES</p><h2>Build with relationships.</h2><p>Use the graph as a durable data layer. Your application supplies the data, the access model and any AI provider.</p></div>
+      <div class="feature-grid">
+        <article><span class="feature-symbol" aria-hidden="true">↗</span><h3>Graph + Cypher</h3><p>Nodes, typed relationships and properties. Read, create, merge, update and delete through the documented Cypher subset.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Query guide →</a></article>
+        <article><span class="feature-symbol" aria-hidden="true">◇</span><h3>Explicit ontology</h3><p>Declare labels, allowed connections, properties and descriptions so applications can understand the graph's structure.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/online-catalog.md">Catalog guide →</a></article>
+        <article><span class="feature-symbol" aria-hidden="true">≋</span><h3>Application timelines</h3><p>Store explicit event nodes or keyed relationships. The Python example reads event pages by time and identity.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Timeline model →</a></article>
+        <article><span class="feature-symbol" aria-hidden="true">⌕</span><h3>Agent context</h3><p>Explore ontology paths, sample visible connections and combine candidates from configured search providers. Graph reads follow the caller's access controls.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context API →</a></article>
+        <article><span class="feature-symbol" aria-hidden="true">⇄</span><h3>Incremental writes</h3><p>Use Python batches for node and edge upserts. DuckLake synchronization compares pinned snapshots and applies bounded changes.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/ducklake-incremental.md">Ingestion guide →</a></article>
+        <article><span class="feature-symbol" aria-hidden="true">▤</span><h3>Visible operations</h3><p>Inspect indexes, query-memory counters, persistent files and recovery. Keep a tested checkpoint outside the running volume.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore →</a></article>
       </div>
     </section>
 
-    <section id="guides" class="content-section">
-      <span class="section-kicker">07 / DOCUMENTATION INDEX</span><h2>Choose the next task.</h2>
-      <div class="guide-grid"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md"><strong>Run Docker</strong><small>Images, volumes, ports and restarts</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md"><strong>Install Python</strong><small>Local package and driver setup</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md"><strong>Load and change data</strong><small>Nodes, edges, patches and batches</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md"><strong>Query the graph</strong><small>CLI, parameters and supported syntax</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/connected-status.md"><strong>Inspect the terminal UI</strong><small>Real schema, indexes and graph sample</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/indexes.md"><strong>Use indexes</strong><small>Declarations, readiness and query paths</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/ducklake-incremental.md"><strong>Sync a source</strong><small>Pinned snapshots and resume behavior</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md"><strong>Run graph algorithms</strong><small>Sparse projections and bounded procedures</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md"><strong>Run an application pilot</strong><small>Ingestion, recovery and safety checks</small></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/beta-operator-checklist.md"><strong>Evaluate a deployment</strong><small>Security, recovery and qualification</small></a></div>
-      <details class="pages-note"><summary>What is GitHub Pages?</summary><p>GitHub Pages serves this static documentation folder as a website. It does not run Brainwire or host a database. Publication depends on the repository's Pages settings, access policy and workflow. To preview this site locally from the checkout, run <code>python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1</code>, then open <code>http://127.0.0.1:8000</code>.</p></details>
+    <section id="use-cases" class="doc-section">
+      <div class="section-head"><p class="eyebrow">USE CASES</p><h2>Where a graph helps.</h2></div>
+      <div class="use-case-list"><article><span>01</span><div><h3>A connected company knowledge base</h3><p>Link documents, projects, people and tickets. Give an application the relationships behind a record, with sources it can reference.</p></div><code>Document → Project → Owner</code></article><article><span>02</span><div><h3>Explicit memory for agents</h3><p>Store decisions, facts and events using stable identities. Retrieve relevant context and keep access checks in the data path.</p></div><code>Agent → Decision → Evidence</code></article><article><span>03</span><div><h3>Dependencies and timelines</h3><p>Follow what depends on a service, what changed on a ticket or how a repository connects. Model the events your application needs.</p></div><code>Service → Deployment → Event</code></article></div>
+      <p>Brainwire does not extract every relationship automatically. Use your pipeline, an explicit connector or your chosen model to map source data into the graph.</p>
     </section>
-    <footer><span>Brainwire / v0.16.0-beta.3 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes ↗</a></footer>
+
+    <section id="terminal" class="doc-section">
+      <div class="section-head"><p class="eyebrow">TERMINAL WORKSPACE</p><h2>See what is connected.</h2><p>Open a read-only workspace against the Docker demo. The example below inspects the Customer and Segment written earlier.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="tui-code" aria-label="Copy terminal workspace command">Copy</button></div><pre><code id="tui-code">docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire \
+  brainwire shell --connect 127.0.0.1:7687 --graph demo \
+  --node-label Customer --entity-id customer-1 \
+  --edge-type IN_SEGMENT --target-label Segment</code></pre></div>
+      <div class="workspace-summary"><div><span>01</span><strong>Schema</strong><p>Allowed types and relationships</p></div><div><span>02</span><strong>Memory</strong><p>Query reservations and refusals</p></div><div><span>03</span><strong>Indexes</strong><p>Declarations and readiness</p></div><div><span>04</span><strong>Graph sample</strong><p>Bounded outgoing relationships</p></div></div>
+      <p><kbd>Tab</kbd> changes panes, <kbd>r</kbd> refreshes, <kbd>?</kbd> opens help and <kbd>q</kbd> exits. Add <code>--lang pt-BR</code> for Portuguese. Protected servers require credentials and grants; memory telemetry requires instance-admin access.</p>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/connected-status.md">Connected workspace →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/tui-demo.md">Demo and offline modes →</a></p>
+    </section>
+
+    <section id="operate" class="doc-section">
+      <div class="section-head"><p class="eyebrow">OPERATIONS</p><h2>Keep data. Check recovery.</h2><p>A container restart keeps the named volume. A persistent volume is only one copy, so keep a separate backup and test restoring it.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal · Docker demo</span><button type="button" data-copy="operate-code" aria-label="Copy health and stop commands">Copy</button></div><pre><code id="operate-code"># Check that the graph can serve a request
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec -T brainwire \
+  brainwire probe --mode ready
+
+# Stop the demo and keep its named volume
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml down</code></pre></div>
+      <p>Adding <code>--volumes</code> to the stop command deletes the demo data. Start the same Compose project again to reuse its volume.</p>
+      <div class="guide-row"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md"><strong>Back up and restore</strong><span>Checkpoints and independent copies →</span></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/memory-defaults.md"><strong>Size memory</strong><span>Budgets, pressure and measurements →</span></a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md"><strong>Deploy a container</strong><span>Docker, Kubernetes and Swarm →</span></a></div>
+    </section>
+
+    <section id="cli" class="doc-section">
+      <div class="section-head"><p class="eyebrow">NATIVE CLI</p><h2>One binary for local tools.</h2><p>For native use, build from source with Rust and the RocksDB native build dependencies: a C++ compiler, libclang, CMake and pkg-config.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="build-code" aria-label="Copy native build commands">Copy</button></div><pre><code id="build-code">cargo fetch --locked
+cargo build --locked --offline -p brainwire-server --bin brainwire
+./target/debug/brainwire --help</code></pre></div>
+      <p>Use <code>brainwire serve</code> to start the server, <code>brainwire cypher</code> for offline queries and <code>brainwire config show</code> for configuration. The server owns the RocksDB directory while running; use Bolt or the connected TUI rather than opening that directory from another process.</p>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">CLI and Cypher reference →</a></p>
+    </section>
+
+    <section id="limits" class="doc-section">
+      <div class="section-head"><p class="eyebrow">BETA BOUNDARIES</p><h2>Evaluate the workload you will run.</h2><p>Start with rebuildable data and a tested backup. The beta has useful capabilities, with important deployment boundaries.</p></div>
+      <div class="boundary-list"><article><h3>Memory</h3><p>Budgets and pressure admission reject some work under load. A process-wide RSS ceiling and sustained representative capacity remain unqualified.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/memory-defaults.md">Memory guide →</a></article><article><h3>Queries and search</h3><p>Cypher support is a documented subset. Nodes have one fixed label; ANN and BM25 indexes are not native features. Relationship property indexes are experimental and standalone-only.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Language support →</a></article><article><h3>History and security</h3><p>Events are application-managed; native <code>AS OF</code> reads and automatic retention are unavailable. Shared deployments need auth and an encrypted boundary; native Bolt TLS is not implemented.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot →</a></article><article><h3>Distribution and evidence</h3><p>Three-voter quorum is experimental. Standard deployment templates run one instance. Local synthetic tests do not qualify multi-machine failover or production performance.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/quorum-replication.md">Replication guide →</a></article></div>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/beta-operator-checklist.md">Run a controlled trial →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/BENCHMARKS.md">Read benchmark conditions →</a></p>
+    </section>
+
+    <section id="guides" class="doc-section">
+      <div class="section-head"><p class="eyebrow">DOCUMENTATION</p><h2>Go deeper when you need to.</h2></div>
+      <div class="guide-columns"><div><h3>Get started</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.md">Getting started</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker and images</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md">Python installation</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot</a></div><div><h3>Build</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python writes and batches</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Cypher reference</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context for agents</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Events and timelines</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md">Graph algorithms</a></div><div><h3>Operate</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md">Deployments</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/README.md">Performance evidence</a></div></div>
+      <details class="pages-note"><summary>What does GitHub Pages host?</summary><p>This static documentation website. It does not run Brainwire or host your graph. Preview it locally with <code>python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1</code>, then open <code>http://127.0.0.1:8000</code>.</p></details>
+    </section>
+    <footer><span>Brainwire · v0.17.0-beta.1 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
   </main>
 </div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
 <script>
-  const navLinks = [...document.querySelectorAll('nav a[href^="#"]')];
+  const navLinks = [...document.querySelectorAll('.section-nav a[href^="#"]')];
   if ('IntersectionObserver' in window) {
     const observer = new IntersectionObserver(entries => {
       const visible = entries.filter(entry => entry.isIntersecting)

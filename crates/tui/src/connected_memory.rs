@@ -269,8 +269,8 @@ pub(crate) fn render_at(
     ];
     let mut lines = vec![
         Line::raw(lang.choose(
-            " Pool de consultas compartilhado por todos os grafos do servidor.",
-            " Query pool shared by all graphs on this server.",
+            " Pool de consultas: todos os grafos. Não é RSS, RAM ou cache.",
+            " Query pool: all graphs. Reservations, not RSS, RAM or cache.",
         )),
         Line::raw(""),
     ];

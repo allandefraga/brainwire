@@ -63,6 +63,8 @@ impl State {
             KeyCode::Down => self.selected = (self.selected + 1).min(last),
             KeyCode::PageUp => self.selected = self.selected.saturating_sub(5),
             KeyCode::PageDown => self.selected = (self.selected + 5).min(last),
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End => self.selected = last,
             _ => {}
         }
     }
@@ -146,18 +148,25 @@ pub(crate) fn render_at(
         0
     };
     let more = state.snapshot.has_more || state.snapshot.neighbors.len() > 20;
+    let target_ids = if state.snapshot.found {
+        targets(&state.snapshot).len()
+    } else {
+        0
+    };
     let mut status = format!(
-        " {} • {} {}s • {} {}{}\n {}",
+        " {} • {} {}s{}\n {} {} / {} {}\n {}",
         lang.choose("SNAPSHOT DO SERVIDOR", "SERVER SNAPSHOT"),
         lang.choose("idade", "age"),
         state.sampled.elapsed().as_secs(),
-        count,
-        lang.choose("relações de saída", "outgoing rows"),
         if more {
             lang.choose(" • MAIS DISPONÍVEIS", " • MORE AVAILABLE")
         } else {
             ""
         },
+        count,
+        lang.choose("relações de saída", "outgoing rows"),
+        target_ids,
+        lang.choose("IDs de destino distintos", "distinct target IDs"),
         lang.choose(
             "Até 20 relações; não é o grau total. Um tipo/direção por amostra.",
             "Up to 20 relationships; not total degree. One type/direction per sample."
@@ -258,16 +267,19 @@ pub(crate) fn render_at(
             )));
         }
         frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .block(panel(
-                    lang.choose(
-                        "RELAÇÃO SELECIONADA • ORIGEM → DESTINO",
-                        "SELECTED LINK • SOURCE → TARGET",
-                    ),
-                    GREEN,
-                    no_color,
+            Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+                panel("", GREEN, no_color).title(format!(
+                    "{} {}/{} • {}",
+                    lang.choose("RELAÇÃO", "LINK"),
+                    if selected_id.is_some() {
+                        state.selected + 1
+                    } else {
+                        0
+                    },
+                    count,
+                    lang.choose("ORIGEM → DESTINO", "SOURCE → TARGET")
                 )),
+            ),
             body[0],
         );
     } else {
@@ -603,8 +615,8 @@ pub(crate) fn render_at(
     );
     frame.render_widget(
         Paragraph::new(lang.choose(
-            " ↑↓ seleciona • PgUp/Dn rola • r atualiza • q sai",
-            " ↑↓ select • PgUp/Dn scroll • r refresh • q quit",
+            " ↑↓ seleciona • Home/End início/fim • r atualiza • q sai",
+            " ↑↓ select • Home/End first/last • r refresh • q quit",
         ))
         .block(panel(
             lang.choose(
@@ -748,6 +760,32 @@ mod tests {
                 state.handle(KeyCode::Up);
                 assert_eq!(state.selected, 18);
                 assert!(!rendered.contains('\x1b'));
+            }
+        }
+    }
+
+    #[test]
+    fn sample_counts_distinguish_relationship_rows_from_target_ids_and_jump_to_edges() {
+        for lang in [Language::En, Language::PtBr] {
+            for (width, height) in [(80, 24), (120, 36)] {
+                let mut snapshot = sample(20);
+                snapshot.neighbors[1] = snapshot.neighbors[0].clone();
+                let mut state = State::new(snapshot);
+                state.handle(KeyCode::End);
+                assert_eq!(state.selected, 19);
+                let output = text(&mut state, lang, width, height);
+                for expected in [
+                    lang.choose("19 IDs de destino distintos", "19 distinct target IDs"),
+                    "20/20",
+                    "comment-19",
+                    lang.choose("não é o grau total", "not total degree"),
+                ] {
+                    assert!(output.contains(expected), "{expected}: {output}");
+                }
+                state.handle(KeyCode::Home);
+                assert_eq!(state.selected, 0);
+                let output = text(&mut state, lang, width, height);
+                assert!(output.contains("comment-0"));
             }
         }
     }

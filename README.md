@@ -1,114 +1,84 @@
-<p align="center">
-  <img src="assets/brainwire-logo.svg" alt="Brainwire" width="360">
-</p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/brainwire-logo.svg"><img src="assets/brainwire-logo-light.svg" alt="Brainwire" width="360"></picture></p>
 
 <h1 align="center">Your data has connections.</h1>
-
+<p align="center">A graph database for connected application and agent context.</p>
 <p align="center">
-  <strong>A durable graph for the context behind your AI apps.</strong>
-  <br>Write with Python. Query with Cypher. Inspect in your terminal.
+  <a href="https://allandefraga.github.io/brainwire/">Documentation</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="docs/local-cypher.md">Cypher</a> ·
+  <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml"><img src="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-65ff54?style=flat-square" alt="License: Apache-2.0"></a>
-  <a href="#current-limits"><img src="https://img.shields.io/badge/status-experimental_beta-65ff54?style=flat-square" alt="Status: experimental beta"></a>
-  <img src="https://img.shields.io/badge/built_with-Rust-65ff54?style=flat-square" alt="Built with Rust">
-</p>
-
-<p align="center">
-  <a href="#quickstart">Run it</a> &nbsp; / &nbsp;
-  <a href="#write-from-python">Python</a> &nbsp; / &nbsp;
-  <a href="#see-what-the-tui-can-do">Terminal UI</a> &nbsp; / &nbsp;
-  <a href="https://allandefraga.github.io/brainwire/">Docs</a> &nbsp; / &nbsp;
-  <a href="BENCHMARKS.md">Benchmarks</a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-65ff54?style=flat-square" alt="Apache-2.0 license"></a>
+  <img src="https://img.shields.io/badge/status-experimental_beta-65ff54?style=flat-square" alt="Experimental beta">
 </p>
 
 Brainwire connects people, projects, documents and events in named graphs.
-The engine is written in Rust, stores data in RocksDB and speaks Bolt.
+Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.16.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> For controlled trials with rebuildable data.
-> Memory and distributed recovery qualification remain open. Read the
-> [current limits](#current-limits) before choosing a deployment.
+> **v0.17.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
-This beta improves memory accounting for keyed relationship writes. When an
-eligible relationship property index is ready, keyed `MERGE` can also use it
-to find existing events between the same endpoints. See
-[how to enable relationship indexes](docs/relationship-property-indexes.md).
-The index changes the on-disk format: back up first, and use it only on a
-standalone server. Quorum and downgrade are not supported for upgraded volumes.
+## How it works
 
-The beta also includes a [paginated timeline example](docs/temporal-data.md),
-the `SHOW INDEXES` Cypher alias, and an advisory for retained Raft log capacity.
+```text
+Python / Bolt client  ──►  Bolt server  ──►  Cypher + graph engine
+                                                   │
+                                      RocksDB: WAL, cache and disk
+                                                   │
+                                         persistent graph volume
+```
+
+The server, engine and CLI are written in Rust. RocksDB stores graph data;
+Bolt connects clients; the Python helper uses the Neo4j Bolt driver. The TUI
+inspects a running database in read-only mode. Experimental quorum replication
+is separate from the standard single-instance deployment.
 
 ## What you can build
 
-| Work with | Available today |
-|---|---|
-| **Connected context** | Nodes, relationships, properties, ontology descriptions and indexes |
-| **Agent retrieval** | Bounded reads, source references and experimental reranking of explicit candidates |
-| **Timelines** | Explicit event nodes or opt-in immutable keys for new relationship types |
-| **Code graphs** | Local Python AST extraction, source links, paths and explanations |
-| **Operations** | Persistent files, checkpoints, query-memory diagnostics and a read-only TUI |
+- **Agent context:** explore ontology and visible record paths, combine ranked IDs from configured providers, then return authorized records and sources.
+- **Connected operations:** link customers, projects, documents and tickets and query relationships with Cypher.
+- **Timelines:** model explicit events with stable keys and page through them in the Python example.
+- **Code graphs:** extract local Python structure and explore paths and source links.
 
-An optional [Kubernetes disruption budget](docs/orchestrators.md) protects the
-single pod from voluntary eviction; it does not provide replication or failover.
-An optional [network policy](deploy/kubernetes-network-isolated/README.md)
-limits Bolt access to labeled same-namespace clients on enforcing clusters.
+See the [architecture](docs/architecture.md), [agent context](docs/context-api.md),
+[Cypher guide](docs/local-cypher.md) and [all documentation](docs/README.md).
 
-Your application chooses the data, permissions and model. See the
-[context API](docs/context-api.md), [timeline model and migration](docs/temporal-data.md),
-and [supported Cypher](docs/local-cypher.md).
+The experimental [context helpers](docs/context-api.md) let an application
+explore allowed schema paths, trace a bounded sample of visible connections,
+and combine its own lexical and vector search providers. A schema path does not
+prove a matching record exists. These helpers do not create search indexes,
+generate embeddings or grant agent actions.
 
 ## Quickstart
 
-You need **Git** and **Docker with Compose**. Start a local demo:
+Install Git and Docker with Compose, then start a local demo:
 
 ```sh
-git clone --branch v0.16.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.17.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.16.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
-`docker pull` only downloads an image. The Compose command above initializes
-and starts the database, then waits for it to accept queries. Check it with:
+Check that it is ready:
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec -T brainwire brainwire probe --mode ready
 ```
 
-The **demo** graph is available at **bolt://127.0.0.1:7687**. Graph files stay in
-a Docker volume across restarts. If the port is busy, set
-`BRAINWIRE_BIND_PORT=17687` before starting and use that port in your client.
+The demo listens at `bolt://127.0.0.1:7687` and keeps data in a Docker volume.
+It disables authentication for local use. For shared environments, use
+[authentication and encrypted transport](docs/protected-containers.md).
 
-Choose a published image from the [release page](https://github.com/allandefraga/brainwire/releases).
-Public images can be pulled without logging in. If GHCR returns `denied` or
-`unauthorized`, see [image access and troubleshooting](docs/container.md#start-from-a-release-image).
-For startup failures, collect recent logs and [report a reproducible bug](https://github.com/allandefraga/brainwire/issues/new?template=bug_report.yml):
-
-```sh
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml logs --tail 100
-```
-
-Remove credentials and private data before sharing logs.
-
-The demo disables authentication and binds to host loopback. For shared access,
-use [protected containers](docs/protected-containers.md) and
-[encrypted transport](docs/protected-transport.md).
-For an application trial, follow the [pilot checklist](docs/application-pilot.md).
-
-### Write from Python
-
-Install the helper with Python 3.9 or newer (with `venv` and `pip`):
+### Write and query from Python
 
 ```sh
 python3 scripts/setup_python.py
 ```
 
-This creates a new `.venv-brainwire` environment, installs this checkout's
-client and downloads its dependencies. It leaves existing environments untouched; use `--venv` to
-choose a different new path. Run this with `.venv-brainwire/bin/python`:
+Run this with `.venv-brainwire/bin/python`:
 
 ```python
 from brainwire import connect
@@ -125,113 +95,79 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
     """))
 ```
 
-Result: `[{'customer': 'Ada', 'segment': 'beta'}]`.
-The demo declares these types. Define an ontology for your own data.
+The demo includes these types. For your own graph, define an ontology first.
+See [Python](docs/python-client.md) and [creating a graph](docs/mvp-quickstart.md).
 
-See the [Python guide](docs/python-client.md) for batches, property updates and
-streaming reads. Batches commit separately; after an unknown commit outcome,
-reconcile before retrying. The helper uses the Neo4j Bolt driver. Install from
-source; a public PyPI package is not available.
+### Help an agent understand the schema
 
-### See what the TUI can do
+Use the same connection to discover declared routes between types:
 
-Open another terminal:
+```python
+from brainwire import schema_paths, trace_paths
 
-```sh
-docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire brainwire shell --connect 127.0.0.1:7687 --graph demo --node-label Customer --entity-id customer-1 --edge-type IN_SEGMENT --target-label Segment
+paths = schema_paths(graph, "Customer", "Segment", max_hops=2)
+for path in paths["paths"]:
+    print([edge["name"] for edge in path["relationships"]])
+
+connections = trace_paths(
+    graph, ("Customer", "customer-1"), ("Segment", "segment-1"),
+    relationship="IN_SEGMENT", max_hops=1,
+)
+print(connections["paths"])
 ```
 
-**Tab** switches views, **r** refreshes, **?** explains and **q** exits. Press
-**s** to inspect one experimental standalone request ID; this is not a batch
-monitor and `not_recorded` does not authorize replay.
-Inspect ontology, query memory, indexes and up to 20 outgoing relationships for
-the selected node and type. The connected TUI is read-only. Add `--lang pt-BR`
-for Portuguese. [TUI guide](docs/connected-status.md).
+Run this inside the connection block above. Schema routes are allowed shapes;
+connection paths are a bounded, unordered sample of records visible to the
+caller. See [context for agents](docs/context-api.md) for source citations and
+search with configured providers.
 
-Stop the demo and keep its data:
+After creating the demo records, run the complete read-only context example:
+
+```sh
+.venv-brainwire/bin/python -m examples.python.agent_context_demo
+```
+
+Its provider returns a fixed demo ID; replace it with your own search provider.
+
+### Explore in the terminal
+
+```sh
+docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire \
+  brainwire shell --connect 127.0.0.1:7687 --graph demo \
+  --node-label Customer --entity-id customer-1 \
+  --edge-type IN_SEGMENT --target-label Segment
+```
+
+Use **Tab** to change views, **r** to refresh, **?** for help and **q** to quit.
+The connected TUI is read-only; it shows schema, indexes, memory diagnostics
+and a bounded relationship sample. Add `--lang pt-BR` for Portuguese.
+[Explore the TUI](docs/connected-status.md).
+
+To stop the demo while keeping its volume:
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
 
-<details>
-<summary>See the illustrated graph demo</summary>
-
-![Animated graph illustration](assets/brainwire-demo.gif)
-
-Illustration with synthetic entities and relationships. It is not a recording of
-the connected TUI. [View the social card](assets/brainwire-social-preview-v1.jpg).
-
-</details>
-
 ## Current limits
 
-Start with a rebuildable graph and a tested backup while evaluating this beta.
+Brainwire is an experimental beta. Plan a controlled trial:
 
-- **Memory:** budgets and pressure admission reject some work before allocation.
-  A local [200,000-node load and restart](docs/benchmarks/2026-11-05-load200k-015b14.md)
-  and [512 MiB pressure smoke](docs/benchmarks/2026-11-05-beta16-cgroup.json)
-  passed with synthetic data. Two later untraced pressure controls were inconclusive.
-  There is no guaranteed process-wide RSS ceiling; earlier pressure and
-  RSS-growth observations remain unexplained, and sustained
-  representative 2/4/8 GiB qualification is incomplete. See the
-  [test history](docs/benchmarks/README.md).
-- **Queries and search:** Brainwire supports a [documented Cypher subset](docs/local-cypher.md)
-  and reranks explicit candidates. Nodes have one fixed label; native ANN and
-  BM25 indexes are not yet available. Relationship-type scans are narrowed by
-  catalog signatures, not constant-time counts. The experimental relationship
-  property index supports selected query shapes and standalone stores only.
-- **History and ingestion:** DuckLake synchronization compares pinned snapshots.
-  Full reconciliation applies missing-key deletions in bounded Python batches.
-  Confirmed rolled-back transaction conflicts receive bounded retries.
-  Native CDC, historical node/edge revisions and `AS OF` reads are not available.
-  Relationship `MERGE` defaults to one edge per pair and type. New types can
-  opt in to [immutable keys](docs/temporal-data.md#keyed-relationships); existing
-  types need a new graph and reingestion to migrate. Pair-based DuckLake edge
-  synchronization does not support keyed types.
-- **Security:** authentication and grants are available. Shared deployments need
-  a verified encrypted network boundary because native Bolt TLS is not implemented.
-- **Distribution:** an experimental three-voter quorum is available for testing.
-  Invalid log sequences and inconsistent commit markers are rejected before
-  they are persisted. Apply batches are checked for malformed entries before
-  graph changes; later I/O failures still require recovery and replay.
-  Standard Kubernetes/Swarm templates run one instance; sharding and failover
-  across machines still need implementation or qualification.
+- **Memory:** budgets and admission provide partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
+- **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
+- **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
+- **Security:** shared deployments need authentication and a verified encrypted boundary; native Bolt TLS is not implemented.
+- **Distribution:** three-voter quorum is experimental. Standard Docker, Kubernetes and Swarm configurations run one instance; multi-machine failover is not qualified.
 
-Read [supported Cypher](docs/local-cypher.md), [memory limits](docs/memory-defaults.md),
-[recovery](docs/checkpoints.md), [quorum operation](docs/quorum-replication.md) and
-[benchmark conditions](BENCHMARKS.md). Measurements use synthetic workloads and
-do not establish production SLOs or general superiority over other databases.
+See [memory](docs/memory-defaults.md), [security](docs/protected-containers.md),
+[recovery](docs/checkpoints.md), [replication](docs/quorum-replication.md) and
+[benchmark conditions](BENCHMARKS.md). Synthetic tests are not production SLOs.
 
-## Documentation
+## Learn more
 
-| I want to… | Start here |
-|---|---|
-| Install or deploy | [Docker](docs/container.md) · [Kubernetes / Swarm](docs/orchestrators.md) |
-| Create a graph and types | [CLI](docs/mvp-quickstart.md) · [ontology](docs/connected-ontology.md) |
-| Write and query | [Python](docs/python-client.md) · [Cypher](docs/local-cypher.md) · [ingestion](docs/source-ingestion.md) |
-| Build agent context | [Context and reranking](docs/context-api.md) · [code graphs](docs/code-graph.md) |
-| Inspect and operate | [TUI](docs/connected-status.md) · [security](docs/bolt-auth.md) · [checkpoints](docs/checkpoints.md) |
-| Evaluate or contribute | [Benchmarks](BENCHMARKS.md) · [releasing](docs/releasing.md) · [changelog](CHANGELOG.md) |
+[Getting started](docs/getting-started.md) · [Architecture](docs/architecture.md) ·
+[Python](docs/python-client.md) · [Cypher](docs/local-cypher.md) ·
+[TUI](docs/connected-status.md) · [Operations](docs/README.md#operate-and-evaluate)
 
-[All documentation](docs/README.md). To build the Rust server, CLI and TUI, follow
-the [local setup](docs/mvp-quickstart.md). Homebrew and Electron installers are
-not available.
-
-## Release status and license
-
-**v0.16.0-beta.3 · experimental beta · production qualification open.** <!-- brainwire-release-version -->
-
-[Apache-2.0](LICENSE). Use, modify and redistribute the current source under its
-terms. Repository and image visibility control access separately.
-Tags run CI and image checks; a container is available after the release
-workflow publishes it. That workflow does not publish packages to crates.io or PyPI.
-
-## Feedback and contributions
-
-Trying Brainwire? Report a [bug](https://github.com/allandefraga/brainwire/issues/new?template=bug_report.yml)
-with the release tag, platform and a small synthetic reproduction, or propose a
-[feature](https://github.com/allandefraga/brainwire/issues/new?template=feature_request.yml).
-See [contributing](CONTRIBUTING.md) for local checks and [security reporting](SECURITY.md)
-for suspected vulnerabilities. Community support is best effort; this beta has
-no production support SLA.
+Brainwire is [Apache-2.0](LICENSE). Please report bugs with a small synthetic
+reproduction via [GitHub Issues](https://github.com/allandefraga/brainwire/issues).

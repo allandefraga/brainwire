@@ -152,7 +152,7 @@ class ReleaseFileTests(unittest.TestCase):
             files[Path("docs-site/index.html")],
         )
         self.assertIn(
-            f"v{next_candidate} · evolving <!-- brainwire-release-version -->",
+            f"v{next_candidate} documentation <!-- brainwire-release-version -->",
             files[Path("docs-site/index.html")],
         )
         lock = files[Path("Cargo.lock")]

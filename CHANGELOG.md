@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.0-beta.1 — experimental candidate
+
+- Add bounded schema-path discovery, ACL-aware instance path samples, and
+  configured-provider context search with rank fusion. Search providers are
+  supplied by the application; this does not add native vector or text indexes.
+- Improve connected TUI navigation and explain the scope of graph and memory
+  views. Refresh the logo, documentation site, installation guide and README.
+- Add unit tests and authenticated integration checks for the context APIs,
+  including visibility of intermediate nodes in graph paths.
+
 ## 0.16.0-beta.3 — experimental candidate
 
 - Reuse a ready relationship property index for eligible keyed `MERGE` calls;

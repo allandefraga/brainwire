@@ -29,6 +29,29 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-07: v0.17.0-beta.1 agent context and documentation
+
+- **Done:** add bounded schema-path discovery, directed visible instance-path
+  samples and configured-provider context search. Providers return candidates;
+  the authenticated graph read filters visibility before ranks are combined.
+  Add a read-only demo, improve connected TUI navigation and clarify the scope
+  of graph and memory samples. Refresh the logo, README and documentation site.
+- **Verification:** the Rust workspace passed 1,152 tests (three ignored),
+  formatting and Clippy. The Python examples suite ran 287 tests (seven
+  skipped), including 480 small ontology-path subcases. Authenticated Bolt
+  acceptance covered graph grants, hidden intermediate nodes and provider
+  candidates. An isolated Docker quickstart checked the context demo and data
+  persistence across a restart. The 512 MiB cgroup pressure admission smoke
+  passed on the final local candidate without a reported OOM event. A one-hour
+  mixed read/write run checked all 100,000 node/edge pairs before and after a
+  quiescent SIGKILL and restart; see the [diagnostic](docs/benchmarks/2026-11-07-context-candidate.md).
+- **Limits:** provider callbacks are trusted application code, not native
+  ANN/BM25 indexes; separate context calls do not share a snapshot. A schema
+  path is not evidence of stored records, and instance paths are bounded
+  samples, not shortest paths. Memory controls do not guarantee global RSS;
+  production multi-machine failover and sustained representative loads remain
+  unqualified.
+
 ## 2026-11-07: v0.16.0-beta.3 keyed write efficiency
 
 - **Done:** reuse an eligible ready relationship property index for keyed

@@ -5,6 +5,10 @@ raw receipts and reports so a result can be traced to its workload and binary.
 The dates matter: historical results describe those candidates, not the current
 working tree or latest release.
 
+The [v0.17 context candidate diagnostics](2026-11-07-context-candidate.md)
+cover a short 512 MiB pressure check and one hour of synthetic mixed load,
+followed by a quiescent kill and restart on a shared host.
+
 **Memory stability remains unqualified.** The 2, 4 and 8 GiB attempts in the
 [v0.9 report](../../PRODUCTION-v0.9.md) stopped early. The later
 [four-label diagnostic](2026-10-28-production-session.md) also stopped under
