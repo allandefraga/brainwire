@@ -19,7 +19,7 @@ index usage is inferred from readiness, equivalent results and timings.
 [Raw receipt](2026-11-06-relationship-index.json) ·
 [Index setup and format limitations](../relationship-property-indexes.md)
 
-To repeat with locally available Docker images and the Python `neo4j` driver:
+To repeat with locally available Docker images and the Python Bolt driver:
 
 ```sh
 python scripts/bench_relationship_index.py --image YOUR_CANDIDATE_IMAGE \

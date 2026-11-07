@@ -1,9 +1,9 @@
 # Write and update a graph from Python
 
 Install the helper from this checkout using the [Python package guide](python-package.md).
-`GraphClient` uses the Neo4j Bolt driver to send Cypher to one named Brainwire
-graph. The application creates and closes the driver and chooses credentials.
-For a runnable synthetic demo, use the [README example](../README.md#write-from-python).
+`GraphClient` uses the Python Bolt driver to send Cypher to one named Brainwire
+graph. `connect` owns the connection; the application chooses credentials.
+For a runnable synthetic demo, use the [README example](../README.md#write-and-query-from-python).
 
 ## Choose the operation
 
@@ -46,13 +46,11 @@ uses its credential-file helper; [protected connections](bolt-auth.md) explains
 that file. Apply your ontology first and use a writer credential.
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 from examples.python.connection import auth_from_env
-from brainwire import GraphClient
 
-with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
-                          liveness_check_timeout=30) as driver:
-    graph = GraphClient(driver, "tickets", batch_size=250, batch_bytes=1 << 20)
+with connect("bolt://127.0.0.1:17687", "tickets", auth=auth_from_env(),
+                          liveness_check_timeout=30) as graph:
     graph.upsert_node("Ticket", "t-42", {"status":"open", "tags":["urgent"]})
     graph.update_node("Ticket", "t-42", {"status":"closed"}, remove=["priority"])
     graph.upsert_node("TicketComment", "c-1", {"body":"Investigating"})
@@ -290,7 +288,7 @@ arbitrary EdgeIds. Apply source-specific reconciliation before calling it.
 
 Internally the helper uses parameterized Cypher `DELETE` on a relationship
 variable. Plain `DELETE` is limited to relationships; node cleanup uses
-`DETACH DELETE`. This does not imply full Neo4j `DELETE` compatibility.
+`DETACH DELETE`. This does not imply full Cypher `DELETE` compatibility.
 
 ## Different load sources
 

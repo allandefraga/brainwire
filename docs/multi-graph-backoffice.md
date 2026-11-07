@@ -115,9 +115,10 @@ Offline `brainwire cypher --database ./data/tickets --query '…'` addresses one
 graph, while `brainwire serve` lets a Bolt driver choose a named database:
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+with connect("bolt://127.0.0.1:7687", "tickets", auth=None) as graph:
+    driver = graph.driver
     with driver.session(database="tickets") as session:
         print(session.run("RETURN 1 AS ready").single()["ready"])
 ```

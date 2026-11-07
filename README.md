@@ -18,22 +18,33 @@
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.17.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.17.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
-```text
-Python / Bolt client  ──►  Bolt server  ──►  Cypher + graph engine
-                                                   │
-                                      RocksDB: WAL, cache and disk
-                                                   │
-                                         persistent graph volume
+```mermaid
+flowchart TB
+    app["Your application<br/>Python · Bolt clients"] --> bolt["Bolt server"]
+    tui["Terminal workspace<br/>Read-only inspection"] --> bolt
+    bolt --> access["Authenticate · check graph grants · apply visibility"]
+    access --> engine["Graph engine · Rust<br/>Cypher · ontology · indexes · transactions"]
+    engine --> store[("RocksDB<br/>WAL · cache · memtables · SST files")]
+    store --> volume[("Persistent volume")]
+    classDef client fill:#101b14,stroke:#4e7659,color:#d6eddd;
+    classDef core fill:#15371f,stroke:#39e75f,color:#edfff1;
+    classDef storage fill:#101b14,stroke:#75b4a8,color:#d6eddd;
+    class app,tui client;
+    class bolt,access,engine core;
+    class store,volume storage;
 ```
 
-The server, engine and CLI are written in Rust. RocksDB stores graph data;
-Bolt connects clients; the Python helper uses the Neo4j Bolt driver. The TUI
-inspects a running database in read-only mode. Experimental quorum replication
-is separate from the standard single-instance deployment.
+Applications write and query over Bolt. The Rust engine checks access, executes
+transactions and stores graph records in RocksDB. Keep its files on a persistent
+volume so restarting the container reopens the same graph.
+
+This diagram shows the standard single-instance deployment. The separate
+[three-voter Raft setup](docs/quorum-replication.md) is experimental. Read the
+[architecture guide](docs/architecture.md) for memory, storage and recovery.
 
 ## What you can build
 
@@ -45,20 +56,14 @@ is separate from the standard single-instance deployment.
 See the [architecture](docs/architecture.md), [agent context](docs/context-api.md),
 [Cypher guide](docs/local-cypher.md) and [all documentation](docs/README.md).
 
-The experimental [context helpers](docs/context-api.md) let an application
-explore allowed schema paths, trace a bounded sample of visible connections,
-and combine its own lexical and vector search providers. A schema path does not
-prove a matching record exists. These helpers do not create search indexes,
-generate embeddings or grant agent actions.
-
 ## Quickstart
 
 Install Git and Docker with Compose, then start a local demo:
 
 ```sh
-git clone --branch v0.17.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.17.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.2 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -96,7 +101,7 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
 ```
 
 The demo includes these types. For your own graph, define an ontology first.
-See [Python](docs/python-client.md) and [creating a graph](docs/mvp-quickstart.md).
+See [Python](docs/python-client.md) and [protected deployment](docs/protected-containers.md).
 
 ### Help an agent understand the schema
 

@@ -1,5 +1,9 @@
 # Distributed operation follow-up
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 `cluster inspect` now contacts all three configured voters concurrently. Each
 request retains its own existing five-second deadline, the report remains in
 voter-ID order, and each member includes its measured `response_time_ms`, even
@@ -36,7 +40,7 @@ passed the same 16 checks, with the [final repeat receipt](2026-10-14-distribute
 Reproduce against a local release binary from the repository root:
 
 ```sh
-uv run --with neo4j==6.3.0 python crates/server/tests/quorum_replication.py \
+.venv-brainwire/bin/python crates/server/tests/quorum_replication.py \
   --binary target/release/brainwire --rows 500
 ```
 

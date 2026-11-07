@@ -99,8 +99,14 @@ dd { margin: 0; font-size: 12px; }
 .architecture-engine { display: grid; justify-items: center; gap: 8px; border: 1px solid #4f8b5e; border-radius: 6px; padding: 21px; background: #14291b; }
 .architecture-engine > .layer { color: var(--green); }
 .architecture-engine > strong { font-size: 20px; }
-.architecture-engine > div { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
-.architecture-engine > div span { padding: 4px 8px; border: 1px solid #37553e; border-radius: 3px; color: var(--mint); font-size: 10px; }
+.architecture-steps { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 13px 0 0; padding: 0; list-style: none; }
+.architecture-steps li { display: grid; gap: 7px; padding: 15px 12px; border: 1px solid #37553e; border-radius: 4px; background: #102117; }
+.architecture-steps strong { color: var(--mint); font-size: 12px; }
+.architecture-steps span { color: #a4b9aa; font-size: 10px; line-height: 1.6; }
+.replication-note { display: grid; gap: 8px; padding: 19px 21px; margin: -5px 0 28px; border: 1px dashed var(--line-strong); border-radius: 6px; }
+.replication-note strong { color: var(--text); font-size: 14px; font-weight: 600; }
+.replication-note p { margin: 0; color: var(--muted); font-size: 12px; }
+.replication-note a { font-size: 11px; text-decoration: none; }
 .architecture-storage { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 18px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); }
 .architecture-storage span { color: var(--muted); font-size: 11px; }
 .architecture-storage code { color: #85a28e; font-size: 10px; }
@@ -206,7 +212,7 @@ footer a { color: var(--muted); text-decoration: none; }
   .connection-details div { display: grid; grid-template-columns: 85px 1fr; gap: 8px; padding: 10px 14px; }
   .connection-details div + div { border-left: 0; border-top: 1px solid var(--line); }
   dt { margin: 3px 0 0; }
-  .architecture-top, .two-column, .feature-grid, .guide-row, .guide-columns { grid-template-columns: 1fr; }
+  .architecture-top, .architecture-steps, .two-column, .feature-grid, .guide-row, .guide-columns { grid-template-columns: 1fr; }
   .architecture-node { padding: 14px; }
   .architecture-engine { padding: 18px 12px; }
   .architecture-storage { gap: 7px; }

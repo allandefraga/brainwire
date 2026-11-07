@@ -18,13 +18,12 @@ properties shown below. The authenticated backend chooses the graph and creates
 the driver; do not accept credentials or graph grants from a model.
 
 ```python
-from neo4j import GraphDatabase
-from brainwire import GraphClient
+from brainwire import connect
 from brainwire.context import ContextClient
 
 # Obtain service_credentials from your backend's protected secret store.
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=service_credentials) as driver:
-    context = ContextClient(GraphClient(driver, "company"))
+with connect("bolt://127.0.0.1:7687", "company", auth=service_credentials) as graph:
+    context = ContextClient(graph)
     tickets = context.nodes(
         "Ticket", ["t-42"],
         properties=["title", "body", "source_url"],

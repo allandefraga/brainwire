@@ -1,5 +1,9 @@
 # Distributed log-cap recovery qualification
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 The quorum acceptance now has an opt-in `--log-cap-recovery` scenario. It runs
 the existing four-row, three-voter loopback acceptance with a 1 MiB retained-log
 limit, appends bounded synthetic writes with stable request IDs, and stops only
@@ -21,12 +25,12 @@ after restart, quorum lookup established that request had not committed, and
 retrying its same request ID applied it exactly once. Replaying an already
 committed request was rejected before the callback ran. All three voters
 recovered at commit/apply index 45, and their offline logical graph digests
-matched. The [four-row opt-in receipt](2026-10-15-distributed-ops/log-cap-recovery-four-row.json)
+matched. The [four-row opt-in receipt](../../benchmarks/archive/2026-10-15-distributed-ops/log-cap-recovery-four-row.json)
 records the per-write capacity samples and cleanup of all processes, proxies and
 temporary data.
 
 The ordinary 500-row release acceptance still passes all 16 checks with the
-default 1 GiB cap; see its [regression receipt](2026-10-15-distributed-ops/default-acceptance-500.json).
+default 1 GiB cap; see its [regression receipt](../../benchmarks/archive/2026-10-15-distributed-ops/default-acceptance-500.json).
 Three additional consecutive runs of the original four-row cap-recovery
 scenario passed all 17 checks. After adding the fatal-category field, the rebuilt
 candidate passed the scenario again and reported `fatal_storage_error` after the
@@ -35,9 +39,9 @@ candidate; both final receipts use the same binary hash.
 Reproduce both from the repository root:
 
 ```sh
-uv run --with neo4j==6.3.0 python crates/server/tests/quorum_replication.py \
+.venv-brainwire/bin/python crates/server/tests/quorum_replication.py \
   --binary target/release/brainwire --rows 500
-uv run --with neo4j==6.3.0 python crates/server/tests/quorum_replication.py \
+.venv-brainwire/bin/python crates/server/tests/quorum_replication.py \
   --binary target/release/brainwire --log-cap-recovery
 ```
 

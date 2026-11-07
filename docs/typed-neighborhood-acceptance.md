@@ -1,5 +1,7 @@
 # Typed neighborhood acceptance and latency observation
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 The fixture in `crates/server/tests/typed_neighborhood_acceptance.py` seeds a
 fresh protected graph with one `Ticket` and `N-1` `TicketComment` nodes, all linked
 outward through `HAS_COMMENT`. It reuses the shape of the connected TUI capture
@@ -49,12 +51,12 @@ timing while retaining one validated snapshot.
 ## Reproduce
 
 Build the release binary first. Run from the repository root with the pinned
-Neo4j driver:
+Python Bolt driver:
 
 ```sh
 python3 crates/server/tests/typed_neighborhood_acceptance.py --self-check
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/typed_neighborhood_acceptance.py --binary target/release/brainwire --nodes 1000 --iterations 100 --cli-iterations 3
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/typed_neighborhood_acceptance.py --binary target/release/brainwire --nodes 100000 --iterations 1000 --cli-iterations 20
+.venv-brainwire/bin/python crates/server/tests/typed_neighborhood_acceptance.py --binary target/release/brainwire --nodes 1000 --iterations 100 --cli-iterations 3
+.venv-brainwire/bin/python crates/server/tests/typed_neighborhood_acceptance.py --binary target/release/brainwire --nodes 100000 --iterations 1000 --cli-iterations 20
 ```
 
 The allowed node range is 22..100,000 so every fixture has more than the 20-row

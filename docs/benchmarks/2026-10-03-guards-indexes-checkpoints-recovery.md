@@ -37,7 +37,7 @@ cargo run --locked --offline -p brainwire-cypher --example index_lookup -- 10000
 
 ## Python/Bolt ingestion and failures
 
-Neo4j Python driver 5.28.6, one local connection, batches of 250, synchronous
+Python Bolt driver 5.28.6, one local connection, batches of 250, synchronous
 acknowledged WAL writes. Each Customer carries email, Boolean, list, embedding
 list and numeric segment. Three scalar indexes (`email`, `active`, `segment`).
 Preparation/opening and verification queries are outside the import clock;
@@ -135,7 +135,7 @@ at 50,001 entries; a rejected migration preserves the complete previous index.
 The [final 10K driver rerun](2026-10-03-results/python-final-10k.json) passed after
 that correction, including guard rollback, index recovery and analytics.
 
-The final native acceptance also passed with Neo4j Python driver 6.3.0, including
+The final native acceptance also passed with Python Bolt driver 6.3.0, including
 the custom memory-limit failure, rollback/reset recovery, numeric indexes and
 shortest-path procedure. [Driver 6 raw result](2026-10-03-results/python-driver6-final-10k.json).
 

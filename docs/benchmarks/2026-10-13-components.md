@@ -1,5 +1,9 @@
 # Connected components through Cypher — 2026-10-13
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 Local release workload on Apple M5 (`Mac17,2`), 32 GiB RAM. Synthetic data,
 single process, no distributed execution. The generated RocksDB graph was
 closed and reopened before querying. Five measured warm samples follow one
@@ -26,7 +30,7 @@ Reproduce from the repository root:
 ```sh
 cargo run --release --locked --offline -p brainwire-cypher --example components -- 100000
 cargo build --release --locked --offline -p brainwire-server --bin brainwire
-uv run --no-project --with neo4j==6.3.0 python -m examples.analytics.qualify_components
+.venv-brainwire/bin/python -m examples.analytics.qualify_components
 ```
 
 Both examples own disposable synthetic databases and remove them. The protected
@@ -36,13 +40,13 @@ It passed against native executable SHA-256
 `de80cbb78b9990fb00f028405f86d0536f56a057383e8bfb383eeb52952f320e`.
 Credentials are private temporary files and are never included in receipts.
 
-Raw receipts: [volume samples](2026-10-13-components/volume.json),
-[protected Python/Bolt result](2026-10-13-components/bolt.json).
+Raw receipts: [volume samples](../../benchmarks/archive/2026-10-13-components/volume.json),
+[protected Python/Bolt result](../../benchmarks/archive/2026-10-13-components/bolt.json).
 An additional fanout-10 fixture has 972,500 relationships with the same asserted
 component counts. Its medians were 325.17 ms for WCC and 391.07 ms for SCC;
 maximum observed values were 351.08 ms and 540.65 ms. It used the same 256 MiB
 query accounting limit. Run it with `-- 100000 10`; see
-[dense samples](2026-10-13-components/dense-volume.json).
+[dense samples](../../benchmarks/archive/2026-10-13-components/dense-volume.json).
 Differences between these small sample sets include host/load/cache variation;
 they do not establish a scaling law.
 
@@ -51,7 +55,7 @@ workspace Clippy (warnings denied) and formatting checks. New tests include
 differential reference connectivity, iterative 100,000-node chain/ring cases,
 transaction snapshots and rollback, node aliases, strict option validation,
 shared pool rejection/release and cooperative interruption. See
-[source/binary provenance](2026-10-13-components/provenance.json).
+[source/binary provenance](../../benchmarks/archive/2026-10-13-components/provenance.json).
 
 This is a new algorithm candidate; the earlier frozen beta image and its
 qualification receipts remain unchanged. Kubernetes/Swarm and replication

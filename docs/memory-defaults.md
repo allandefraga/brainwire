@@ -301,3 +301,10 @@ These counters are not an HTTP or Prometheus endpoint. Raw controller usage
 includes reclaimable file cache: conservative admission can keep rejecting RUNs
 until usage falls, even when some pages could be reclaimed. Unknown monitoring
 fails open for admission while existing query/input reservations remain active.
+
+## Cypher temporary values
+
+The `reverse`, `head`, `last`, `tail` and `valueType` functions avoid an
+extra deep copy of their already-evaluated argument. Some inputs and results
+still need to be materialized, and normal query reservations continue to
+apply. This improvement is not a process-wide RSS ceiling.

@@ -1,0 +1,368 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "run": "2ecc7519cd6e4fbfb17a423d4eb2bff7",
+  "image": "ghcr.io/allandefraga/brainwire:v0.17.0-beta.1",
+  "runner_schema": 2,
+  "workload_settings": {
+    "rows": 10000,
+    "batch": 250,
+    "seconds": 120,
+    "memory": 2,
+    "payload_bytes": 256,
+    "query_timeout": 30,
+    "sample_seconds": 5,
+    "deadline": 600,
+    "pause": 0.02,
+    "progress_window": 60,
+    "minimum_writes_per_window": 1,
+    "minimum_reads_per_window": 1
+  },
+  "progress_semantics": "completion timestamps; full windows required, trailing partial diagnostic, sole short window required; an operation started before the requested end may complete during bounded shutdown and count in the final window",
+  "rows": 10000,
+  "batch": 250,
+  "requested_seconds": 120,
+  "memory_gib": 2,
+  "cpus": 2,
+  "payload_bytes": 256,
+  "memory_samples": [
+    {
+      "current": 43085824,
+      "peak": 46542848,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 49463296,
+      "elapsed_s": 0.19296354100000013,
+      "completed_writes": 1,
+      "completed_reads": 2
+    },
+    {
+      "current": 71278592,
+      "peak": 74801152,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 69365760,
+      "elapsed_s": 5.357074666,
+      "completed_writes": 83,
+      "completed_reads": 121
+    },
+    {
+      "current": 94289920,
+      "peak": 94289920,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 78577664,
+      "elapsed_s": 10.431310791000001,
+      "completed_writes": 182,
+      "completed_reads": 244
+    },
+    {
+      "current": 118284288,
+      "peak": 118284288,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 92438528,
+      "elapsed_s": 15.517394416000002,
+      "completed_writes": 288,
+      "completed_reads": 368
+    },
+    {
+      "current": 124051456,
+      "peak": 128036864,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 96718848,
+      "elapsed_s": 21.133643583,
+      "completed_writes": 337,
+      "completed_reads": 433
+    },
+    {
+      "current": 134316032,
+      "peak": 137584640,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 102387712,
+      "elapsed_s": 26.30177425,
+      "completed_writes": 387,
+      "completed_reads": 498
+    },
+    {
+      "current": 153522176,
+      "peak": 154140672,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 113049600,
+      "elapsed_s": 33.634100666,
+      "completed_writes": 449,
+      "completed_reads": 563
+    },
+    {
+      "current": 144093184,
+      "peak": 159809536,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 94527488,
+      "elapsed_s": 38.7256915,
+      "completed_writes": 521,
+      "completed_reads": 662
+    },
+    {
+      "current": 157757440,
+      "peak": 160243712,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 99004416,
+      "elapsed_s": 43.845480458000004,
+      "completed_writes": 610,
+      "completed_reads": 777
+    },
+    {
+      "current": 166289408,
+      "peak": 166289408,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 101470208,
+      "elapsed_s": 49.003479291,
+      "completed_writes": 676,
+      "completed_reads": 859
+    },
+    {
+      "current": 179240960,
+      "peak": 179916800,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 108777472,
+      "elapsed_s": 54.145335375,
+      "completed_writes": 737,
+      "completed_reads": 938
+    },
+    {
+      "current": 191950848,
+      "peak": 195792896,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 117985280,
+      "elapsed_s": 59.237328291000004,
+      "completed_writes": 818,
+      "completed_reads": 1018
+    },
+    {
+      "current": 207273984,
+      "peak": 207503360,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 120762368,
+      "elapsed_s": 64.31883058300001,
+      "completed_writes": 904,
+      "completed_reads": 1092
+    },
+    {
+      "current": 220209152,
+      "peak": 220471296,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 123224064,
+      "elapsed_s": 69.383320708,
+      "completed_writes": 1016,
+      "completed_reads": 1186
+    },
+    {
+      "current": 157401088,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 129560576,
+      "elapsed_s": 74.459837375,
+      "completed_writes": 1122,
+      "completed_reads": 1300
+    },
+    {
+      "current": 142786560,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 104009728,
+      "elapsed_s": 79.58340975,
+      "completed_writes": 1224,
+      "completed_reads": 1421
+    },
+    {
+      "current": 150519808,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 104947712,
+      "elapsed_s": 84.650771,
+      "completed_writes": 1307,
+      "completed_reads": 1521
+    },
+    {
+      "current": 160284672,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 111140864,
+      "elapsed_s": 89.901354875,
+      "completed_writes": 1387,
+      "completed_reads": 1605
+    },
+    {
+      "current": 181063680,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 119971840,
+      "elapsed_s": 95.015039375,
+      "completed_writes": 1466,
+      "completed_reads": 1667
+    },
+    {
+      "current": 180953088,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 128667648,
+      "elapsed_s": 100.143287791,
+      "completed_writes": 1551,
+      "completed_reads": 1725
+    },
+    {
+      "current": 183201792,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 132325376,
+      "elapsed_s": 105.271188333,
+      "completed_writes": 1653,
+      "completed_reads": 1797
+    },
+    {
+      "current": 157433856,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 135270400,
+      "elapsed_s": 110.352526333,
+      "completed_writes": 1746,
+      "completed_reads": 1886
+    },
+    {
+      "current": 165072896,
+      "peak": 220606464,
+      "max": 2147483648,
+      "oom": 0,
+      "oom_kill": 0,
+      "rss_bytes": 135303168,
+      "elapsed_s": 115.439935791,
+      "completed_writes": 1840,
+      "completed_reads": 2000
+    }
+  ],
+  "scope": "one local standalone container, concurrent writer and reader",
+  "limitations": [
+    "sampled RSS is not a process-wide ceiling",
+    "no kernel log verification",
+    "SIGKILL occurs after acknowledged writes and quiescent verification",
+    "no lost-ack, disk-loss, power-loss, quorum or multi-machine simulation"
+  ],
+  "image_id": "sha256:de3557fa92b7b21940e626a2b8223e7b6f863c19bc8b1c6e4e9a37ee1c79bafb",
+  "driver": "5.28.8",
+  "initial": {
+    "nodes": 10000,
+    "edges": 10000,
+    "node_revision_sum": 0,
+    "edge_revision_sum": 0,
+    "scratch": 0,
+    "exact_rows_verified": 10000
+  },
+  "mixed_seconds": 120.027602041,
+  "writer": {
+    "committed_batches": 1916,
+    "updated_rows": 479000
+  },
+  "reader": {
+    "successful_reads": 2093
+  },
+  "client_failures": [],
+  "progress_windows": [
+    {
+      "start_s": 0,
+      "end_s": 60,
+      "required": true,
+      "minimum_writes": 1,
+      "minimum_reads": 1,
+      "writes": 829,
+      "reads": 1027,
+      "writes_after_requested_end": 0,
+      "reads_after_requested_end": 0,
+      "last_completion_s": 59.968945291,
+      "passed": true
+    },
+    {
+      "start_s": 60,
+      "end_s": 120,
+      "required": true,
+      "minimum_writes": 1,
+      "minimum_reads": 1,
+      "writes": 1086,
+      "reads": 1066,
+      "writes_after_requested_end": 1,
+      "reads_after_requested_end": 0,
+      "last_completion_s": 120.027373708,
+      "passed": true
+    }
+  ],
+  "progress_status": "passed",
+  "before_kill": {
+    "nodes": 10000,
+    "edges": 10000,
+    "node_revision_sum": 18965000,
+    "edge_revision_sum": 18965000,
+    "scratch": 0,
+    "exact_rows_verified": 10000
+  },
+  "after_kill_restart": {
+    "nodes": 10000,
+    "edges": 10000,
+    "node_revision_sum": 18965000,
+    "edge_revision_sum": 18965000,
+    "scratch": 0,
+    "exact_rows_verified": 10000
+  },
+  "final_memory": {
+    "current": 149049344,
+    "peak": 149319680,
+    "max": 2147483648,
+    "oom": 0,
+    "oom_kill": 0,
+    "rss_bytes": 144711680
+  },
+  "integrity": {
+    "database": "bench",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "cleanup": true
+}

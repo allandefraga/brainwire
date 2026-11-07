@@ -36,18 +36,19 @@ Initialize labels/catalog using a separate ordinary authenticated administrator
 transaction; for example `CALL db.createLabel('Item')`. An identified transaction
 cannot call procedures or change the catalog.
 
-Using the Neo4j Python Bolt driver, create an **explicit transaction** and provide
+Using the Python Bolt driver, create an **explicit transaction** and provide
 its request ID before the first query:
 
 ```python
 import os
-from neo4j import GraphDatabase
+from brainwire import connect
 
-with GraphDatabase.driver(
-    os.environ["BRAINWIRE_URI"],
+with connect(
+    os.environ["BRAINWIRE_URI"], "default",
     auth=(os.environ["BRAINWIRE_PRINCIPAL"], os.environ["BRAINWIRE_TOKEN"]),
     max_transaction_retry_time=0,
-) as driver:
+) as graph:
+    driver = graph.driver
     with driver.session(database="default") as session:
         tx = session.begin_transaction(metadata={"brainwire_request_id": "source-event-42"})
         tx.run("CREATE (:Item {entity_id: $id})", id="item-42").consume()

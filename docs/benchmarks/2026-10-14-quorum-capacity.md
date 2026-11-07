@@ -1,5 +1,9 @@
 # Quorum operations and Python qualification — October 14, 2026
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 This local candidate builds on `404133a`. It adds retained-log capacity diagnostics,
 three-member inspection, local Raft liveness/readiness, explicit Python transaction
 identities and atomic node/ACL upserts. No target deployment or publication occurred.
@@ -31,7 +35,7 @@ six deliberately false readiness/cleanup/capacity receipts in memory.
 
 ```sh
 python3 docs/benchmarks/2026-10-14-quorum-capacity/verify.py
-uv run --with neo4j==6.3.0 python crates/server/tests/quorum_replication.py \
+.venv-brainwire/bin/python crates/server/tests/quorum_replication.py \
   --binary target/quorum-20261014-release/brainwire --rows 500
 ```
 

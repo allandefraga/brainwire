@@ -25,8 +25,8 @@ It ran concurrently with the separate pressure check and isolated application
 smokes on the shared host. Sustained representative workloads and 2/4/8 GiB
 qualification remain open.
 
-To repeat the checks with a locally built candidate image and the Neo4j Bolt
-Python driver installed:
+To repeat the checks with a locally built candidate image and the Python Bolt
+driver installed:
 
 ```sh
 python crates/server/tests/cgroup_pressure_smoke.py --image YOUR_IMAGE \

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.0-beta.2 — experimental candidate
+
+- Reduce avoidable intermediate copies in Cypher value inspection and list
+  functions; query budgets and other materialization still apply.
+- Validate persisted quorum request records and the initialization marker at
+  startup, rejecting malformed encodings while preserving the existing format.
+- Simplify the documentation, add architecture diagrams, and archive historical
+  benchmark artifacts without changing their recorded data.
+
 ## 0.17.0-beta.1 — experimental candidate
 
 - Add bounded schema-path discovery, ACL-aware instance path samples, and

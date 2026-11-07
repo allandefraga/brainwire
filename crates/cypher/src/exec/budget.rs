@@ -938,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn scalar_inspection_does_not_copy_its_already_admitted_argument() {
+    fn functions_do_not_copy_their_already_admitted_argument() {
         use brainwire_store::db::{Resources, StoreConfig};
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
@@ -950,6 +950,12 @@ mod tests {
             streams: vec![],
         };
         let vars = plan::Vars::default();
+        let nested = || {
+            Value::Map(BTreeMap::from([(
+                "body".into(),
+                Value::List(vec![Value::Str("x".repeat(1 << 20))]),
+            )]))
+        };
         for (name, argument, expected) in [
             (
                 "size",
@@ -982,12 +988,42 @@ mod tests {
                 )])),
                 val::Val::Bool(true),
             ),
+            (
+                "valuetype",
+                Value::List(vec![Value::Str("x".repeat(1 << 20))]),
+                val::Val::Str("LIST<ANY> NOT NULL".into()),
+            ),
+            ("valuetype", nested(), val::Val::Str("MAP NOT NULL".into())),
+            (
+                "head",
+                Value::List(vec![nested(), Value::Null]),
+                val::Val::from(&nested()),
+            ),
+            (
+                "last",
+                Value::List(vec![Value::Null, nested()]),
+                val::Val::from(&nested()),
+            ),
+            (
+                "tail",
+                Value::List(vec![Value::Null, nested()]),
+                val::Val::List(vec![val::Val::from(&nested())]),
+            ),
+            (
+                "reverse",
+                Value::List(vec![Value::Null, nested()]),
+                val::Val::List(vec![val::Val::from(&nested()), val::Val::Null]),
+            ),
         ] {
             let param_vals = BTreeMap::from([("argument".into(), val::Val::from(&argument))]);
             let params = BTreeMap::from([("argument".into(), argument)]);
             let budget = Budget::new(
                 ExecutionLimits {
-                    memory_bytes: (1 << 20) + (64 << 10),
+                    memory_bytes: if matches!(name, "head" | "last" | "tail" | "reverse") {
+                        4 << 20
+                    } else {
+                        (1 << 20) + (64 << 10)
+                    },
                     timeout: None,
                 },
                 None,
@@ -1017,6 +1053,52 @@ mod tests {
                 allocated < (1 << 20) + (64 << 10),
                 "{name} copied a large argument beyond its admitted allocation: {allocated}"
             );
+        }
+    }
+
+    #[test]
+    fn moved_function_arguments_preserve_unicode_nulls_and_shared_parameters() {
+        use brainwire_store::db::{Resources, StoreConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let params = BTreeMap::from([(
+            "items".into(),
+            Value::List(vec![Value::Str("é".into()), Value::Str("🦀".into())]),
+        )]);
+        let output = execute(
+            &db,
+            "RETURN reverse($items), head($items), last($items), tail($items), $items, reverse('é🦀'), head([]), last([]), tail([]), reverse(null), head(null), last(null), tail(null), valueType(null)",
+            &params,
+        ).unwrap();
+        let list = |values: &[&str]| {
+            Out::Value(Value::List(
+                values.iter().map(|s| Value::Str((*s).into())).collect(),
+            ))
+        };
+        assert_eq!(
+            output.rows,
+            vec![vec![
+                list(&["🦀", "é"]),
+                Out::Value(Value::Str("é".into())),
+                Out::Value(Value::Str("🦀".into())),
+                list(&["🦀"]),
+                list(&["é", "🦀"]),
+                Out::Value(Value::Str("🦀é".into())),
+                Out::Value(Value::Null),
+                Out::Value(Value::Null),
+                list(&[]),
+                Out::Value(Value::Null),
+                Out::Value(Value::Null),
+                Out::Value(Value::Null),
+                Out::Value(Value::Null),
+                Out::Value(Value::Str("NULL".into())),
+            ]]
+        );
+        for function in ["head", "last", "tail", "reverse"] {
+            assert!(matches!(
+                execute(&db, &format!("RETURN {function}(1)"), &BTreeMap::new()),
+                Err(ExecError::Semantic(_))
+            ));
         }
     }
 

@@ -33,7 +33,7 @@ binary rather than repeatedly referring to a shared Cargo output path:
   --rows 32
 ```
 
-The live test needs the existing Neo4j Python Bolt driver and permission to
+The live test needs the existing Python Bolt driver and permission to
 bind a loopback listener. The pure fixture check needs only Python:
 
 ```sh

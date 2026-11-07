@@ -179,7 +179,7 @@ kubectl kustomize deploy/kubernetes-release
 kubectl apply -n YOUR_TEST_NAMESPACE -k deploy/kubernetes-release
 ```
 
-Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.17.0-beta.1`. <!-- brainwire-release-version --> The local
+Both versioned overlays pin `ghcr.io/allandefraga/brainwire:v0.17.0-beta.2`. <!-- brainwire-release-version --> The local
 release helper updates both tags with the Cargo workspace version. The private
 overlay references `ghcr-pull`; logging in on your workstation alone does not
 authenticate cluster nodes. The public overlay needs no image-pull secret. For
@@ -255,7 +255,7 @@ described in [protected Swarm setup](protected-containers.md):
 
 ```sh
 export BRAINWIRE_SWARM_NODE_ID=YOUR_STORAGE_NODE_ID
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.2 # brainwire-release-version
 docker secret create brainwire-auth-policy /secure/path/policy.json
 docker secret create brainwire-health-auth /secure/path/health.json
 docker stack config -c deploy/swarm.yaml -c deploy/swarm.auth.yaml
@@ -290,7 +290,7 @@ python crates/server/tests/kubernetes_restart.py --image brainwire:local --rows 
 The acceptance script waits for a query-ready probe and kills its own uniquely
 named container during an uncommitted indexed overwrite. It checks acknowledged
 data and current/stale index keys after restart, runs an offline `db check`,
-then removes its own resources. Requires the Neo4j Python driver and a current
+then removes its own resources. Requires the Python Bolt driver and a current
 built image. The Compose acceptance also initializes the ontology offline,
 force-recreates the service after SIGKILL, verifies an indexed read and audits
 the retained volume, cleaning its own project afterward. Manifest parsing and
@@ -301,7 +301,7 @@ Sources: [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controller
 [Swarm placement/storage](https://docs.docker.com/engine/swarm/services/),
 [update/rollback order](https://docs.docker.com/reference/compose-file/deploy/).
 
-The Kubernetes script requires `kind`, Docker, kubectl and the Neo4j driver. It
+The Kubernetes script requires `kind`, Docker, kubectl and the Bolt driver. It
 checks that the local image exists before allocating resources, creates a unique
 single-node cluster with a private kubeconfig, loads that
 local image and applies the actual StatefulSet template. It initializes ontology

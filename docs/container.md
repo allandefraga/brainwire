@@ -27,13 +27,13 @@ and access to the package. Do not enter your GitHub account password. Public
 images do not need this step. Then start the published version:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.2 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --wait --wait-timeout 900
 ```
 
-Images use the exact release tag, for example `v0.17.0-beta.1`. <!-- brainwire-release-version -->
+Images use the exact release tag, for example `v0.17.0-beta.2`. <!-- brainwire-release-version -->
 For reproducible deployment, pin the digest from the release receipt. A private
 GHCR image requires package access in addition to repository access. Keep
 credentials out of shell arguments and source files. If `pull` reports
@@ -78,13 +78,13 @@ The database runs in Docker; Python can run on the host. Create an environment
 and install the Bolt driver:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install neo4j==6.3.0
-.venv/bin/python - <<'PYTHON'
-from neo4j import GraphDatabase
+python3 scripts/setup_python.py
+.venv-brainwire/bin/python - <<'PYTHON'
+from brainwire import connect
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None,
-                          max_transaction_retry_time=0) as driver:
+with connect("bolt://127.0.0.1:7687", "demo", auth=None,
+                          max_transaction_retry_time=0) as graph:
+    driver = graph.driver
     with driver.session(database="demo") as session:
         session.run("""
             UNWIND $rows AS row
@@ -107,7 +107,7 @@ write result to complete the autocommit transaction. A lost commit response is
 an unknown outcome; reconcile the stable IDs before retrying.
 
 For bounded upserts and property patches, the repository also has a
-[locally installable Python helper](python-package.md). It uses the Neo4j driver;
+[locally installable Python helper](python-package.md). It uses the Bolt driver;
 a public PyPI package is not claimed. See the [mutation contract](python-client.md)
 and [supported Cypher](local-cypher.md).
 

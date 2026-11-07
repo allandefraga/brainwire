@@ -26,7 +26,7 @@ so the caller may retry it. The message ends with a machine-readable hint:
 | `cgroup` | container working set at 95% | back off; the whole server is busy |
 | `ingress` | shared Bolt input pool | send a smaller message or retry later |
 
-Neo4j drivers retry transient errors inside managed transactions; that is safe
+Bolt drivers can retry transient errors inside managed transactions; that is safe
 here because of the rollback guarantee. A client that wants to size its next
 batch reads `requested_bytes` and `available_bytes`.
 

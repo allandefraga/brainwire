@@ -18,14 +18,14 @@ Grace was 3,000 ms. In every run the unacknowledged RUN committed nothing; the
 fixture accepts either atomic outcome. One quorum attempt on `8662a232…` failed
 before any write with `EADDRNOTAVAIL` (ephemeral ports exhausted while another
 three-voter benchmark ran concurrently); the rerun passed. Receipts:
-[driver 6](2026-10-15-graceful-drain/termination-driver6.json),
-[driver 5](2026-10-15-graceful-drain/termination-driver5.json),
-[quorum](2026-10-15-graceful-drain/quorum-graceful-stop.json).
+[driver 6](../../benchmarks/archive/2026-10-15-graceful-drain/termination-driver6.json),
+[driver 5](../../benchmarks/archive/2026-10-15-graceful-drain/termination-driver5.json),
+[quorum](../../benchmarks/archive/2026-10-15-graceful-drain/quorum-graceful-stop.json).
 
 The later peer-transport fix produced binary `9a09b8c1…`; on it the termination
 fixture passed with both drivers
-([driver 6](2026-10-15-graceful-drain/termination-driver6-final.json),
-[driver 5](2026-10-15-graceful-drain/termination-driver5-final.json)) and the
+([driver 6](../../benchmarks/archive/2026-10-15-graceful-drain/termination-driver6-final.json),
+[driver 5](../../benchmarks/archive/2026-10-15-graceful-drain/termination-driver5-final.json)) and the
 500-row quorum acceptance ended with SIGTERM exit 0 on every voter.
 
 ## Defect found and fixed during qualification
@@ -55,7 +55,7 @@ SIGTERM.
   `636f63b1…` (binary `372bdeb0…`, Debian glibc 2.36, aarch64) passed the
   extended `compose_restart.py` three times: commit during the SIGTERM drain
   survives restart with exit 0, SIGKILL recovery, idle-only stop exit 0,
-  offline audit `ok` ([receipt](2026-10-15-graceful-drain/compose-linux.json)).
+  offline audit `ok` ([receipt](../../benchmarks/archive/2026-10-15-graceful-drain/compose-linux.json)).
   No amd64, Kubernetes or Swarm run.
 - No Kubernetes/Swarm target, no interruption of running engine calls, no
   COMMIT-phase kill hook, no load during the drain beyond the fixture cases.

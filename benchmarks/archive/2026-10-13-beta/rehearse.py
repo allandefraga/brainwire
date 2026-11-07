@@ -37,9 +37,9 @@ def run(binary):
     load = json.loads((DIRECTORY / "mixed-100000-3600.json").read_text())
     assert load["result"] == "PASS" and load["load_seconds"] >= 3600 and load["binary_sha256"] == NATIVE_SHA
     tasks = (
-        ("ducklake-100000", "docs/benchmarks/2026-10-12-mvp/acceptance.py",
+        ("ducklake-100000", "benchmarks/archive/2026-10-12-mvp/acceptance.py",
          ["--tickets", "100000", "--ducklake", "--captures", str(DIRECTORY / "source-captures")]),
-        ("recovery-100000", "docs/benchmarks/2026-10-10-source-ingestion/acceptance.py", ["--tickets", "100000"]),
+        ("recovery-100000", "benchmarks/archive/2026-10-10-source-ingestion/acceptance.py", ["--tickets", "100000"]),
         ("multigraph-100000", "crates/server/tests/multigraph_acceptance.py", ["--rows-per-graph", "100000"]),
         ("typed-neighborhood-100000", "crates/server/tests/typed_neighborhood_acceptance.py",
          ["--nodes", "100000", "--iterations", "1000", "--cli-iterations", "20"]),

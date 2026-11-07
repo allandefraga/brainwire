@@ -1,5 +1,9 @@
 # Incremental graph updates from pinned DuckLake snapshots
 
+Python commands below use the environment from [Python setup](python-package.md).
+For DuckDB/DuckLake commands, install the optional reader in that environment:
+`.venv-brainwire/bin/python -m pip install duckdb==1.5.5`.
+
 `examples/source_ingestion/ducklake_incremental.py` compares two explicit versions of a
 local SQLite-backed DuckLake source. It emits authoritative upserts and physical
 deletions using the existing external application ticket/comment mapping and stable scoped
@@ -68,10 +72,10 @@ uv run --no-project --with duckdb==1.5.5 python -m examples.source_ingestion.duc
   --output /absolute/private/changes-12-18.jsonl
 
 export BRAINWIRE_BOLT_AUTH_FILE=/absolute/private/writer.json
-uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ducklake_incremental register \
+.venv-brainwire/bin/python -m examples.source_ingestion.ducklake_incremental register \
   /absolute/private/changes-12-18.jsonl --database support-demo \
   --baseline-file /absolute/private/snapshot-12.jsonl --baseline-source-id baseline-12
-uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ducklake_incremental ingest \
+.venv-brainwire/bin/python -m examples.source_ingestion.ducklake_incremental ingest \
   /absolute/private/changes-12-18.jsonl --database support-demo --batch-size 250 \
   --max-batches 4
 ```
@@ -121,8 +125,7 @@ history, retention, tombstone preservation or selective edge ownership.
 ## Synthetic qualification
 
 ```sh
-uv run --no-project --with duckdb==1.5.5 --with neo4j==6.3.0 \
-  python -m unittest examples.source_ingestion.test_ducklake_incremental -v
+.venv-brainwire/bin/python -m unittest examples.source_ingestion.test_ducklake_incremental -v
 ```
 
 Tests use cached real DuckLake managed Parquet snapshots and private authenticated

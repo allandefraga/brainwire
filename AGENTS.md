@@ -35,11 +35,12 @@ is `/Users/fraga/Documents/brainwire`; it has no required sibling checkout.
 
 ## Plans and verification
 
-The approved design is `docs/superpowers/specs/2026-09-24-brainwire-design.md`.
-The current implementation plan is
-`docs/superpowers/plans/2026-09-26-brainwire-mvp.md`; the storage foundation
-plan also records crash-recovery requirements. Older paths beginning with
-`brainwire/` refer to this repository root now.
+The original approved design and MVP plan are summarized in
+`docs/superpowers/specs/2026-09-24-brainwire-design.md` and
+`docs/superpowers/plans/2026-09-26-brainwire-mvp.md`; their full historical text
+remains in Git history. Use `docs/production-readiness-roadmap.md` and the
+latest journal entry for current work. Older paths beginning with `brainwire/`
+refer to this repository root now.
 
 Use test-first development for engine behavior, followed by task review.
 Run the relevant package tests, and consolidate with:

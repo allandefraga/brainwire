@@ -28,7 +28,7 @@ were not independently verified. These observations apply only to this run.
 ## Reproduce
 
 Build a candidate image separately. Then, with Docker and Python 3.12 plus the
-Neo4j Python driver available, run:
+Python Bolt driver available, run:
 
 ```sh
 python crates/server/tests/cgroup_pressure_smoke.py \

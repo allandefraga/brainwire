@@ -431,7 +431,7 @@ def main():
     if args.self_check:
         print(json.dumps(self_check(), indent=2)); return
     directory = Path(__file__).resolve().parent
-    ui = directory.parents[1] / "design/assets/2026-10-13-beta"
+    ui = directory.parent / "design-assets/2026-10-13-beta"
     output = directory / "validation.json"
     # Remove a previous verdict before checking so failed reruns cannot leave stale PASS evidence.
     output.unlink(missing_ok=True)

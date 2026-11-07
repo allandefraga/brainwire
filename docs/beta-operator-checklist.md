@@ -1,6 +1,6 @@
 # Single-node shadow beta operator checklist
 
-Use this checklist with the [protected quickstart](mvp-quickstart.md),
+Use this checklist with the [protected quickstart](protected-containers.md),
 [protected transport qualification](benchmarks/2026-10-13-beta.md) and
 [ACL/incremental candidate qualification](benchmarks/2026-10-13-beta-acl.md) and
 [remaining release gates](releasing.md). It is an operator rehearsal for a

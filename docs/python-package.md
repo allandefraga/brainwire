@@ -40,7 +40,7 @@ not prove access to a named graph before the first graph operation.
 
 On Windows, use `.venv-brainwire\Scripts\python.exe` to run your file.
 Existing virtual environments can install this checkout with `python -m pip install .`.
-The helper uses the Neo4j Bolt driver; it is a synchronous client.
+The helper uses the Python Bolt driver; it is a synchronous client.
 
 ## Next steps
 

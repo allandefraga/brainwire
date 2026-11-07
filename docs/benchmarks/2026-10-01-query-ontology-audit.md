@@ -53,7 +53,7 @@ guarantees, not proof that Brainwire's query layer meets its scale goal.
 ## Focused local measurement
 
 One temporary database used the checked-in Customer ontology, which declares
-`email` in `indexed_fields`. A Neo4j Python 6.3.0 driver loaded Customers with
+`email` in `indexed_fields`. A Python Bolt driver 6.3.0 loaded Customers with
 unique `entity_id` and `email`, then queried the last row through Bolt. Times
 include the driver and local loopback. The cache was warm; there were no other
 clients. Values below are medians (10 point lookups, three email lookups), not

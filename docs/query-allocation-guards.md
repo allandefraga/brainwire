@@ -29,7 +29,7 @@ Every memory refusal uses `Neo.TransientError.General.MemoryPressure` with a
 `[brainwire.memory reason=... requested_bytes=... available_bytes=...
 rolled_back=true]` hint: `statement_limit` for the per-RUN guard, `query_pool`
 for pool contention, `process_limit` near `memory.limit`
-([contract](design/memory-error-contract.md)). Neo4j Python drivers 5 and 6
+([contract](design/memory-error-contract.md)). Python Bolt drivers 5 and 6
 classify it as retryable. All discard the complete query transaction,
 including writes and indexes from earlier RUNs. Conversion errors at the Bolt
 boundary also release reservations and discard prior writes. Use the driver's

@@ -1,5 +1,7 @@
 # Native termination, drain and recovery qualification
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 `brainwire serve` handles SIGTERM and SIGINT with a bounded drain:
 
 1. The listener closes at once. New connections are refused; a connection
@@ -77,7 +79,7 @@ logs and credentials.
 ```sh
 cargo build --release --locked --offline
 python3 crates/server/tests/termination_recovery.py --self-check
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/termination_recovery.py --binary target/release/brainwire
+.venv-brainwire/bin/python crates/server/tests/termination_recovery.py --binary target/release/brainwire
 ```
 
 The quorum fixture (`crates/server/tests/quorum_replication.py`) now ends with
@@ -86,7 +88,7 @@ audits and logical digests across voters.
 
 Evidence for the current candidate is in
 [2026-10-15 graceful drain](benchmarks/2026-10-15-graceful-drain.md). The
-[October 13 receipt](benchmarks/2026-10-13-beta/termination.json) records the
+[October 13 receipt](../benchmarks/archive/2026-10-13-beta/termination.json) records the
 earlier abrupt-termination binary and stays as historical evidence.
 
 ## Application and supervisor boundary

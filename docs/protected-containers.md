@@ -1,5 +1,7 @@
 # Protected single-instance container profiles
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 The base manifests omit credentials and now fail closed on their non-loopback
 listeners. These overlays mount a server verifier policy and a separate
 read-only health credential. Generate these
@@ -205,7 +207,7 @@ requires retained storage and a single active owner.
 
 ```sh
 python3 deploy/check_auth_profiles.py
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/compose_auth.py \
+.venv-brainwire/bin/python crates/server/tests/compose_auth.py \
   --image brainwire:auth-20261012
 ```
 

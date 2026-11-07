@@ -77,15 +77,16 @@ RETURN representative.entity_id, size
 ```
 
 To count groups, use that same filter and `RETURN count(*) AS groups`.
-The same procedures work through Python's Neo4j driver against a named
+The same procedures work through Python's Bolt driver against a named
 Brainwire graph with read access:
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 from examples.python.connection import auth_from_env
 
-with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
-                          liveness_check_timeout=30) as driver:
+with connect("bolt://127.0.0.1:17687", "pages", auth=auth_from_env(),
+                          liveness_check_timeout=30) as graph:
+    driver = graph.driver
     with driver.session(database="pages") as session:
         rows = session.run(
             "CALL graph.scc({relationship:$relationship}) "
@@ -99,7 +100,7 @@ with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(),
 
 Create `pages` with the Page/LINK ontology and import nodes before running this
 snippet; set `BRAINWIRE_BOLT_AUTH_FILE` to a reader's credentials on protected
-servers. See [the protected quickstart](mvp-quickstart.md) for server setup.
+servers. See [the protected quickstart](protected-containers.md) for server setup.
 
 All graph nodes participate, including isolates and nodes with no relationship
 of the selected type. Their groups have size one. These procedures use unit

@@ -1,5 +1,7 @@
 # Three named graphs on one protected server
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 The executable `crates/server/tests/multigraph_acceptance.py` qualifies three
 independent named graphs, `graph_a`, `graph_b` and `graph_c`, inside one native
 Brainwire server. It uses a new private temporary store, unused loopback port,
@@ -57,8 +59,8 @@ Build the binary separately, then run from the repository root:
 
 ```sh
 python3 crates/server/tests/multigraph_acceptance.py --self-check
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/multigraph_acceptance.py --binary target/release/brainwire --rows-per-graph 1000
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/multigraph_acceptance.py --binary target/release/brainwire --rows-per-graph 100000
+.venv-brainwire/bin/python crates/server/tests/multigraph_acceptance.py --binary target/release/brainwire --rows-per-graph 1000
+.venv-brainwire/bin/python crates/server/tests/multigraph_acceptance.py --binary target/release/brainwire --rows-per-graph 100000
 ```
 
 The first command checks fixture identities and batch construction only; it does

@@ -1,6 +1,6 @@
 # Python ingestion and recovery — 2026-10-01
 
-Local macOS development build, Neo4j Python driver 5.28.6 over loopback Bolt,
+Local macOS development build, Python Bolt driver 5.28.6 over loopback Bolt,
 synthetic Customer records with email, Boolean, two tags and three numeric
 embedding values. Two declared scalar indexes: email and active. Temporary
 independent graphs; shared cache 64 MiB, write-buffer target 4 MiB, configured

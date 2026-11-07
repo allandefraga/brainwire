@@ -1,5 +1,7 @@
 # Request decoding, idle connections and Python pools
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 Brainwire independently limits encoded Bolt request payloads and PackStream
 owned decoded storage. `server.max_message` bounds payload bytes; chunk framing
 and NOOPs do not consume that payload budget. `server.max_decoded_message`
@@ -40,21 +42,22 @@ aggregate result-memory or peak RSS bound.
 ## Python connection pools
 
 A pooled socket can expire while the application is idle. Configure the official
-Neo4j Python driver to check connections idle for at least 30 seconds before
+Python Bolt driver to check connections idle for at least 30 seconds before
 reuse. This is below the optional TLS proxy's 60-second inactivity timeout and
 the native server's 300-second IO default. For a shorter configured timeout,
 choose a liveness threshold below the earliest idle boundary in that path:
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 
-with GraphDatabase.driver(
-    'bolt://127.0.0.1:7687',
+with connect(
+    'bolt://127.0.0.1:7687', "default",
     auth=('reader', token),
     liveness_check_timeout=30,
     connection_timeout=5,
     max_transaction_retry_time=0,
-) as driver:
+) as graph:
+    driver = graph.driver
     with driver.session(database='default') as session:
         print(session.run('RETURN 1 AS ok').single()['ok'])
 ```
@@ -80,8 +83,7 @@ fixture value is separate from the ordinary 30-second configuration above.
 
 ```sh
 python3 crates/server/tests/connection_limits.py --self-check
-uv run --no-project --with neo4j==5.28.6 python crates/server/tests/connection_limits.py --binary target/release/brainwire
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/connection_limits.py --binary target/release/brainwire
+.venv-brainwire/bin/python crates/server/tests/connection_limits.py --binary target/release/brainwire
 ```
 
 The optional default test starts another fresh server **without** overriding
@@ -90,11 +92,11 @@ authenticated socket closing around the default 300-second boundary, and checks
 pool reuse with and without liveness. It does not accelerate or mock the timer.
 
 ```sh
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/connection_limits.py --binary target/release/brainwire --default-idle
+.venv-brainwire/bin/python crates/server/tests/connection_limits.py --binary target/release/brainwire --default-idle
 ```
 
-The final candidate's [driver 5 receipt](benchmarks/2026-10-13-beta/connection-limits-driver5.json)
-and [driver 6 receipt](benchmarks/2026-10-13-beta/connection-limits-driver6.json)
+The final candidate's [driver 5 receipt](../benchmarks/archive/2026-10-13-beta/connection-limits-driver5.json)
+and [driver 6 receipt](../benchmarks/archive/2026-10-13-beta/connection-limits-driver6.json)
 record unoverridden native expiry at 300.003 and 300.002 seconds respectively.
 Both first reuses passed with fixture liveness enabled; both default pools failed
 their first reuse and succeeded after an explicit new connection. Those receipts

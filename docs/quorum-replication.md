@@ -219,7 +219,7 @@ reply; reusing its request ID for different content returns Conflict.
 ## Python writes and uncertain commits
 
 Connect directly to the leader's Bolt endpoint using the existing Python driver
-and [file credentials](bolt-auth.md). There is no Neo4j routing discovery or
+and [file credentials](bolt-auth.md). There is no automatic routing discovery or
 automatic follower forwarding. Recheck cluster status after a leader change and
 reconnect to that leader. Every transaction begins after a leader quorum read
 barrier; an existing transaction reads its own snapshot. Followers and isolated
@@ -237,7 +237,7 @@ export BRAINWIRE_BOLT_AUTH_FILE="$bw_demo_root/auth/writer.json"
 import hashlib
 import json
 import uuid
-from neo4j import GraphDatabase
+from brainwire import connect
 from examples.python.connection import auth_from_env
 
 seed = "ticket-create-" + uuid.uuid4().hex  # Persist once; reuse after an uncertain outcome.
@@ -248,8 +248,9 @@ request_key = hashlib.sha256(json.dumps(
 print("Durable request key:", request_key)
 
 # Replace the endpoint with the leader reported by cluster status.
-with GraphDatabase.driver("bolt://127.0.0.1:17681", auth=auth_from_env(),
-                          liveness_check_timeout=30) as driver:
+with connect("bolt://127.0.0.1:17681", "tickets", auth=auth_from_env(),
+                          liveness_check_timeout=30) as graph:
+    driver = graph.driver
     with driver.session(database="tickets") as session:
         with session.begin_transaction(metadata={"brainwire_request_id": seed}) as tx:
             tx.run("CREATE (t:Ticket {entity_id:$id, subject:$subject})",
@@ -347,7 +348,7 @@ Voters reuse authenticated peer connections for Raft replication and votes
 connection open 30 s for its next request). Each request is still authenticated
 and, with TLS, certificate-checked. Earlier builds opened one connection per
 RPC; sustained writes then exhausted local ports and broke quorum reads
-([diagnosis](benchmarks/2026-10-15-quorum-write/README.md)). A voter that still
+([diagnosis](../benchmarks/archive/2026-10-15-quorum-write/README.md)). A voter that still
 closes after one request keeps working through a single fresh-connection retry.
 
 Mount and retain the **whole** `server.data_dir` for each voter: its identity file,
@@ -408,3 +409,11 @@ adds an opt-in small-cap test that resolves an uncertain commit against the
 same retained voter volumes after the configured limit is raised. It is not
 evidence that the 1 GiB default has been exhausted or that multi-machine
 recovery is qualified.
+
+## Startup validation
+
+Each voter checks persisted request-ledger encodings and its initialization
+marker before opening for service. A malformed record stops startup instead of
+being used later during recovery. Existing stores without the optional marker
+remain supported. This check does not authenticate otherwise valid data or
+qualify failover across machines.

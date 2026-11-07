@@ -175,7 +175,7 @@ python crates/server/tests/query_memory.py --binary target/debug/brainwire
 python crates/server/tests/python_ingestion.py --binary target/debug/brainwire --rows 100000 --batch-size 250 --query-mib 256
 ```
 
-Use a Python environment with the Neo4j driver installed. Scripts allocate only
+Use a Python environment with the Bolt driver installed. Scripts allocate only
 temporary synthetic stores and stop their servers. Run builds before timing;
 these are debug measurements. Server telemetry:
 

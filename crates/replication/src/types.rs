@@ -98,6 +98,18 @@ impl std::fmt::Debug for Command {
         }
     }
 }
+pub(crate) fn validate_request_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+    {
+        return Err("request_id must be 1..128 ASCII identifier characters".into());
+    }
+    Ok(())
+}
+
 impl Command {
     pub fn request_id(&self) -> &str {
         match self {
@@ -107,15 +119,7 @@ impl Command {
         }
     }
     pub fn validate(&self) -> Result<(), String> {
-        let id = self.request_id();
-        if id.is_empty()
-            || id.len() > 128
-            || !id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
-        {
-            return Err("request_id must be 1..128 ASCII identifier characters".into());
-        }
+        validate_request_id(self.request_id())?;
         let mut size = CommandSize {
             bytes: 0,
             exceeded: false,

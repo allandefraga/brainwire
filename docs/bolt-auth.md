@@ -1,5 +1,7 @@
 # Protected Bolt service connections
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 The beta can require random service tokens and graph-scoped read/write grants.
 This is not the planned human-password/Argon2 or JWT/JWKS authentication, field
 ACLs, online user management or native encrypted transport. The credentials
@@ -85,7 +87,7 @@ format. Tokens stay out of argv and output:
 ```sh
 export BRAINWIRE_BOLT_AUTH_FILE=/tmp/brainwire-auth/writer.json
 python3 -m examples.source_ingestion.generate_fixture /tmp/brainwire-protected-tickets.jsonl --tickets 10000
-uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ingest_snapshot \
+.venv-brainwire/bin/python -m examples.source_ingestion.ingest_snapshot \
   /tmp/brainwire-protected-tickets.jsonl --database tickets --uri bolt://127.0.0.1:17687 \
   --source-id synthetic-snapshot-001
 
@@ -113,11 +115,12 @@ credential file.
 Programmatic Python connection from the repository root:
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 from examples.python.connection import auth_from_env
 from examples.source_ingestion.ingest_snapshot import identity
 
-with GraphDatabase.driver("bolt://127.0.0.1:17687", auth=auth_from_env(), liveness_check_timeout=30) as driver:
+with connect("bolt://127.0.0.1:17687", "tickets", auth=auth_from_env(), liveness_check_timeout=30) as graph:
+    driver = graph.driver
     with driver.session(database="tickets") as session:
         record = session.run(
             "MATCH (t:Ticket {entity_id:$id}) "
@@ -138,7 +141,7 @@ online graph administration.
 ## Connection API contract
 
 Use a direct `bolt://host:port` Python connection. The server does not implement
-Neo4j routing discovery (`neo4j://`), TLS schemes, a Redis protocol or an HTTP
+automatic routing discovery, TLS schemes, a Redis protocol or an HTTP
 query endpoint. Graph selection belongs to `driver.session(database="name")`;
 Cypher statements do not choose another graph inside an active transaction.
 A transaction spans one named graph and is not a cross-graph atomic transaction.

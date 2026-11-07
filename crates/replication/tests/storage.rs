@@ -1207,3 +1207,149 @@ async fn append_rejects_unrecoverable_origin_and_term_regression_atomically() {
         vec![first, second]
     );
 }
+
+#[tokio::test]
+async fn recovery_rejects_malformed_request_ledger_without_application_effects() {
+    let valid = serde_json::to_vec(&serde_json::json!({
+        "digest": vec![0_u8; 32], "reply": "Conflict"
+    }))
+    .unwrap();
+    let mut cases = vec![
+        (b"Drequest".to_vec(), b"{".to_vec()),
+        (b"Drequest".to_vec(), b"null".to_vec()),
+        (
+            b"Drequest".to_vec(),
+            b"{\"digest\":[],\"reply\":\"Conflict\"}".to_vec(),
+        ),
+        (b"Drequest".to_vec(), vec![b' '; 1025]),
+    ];
+    for key in [
+        b"D".to_vec(),
+        b"Dbad space".to_vec(),
+        b"D\xff".to_vec(),
+        [b"D".as_slice(), &[b'a'; 129]].concat(),
+    ] {
+        cases.push((key, valid.clone()));
+    }
+    for (key, encoded) in cases {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        let retained = entry(0, command("valid"));
+        store
+            .log_store()
+            .blocking_append([retained.clone()])
+            .await
+            .unwrap();
+        store.state_machine().apply([retained]).await.unwrap();
+        drop(store);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        db.put(&key, &encoded).unwrap();
+        db.flush_wal(true).unwrap();
+        drop(db);
+        assert!(Storage::open(dir.path(), 1024 * 1024, app.clone()).is_err());
+        assert_eq!(app.calls.load(Ordering::SeqCst), 1);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        assert_eq!(db.get(&key).unwrap().unwrap(), encoded);
+    }
+}
+
+#[test]
+fn recovery_rejects_malformed_registry_marker_without_rewriting_it() {
+    for encoded in [b"null".as_slice(), b"1".as_slice(), b"{".as_slice()] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        drop(Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap());
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        db.put(b"Mregistry_initialized", encoded).unwrap();
+        db.flush_wal(true).unwrap();
+        drop(db);
+        assert!(Storage::open(dir.path(), 1024 * 1024, app.clone()).is_err());
+        assert_eq!(app.calls.load(Ordering::SeqCst), 0);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        assert_eq!(db.get(b"Mregistry_initialized").unwrap().unwrap(), encoded);
+    }
+}
+
+#[tokio::test]
+async fn recovery_keeps_valid_legacy_request_ledger_and_missing_registry_marker() {
+    let dir = TempDir::new().unwrap();
+    let app = Arc::new(App::default());
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    let first = entry(0, command("legacy:request_1"));
+    store
+        .log_store()
+        .blocking_append([first.clone()])
+        .await
+        .unwrap();
+    store.state_machine().apply([first.clone()]).await.unwrap();
+    drop(store);
+    let db = rocksdb::DB::open_default(dir.path()).unwrap();
+    assert!(db.get(b"Mregistry_initialized").unwrap().is_none());
+    let original = db.get(b"Dlegacy:request_1").unwrap().unwrap();
+    drop(db);
+    let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+    assert!(!store.registry_initialized().unwrap());
+    assert_eq!(
+        store.lookup("legacy:request_1").unwrap(),
+        Some(Reply::Applied { revision: 1 })
+    );
+    let duplicate = entry(1, command("legacy:request_1"));
+    let mut conflict = command("legacy:request_1");
+    if let Command::Write {
+        expected_revision, ..
+    } = &mut conflict
+    {
+        *expected_revision = 99;
+    }
+    let conflict = entry(2, conflict);
+    store
+        .log_store()
+        .blocking_append([duplicate.clone(), conflict.clone()])
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .state_machine()
+            .apply([duplicate, conflict])
+            .await
+            .unwrap(),
+        vec![Reply::Applied { revision: 1 }, Reply::Conflict]
+    );
+    assert_eq!(app.calls.load(Ordering::SeqCst), 1);
+    drop(store);
+    let db = rocksdb::DB::open_default(dir.path()).unwrap();
+    assert_eq!(db.get(b"Dlegacy:request_1").unwrap().unwrap(), original);
+    assert!(db.get(b"Mregistry_initialized").unwrap().is_none());
+}
+
+#[test]
+fn recovery_accepts_every_current_cached_reply_encoding_without_a_registry_marker() {
+    for reply in [
+        Reply::Initialized,
+        Reply::Conflict,
+        Reply::Applied { revision: u64::MAX },
+    ] {
+        let dir = TempDir::new().unwrap();
+        let app = Arc::new(App::default());
+        drop(Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap());
+        // This is the existing persisted Cached layout, with maximal numeric widths.
+        let encoded = serde_json::to_vec(&serde_json::json!({
+            "digest": vec![255_u8; 32], "reply": reply
+        }))
+        .unwrap();
+        let id = "a".repeat(128);
+        let key = format!("D{id}");
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        db.put(&key, &encoded).unwrap();
+        db.flush_wal(true).unwrap();
+        drop(db);
+        let store = Storage::open(dir.path(), 1024 * 1024, app.clone()).unwrap();
+        assert!(!store.registry_initialized().unwrap());
+        assert_eq!(store.lookup(&id).unwrap(), Some(reply));
+        assert_eq!(app.calls.load(Ordering::SeqCst), 0);
+        drop(store);
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        assert_eq!(db.get(&key).unwrap().unwrap(), encoded);
+    }
+}

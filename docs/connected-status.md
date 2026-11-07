@@ -198,5 +198,5 @@ snapshots accept 80–240 columns and 24–80 rows; `NO_COLOR` removes color.
 See [connected ontology](connected-ontology.md) for the schema contract,
 [connection limits](connection-limits.md) for Python pool reuse, and
 [TUI modes](tui-demo.md) for the separate synthetic and offline inspectors.
-The [dated terminal capture report](design/assets/2026-10-13-beta/README.md)
+The [dated terminal capture report](../benchmarks/archive/design-assets/2026-10-13-beta/README.md)
 records a specific older 100,000-node synthetic run, not a current capacity claim.

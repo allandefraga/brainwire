@@ -1,6 +1,6 @@
 # Bounded Cypher regular expressions
 
-Status: candidate subset; not complete Java/Neo4j regex compatibility.
+Status: candidate subset; Java regex compatibility is incomplete.
 
 ## Problem
 
@@ -32,4 +32,4 @@ patterns, injection into the wrapper, rollback, timeout and budget exhaustion.
 Measure per-row compilation and compare real application queries before any
 throughput claim. The subset must not be counted as full Java-regex parity.
 
-References: [Neo4j string operators](https://neo4j.com/docs/cypher-manual/25/expressions/predicates/string-operators/) and [regex-automata meta configuration](https://docs.rs/regex-automata/latest/regex_automata/meta/struct.Config.html).
+Implementation reference: [regex-automata meta configuration](https://docs.rs/regex-automata/latest/regex_automata/meta/struct.Config.html).

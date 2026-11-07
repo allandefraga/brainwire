@@ -1,5 +1,7 @@
 # Protected Bolt transport for a single-host pilot
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 Brainwire currently serves plaintext Bolt. The optional Compose TLS overlay
 terminates TLS in HAProxy and forwards Bolt to Brainwire over the project's
 private container network. Bolt authentication and per-graph grants still run
@@ -81,16 +83,17 @@ export SSL_CERT_FILE=/absolute/path/private-ca.crt
 ```python
 import json
 from pathlib import Path
-from neo4j import GraphDatabase
+from brainwire import connect
 
 credentials = json.loads(Path('/absolute/private/writer.json').read_text())
-with GraphDatabase.driver(
-    'bolt+s://localhost:7688',
+with connect(
+    'bolt+s://localhost:7688', "default",
     auth=(credentials['principal'], credentials['credentials']),
     connection_timeout=5,
     liveness_check_timeout=30,
     max_transaction_retry_time=0,
-) as driver:
+) as graph:
+    driver = graph.driver
     with driver.session(database='default') as session:
         print(session.run('RETURN 1 AS ok').single()['ok'])
 ```
@@ -119,8 +122,7 @@ network and temporary certificates even after failure.
 
 ```sh
 python3 crates/server/tests/compose_tls.py --self-check
-uv run --no-project --with neo4j==5.28.6 python crates/server/tests/compose_tls.py --image brainwire:local
-uv run --no-project --with neo4j==6.3.0 python crates/server/tests/compose_tls.py --image brainwire:local
+.venv-brainwire/bin/python crates/server/tests/compose_tls.py --image brainwire:local
 ```
 
 Add `--idle-pool` to either runtime command to warm a one-connection pool,
@@ -141,8 +143,8 @@ run, Python 3.14 with OpenSSL 3.5 passed these checks, while Python 3.9.6 with
 LibreSSL 2.8.3 could not complete TLS readiness; the cause remains unverified.
 The readiness timeout preserves the last connection error for diagnosis.
 
-The final candidate [driver 5 receipt](benchmarks/2026-10-13-beta/tls-driver5.json)
-and [driver 6 receipt](benchmarks/2026-10-13-beta/tls-driver6.json) passed these
+The final candidate [driver 5 receipt](../benchmarks/archive/2026-10-13-beta/tls-driver5.json)
+and [driver 6 receipt](../benchmarks/archive/2026-10-13-beta/tls-driver6.json) passed these
 checks on image `brainwire:beta-20261013`
 (`sha256:d08c2e5af98ea237b568b86bf58af99af7d80ae5425ad7aaecdc37f620d821d3`).
 Their idle-pool pauses were 65.807 and 65.811 seconds; both observed a different

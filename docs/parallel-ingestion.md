@@ -1,5 +1,9 @@
 # Parallel writes and DuckLake synchronization
 
+Python commands below use the environment from [Python setup](python-package.md).
+For DuckDB/DuckLake commands, install the optional reader in that environment:
+`.venv-brainwire/bin/python -m pip install duckdb==1.5.5`.
+
 This guide is for a writer that has to load a lot of data and keep it current:
 how to write, how many processes to run, what happens when they collide, and
 how to read a DuckLake table directly, first in full and then incrementally.
@@ -73,8 +77,7 @@ the credential directory outside the repository.
 
    ```sh
    export BRAINWIRE_BOLT_AUTH_FILE=~/brainwire-auth/writer.json
-   uv run --no-project --python 3.12 --with duckdb==1.5.5 --with neo4j==5.28.6 \
-     python -m examples.python.ducklake_sync people.json \
+   .venv-brainwire/bin/python -m examples.python.ducklake_sync people.json \
      --lake 'ducklake:postgres:dbname=lake_catalog host=pg.internal user=lake_reader' \
      --load ducklake,postgres,httpfs,aws --init-sql lake-init.sql \
      --database lake --source-id clean-people --workers 8
@@ -98,7 +101,7 @@ transaction, and transactions commit with optimistic conflict detection. Two
 transactions that touch the same node or edge cannot both commit; the loser
 gets `Neo.TransientError.Transaction.Outdated`, and nothing it staged is
 visible. `GraphClient` uses explicit one-shot transactions and propagates
-failures. Earlier beta helpers used the Neo4j driver's managed `execute_write`,
+failures. Earlier beta helpers used the Bolt driver's managed `execute_write`,
 which can replay a callback after a lost COMMIT response. Automatic retries
 were removed so an ambiguous write is not silently submitted again.
 
@@ -187,12 +190,10 @@ credentials file ([Bolt authentication](bolt-auth.md)); every worker reads it.
 Run it once per table, nodes first:
 
 ```sh
-uv run --no-project --with duckdb==1.5.5 --with neo4j==5.28.6 \
-  python -m examples.python.ducklake_sync customers.json \
+.venv-brainwire/bin/python -m examples.python.ducklake_sync customers.json \
   --lake ducklake:sqlite:/abs/catalog.sqlite --database crm \
   --source-id crm-customers --workers 10 --batch-size 500
-uv run --no-project --with duckdb==1.5.5 --with neo4j==5.28.6 \
-  python -m examples.python.ducklake_sync follows.json \
+.venv-brainwire/bin/python -m examples.python.ducklake_sync follows.json \
   --lake ducklake:sqlite:/abs/catalog.sqlite --database crm \
   --source-id crm-follows --workers 10
 ```

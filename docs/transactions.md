@@ -54,13 +54,12 @@ An engine implements begin, run, commit and idempotent abort operations.
 The session routes explicit transactions to these hooks and owns pending cleanup.
 An implicit transaction completes after its result is exhausted or discarded;
 an explicit transaction waits for COMMIT. Partial results leave it open. These
-boundaries follow the [Bolt transaction message specification](https://neo4j.com/docs/bolt/current/bolt/message/).
+boundaries are part of the Bolt session contract.
 
 Query failures, rollback, processed RESET and session teardown release pending
 transaction ownership. Cleanup failure must not acknowledge success or leave a
 reusable connection. Disconnect/fatal network paths need cleanup even if the
-peer cannot receive the failure response. The [server state specification](https://neo4j.com/docs/bolt/current/bolt/server-state/)
-describes the corresponding terminal and recovery states.
+peer cannot receive the failure response. The session returns to a reusable state only after successful cleanup.
 
 Bookmarks are optional engine-provided output; the session no longer invents
 commit counters. The development stub has no durable graph state and does not

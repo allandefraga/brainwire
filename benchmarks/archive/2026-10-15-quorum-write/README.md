@@ -1,5 +1,9 @@
 # Local quorum write diagnostic — 2026-10-15
 
+Python commands below use the environment from [Python setup](../../../docs/python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 This short synthetic run compares sequential single-row Cypher transactions
 with 25-row `UNWIND` transactions against three independent native Brainwire
 voters on one host. The harness reuses the qualification test’s framed peer
@@ -8,10 +12,10 @@ pattern. No partition is injected during measurement.
 
 ```sh
 cargo build --release --locked --offline -p brainwire-server
-uv run --no-project --with neo4j==6.3.0 python \
+.venv-brainwire/bin/python \
   crates/server/tests/quorum_write_benchmark.py \
   --binary target/release/brainwire --rows 400 --batch-size 25 --repeats 5 \
-  > docs/benchmarks/2026-10-15-quorum-write/rows-400-batch-25.json
+  > benchmarks/archive/2026-10-15-quorum-write/rows-400-batch-25.json
 ```
 
 The [canonical raw receipt](rows-400-batch-25.json) binds the candidate binary

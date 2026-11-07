@@ -1110,7 +1110,7 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
         }
         "reverse" => {
             one(&args)?;
-            match first() {
+            match args.pop().unwrap() {
                 Val::Null => Val::Null,
                 Val::Str(s) => Val::Str(s.chars().rev().collect()),
                 Val::List(mut items) => {
@@ -1173,7 +1173,7 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
         }
         "head" | "last" | "tail" => {
             one(&args)?;
-            match first() {
+            match args.pop().unwrap() {
                 Val::Null => Val::Null,
                 Val::List(mut items) => match name {
                     "head" => items.into_iter().next().unwrap_or(Val::Null),
@@ -1238,7 +1238,7 @@ fn function(name: &str, mut args: Vec<Val>, ctx: &Context<'_, '_>) -> Result<Val
         "valuetype" => {
             one(&args)?;
             Val::Str(
-                match first() {
+                match &args[0] {
                     Val::Null => "NULL",
                     Val::Bool(_) => "BOOLEAN NOT NULL",
                     Val::Int(_) => "INTEGER NOT NULL",

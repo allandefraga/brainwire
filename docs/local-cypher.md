@@ -1,5 +1,7 @@
 # Run Cypher queries
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 Choose how to connect before running a query:
 
 | Your task | Use |
@@ -125,10 +127,9 @@ materialized and subject to conservative accounting.
 
 ## Supported Cypher
 
-The clauses and functions below describe the current implementation. The
-[fixed differential harness](../crates/server/tests/differential.py) compares
-synthetic queries with Neo4j; an older passing run does not prove compatibility
-for a new binary or every query shape. Test the queries your application uses.
+The clauses and functions below describe the current implementation. The fixed differential test suite covers synthetic query shapes; an older
+passing run does not prove compatibility for a new binary or every query shape.
+Test the queries your application uses.
 Unsupported forms return an error.
 
 **Clauses.** `MATCH`, `OPTIONAL MATCH`, `WHERE`, `WITH` (`DISTINCT`, `WHERE`,
@@ -184,8 +185,7 @@ argument. With omitted or zero precision, ties round toward positive infinity:
 preserves a value when rounding cannot change its binary float representation.
 NaN and infinity parameters remain unchanged. Decimal rounding still uses binary
 floating-point arithmetic, so this is not exact decimal arithmetic or financial
-rounding. The three-argument rounding-mode form is not supported. The zero vs
-positive precision distinction follows the [Cypher numeric function semantics](https://neo4j.com/docs/cypher-manual/current/functions/mathematical-numeric/).
+rounding. The three-argument rounding-mode form is not supported. The zero and positive precision cases intentionally use different tie rules.
 
 **Regular expressions.** `text =~ pattern` matches the whole string using a
 bounded Rust regex subset. Pass patterns as parameters. Java-specific
@@ -312,8 +312,7 @@ RETURN size([1, null, 3]) AS items, size('é🧠') AS characters
 
 Returns `3` and `2`. `size(null)` returns null, including missing properties.
 Strings count Unicode code points, not bytes or displayed grapheme clusters;
-`size('é')` is `2` for the decomposed accent. This follows the
-[Cypher scalar function contract](https://neo4j.com/docs/cypher-manual/current/functions/scalar/#functions-size).
+`size('é')` is `2` for the decomposed accent.
 
 ```cypher
 MATCH (c:Customer) WHERE size(c.name) > 3 RETURN c.entity_id, size(c.name)
@@ -324,10 +323,10 @@ rejected. Lists can hold document chunks or vector components, but `size()`
 does not provide vector similarity or ANN search. It also works in UNWIND,
 SET and `count(size(...))`; aggregates inside `size()` remain unsupported.
 
-The [Python/Bolt integration check](benchmarks/2026-10-08-size/python_bolt.py)
+The [Python/Bolt integration check](../benchmarks/archive/2026-10-08-size/python_bolt.py)
 starts a disposable local server, verifies parameter sizes and a persisted SET,
 and shuts down in `finally`. Build `brainwire-server`, then run
-`uv run --no-project --with neo4j==5.28.6 python docs/benchmarks/2026-10-08-size/python_bolt.py`.
+`.venv-brainwire/bin/python benchmarks/archive/2026-10-08-size/python_bolt.py`.
 
 ## Typed neighborhood reads
 
@@ -374,8 +373,7 @@ Brainwire uses Rust whole-string Unicode casing, independent of locale. Unicode
 expansion can change length (`toUpper('ß')` is `SS`), and whole-string lowercasing
 preserves contextual Greek final sigma. It is not grapheme normalization,
 case-insensitive collation or a promise of exact casing compatibility with every
-Neo4j/JVM Unicode version. Null and string-only semantics follow the
-[Cypher string function contract](https://neo4j.com/docs/cypher-manual/current/functions/string/).
+JVM Unicode version. Null inputs propagate; non-string values are rejected.
 
 Before conversion the existing budget/shared query pool reserves a deliberately
 conservative allowance: 24 times input UTF-8 bytes plus value overhead. Total query

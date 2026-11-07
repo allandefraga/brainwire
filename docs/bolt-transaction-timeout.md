@@ -13,17 +13,13 @@ Omitting `tx_timeout`, or sending zero, preserves the existing server policy:
 an idle transaction timeout for those clients. An explicit transaction sets its
 timeout in BEGIN; RUN inside it cannot override that setting.
 
-With the Neo4j Python driver, send the protocol metadata explicitly:
+With the Python Bolt driver, send the protocol metadata explicitly:
 
 ```python
-from neo4j import Query
-
-with driver.session(database="demo") as session:
-    rows = session.run(Query("MATCH (n:Customer) RETURN n.entity_id LIMIT 10",
-                             timeout=0.5)).data()
-
+# graph is a connected GraphClient created with brainwire.connect.
+with graph.driver.session(database=graph.database) as session:
     with session.begin_transaction(timeout=0.5) as tx:
-        rows = tx.run("MATCH (n:Customer) RETURN count(*)").data()
+        rows = tx.run("MATCH (n:Customer) RETURN n.entity_id LIMIT 10").data()
 ```
 
 `session.run(cypher, timeout=0.5)` passes a Cypher parameter named `timeout`;

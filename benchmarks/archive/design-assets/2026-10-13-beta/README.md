@@ -1,5 +1,7 @@
 # Connected beta workspace: 100,000-node terminal captures
 
+Python commands below use the environment from [Python setup](../../../../docs/python-package.md).
+
 These 13 PNGs contain actual interactive terminal cells from the frozen native
 Brainwire release binary. `capture.py` launches a controlling PTY, decodes the
 terminal stream with pyte, and renders its cells with Pillow and macOS Menlo.
@@ -11,7 +13,7 @@ The isolated synthetic graph contains **100,000 nodes and 99,999 edges**:
 one `Ticket` with `entity_id = ticket-high-degree` and 99,999 `TicketComment`
 nodes connected through outgoing `HAS_COMMENT` relationships. Its ontology
 comes directly from `examples/source_ingestion/ontology.json`. Fresh records and edges
-are created in batches of 250 through the Python Neo4j 6.3.0 driver, with a
+are created in batches of 250 through the Python Bolt 6.3.0 driver, with a
 1 MiB Bolt payload cap, 16 MiB decoded-message cap and 64 MiB query pool.
 The driver verifies the exact node and edge counts; offline `db stats` confirms
 them again after the server stops. Fixture population plus verification took
@@ -62,7 +64,7 @@ Run from the repository root:
 
 ```sh
 cargo build -p brainwire-server --release --locked --offline
-uv run --no-project --with neo4j==6.3.0 --with pyte --with pillow python docs/design/assets/2026-10-13-beta/capture.py --nodes 100000 --binary target/release/brainwire
+uv run --with pyte --with pillow python benchmarks/archive/design-assets/2026-10-13-beta/capture.py --nodes 100000 --binary target/release/brainwire
 ```
 
 The default fixture has 1,000 nodes; `--nodes 100000` reproduces this qualification.

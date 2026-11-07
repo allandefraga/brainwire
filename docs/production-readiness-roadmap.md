@@ -136,10 +136,6 @@ and membership changes before offering them operationally.
   semantics before they can be operated reliably. HugeGraph separates local
   RocksDB from its distributed backend; multiple servers must not open the
   same Brainwire RocksDB directory as a substitute for replication.
-- [Neo4j clustering architecture](https://neo4j.com/docs/operations-manual/current/clustering/introduction/)
-  provides a useful contract for leader-coordinated writes, quorum replication
-  and read consistency. Brainwire needs its own evidence for each supported
-  failure mode and deployment edition.
 - [FalkorDB's project documentation](https://github.com/FalkorDB/FalkorDB)
   describes sparse-matrix representation and linear-algebra query execution.
   Sparse projections in Brainwire do not establish equivalent execution,

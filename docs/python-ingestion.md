@@ -1,8 +1,8 @@
 # Python ingestion and the durable write path
 
 Python is the client; Brainwire runs the graph engine in Rust. Send parameterized
-Cypher over Bolt using the Neo4j Python driver. The acceptance harness currently
-verifies driver 5.28.6; this is a tested protocol subset, not full Neo4j feature
+Cypher over Bolt using the Python Bolt driver. The acceptance harness currently
+verifies driver 5.28.6; this is a tested protocol subset, not full database feature
 compatibility. A [synthetic external application ticket/comment snapshot adapter](source-ingestion.md)
 now reuses the same importer. To read a DuckLake table directly with parallel
 workers and incremental changes, see [parallel writes and DuckLake sync](parallel-ingestion.md).
@@ -18,8 +18,7 @@ From the repository root, with the server stopped:
 
 ```sh
 cargo build --locked --offline -p brainwire-server
-python3 -m venv .venv
-.venv/bin/python -m pip install neo4j==5.28.6
+python3 scripts/setup_python.py
 ./target/debug/brainwire db create customers --ontology examples/python/schema.json
 ./target/debug/brainwire serve
 ```
@@ -27,7 +26,7 @@ python3 -m venv .venv
 In another terminal:
 
 ```sh
-.venv/bin/python examples/python/ingest_customers.py examples/python/customers.jsonl
+.venv-brainwire/bin/python examples/python/ingest_customers.py examples/python/customers.jsonl
 ```
 
 Run the same input again: stable `entity_id` values update the same nodes. Each
@@ -39,9 +38,10 @@ an unintended property removal. Empty strings are values; JSON `null` removes a
 property. Unknown extra fields are not sent by this fixed query.
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None, liveness_check_timeout=30) as driver:
+with connect("bolt://127.0.0.1:7687", "customers", auth=None, liveness_check_timeout=30) as graph:
+    driver = graph.driver
     with driver.session(database="customers") as session:
         records = session.run(
             "MATCH (c:Customer {email:$email}) RETURN c",
@@ -127,7 +127,7 @@ backups or a proof against every form of file/hardware corruption.
 ## Reproduce acceptance
 
 ```sh
-.venv/bin/python crates/server/tests/python_ingestion.py --rows 50000 --batch-size 250
+.venv-brainwire/bin/python crates/server/tests/python_ingestion.py --rows 50000 --batch-size 250
 ```
 
 The harness creates only temporary synthetic databases, starts its own server,
@@ -236,7 +236,7 @@ Create a separate test graph using the example's ontology, then start the server
 In another terminal:
 
 ```sh
-.venv/bin/python examples/python/resumable_customers.py examples/python/customers.jsonl \
+.venv-brainwire/bin/python examples/python/resumable_customers.py examples/python/customers.jsonl \
   --database customers-resumable --source-id synthetic-customers-v1 \
   --batch-size 250 --batch-bytes 1048576 --line-bytes 65536
 ```
@@ -275,7 +275,7 @@ Algorithm tests run without installing a driver:
 python3 -m unittest discover -s examples/python -p test_resumable_customers.py
 ```
 
-The [real Bolt failure harness](benchmarks/2026-10-07-commit-state/resumable_acceptance.py)
+The [real Bolt failure harness](../benchmarks/archive/2026-10-07-commit-state/resumable_acceptance.py)
 checks rollback after customer writes and before cursor advancement, lost receipts,
 process kill/reopen/resume, list/vector round trips, changed-source rejection and
 the graph/index audit. It uses disposable synthetic data.

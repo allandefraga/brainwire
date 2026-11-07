@@ -20,7 +20,7 @@ import pyte
 from PIL import Image, ImageDraw, ImageFont
 
 root = Path(__file__).resolve().parents[4]
-out = root / "docs/design/assets/2026-10-05-connected"
+out = root / "benchmarks/archive/design-assets/2026-10-05-connected"
 out.mkdir(parents=True, exist_ok=True)
 font = ImageFont.truetype(
     os.environ.get("BRAINWIRE_CAPTURE_FONT", "/System/Library/Fonts/Menlo.ttc"), 18

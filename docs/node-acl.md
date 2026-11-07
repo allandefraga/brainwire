@@ -38,25 +38,20 @@ For dynamic per-caller filtering, configure a separate service principal with
 `"visibility_delegate": true` and no `node_visibility`. The trusted backend
 must attach `brainwire_visibility` to **every** read transaction using the
 caller identity it resolved from its own authenticated session. For example,
-the Neo4j Python driver accepts Bolt transaction metadata as `metadata=`:
+the Python Bolt driver accepts Bolt transaction metadata as `metadata=`:
 
 ```python
-from neo4j import unit_of_work
-
-@unit_of_work(metadata={"brainwire_visibility": {
-    "principals": ["user:zendesk-main:alice"],
-    "allowed_connectors": ["zendesk-main"],
+visibility = {"brainwire_visibility": {
+    "principals": ["user:ticket-source:alice"],
+    "allowed_connectors": ["ticket-source"],
     "open_connectors": [],
     "entry_strict": True,
     "knowledge_grants": [],
-}})
-def read_tickets(tx):
-    return [record.data() for record in tx.run(
-        "MATCH (t:Ticket) RETURN t.entity_id LIMIT 20"
-    )]
-
-with driver.session(database="tickets") as session:
-    records = session.execute_read(read_tickets)
+}}
+# graph is a connected GraphClient created by the trusted backend.
+with graph.driver.session(database=graph.database) as session:
+    with session.begin_transaction(metadata=visibility) as tx:
+        records = tx.run("MATCH (t:Ticket) RETURN t.entity_id LIMIT 20").data()
 ```
 
 Missing or malformed metadata is denied, including for autocommit and explicit

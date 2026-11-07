@@ -24,6 +24,9 @@ const APPLIED: &[u8] = b"Mapplied";
 const MEMBERSHIP: &[u8] = b"Mmembership";
 const BYTES: &[u8] = b"Mbytes";
 const REGISTRY_INITIALIZED: &[u8] = b"Mregistry_initialized";
+// Current cached replies encode a 32-byte digest and a small fixed-shape enum.
+// Keep recovery validation bounded per record without materializing the ledger.
+const MAX_CACHED_BYTES: usize = 1024;
 fn error(message: impl ToString) -> Error {
     StorageIOError::write(&std::io::Error::other(message.to_string())).into()
 }
@@ -79,6 +82,7 @@ impl Storage {
         }));
         // Reject unreadable consensus metadata before a voter starts serving.
         let _: Option<Vote<u64>> = result.read(VOTE)?;
+        result.registry_initialized()?;
         let applied = result.last_applied()?;
         let mut applied_membership = StoredMembership::default();
         let mut bytes = 0u64;
@@ -87,6 +91,15 @@ impl Storage {
         let mut previous_leader = None;
         for item in result.0.db.iterator(IteratorMode::Start) {
             let (k, v) = item.map_err(error)?;
+            if k.first() == Some(&b'D') {
+                let id = std::str::from_utf8(&k[1..]).map_err(error)?;
+                crate::types::validate_request_id(id).map_err(error)?;
+                if v.len() > MAX_CACHED_BYTES {
+                    return Err(error("cached request outcome exceeds recovery bound"));
+                }
+                let _: Cached = serde_json::from_slice(&v).map_err(error)?;
+                continue;
+            }
             if k.first() != Some(&b'L') {
                 continue;
             }
@@ -576,5 +589,26 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
 impl RaftSnapshotBuilder<TypeConfig> for StateMachine {
     async fn build_snapshot(&mut self) -> Result<Snapshot<TypeConfig>, Error> {
         Err(error("snapshot building unsupported"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cached, Reply, MAX_CACHED_BYTES};
+
+    #[test]
+    fn every_cached_reply_fits_recovery_bound_at_maximal_numeric_widths() {
+        for reply in [
+            Reply::Initialized,
+            Reply::Conflict,
+            Reply::Applied { revision: u64::MAX },
+        ] {
+            let encoded = serde_json::to_vec(&Cached {
+                digest: [255; 32],
+                reply,
+            })
+            .unwrap();
+            assert!(encoded.len() <= MAX_CACHED_BYTES);
+        }
     }
 }

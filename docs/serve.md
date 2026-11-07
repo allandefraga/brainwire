@@ -52,14 +52,14 @@ and [query allocation guards](query-allocation-guards.md) before sizing a load.
 Install the driver in a virtual environment, then use a named database:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install neo4j==6.3.0
-.venv/bin/python - <<'PYTHON'
-from neo4j import GraphDatabase
+python3 scripts/setup_python.py
+.venv-brainwire/bin/python - <<'PYTHON'
+from brainwire import connect
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None,
+with connect("bolt://127.0.0.1:7687", "default", auth=None,
                           liveness_check_timeout=30,
-                          max_transaction_retry_time=0) as driver:
+                          max_transaction_retry_time=0) as graph:
+    driver = graph.driver
     with driver.session(database="default") as session:
         print(session.run("RETURN 1 AS n").single()["n"])
 PYTHON
@@ -69,7 +69,7 @@ This is the isolated, unauthenticated loopback demo. Shared or remote connection
 need a policy and encrypted transport. For writes and batches, see the
 [Python helper](python-package.md), [mutation contract](python-client.md) and
 [supported Cypher](local-cypher.md). Compatible Bolt drivers do not imply full
-Neo4j language or administration compatibility.
+database language or administration compatibility.
 
 ## Use online and offline commands correctly
 

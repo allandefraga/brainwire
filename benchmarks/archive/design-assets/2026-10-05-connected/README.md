@@ -1,5 +1,7 @@
 # Actual connected Ontology captures, October 5
 
+Python commands below use the environment from [Python setup](../../../../docs/python-package.md).
+
 These are actual interactive TUI frames, captured from a controlling PTY against
 an isolated local Bolt server, decoded with pyte and rendered with Pillow/Menlo.
 They are terminal renders, not generated UI mockups. The adjacent text files
@@ -31,8 +33,8 @@ From the repository root, using the built debug CLI:
 
 ```sh
 cargo build --locked --offline -p brainwire-server --bin brainwire
-uv run --no-project --with pyte --with pillow python docs/design/assets/2026-10-05-connected/capture.py
-uv run --no-project --with neo4j==5.28.6 python docs/design/assets/2026-10-05-connected/python_acceptance.py
+uv run --no-project --with pyte --with pillow python benchmarks/archive/design-assets/2026-10-05-connected/capture.py
+.venv-brainwire/bin/python benchmarks/archive/design-assets/2026-10-05-connected/python_acceptance.py
 ```
 
 Menlo on macOS is the default font; `BRAINWIRE_CAPTURE_FONT` can select another
@@ -41,7 +43,7 @@ runtime dependencies. Helpers use synthetic temporary graphs only.
 
 ## Concurrent Python acceptance
 
-With Neo4j Python driver 5.28.6, two readers completed 40 `CALL db.schema()`
+With Python Bolt driver 5.28.6, two readers completed 40 `CALL db.schema()`
 queries while a writer committed 10 batches of 20 Customers. Every schema result
 contained the three expected types and all three relationship signatures,
 including both IN_SEGMENT pairs. The final Customer count was 200; connected CLI
@@ -53,4 +55,4 @@ expanded schema accounting, snapshot isolation, rollback, malformed and oversize
 Bolt responses, slow-drip deadlines, delayed trailing records, graph selection,
 missing/empty graphs, no local configuration/storage access and stale UI recovery.
 Workspace clippy, formatting and diff checks passed. See the
-[connected guide](../../../connected-ontology.md) for bounds and known limitations.
+[connected guide](../../../../docs/connected-ontology.md) for bounds and known limitations.

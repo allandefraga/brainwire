@@ -1,5 +1,7 @@
 # Isolated Swarm restart acceptance
 
+Python commands below use the environment from [Python setup](python-package.md).
+
 `crates/server/tests/swarm_restart.py` rehearses a protected, single-owner
 Brainwire service using the actual `deploy/swarm.yaml` and
 `deploy/swarm.auth.yaml`. It creates a disposable Docker-in-Docker daemon rather
@@ -15,7 +17,7 @@ quorum, distributed failover or a production Swarm cluster.
 
 Use a locally built, frozen candidate image. The script never builds, pushes or
 chooses a Brainwire candidate. Its standard-library self-check needs neither
-Docker nor the Neo4j package:
+Docker nor the Bolt driver package:
 
 ```sh
 python3 crates/server/tests/swarm_restart.py --self-check
@@ -24,7 +26,7 @@ python3 crates/server/tests/swarm_restart.py --self-check
 After the candidate image is available locally:
 
 ```sh
-uv run --no-project --with neo4j==6.3.0 python \
+.venv-brainwire/bin/python \
   crates/server/tests/swarm_restart.py \
   --image brainwire:YOUR-FROZEN-CANDIDATE --rows 1000
 ```

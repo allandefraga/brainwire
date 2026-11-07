@@ -29,6 +29,26 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-07: v0.17.0-beta.2 documentation, memory and recovery
+
+- **Done:** avoid redundant deep copies in `reverse`, `head`, `last`, `tail`
+  and `valueType`; add fail-closed startup validation for malformed quorum
+  deduplication records and initialization markers without changing the disk
+  format. Simplify documentation and remove duplicate guides; preserve raw
+  historical results in the benchmark archive. Add architecture diagrams.
+- **Verification:** 1,158 Rust tests passed (three ignored), as did Clippy and
+  formatting. Python examples ran 287 tests (seven skipped), and 132 script
+  tests passed. An isolated synthetic application-adapter smoke exercised
+  20 nodes, merge/update, two-identity visibility and deletion. A local
+  [mixed-load diagnostic](docs/benchmarks/2026-11-07-beta2-mixed.md) compared
+  two short shared-host runs with 10,000 node/relationship pairs and restart.
+- **Limits:** the Cypher change does not bound RSS or avoid all materialization.
+  Ledger validation checks encoding, not authenticity. The smoke is not a
+  representative production workload; quorum failover across machines remains
+  unqualified. Older designs are summarized in docs and preserved in history.
+- **Next:** qualify sustained load and crash recovery on representative data;
+  validate the consuming application's pinned image and ambiguous-commit path.
+
 ## 2026-11-07: v0.17.0-beta.1 agent context and documentation
 
 - **Done:** add bounded schema-path discovery, directed visible instance-path
@@ -905,7 +925,7 @@ Allan's current language.
   an isolated v0.9 image/volume. The wheel was built and installed outside the
   source tree in the isolated packaging checkout.
 - **Measured:** synthetic response comparison receipts and limits are in
-  `docs/benchmarks/2026-10-29-bolt-response/`; results are variable and do not
+  `benchmarks/archive/2026-10-29-bolt-response/`; results are variable and do not
   establish the 5% regression gate. Conflict deque diagnostic is recorded in
   `docs/benchmarks/2026-10-29-history-growth.md`.
 - **Next step:** expand representative many-small-value and concurrent workload
@@ -1719,7 +1739,7 @@ No line of code before the end of phase 2.
   finds the row after restart. The final idle-only stop must also exit 0.
 - **Verified:** image `636f63b1…` built from the current working tree (binary
   `372bdeb0…`, Debian glibc 2.36, aarch64) passed 3/3 runs with offline audit
-  `ok`; receipt `docs/benchmarks/2026-10-15-graceful-drain/compose-linux.json`.
+  `ok`; receipt `benchmarks/archive/2026-10-15-graceful-drain/compose-linux.json`.
   Each run removed its project and volume; the test image was removed after.
 - **Limits:** Docker Desktop on one Mac; no amd64, Kubernetes or Swarm target,
   no load during the drain beyond one open transaction.
@@ -1836,7 +1856,7 @@ No line of code before the end of phase 2.
   `typed_neighborhood_acceptance`, `query_memory`, `beta_acl_api` PASS.
   `cargo test --workspace --locked --offline` 642 passed / 0 failed; clippy with
   `-D warnings` and `cargo fmt --check` clean; `git diff --check` clean.
-  Evidence: `docs/benchmarks/2026-10-15-graceful-drain.md` and receipts.
+  Evidence: `benchmarks/archive/2026-10-15-graceful-drain.md` and receipts.
 - **Not verified:** Linux container. Docker's daemon timed out resolving base
   image metadata (`rust:1.98.1-bookworm`, `debian:bookworm-slim`), so no image
   was built; signal delivery via the image and the destructor ordering on
@@ -1933,7 +1953,7 @@ No line of code before the end of phase 2.
   workspace tests passed. Full Clippy with warnings denied, formatting and
   `git diff --check` passed. No production write/durability behavior was
   changed in this session.
-- **Artifacts:** `docs/benchmarks/2026-10-15-quorum-write/`,
+- **Artifacts:** `benchmarks/archive/2026-10-15-quorum-write/`,
   `docs/benchmarks/2026-10-15-detach-delete/`,
   `docs/benchmarks/2026-10-15-acl-reads.md`, and
   `docs/benchmarks/2026-10-15-streaming-reads.md`,
@@ -2047,7 +2067,7 @@ No line of code before the end of phase 2.
   The 100,000-node / 99,999-edge run passed and then reopened the same RocksDB
   data after a server restart. The demo uses disposable synthetic data and
   cleans up credentials and temporary storage. Its six connected TUI captures
-  and receipt are under `docs/design/assets/2026-10-15-demo/`; it is a local
+  and receipt are under `benchmarks/archive/design-assets/2026-10-15-demo/`; it is a local
   single-node demonstration, not a quorum/HA acceptance.
 - **Docker:** added `deploy/compose.demo.yaml` for build, one-time ontology
   initialization, a persistent named volume, readiness checks and bounded
@@ -2137,7 +2157,7 @@ No line of code before the end of phase 2.
   on the rebuilt candidate; three further consecutive pre-diagnostic opt-in
   repeats also passed 17/17. The four-row
   receipt and reproduction commands are in
-  `docs/benchmarks/2026-10-15-distributed-ops.md`. The quorum guide, README and
+  `benchmarks/archive/2026-10-15-distributed-ops.md`. The quorum guide, README and
   [replication next-gates](docs/design/replication-next-gates.md) link the
   qualification and retain its limits.
 - **Verified:** quorum Python self-check; `cluster_probe` (5 tests),
@@ -2327,7 +2347,7 @@ No line of code before the end of phase 2.
   updates/indexes; audit passed. See final candidate report/strict verifier.
 - **Review:** Astra reviewed integrated paths and the final borrowed setter. An
   earlier candidate was superseded and its partial hour intentionally stopped;
-  evidence stays in `docs/benchmarks/2026-10-13-beta-acl/pre-stamp-fix/`. The corrected
+  evidence stays in `benchmarks/archive/2026-10-13-beta-acl/pre-stamp-fix/`. The corrected
   candidate is qualified separately. One existing authentication timing test failed
   under concurrent builds; isolated and final full runs passed without changing it.
 - **Next step:** obtain the real source catalog/mapping and authoritative ACL
@@ -2371,7 +2391,7 @@ No line of code before the end of phase 2.
   972,500 edges WCC 325.17 ms / SCC 391.07 ms. Host/load/cache variation means
   these small sets are not a scaling law or production percentiles. Timings
   include projection and eager Cypher output; 256 MiB accounting limit, no RSS
-  measurement. See `docs/benchmarks/2026-10-13-components.md`, raw receipts and
+  measurement. See `benchmarks/archive/2026-10-13-components.md`, raw receipts and
   source/binary provenance. Earlier frozen beta image/receipts were not changed.
 - **Next step / pending:** node-level ACL, the actual external application adapter contract,
   Kubernetes/Swarm qualification of the new candidate and real replication
@@ -2433,8 +2453,8 @@ No line of code before the end of phase 2.
   diagnostic; original/checkpoint remain intact. A corrupted neighboring store
   blocks eager offline catalog opening; namespaces are not corruption domains.
 - **Evidence:** [qualification report](docs/benchmarks/2026-10-13-beta.md),
-  [20-receipt manifest](docs/benchmarks/2026-10-13-beta/validation.json), hashed logs,
-  actual RSS/latency figure and [TUI captures](docs/design/assets/2026-10-13-beta/README.md).
+  [20-receipt manifest](benchmarks/archive/2026-10-13-beta/validation.json), hashed logs,
+  actual RSS/latency figure and [TUI captures](benchmarks/archive/design-assets/2026-10-13-beta/README.md).
   Standard-library collector has negative checks against false PASS, stale verdicts,
   missing/corrupt/mismatched receipts/assets, insufficient durations and profiles.
   Advisory final review independently obtained the same passing manifest.
@@ -2502,7 +2522,7 @@ No line of code before the end of phase 2.
 - **Next step:** October 13 protected transport boundary (same-host loopback or
   verified encrypted tunnel/proxy), then admission/slow-client qualification and
   the supervised shutdown/recovery boundary. Run the
-  [local MVP quickstart](docs/mvp-quickstart.md); see the
+  [local MVP quickstart](docs/getting-started.md); see the
   [dated beta queue](docs/2026-10-pilot-roadmap.md) for source mapping, actual backend,
   packaging, target execution, restore, performance and release decision gates.
 - **Blockers/limits:** actual external application mappings, catalog/storage access and SLOs
@@ -2669,7 +2689,7 @@ No line of code before the end of phase 2.
   importer bridge. Do not claim CDC, source deletes or machine-loss failover.
 - **Evidence:** [session report](docs/benchmarks/2026-10-12-auth.md),
   [connection guide](docs/bolt-auth.md), [container guide](docs/protected-containers.md),
-  [updated beta security checklist](docs/beta-auth-checklist.md).
+  [updated beta security checklist](docs/beta-operator-checklist.md).
 
 ### 2026-10-10 — external application snapshot adapter and recovery acceptance
 
@@ -2709,11 +2729,11 @@ No line of code before the end of phase 2.
   source-version arbitration, external edge repair or new connected TUI feature.
 - **Next:** implement protected Bolt authentication and graph/operation scopes
   across HELLO/LOGON, implicit RUN and explicit BEGIN. The read-only trace is in
-  docs/beta-auth-checklist.md; consult Astra on policy/state/config first. Current
+  docs/beta-operator-checklist.md; consult Astra on policy/state/config first. Current
   AllowAll, RESET/LOGOFF behavior, read-only mutation checks and process-wide CALL
   telemetry need explicit denial tests. Do not expose current Bolt on a shared
   network. Confirm real external application export mapping before any live-data integration.
-- **Evidence/local:** docs/benchmarks/2026-10-10-source-ingestion.md and its raw JSON,
+- **Evidence/local:** benchmarks/archive/2026-10-10-source-ingestion.md and its raw JSON,
   reproducible harnesses and final source inventory. Temporary stores and owned
   servers cleaned. All work local; no push, publication, PR or deployment.
 
@@ -2760,7 +2780,7 @@ No line of code before the end of phase 2.
   Actual CLI returns [2,3,null]. Python Neo4j driver 5.28.6 against a disposable
   local Bolt server returns Unicode/list sizes and persists SET length=2;
   server stopped and its temporary data removed. Runnable evidence:
-  docs/benchmarks/2026-10-08-size/python_bolt.py and python-bolt.json.
+  benchmarks/archive/2026-10-08-size/python_bolt.py and python-bolt.json.
 - **Investigated:** crate-private callback decodes node bytes from overlay or
   Snapshot::get_pinned_cf, eliminating one intermediate raw Vec copy. Its
   snapshot/tombstone/error/LIMIT semantics and 435-test candidate workspace
@@ -2845,7 +2865,7 @@ No line of code before the end of phase 2.
   preserve order/overlay/snapshot/LIMIT/error timing and decide a result-byte policy.
   Current key-count caps alone do not bound arbitrary node payload bytes.
 - **Evidence:** docs/commit-state.md, updated Python/transaction/checkpoint/serve
-  guides and roadmap; docs/benchmarks/2026-10-07-commit-state.md and raw scripts,
+  guides and roadmap; benchmarks/archive/2026-10-07-commit-state.md and raw scripts,
   JSON and final source/binary hashes. Replication, temporal history, ANN, auth,
   full connected TUI and source connectors remain unfinished beta work.
 - **Blockers:** none for this slice. Keep future sessions substantial and timed;
@@ -2918,8 +2938,8 @@ No line of code before the end of phase 2.
   directory. Disputed runs were discarded. Preserve the original executable,
   clean affected store/Cypher/server packages, rebuild the canonical code and
   measure immutable executable copies serially. Provenance and raw final samples
-  are retained in `docs/benchmarks/2026-10-06-typed-adjacency/`; source and complete
-  method are linked from `docs/benchmarks/2026-10-06-typed-adjacency.md`.
+  are retained in `benchmarks/archive/2026-10-06-typed-adjacency/`; source and complete
+  method are linked from `benchmarks/archive/2026-10-06-typed-adjacency.md`.
 - **Profile:** a separate five-second macOS sample points to per-node RocksDB
   reads (`node_record`/`get_node`/`read_node`) as the dominant selected dense-query
   branch; empty-row decode itself is much smaller. Inclusive branch counts are
@@ -2964,7 +2984,7 @@ No line of code before the end of phase 2.
   restart with schema v2 and refresh without restarting the TUI. Test servers and
   temporary databases are cleaned up. These checks are not performance benchmarks.
 - **Artifacts:** `docs/connected-ontology.md`, README/server/backoffice updates,
-  and `docs/design/assets/2026-10-05-connected/` with five captures, text and
+  and `benchmarks/archive/design-assets/2026-10-05-connected/` with five captures, text and
   repeatable Python/PTY checks. No new runtime dependency or storage format.
 - **Limits/next step:** refresh is synchronous (default 3-second network deadline,
   configurable 1..10000 ms), no background polling, no graph discovery, no arbitrary

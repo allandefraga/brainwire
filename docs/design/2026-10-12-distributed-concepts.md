@@ -426,8 +426,7 @@ to occur at the correct boundary before accepting a second decision. A complete
 multi-RUN transaction also needs an explicit request-identity scope; a receipt
 for one statement is not automatically a receipt for the entire transaction.
 
-Managed Python transaction callbacks can run again during driver retries; see
-[the driver's transaction guidance](https://neo4j.com/docs/python-manual/current/transactions/).
+Managed Python transaction callbacks can run again during driver retries.
 A once-applied graph mutation does not make an email, webhook or external API
 call inside that callback execute once. Those external effects require their
 own retry/delivery contract. A future outbox could commit delivery intent with
@@ -484,11 +483,9 @@ its response arrived. Moving an uncommitted transaction snapshot and staged
 writes to another server would be a separate protocol.
 
 Bolt specifies authenticated routing-table requests and distinguishes explicit
-COMMIT from intermediate transaction messages. See
-[the Bolt message specification](https://neo4j.com/docs/bolt/current/bolt/message/).
-This reference does not mean Brainwire already implements ROUTE or cluster
-bookmarks, nor that a generic Neo4j driver automatically supplies our undecided
-operation-identity contract.
+COMMIT from intermediate transaction messages. This does not mean Brainwire
+already implements ROUTE or cluster bookmarks, nor that a generic Bolt driver
+supplies the proposed operation-identity contract.
 
 Replication addresses must identify the expected member, not an arbitrary
 backend behind a shared load balancer. Validate authenticated cluster/member

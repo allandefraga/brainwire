@@ -90,9 +90,10 @@ Development-mode example of the same query through the Python Bolt driver
 on isolated loopback (protected credentials are described below):
 
 ```python
-from neo4j import GraphDatabase
+from brainwire import connect
 
-with GraphDatabase.driver("bolt://127.0.0.1:7687", auth=None) as driver:
+with connect("bolt://127.0.0.1:7687", "tickets", auth=None) as graph:
+    driver = graph.driver
     with driver.session(database="tickets") as session:
         schema = session.run("""
             CALL db.schema()
@@ -127,7 +128,7 @@ The shared renderer has a 65,535-line scroll ceiling. Exceptionally large proper
 lists may exceed it after wrapping; inspect those lists through Cypher/Python
 instead. Pagination and an asynchronous refresh loop are follow-up work.
 
-[Actual terminal captures and integration checks](design/assets/2026-10-05-connected/README.md)
+[Actual terminal captures and integration checks](../benchmarks/archive/design-assets/2026-10-05-connected/README.md)
 include a server failure, restart with a changed schema, and concurrent Python writes.
 
 ## Protected service sessions

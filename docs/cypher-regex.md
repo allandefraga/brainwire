@@ -6,7 +6,7 @@ implementation supports the Rust regex syntax subset, including common
 `(?i)`, `(?m)`, `(?s)` and extended-mode flags. It does not implement Java
 look-around or backreferences; invalid, unsupported and oversized patterns
 return a semantic client error and roll back staged writes. Unicode case
-folding and regex syntax can differ from Neo4j's Java dialect.
+folding and regex syntax can differ from the Java regex dialect.
 
 The original expression is parsed as a bounded regex-syntax AST before
 normalization and absolute anchoring. This prevents unmatched group delimiters

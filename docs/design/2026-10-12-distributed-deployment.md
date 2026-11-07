@@ -124,8 +124,7 @@ it cannot treat BEGIN, RUN and COMMIT as unrelated balanced requests.
    response disappeared, preserve an unknown outcome and use the defined
    resolution/retry identity instead of assuming rollback.
 
-See the [Bolt message contract](https://neo4j.com/docs/bolt/current/bolt/message/)
-and the proposed [retry boundaries](2026-10-12-distributed-concepts.md#python-retries-and-ingestion).
+See the proposed [retry boundaries](2026-10-12-distributed-concepts.md#python-retries-and-ingestion).
 ROUTE and cluster bookmarks are not implemented in Brainwire today.
 
 ### Internal and external addresses

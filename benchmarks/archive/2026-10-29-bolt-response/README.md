@@ -17,7 +17,7 @@ statistically reliable regression bound. RSS values are sampled, not peaks;
 no cgroup/kernel OOM evidence was collected.
 
 Run on an appropriately qualified host with two frozen executables, no builds,
-and the Neo4j Python driver installed:
+and the Python Bolt driver installed:
 
 ```sh
 python scripts/bench_bolt_response.py --baseline /path/to/old/brainwire \

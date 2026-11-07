@@ -1,5 +1,9 @@
 # Typed neighborhood performance — 2026-10-06
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 Typed Cypher hops now seek the existing `[node ID, relationship type]` adjacency
 prefix. Previously they visited every edge of the starting node and filtered
 its type in Rust. The storage format, scalar indexes, ontology and transaction
@@ -81,13 +85,13 @@ out of the timed runs. Release and cold-cache measurements remain future work.
 ## Python and transaction acceptance
 
 The acceptance script copies the closed fixture into an isolated temporary
-server directory. It never writes to the supplied fixture. It uses the Neo4j
-5.28.6 driver and the same Bolt/Cypher engine available to external application:
+server directory. It never writes to the supplied fixture. It uses the Python Bolt
+driver 5.28.6 and the same Bolt/Cypher engine available to external application:
 
 ```sh
 cargo build --locked --offline -p brainwire-server --bin brainwire
-uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-06-typed-adjacency/python_acceptance.py \
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-06-typed-adjacency/python_acceptance.py \
   "$BENCH_DIR/fixture"
 ```
 
@@ -114,7 +118,7 @@ projection LIMIT cancellation. Workspace validation: 414 tests passed;
 Clippy with warnings denied, formatting and diff checks passed.
 
 Raw fixture, paired query measurements and Python results are in
-[the results directory](2026-10-06-typed-adjacency/).
+[the results directory](../../benchmarks/archive/2026-10-06-typed-adjacency).
 
 ## Remaining cost
 

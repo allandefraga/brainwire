@@ -1,5 +1,9 @@
 # October 7: durable commits, resumable Python and mixed-load acceptance
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 All work was local. Data is synthetic and disposable. These checks establish
 single-store commit/restart behavior; they do not implement replicated apply,
 causal bookmarks, historical reads, DuckLake CDC or ANN search.
@@ -41,7 +45,7 @@ line length. This is an example, not a general SDK or source-change connector.
 
 ## Volume and measurement scope
 
-Runs use macOS ARM64 and Neo4j Python driver 5.28.6 (plus a separate 10K
+Runs use macOS ARM64 and Python Bolt driver 5.28.6 (plus a separate 10K
 resumable/recovery check with driver 6.3.0), 64 MiB cache
 and 16 MiB memtable budget. Those are component settings, not a hard RSS cap.
 Raw JSON records profile, source shape, hashes and cleanup status.
@@ -92,14 +96,14 @@ it does not isolate the sequence marker's overhead against an older binary.
 
 ```sh
 cargo build --release --locked --offline -p brainwire-server
-uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-07-commit-state/python_acceptance.py \
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-07-commit-state/python_acceptance.py \
   --binary target/release/brainwire --rows 100000 --payload-bytes 1024
-uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-07-commit-state/resumable_acceptance.py \
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-07-commit-state/resumable_acceptance.py \
   --binary target/release/brainwire --rows 100000 --dimensions 768 --varied-vectors
-uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-07-commit-state/mixed_soak.py --seconds 600
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-07-commit-state/mixed_soak.py --seconds 600
 ```
 
 Each harness creates its own graph/server directories and removes them on exit.
@@ -111,7 +115,7 @@ uv run --with pyte --with pillow python \
   docs/design/assets/2026-10-07-commit-state/capture.py
 ```
 
-Raw [results and executable harnesses](2026-10-07-commit-state/) and
+Raw [results and executable harnesses](../../benchmarks/archive/2026-10-07-commit-state) and
 [TUI captures/receipt](../design/assets/2026-10-07-commit-state/) preserve the
 measurement/capture provenance. Next performance work is the
 [bounded destination-read experiment](../design/2026-10-07-batched-node-read-spike.md),

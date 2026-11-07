@@ -23,7 +23,7 @@ export BRAINWIRE_MEMORY_MEMTABLES=16MiB
 
 `finance-approved` scores approximately `0.90`; `popular-sheet` scores `0.10`.
 The five numeric contributions sum to the score. Python can use the same query
-through the existing Neo4j driver/Bolt path, replacing the options literal with
+through the existing Python/Bolt path, replacing the options literal with
 `$options` and passing a Python dictionary.
 
 Override the evidence weights for a particular query when a product needs a

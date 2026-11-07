@@ -20,7 +20,7 @@ For a feature, describe the workload and what is difficult today in a
 
 ## Make a change
 
-1. Follow the [local setup](docs/mvp-quickstart.md) and create a focused branch.
+1. Follow the [local setup](docs/getting-started.md) and create a focused branch.
 2. Read the code's callers and existing tests. Add a regression test for a bug
    or a behavior test for non-trivial new logic.
 3. Update the README or relevant guide when behavior changes. Use English for

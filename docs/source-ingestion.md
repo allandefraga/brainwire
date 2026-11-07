@@ -1,5 +1,9 @@
 # external application ticket/comment shadow integration
 
+Python commands below use the environment from [Python setup](python-package.md).
+For DuckDB/DuckLake commands, install the optional reader in that environment:
+`.venv-brainwire/bin/python -m pip install duckdb==1.5.5`.
+
 This is an executable **synthetic integration contract**, not an approved live
 external application schema or a production deployment. It implements the October 9–10
 workload/fixture slice. The local external application starter graph mapping is empty; the
@@ -77,7 +81,7 @@ From the Brainwire repository root, choose an unused loopback port and fresh
 storage/file paths. For this unprotected example use an isolated local test. The server now also
 supports [protected service-token connections](bolt-auth.md); shared deployment
 still requires the transport and operational gates.
-The [protected Bolt checklist](beta-auth-checklist.md) records the next dependency.
+The [protected Bolt checklist](beta-operator-checklist.md) records the next dependency.
 
 ```sh
 cargo build --release --locked --offline -p brainwire-server --bin brainwire
@@ -95,7 +99,7 @@ In another terminal, still from the repository root:
 
 ```sh
 python3 -m examples.source_ingestion.generate_fixture /tmp/brainwire-external-tickets.jsonl --tickets 10000
-uv run --no-project --with neo4j==5.28.6 python -m examples.source_ingestion.ingest_snapshot \
+.venv-brainwire/bin/python -m examples.source_ingestion.ingest_snapshot \
   /tmp/brainwire-external-tickets.jsonl --database support-demo \
   --uri bolt://127.0.0.1:17687 --source-id zendesk-synthetic-snapshot-001 \
   --batch-size 250 --batch-bytes 1048576 --line-bytes 65536 \
@@ -141,7 +145,7 @@ Observatory identity are unchanged.
 candidate ticket/comment contract. It reads one trusted SELECT from a read-only
 DuckDB file, normalizes every row with the same adapter used by ingestion and
 publishes a new immutable JSONL file. It does not change the Rust dependency tree.
-Tested optional versions are DuckDB **1.5.5** and Neo4j Python driver **6.3.0**.
+Tested optional versions are DuckDB **1.5.5** and Python Bolt driver **6.3.0**.
 
 From the repository root, prepare a `source` table/view with the explicit required
 fields above. Adapt [the candidate SQL](../examples/source_ingestion/export_snapshot.sql)
@@ -155,7 +159,7 @@ uv run --no-project --with duckdb==1.5.5 python -m examples.source_ingestion.exp
   --fetch-rows 250 --line-bytes 65536 --max-output-bytes 1073741824
 
 export BRAINWIRE_BOLT_AUTH_FILE=/private/path/writer.json
-uv run --no-project --with neo4j==6.3.0 python -m examples.source_ingestion.ingest_snapshot \
+.venv-brainwire/bin/python -m examples.source_ingestion.ingest_snapshot \
   /private/path/snapshot-001.jsonl --database support-demo \
   --uri bolt://127.0.0.1:17687 --source-id zendesk-snapshot-001
 ```
@@ -234,12 +238,12 @@ python3 -m unittest discover -s examples/python -p test_resumable_customers.py
 python3 -m unittest discover -s examples/source_ingestion -p 'test_*.py'
 uv run --no-project --with duckdb==1.5.5 python -m unittest examples.source_ingestion.test_export_snapshot
 uv run --no-project --with duckdb==1.5.5 python -m unittest examples.source_ingestion.test_ducklake_snapshot
-uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-10-source-ingestion/acceptance.py --tickets 10000
-uv run --no-project --with duckdb==1.5.5 --with neo4j==6.3.0 python \
-  docs/benchmarks/2026-10-12-mvp/acceptance.py --tickets 10000
-uv run --no-project --with duckdb==1.5.5 --with neo4j==6.3.0 python \
-  docs/benchmarks/2026-10-12-mvp/acceptance.py --tickets 10000 --ducklake
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-10-source-ingestion/acceptance.py --tickets 10000
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-12-mvp/acceptance.py --tickets 10000
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-12-mvp/acceptance.py --tickets 10000 --ducklake
 ```
 
 The harness creates disposable graphs, verifies exact nodes/links/index answers,

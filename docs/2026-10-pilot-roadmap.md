@@ -253,7 +253,7 @@ The experimental quorum's intermittent `leader/quorum unavailable` and
 `CommitOutcomeUnknown` under sequential writes had one cause: a new TCP
 connection per peer RPC exhausted local ports (58,046 TIME_WAIT sockets). Peer
 connections are now reused; the reproducing 2000×100×10 loopback run and the
-500-row quorum acceptance pass ([diagnosis](benchmarks/2026-10-15-quorum-write/README.md)).
+500-row quorum acceptance pass ([diagnosis](../benchmarks/archive/2026-10-15-quorum-write/README.md)).
 A six-minute soak (800k rows) then passed once; its repeat lost leadership
 mid-run after an undiagnosed sub-2 s pause (RocksDB stalls ruled out). This is
 loopback evidence on a busy host, not multi-machine qualification.

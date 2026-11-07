@@ -1,5 +1,9 @@
 # external application Ticket/Comment snapshot acceptance — October 10
 
+Python commands below use the environment from [Python setup](../python-package.md).
+These commands use the current checkout's Python dependencies. They do not
+recreate the historical dependency environment; original versions remain in the receipts.
+
 The [shadow adapter](../source-ingestion.md) imports fixed-schema synthetic
 Zendesk-shaped Ticket and TicketComment records through the existing Python/Bolt
 transaction engine. It adds source-qualified identities, HAS_COMMENT parent
@@ -14,9 +18,9 @@ No storage format or Rust engine behavior is changed.
 | Driver 5.28.6, expanded acceptance | 100,000 | 200,000 | 200,000 | 25.101 | 11,952 |
 | Driver 6.3.0, expanded + partial-resume acceptance | 1,000 | 2,000 | 2,000 | 0.277 | 10,832 |
 
-Raw receipts: [10K](2026-10-10-source-ingestion/10000.json),
-[100K](2026-10-10-source-ingestion/100000.json),
-[driver 6](2026-10-10-source-ingestion/driver6-1000.json).
+Raw receipts: [10K](../../benchmarks/archive/2026-10-10-source-ingestion/10000.json),
+[100K](../../benchmarks/archive/2026-10-10-source-ingestion/100000.json),
+[driver 6](../../benchmarks/archive/2026-10-10-source-ingestion/driver6-1000.json).
 The initial smaller run preceded the extra overwrite/parent/guard cases;
 each receipt lists the cases actually executed. Later source additions do not
 retroactively add tests to the earlier run.
@@ -60,25 +64,25 @@ Expanded runs verify:
 The driver-6 run also rejects changed content for a reused source ID and resumes
 a partial source after a wrapper deliberately drops the receipt **after the real
 first batch commits**. The final node/edge counts show no duplicate replay.
-The [existing Customer acceptance](2026-10-10-source-ingestion/legacy-customers.json)
+The [existing Customer acceptance](../../benchmarks/archive/2026-10-10-source-ingestion/legacy-customers.json)
 also passes with 1000 records after the shared-helper extension, including
 before-commit rollback, lost acknowledgement/SIGKILL and completed CLI replay.
 Thirteen importer and three adapter algorithm tests pass; 438 Rust workspace tests,
 workspace all-targets Clippy and rustfmt pass.
 
-A separate [old-catalog check](2026-10-10-source-ingestion/old-catalog.json) uses an actual
+A separate [old-catalog check](../../benchmarks/archive/2026-10-10-source-ingestion/old-catalog.json) uses an actual
 Customer ontology without `contract_id` and an existing checkpoint lacking that
 property. Resume, completed replay, a new default source and offline index audit
 pass through real Bolt. Reproduce from the repository root:
 
 ```sh
-PYTHONPATH=. uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-10-source-ingestion/old-catalog-acceptance.py
+PYTHONPATH=. .venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-10-source-ingestion/old-catalog-acceptance.py
 ```
 
-[Validation inventory](2026-10-10-source-ingestion/validation.json) records final source
+[Validation inventory](../../benchmarks/archive/2026-10-10-source-ingestion/validation.json) records final source
 hashes and checks. Earlier benchmark receipts retain their original case lists.
-The [final 1K check](2026-10-10-source-ingestion/final-1000.json) reruns the complete
+The [final 1K check](../../benchmarks/archive/2026-10-10-source-ingestion/final-1000.json) reruns the complete
 driver-6 harness after adding explicit success/index-scope assertions for all
 three offline audits; it is a verification rerun, not a new throughput target.
 
@@ -95,10 +99,10 @@ remain bounded batches; a successful import does not imply unlimited mass update
 
 ```sh
 cargo build --release --locked --offline -p brainwire-server --bin brainwire
-uv run --no-project --with neo4j==5.28.6 python \
-  docs/benchmarks/2026-10-10-source-ingestion/acceptance.py --tickets 100000
-uv run --no-project --with neo4j==6.3.0 python \
-  docs/benchmarks/2026-10-10-source-ingestion/acceptance.py --tickets 1000
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-10-source-ingestion/acceptance.py --tickets 100000
+.venv-brainwire/bin/python \
+  benchmarks/archive/2026-10-10-source-ingestion/acceptance.py --tickets 1000
 ```
 
 The harness creates only temporary synthetic input/stores, stops every server it
