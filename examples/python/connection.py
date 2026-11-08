@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import stat
 
 
 def auth_from_env():
@@ -18,7 +19,12 @@ def auth_from_env():
             result[key] = value
         return result
     try:
-        with open(path, 'rb') as stream:
+        # Inspect the opened target so mounted secret symlinks remain supported.
+        with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0)), 'rb') as stream:
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or \
+                    os.name == 'posix' and metadata.st_mode & 0o022:
+                raise ValueError('invalid Bolt credentials file')
             content = stream.read(65537)
         if len(content) > 65536:
             raise ValueError('invalid Bolt credentials file')

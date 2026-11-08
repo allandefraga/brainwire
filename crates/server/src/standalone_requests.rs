@@ -268,11 +268,16 @@ mod integration_tests {
     use std::time::{Duration, Instant};
 
     pub(super) fn fixture() -> (tempfile::TempDir, Config, Arc<Databases>) {
+        fixture_with_ledger(true)
+    }
+    pub(super) fn fixture_with_ledger(
+        enabled: bool,
+    ) -> (tempfile::TempDir, Config, Arc<Databases>) {
         let root = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.server.data_dir = root.path().join("data");
         config.server.auth_file = Some(root.path().join("private-policy.json"));
-        config.server.request_ledger = true;
+        config.server.request_ledger = enabled;
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         let databases = Arc::new(Databases::open_all(&config).unwrap());
@@ -638,7 +643,7 @@ mod integration_tests {
 
 #[cfg(test)]
 mod wire_tests {
-    use super::integration_tests::{drain_workers, fixture};
+    use super::integration_tests::{drain_workers, fixture, fixture_with_ledger};
     use super::*;
     use crate::{databases::Databases, engine::DbEngine};
     use brainwire_bolt::session::AuthMode;
@@ -724,12 +729,17 @@ mod wire_tests {
                 "{response:?}"
             );
         }
-        fn failure(&mut self, code: &str) {
+        fn failure(&mut self, code: &str) -> PackValue {
             let response = self.recv();
-            let PackValue::Struct { tag: 0x7f, fields } = response else {
+            let PackValue::Struct {
+                tag: 0x7f,
+                mut fields,
+            } = response
+            else {
                 panic!("failure expected: {response:?}")
             };
             assert_eq!(fields[0].get("code"), Some(&PackValue::String(code.into())));
+            fields.remove(0)
         }
         fn begin(&mut self, seed: &str) {
             self.send(
@@ -811,6 +821,55 @@ mod wire_tests {
             result.unwrap();
         });
         drain_workers(databases);
+    }
+
+    #[test]
+    fn bolt_plain_commit_unknown_blocks_further_writes_until_reopen() {
+        let (root, config, databases) = fixture_with_ledger(false);
+        assert!(!databases.request_ledger_enabled());
+        let db = databases.get("default").unwrap();
+        let invalid = root.path().join("invalid-file");
+        std::fs::write(&invalid, b"file").unwrap();
+        let resources =
+            brainwire_store::db::Resources::new(brainwire_store::db::StoreConfig::for_tests());
+        let injected = Database::open(&invalid, &resources).err().unwrap();
+        serve_once(&databases, move |address| {
+            let mut client = Wire::connect(address, "writer");
+            client.send(0x11, vec![PackValue::Map(vec![])]);
+            client.success();
+            client.create("persisted-before-plain-failure");
+            db.inject_unknown_result_after_next_write(injected);
+            client.send(0x12, vec![]);
+            let failure = client.failure("Neo.ClientError.Transaction.CommitOutcomeUnknown");
+            assert!(
+                matches!(failure.get("message"), Some(PackValue::String(message))
+                if message.contains("brainwire.commit outcome=unknown"))
+            );
+            client.reset();
+            drop(client);
+
+            let mut reconnected = Wire::connect(address, "writer");
+            reconnected.send(0x11, vec![PackValue::Map(vec![])]);
+            reconnected.success();
+            reconnected.create("blocked-after-unknown");
+            reconnected.send(0x12, vec![]);
+            let failure = reconnected.failure("Neo.DatabaseError.General.UnknownError");
+            assert!(
+                matches!(failure.get("message"), Some(PackValue::String(message))
+                if message.contains("brainwire.commit outcome=rolled_back"))
+            );
+            reconnected.reset();
+        });
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 1);
+        drop(databases);
+
+        let reopened = Arc::new(Databases::open_all(&config).unwrap());
+        assert_eq!(reopened.get("default").unwrap().stats().unwrap().nodes, 1);
+        serve_once(&reopened, move |address| {
+            let mut writer = Wire::connect(address, "writer");
+            writer.create("normal-after-reopen");
+        });
+        assert_eq!(reopened.get("default").unwrap().stats().unwrap().nodes, 2);
     }
 
     #[test]

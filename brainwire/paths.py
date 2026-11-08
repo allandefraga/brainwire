@@ -1,4 +1,4 @@
-"""Bounded directed instance-path traces through the caller's graph visibility."""
+"""Bounded instance-path traces through the caller's graph visibility."""
 import json
 import math
 import time
@@ -21,15 +21,18 @@ def _bounded_output(value, max_bytes):
             raise ContextLimitError('path context exceeds max_bytes')
 
 
-def trace_paths(graph, source, target, *, relationship=None, max_hops=3,
+def trace_paths(graph, source, target, *, relationship=None, direction='outgoing', max_hops=3,
                 limit=3, max_bytes=65536, timeout=10):
-    """Return a few visible directed instance paths with one read-only query.
+    """Return a few visible instance paths with one read-only query.
 
     Endpoints are (label, entity_id) tuples. Every result includes only ordered
     node identities and relationship type names, without arbitrary properties.
     Paths contain 1..max_hops relationships; a cycle may connect equal endpoints.
     Parallel relationships may produce the same node/type sequence. This is
     neither a shortest-path query nor a promise of stable result ordering.
+    direction is outgoing (default), incoming, or both. For both, node order
+    follows the walk and does not imply stored relationship direction; per-edge
+    orientations are not included in this identity/type-only response.
 
     The server's normal graph grants, node visibility, query budget and deadline
     apply, including to intermediate nodes. Missing, hidden or disconnected
@@ -44,6 +47,8 @@ def trace_paths(graph, source, target, *, relationship=None, max_hops=3,
     preempt a blocked Bolt request; configure server/driver timeouts separately.
     """
     source, target = _endpoint(source), _endpoint(target)
+    if not isinstance(direction, str) or direction not in ('outgoing', 'incoming', 'both'):
+        raise ValueError('direction must be outgoing, incoming or both')
     if relationship is not None:
         relationship = identifier(relationship)
     for name, value, upper in (('max_hops', max_hops, 4), ('limit', limit, 5),
@@ -54,7 +59,7 @@ def trace_paths(graph, source, target, *, relationship=None, max_hops=3,
         raise ValueError('timeout must be finite and greater than 0 through 300 seconds')
     database = _entity(graph.database)
     result = {'graph': database, 'schema_only': False, 'source': source, 'target': target,
-              'relationship': relationship, 'max_hops': max_hops, 'limit': limit,
+              'relationship': relationship, 'direction': direction, 'max_hops': max_hops, 'limit': limit,
               'paths': [], 'truncated': False}
     _bounded_output(result, max_bytes)
     deadline = time.monotonic() + timeout
@@ -64,8 +69,9 @@ def trace_paths(graph, source, target, *, relationship=None, max_hops=3,
             raise TimeoutError('path context deadline exceeded')
 
     pattern = ':' + relationship if relationship is not None else ''
+    left, right = {'outgoing': ('-', '->'), 'incoming': ('<-', '-'), 'both': ('-', '-')}[direction]
     query = (f'MATCH p = (s:{source["label"]} {{entity_id:$source_id}})'
-             f'-[{pattern}*1..{max_hops}]->'
+             f'{left}[{pattern}*1..{max_hops}]{right}'
              f'(t:{target["label"]} {{entity_id:$target_id}}) '
              'RETURN [n IN nodes(p) | {label:head(labels(n)), entity_id:n.entity_id}] AS nodes, '
              '[r IN relationships(p) | type(r)] AS relationships LIMIT $limit')

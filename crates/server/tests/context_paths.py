@@ -1,4 +1,4 @@
-"""Owned synthetic acceptance for directed instance paths and intermediate ACLs."""
+"""Owned synthetic acceptance for path directions and intermediate ACLs."""
 import argparse
 import hashlib
 import json
@@ -93,6 +93,8 @@ limit = "2GiB"
                     options = {'relationship': 'LINK', 'max_hops': 3}
                     assert trace_paths(reader, ('Item', 'a'), ('Item', 'b'), **options)['paths'] == []
                     assert node_ids(trace_paths(other, ('Item', 'a'), ('Item', 'b'), **options)) == [['a', 'hidden', 'b']]
+                    assert trace_paths(reader, ('Item', 'b'), ('Item', 'a'), direction='incoming', **options)['paths'] == []
+                    assert node_ids(trace_paths(other, ('Item', 'b'), ('Item', 'a'), direction='incoming', **options)) == [['b', 'hidden', 'a']]
                     for target in ('hidden', 'missing'):
                         assert trace_paths(reader, ('Item', 'a'), ('Item', target), **options)['paths'] == []
                     for source in ('hidden', 'missing'):
@@ -113,10 +115,26 @@ limit = "2GiB"
                     assert len(limited['paths']) == 1 and limited['truncated']
                     assert trace_paths(reader, ('Item', 'a'), ('Item', 'b'), relationship='LINK', max_hops=1)['paths'] == []
                     assert trace_paths(reader, ('Item', 'b'), ('Item', 'a'), **options)['paths'] == []
+                    incoming = trace_paths(reader, ('Item', 'b'), ('Item', 'a'), direction='incoming', **options)
+                    assert set(map(tuple, node_ids(incoming))) == {('b', 'visible', 'a'), ('b', 'alternate', 'a')}
+                    assert incoming['direction'] == 'incoming' and 'hidden' not in json.dumps(incoming)
                     writer.upsert_edge(('Item', 'visible'), 'LINK', ('Item', 'a'))
                     assert ['a', 'visible', 'a'] in node_ids(trace_paths(reader, ('Item', 'a'), ('Item', 'a'), **options))
                     writer.upsert_edge(('Item', 'a'), 'OTHER', ('Item', 'b'))
                     assert ['a', 'b'] in node_ids(trace_paths(reader, ('Item', 'a'), ('Item', 'b'), max_hops=1))
+                    for identity, allow in [('mixed-start', ['reader', 'health']), ('mixed-end', ['reader', 'health']),
+                                            ('mixed-visible', ['reader']), ('mixed-hidden', ['health'])]:
+                        writer.upsert_node_with_acl('Item', identity, {}, {'allow': allow})
+                    for middle in ('mixed-visible', 'mixed-hidden'):
+                        writer.upsert_edge(('Item', 'mixed-start'), 'LINK', ('Item', middle))
+                        writer.upsert_edge(('Item', 'mixed-end'), 'LINK', ('Item', middle))
+                    for direction in ('outgoing', 'incoming'):
+                        assert trace_paths(reader, ('Item', 'mixed-start'), ('Item', 'mixed-end'), direction=direction, **options)['paths'] == []
+                    mixed = trace_paths(reader, ('Item', 'mixed-start'), ('Item', 'mixed-end'), direction='both', limit=1, **options)
+                    assert node_ids(mixed) == [['mixed-start', 'mixed-visible', 'mixed-end']]
+                    assert mixed['direction'] == 'both' and mixed['truncated'] is False
+                    assert 'mixed-hidden' not in json.dumps(mixed)
+                    assert node_ids(trace_paths(other, ('Item', 'mixed-start'), ('Item', 'mixed-end'), direction='both', **options)) == [['mixed-start', 'mixed-hidden', 'mixed-end']]
                     try:
                         trace_paths(reader, ('Item', 'a'), ('Item', 'b'), max_bytes=300, **options)
                     except ContextLimitError:
@@ -132,7 +150,8 @@ limit = "2GiB"
                 return {'result': 'PASS', 'synthetic': True,
                     'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
                     'checks': ['hidden intermediate nodes prevent traversal', 'hidden endpoints and missing endpoints return no paths',
-                               'visible multi-hop paths and relationship types', 'direction, cycles and hop bounds',
+                               'visible multi-hop paths and relationship types', 'outgoing, incoming and mixed-direction paths',
+                               'mixed-direction hidden intermediates and visible truncation', 'cycles and hop bounds',
                                'hidden alternatives do not influence truncation',
                                'visible lookahead and output byte bound', 'read grants reject writes'],
                     'limits': ['unordered path samples, not shortest or exhaustive paths',

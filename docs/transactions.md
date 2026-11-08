@@ -42,6 +42,12 @@ one store and continues after reopening; it is not a causal bookmark or a global
 replication position. See [durable commit state](commit-state.md). Allocated ID gaps can remain after abort;
 ID allocation intentionally reserves durable blocks independently of graph writes.
 
+If the storage write returns an uncertain outcome, Brainwire blocks further
+write commits and checkpoints for that open store until it is reopened. The
+original commit may have persisted: reconcile its outcome before retrying.
+Reopening healthy storage clears this in-memory quarantine, but does not tell
+the client whether an unidentified request committed or repair damaged storage.
+
 The public context borrows its database. An owning worker can hold the database
 and create the context inside its own scope; the context must end before the
 database is dropped. Do not create a self-referential owner/borrower struct or

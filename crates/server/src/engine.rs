@@ -1349,8 +1349,8 @@ fn error_code(error: &ExecError) -> &'static str {
     }
 }
 
-/// Only the RocksDB write of the commit batch itself is ambiguous; every other
-/// failure happens before it, so nothing was applied.
+/// Only the RocksDB write of the commit batch itself is ambiguous; other
+/// failures do not publish staged graph changes. RUN may have reserved IDs.
 fn commit_error(error: ExecError) -> EngineError {
     use brainwire_store::{db::StoreError, graph::GraphError, txn::TxnError};
     let unknown = matches!(

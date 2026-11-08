@@ -803,7 +803,9 @@ impl<'db> QueryTransaction<'db> {
                 .any(|clause| matches!(clause, Clause::Call { .. }))
         {
             self.fail();
-            return Err(ExecError::Forbidden("procedures are unavailable in identified transactions; execute transactional Cypher only"));
+            return Err(ExecError::Forbidden(
+                "procedures are unavailable in identified transactions; execute transactional Cypher only",
+            ));
         }
         if let Err(error) = self.checkpoint_preconditions(query) {
             self.fail();
@@ -870,6 +872,7 @@ impl<'db> QueryTransaction<'db> {
     /// preserving the standalone executor's read-only behavior.
     pub fn commit(&mut self) -> Result<Option<u64>, ExecError> {
         self.check_transaction_deadline()?;
+        self.reserve_write_materialization()?;
         let mut txn = self.txn.take().expect("active transaction");
         let result = if self.wrote {
             // Rejects a catalog migration committed since this snapshot.
@@ -901,6 +904,7 @@ impl<'db> QueryTransaction<'db> {
             self.fail();
             return Err(ExecError::Forbidden("identified write capability required").into());
         }
+        self.reserve_write_materialization()?;
         let mut txn = self.txn.take().expect("active transaction");
         if self.wrote {
             txn.depend(Cf::Meta, b"catalog");
@@ -928,25 +932,7 @@ impl<'db> QueryTransaction<'db> {
                 "replicated IDs must be enabled before RUN".into(),
             ));
         }
-        if self.wrote {
-            let estimate = self
-                .txn
-                .as_ref()
-                .expect("active transaction")
-                .estimated_memory_bytes()
-                .checked_mul(3)
-                .ok_or(ExecError::MemoryLimit {
-                    limit: self.limits.memory_bytes,
-                    attempted: usize::MAX,
-                });
-            let guard = estimate.and_then(|estimate| {
-                Budget::new(self.limits, self.reservation.as_ref()).charge(estimate)
-            });
-            if let Err(error) = guard {
-                self.fail();
-                return Err(error);
-            }
-        }
+        self.reserve_write_materialization()?;
         let mut txn = self.txn.take().expect("active transaction");
         if self.wrote {
             txn.depend(Cf::Meta, b"catalog");
@@ -981,6 +967,30 @@ impl<'db> QueryTransaction<'db> {
             Ok(None) => QueryTransactionState::Committed,
             Err(_) => QueryTransactionState::Failed,
         };
+        result
+    }
+
+    // Keep storage commit and replication export under the same conservative floor.
+    fn reserve_write_materialization(&mut self) -> Result<(), ExecError> {
+        if !self.wrote {
+            return Ok(());
+        }
+        let estimate = self
+            .txn
+            .as_ref()
+            .expect("active transaction")
+            .estimated_memory_bytes()
+            .checked_mul(3)
+            .ok_or(ExecError::MemoryLimit {
+                limit: self.limits.memory_bytes,
+                attempted: usize::MAX,
+            });
+        let result = estimate.and_then(|estimate| {
+            Budget::new(self.limits, self.reservation.as_ref()).charge(estimate)
+        });
+        if result.is_err() {
+            self.fail();
+        }
         result
     }
 

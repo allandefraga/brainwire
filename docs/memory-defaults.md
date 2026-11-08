@@ -271,6 +271,8 @@ finite visible cgroup ancestor admission limit, the RUN fails with
 transaction are rolled back. Reduce concurrent work and reconcile application
 state before retrying. Existing PULL/DISCARD results, COMMIT, ROLLBACK, RESET
 and connection cleanup remain available under pressure.
+Their own execution and reservation limits still apply, including the staged
+commit guard described below.
 
 On cgroup v2, the admission limit is the lower finite value of `memory.high`
 and `memory.max` at each visible ancestor. If `memory.high` is missing,
@@ -308,3 +310,21 @@ The `reverse`, `head`, `last`, `tail` and `valueType` functions avoid an
 extra deep copy of their already-evaluated argument. Some inputs and results
 still need to be materialized, and normal query reservations continue to
 apply. This improvement is not a process-wide RSS ceiling.
+
+## Staged writes at commit
+
+Before a Cypher write transaction commits, it reserves a conservative estimate
+for materializing its staged overlay into the storage batch. Replication
+preparation uses the same estimate. A transaction admitted during `RUN` can
+therefore still be refused at commit by the query limit or shared pool; that
+refusal happens before writing and discards its staged changes. Read-only
+completion does not need this write-buffer reservation.
+Internal ID ranges durably reserved during `RUN` can remain allocated after a
+refusal; the refused commit does not publish its graph records or request receipt.
+
+The estimate is three times the accounted overlay and dependency bytes. It is
+a reservation floor, not a measurement of every native allocation. Existing
+transaction high-water credit can cover it without new growth; pressure is
+sampled when reservation growth needs admission, not on every commit. Live
+result owners can retain their credits after transaction completion. These
+controls do not guarantee a process RSS ceiling or preempt storage I/O.

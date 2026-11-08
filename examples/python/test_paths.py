@@ -50,6 +50,26 @@ class PathTests(unittest.TestCase):
         self.assertEqual(result['paths'], [path('a', 'b')])
         self.assertTrue(result['truncated'])
 
+    def test_incoming_and_either_direction_are_explicit_and_parameterized(self):
+        for direction, pattern in [('incoming', '<-[:LINK*1..2]-'),
+                                   ('both', '-[:LINK*1..2]-')]:
+            with self.subTest(direction=direction):
+                graph = Graph([path('start', 'middle', 'end')])
+                result = trace_paths(graph, ('Item', 'start'), ('Item', 'end'),
+                                     relationship='LINK', direction=direction, max_hops=2)
+                self.assertIn(pattern, graph.calls[0][0])
+                self.assertEqual(result['direction'], direction)
+                self.assertEqual(result['paths'], [path('start', 'middle', 'end')])
+                self.assertEqual(graph.calls[0][1]['source_id'], 'start')
+                self.assertTrue(graph.closed)
+
+    def test_invalid_direction_fails_before_query(self):
+        for direction in ['sideways', 'OUTGOING', '-[]->', '', None, [], 1]:
+            graph = Graph()
+            with self.subTest(direction=direction), self.assertRaises(ValueError):
+                trace_paths(graph, ('Item', 'a'), ('Item', 'b'), direction=direction)
+            self.assertEqual(graph.calls, [])
+
     def test_empty_results_have_no_endpoint_existence_signal(self):
         result = trace_paths(Graph(), ('Item', 'missing'), ('Item', 'hidden'))
         self.assertEqual(result['paths'], [])

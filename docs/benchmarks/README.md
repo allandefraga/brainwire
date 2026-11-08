@@ -5,6 +5,8 @@ raw receipts and reports so a result can be traced to its workload and binary.
 The dates matter: historical results describe those candidates, not the current
 working tree or latest release.
 
+The [v0.18 recovery and memory checks](2026-11-08-recovery-memory.md) exercise interrupted commits and synthetic 512 MiB/2 GiB pressure on a shared host.
+
 The [v0.17 beta.2 mixed-load diagnostic](2026-11-07-beta2-mixed.md) compares two short synthetic runs on a shared host.
 
 The [v0.17 context candidate diagnostics](2026-11-07-context-candidate.md)

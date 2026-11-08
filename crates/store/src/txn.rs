@@ -135,7 +135,7 @@ impl Committer {
 #[derive(Default)]
 struct CommitState {
     seq: u64,
-    // Opt-in identified stores cannot trust RAM after an ambiguous RocksDB error.
+    // RAM commit state cannot be trusted after an ambiguous RocksDB error.
     unknown_write: bool,
     #[cfg(any(test, feature = "test-fault-injection"))]
     fail_after_write: Option<StoreError>,
@@ -326,7 +326,7 @@ impl Database {
 
     /// Latest durable per-store commit sequence. Missing legacy metadata is
     /// untracked until the first successful write; reads never create a marker.
-    /// An opt-in store with an uncertain write result is untracked until reopen.
+    /// A store with an uncertain write result is untracked until reopen.
     pub fn commit_sequence(&self) -> Option<u64> {
         let st = self.committer.lock();
         (st.tracked && !st.unknown_write).then_some(st.seq)
@@ -841,14 +841,14 @@ impl<'db> Txn<'db> {
             batch.put_cf(db.cf("meta")?, COMMIT_SEQUENCE_KEY, marker);
             let mut opts = rocksdb::WriteOptions::default();
             opts.set_sync(true);
-            if let Err(error) = db.db.write_opt(batch, &opts) {
-                if db.request_ledger.is_some() {
-                    st.unknown_write = true;
-                }
-                return Err(StoreError::from(error).into());
-            }
+            let written = db.db.write_opt(batch, &opts).map_err(StoreError::from);
             #[cfg(any(test, feature = "test-fault-injection"))]
-            if let Some(error) = st.fail_after_write.take() {
+            let written = written.and_then(|()| match st.fail_after_write.take() {
+                Some(error) => Err(error),
+                None => Ok(()),
+            });
+            if let Err(error) = written {
+                // A failed native write may have reached disk; reopen before trusting RAM.
                 st.unknown_write = true;
                 return Err(error.into());
             }
@@ -897,6 +897,60 @@ mod tests {
         let res = Resources::new(StoreConfig::for_tests());
         let db = Database::open(dir.path(), &res).unwrap();
         (dir, res, db)
+    }
+
+    #[test]
+    fn ambiguous_standalone_write_quarantines_commits_until_reopen() {
+        let (dir, res, db) = open();
+        let mut seed = db.begin();
+        seed.put(Cf::Note, b"seed".to_vec(), b"first".to_vec());
+        assert_eq!(seed.commit().unwrap(), 1);
+        let mut pending = db.begin();
+        pending.put(Cf::Note, b"pending".to_vec(), b"must-not-commit".to_vec());
+        let old_snapshot = db.begin();
+
+        let invalid_path = dir.path().join("not-a-database");
+        std::fs::write(&invalid_path, b"file").unwrap();
+        let native_error = rocksdb::DB::open_default(&invalid_path).err().unwrap();
+        db.inject_unknown_result_after_next_write(StoreError::Rocks(native_error));
+        let mut uncertain = db.begin();
+        uncertain.put(Cf::Note, b"uncertain".to_vec(), b"durable".to_vec());
+        assert!(matches!(
+            uncertain.commit(),
+            Err(TxnError::Store(StoreError::Rocks(_)))
+        ));
+
+        assert_eq!(db.commit_sequence(), None);
+        assert_eq!(db.begin().snapshot_commit_sequence(), None);
+        assert_eq!(old_snapshot.snapshot_commit_sequence(), Some(1));
+        assert!(pending.commit().is_err());
+        assert!(db.begin().commit().is_err());
+        let mut later = db.begin();
+        later.put(Cf::Note, b"later".to_vec(), b"must-not-commit".to_vec());
+        assert!(later.commit().is_err());
+        let checkpoint_root = tempfile::tempdir().unwrap();
+        assert!(db
+            .checkpoint(&checkpoint_root.path().join("checkpoint"))
+            .is_err());
+        assert_eq!(old_snapshot.get(Cf::Note, b"uncertain").unwrap(), None);
+        assert_eq!(
+            db.begin().get(Cf::Note, b"uncertain").unwrap(),
+            Some(b"durable".to_vec())
+        );
+        drop(old_snapshot);
+        drop(db);
+
+        let db = Database::open(dir.path(), &res).unwrap();
+        assert_eq!(db.commit_sequence(), Some(2));
+        assert_eq!(
+            db.begin().get(Cf::Note, b"uncertain").unwrap(),
+            Some(b"durable".to_vec())
+        );
+        assert_eq!(db.begin().get(Cf::Note, b"pending").unwrap(), None);
+        assert_eq!(db.begin().get(Cf::Note, b"later").unwrap(), None);
+        let mut resumed = db.begin();
+        resumed.put(Cf::Note, b"resumed".to_vec(), b"normal".to_vec());
+        assert_eq!(resumed.commit().unwrap(), 3);
     }
 
     fn retained_key_payload_bytes(st: &CommitState) -> usize {
@@ -1446,7 +1500,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_write_is_a_store_error_not_a_panic() {
+    fn a_native_write_refusal_quarantines_until_reopen_without_panicking() {
         let dir = tempfile::tempdir().unwrap();
         let res = Resources::new(StoreConfig::for_tests());
         // Create every column family, then close the read-write handle so a
@@ -1469,16 +1523,30 @@ mod tests {
         let mut t = db.begin();
         t.put(Cf::Node, b"a".to_vec(), b"1".to_vec());
         match t.commit() {
-            Err(TxnError::Store(_)) => {}
+            Err(TxnError::Store(StoreError::Rocks(_))) => {}
             other => {
                 panic!("expected TxnError::Store for a write against a read-only db, got {other:?}")
             }
         }
-        assert_eq!(db.commit_sequence(), Some(1));
+        // Native write errors share a conservative outcome-unknown policy,
+        // even when this test's read-only handle proves nothing was applied.
+        assert_eq!(db.commit_sequence(), None);
+        assert_eq!(db.begin().snapshot_commit_sequence(), None);
         assert_eq!(db.begin().get(Cf::Node, b"a").unwrap(), None);
+        let mut blocked = db.begin();
+        blocked.put(Cf::Node, b"blocked".to_vec(), b"1".to_vec());
+        assert!(matches!(
+            blocked.commit(),
+            Err(TxnError::Store(StoreError::Corrupt(_)))
+        ));
         drop(db);
         let reopened = Database::open(dir.path(), &res).unwrap();
         assert_eq!(reopened.commit_sequence(), Some(1));
+        assert_eq!(reopened.begin().get(Cf::Node, b"a").unwrap(), None);
+        assert_eq!(reopened.begin().get(Cf::Node, b"blocked").unwrap(), None);
+        let mut resumed = reopened.begin();
+        resumed.put(Cf::Node, b"resumed".to_vec(), b"2".to_vec());
+        assert_eq!(resumed.commit().unwrap(), 2);
     }
 
     // Fix round 1 (review of the tests above found the dependency check

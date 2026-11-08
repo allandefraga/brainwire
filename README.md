@@ -18,7 +18,7 @@
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.17.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.18.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
@@ -89,9 +89,9 @@ See the [architecture](docs/architecture.md), [agent context](docs/context-api.m
 Install Git and Docker with Compose, then start a local demo:
 
 ```sh
-git clone --branch v0.17.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.18.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.17.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.18.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -151,7 +151,8 @@ print(connections["paths"])
 
 Run this inside the connection block above. Schema routes are allowed shapes;
 connection paths are a bounded, unordered sample of records visible to the
-caller. See [context for agents](docs/context-api.md) for source citations and
+caller. Use `direction="incoming"` or `direction="both"` to follow paths in
+other directions. See [context for agents](docs/context-api.md) for source citations and
 search with configured providers.
 
 After creating the demo records, run the complete read-only context example:

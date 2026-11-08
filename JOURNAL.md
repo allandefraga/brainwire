@@ -29,6 +29,27 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-08: v0.18.0-beta.1 memory, security and recovery
+
+- **Done:** account for staged write-batch materialization before standalone
+  Cypher commits; quarantine further write commits and checkpoints after an
+  uncertain RocksDB write until the store is reopened. Extend visible path
+  tracing to incoming and mixed directions. Harden Python example credential
+  loading against named pipes and writable-by-others files on Unix.
+- **Verification:** 1,163 Rust workspace tests passed (three ignored); the Python
+  example suite ran 291 tests (seven skipped), and 132 script tests passed.
+  Store regression tests and authenticated Bolt tests cover unknown outcomes,
+  blocked writes, re-open and resumption. A protected synthetic adapter smoke
+  covered 20 nodes, edge merge/update, ACL reads and deletion. A local
+  [recovery and memory report](docs/benchmarks/2026-11-08-recovery-memory.md)
+  records process-kill reconciliation and short 512 MiB / 2 GiB pressure checks.
+- **Limits:** these are shared-host synthetic checks, not production SLOs or a
+  hard RSS ceiling. Reopening healthy storage clears quarantine but cannot fix
+  disk damage or determine unidentified request outcomes without reconciliation.
+  Multi-machine failover and sustained representative load remain unqualified.
+- **Next:** investigate the historical pressure-admission discrepancy and
+  qualify sustained representative loads and failure recovery across machines.
+
 ## 2026-11-07: v0.17.0-beta.3 storage explanation
 
 - **Done:** explain the RocksDB write path, memtables, SST levels, reads and

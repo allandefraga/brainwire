@@ -123,7 +123,8 @@ the encoded result, not memory used by the driver when fetching the catalog.
 
 ## Trace visible connections
 
-`trace_paths` reads a small sample of directed paths between two known records:
+`trace_paths` reads a small sample of paths between two known records. It follows
+outgoing relationships by default:
 
 ```python
 from brainwire import trace_paths
@@ -133,6 +134,19 @@ result = trace_paths(graph, ("Person", "person-1"), ("Project", "project-1"),
 for path in result["paths"]:
     print(path["nodes"], path["relationships"])
 ```
+
+Use `direction="incoming"` to follow relationships toward their sources, or
+`direction="both"` to follow a connection regardless of its stored direction:
+
+```python
+result = trace_paths(graph, ("Document", "doc-1"), ("Person", "person-1"),
+                     relationship="AUTHORED", direction="incoming", max_hops=1)
+```
+
+The response records the requested `direction`. Node identities are ordered
+from the supplied source to the supplied target. In `both` mode, a path can
+mix outgoing and incoming steps; its node order does not describe each
+relationship's stored source/target. Per-edge orientation is not included.
 
 The graph's normal read grants and node visibility apply at each hop. Paths
 contain node identities and relationship types, not source citations or edge

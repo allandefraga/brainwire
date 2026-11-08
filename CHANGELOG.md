@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.0-beta.1 — experimental candidate
+
+- Explore bounded visible instance paths in outgoing, incoming or mixed
+  directions using the Python context helper.
+- Quarantine a store after an uncertain native commit result until reopening,
+  including stores without an identified-request ledger.
+- Account for a conservative write-batch materialization estimate before
+  standalone Cypher commits; refuse work exceeding the query budget.
+- Harden credential-file loading in Python examples against named pipes and
+  group/world-writable files on Unix.
+
 ## 0.17.0-beta.3 — experimental candidate
 
 - Explain the RocksDB write path, SST levels and compaction with a diagram in

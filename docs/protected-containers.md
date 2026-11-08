@@ -129,6 +129,11 @@ secret mechanism. It must not receive the server policy or health token. For a
 host Python application, set `BRAINWIRE_BOLT_AUTH_FILE` to its securely installed
 writer/reader file and connect to `bolt://127.0.0.1:7687`; see the
 [Python connection example](bolt-auth.md#python-health-checks-and-connected-inspection).
+The provided Python examples accept regular credential files and mounted-secret
+symlinks. On Unix, the opened file must not be writable by group or others;
+group-readable modes such as `0640` are allowed. Named pipes are rejected.
+Use owner-only permissions where practical, and protect the parent directory and
+filesystem ACLs; this check alone does not guarantee token confidentiality.
 Do not make the root-only source directory world-readable just to let an app
 load a token. Provision a separate owner-readable copy for that app.
 

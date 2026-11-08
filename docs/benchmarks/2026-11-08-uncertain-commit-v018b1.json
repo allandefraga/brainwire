@@ -1,0 +1,43 @@
+{
+  "binary_sha256": "3a4bdd489f449405f8b6f61702a74cf5d0ac04bcebd02b2b548e381f2f0af25f",
+  "driver": "5.28.8",
+  "synthetic": true,
+  "rows_per_batch": 100,
+  "scope": "native protected single-node COMMIT submitted without acknowledgement; process SIGKILL, not power loss or exact commit-phase injection",
+  "cycles": [
+    {
+      "cycle": 0,
+      "requested_delay_seconds": 0,
+      "signal_wait_seconds": 0.001559,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    },
+    {
+      "cycle": 1,
+      "requested_delay_seconds": 0.001,
+      "signal_wait_seconds": 0.005116,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 2,
+      "requested_delay_seconds": 0.01,
+      "signal_wait_seconds": 0.017267,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    }
+  ],
+  "audit": {
+    "database": "default",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "result": "PASS",
+  "owned_resources_removed": true
+}
