@@ -29,6 +29,27 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-09: v0.18.0-beta.2 context output memory
+
+- **Done:** check the encoded output size of context search and reranking
+  incrementally instead of allocating a complete second JSON representation.
+  The UTF-8 output limit and no-partial-result behavior remain unchanged.
+- **Verification:** the Python example suite ran 294 tests (seven skipped),
+  and 132 script tests passed. Exact Unicode boundaries, early oversized-output
+  rejection and temporary allocations were tested. A local synthetic Python
+  3.9.6 check of an 820,613-byte response measured 1,233,145 bytes peak for
+  full encoding and 19,363 bytes for incremental checking. The local candidate
+  image passed a container restart check and a 512 MiB pressure smoke. The
+  workspace passed 1,163 Rust tests (three ignored), and Clippy passed;
+  authenticated Bolt acceptance checked search and reranking with node
+  visibility. Independent agent review was unavailable in this session.
+- **Limits:** the measurement covers only the output-size check. Individual
+  JSON strings, driver buffers and the graph read can still allocate memory;
+  this does not establish a process-wide RSS ceiling. Sustained representative
+  load and multi-machine recovery remain unqualified.
+- **Next:** continue investigating pressure admission and validate recovery
+  under representative workloads and multi-machine deployment.
+
 ## 2026-11-08: v0.18.0-beta.1 memory, security and recovery
 
 - **Done:** account for staged write-batch materialization before standalone

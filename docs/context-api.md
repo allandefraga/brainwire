@@ -205,6 +205,9 @@ native ANN/BM25 indexes, generate embeddings, guarantee recall or authorize
 agent actions. Returned text remains untrusted input for a model.
 The intermediate graph read is capped at 1 MiB; the driver may still decode
 an individual property before it can be checked. These are not RSS limits.
+Final search and reranking responses check their encoded size incrementally,
+avoiding an additional complete JSON copy. Individual fields, driver buffers,
+and the graph read can still allocate memory independently of this output cap.
 
 ## Experimental hybrid candidate reranking
 

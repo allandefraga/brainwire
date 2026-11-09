@@ -9,6 +9,14 @@ class ContextLimitError(ValueError):
     """Requested context exceeds its output bound; no partial result is returned."""
 
 
+def _check_json_size(value, maximum, message):
+    size = 0
+    for chunk in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(value):
+        size += len(chunk.encode('utf-8'))
+        if size > maximum:
+            raise ContextLimitError(message)
+
+
 def _entity(value):
     if not isinstance(value, str) or not value or len(value.encode('utf-8')) > 4096:
         raise ValueError('entity IDs must be nonempty strings of at most 4096 UTF-8 bytes')

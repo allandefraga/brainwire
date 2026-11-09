@@ -1,4 +1,5 @@
 import math
+import json
 import re
 import unittest
 from contextlib import contextmanager
@@ -31,6 +32,15 @@ def rank(graph, **options):
 
 
 class RerankTests(unittest.TestCase):
+    def test_output_limit_counts_utf8_exactly(self):
+        graph = Graph([{'id': 'a', 'body': 'release', 'embedding': [1., 0.],
+                        'title': 'é🙂'}])
+        expected = rank(graph, properties=['title'])
+        size = len(json.dumps(expected, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+        self.assertEqual(rank(graph, properties=['title'], max_bytes=size), expected)
+        with self.assertRaises(ContextLimitError):
+            rank(graph, properties=['title'], max_bytes=size - 1)
+
     def test_one_authorized_read_fuses_explainable_rankings(self):
         graph = Graph([{'id':'a','body':'Release notes','embedding':[0.,1.],'title':'Notes'},
                        {'id':'b','body':'Other topic','embedding':[1.,0.],'title':'Other'}])

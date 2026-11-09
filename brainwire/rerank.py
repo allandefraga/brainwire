@@ -1,10 +1,9 @@
 """Experimental exact reranking over explicit, authorized graph candidates."""
-import json
 import math
 import re
 
 from .client import identifier
-from .context import ContextClient, ContextLimitError, _options
+from .context import ContextClient, ContextLimitError, _check_json_size, _options
 
 
 def _text(value, maximum, name):
@@ -100,6 +99,5 @@ def rerank_context(graph, label, entity_ids, query_text, query_vector, *,
     scored.sort(key=lambda row: (-row['score'], row['entity_id']))
     result = {'graph': graph.database, 'method': 'candidate_rrf_v1', 'rrf_k': 60,
               'limit': limit, 'records': scored[:limit]}
-    if len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8')) > max_bytes:
-        raise ContextLimitError('reranked context exceeds max_bytes')
+    _check_json_size(result, max_bytes, 'reranked context exceeds max_bytes')
     return result

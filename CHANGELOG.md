@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.0-beta.2 — experimental candidate
+
+- Check context-search and reranking JSON size incrementally, avoiding a full
+  extra serialized response allocation while preserving the output limit.
+
 ## 0.18.0-beta.1 — experimental candidate
 
 - Explore bounded visible instance paths in outgoing, incoming or mixed

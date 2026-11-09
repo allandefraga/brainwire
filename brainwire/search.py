@@ -1,12 +1,11 @@
 """Experimental search over explicit ranked providers and authorized graph data."""
 from collections.abc import Mapping
-import json
 import math
 import re
 import time
 
 from .client import identifier
-from .context import ContextClient, ContextLimitError, _entity, _options
+from .context import ContextClient, ContextLimitError, _check_json_size, _entity, _options
 
 
 class ContextProviderError(RuntimeError):
@@ -56,8 +55,7 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
               'providers': sorted(providers), 'limit': limit, 'records': [], 'sources': []}
 
     def output_bound():
-        if len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8')) > max_bytes:
-            raise ContextLimitError('searched context exceeds max_bytes')
+        _check_json_size(result, max_bytes, 'searched context exceeds max_bytes')
 
     output_bound()
     deadline = time.monotonic() + timeout
