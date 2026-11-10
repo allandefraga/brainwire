@@ -1,4 +1,5 @@
 import unittest
+import tracemalloc
 from contextlib import contextmanager
 
 from brainwire.context import ContextClient, ContextLimitError
@@ -22,6 +23,33 @@ class Graph:
 
 
 class ContextTests(unittest.TestCase):
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_large_property_is_rejected_without_copying_it(self):
+        graph = Graph([{'entity_id': 't', 'p0': 'x' * (8 << 20)}])
+        tracemalloc.start()
+        try:
+            with self.assertRaises(ContextLimitError):
+                ContextClient(graph).nodes('Ticket', ['t'], properties=['body'], max_bytes=1024)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+        self.assertTrue(graph.closed)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_evidence_rejects_large_property_without_copying_it(self):
+        graph = Graph([{'entity_id': 't', 'p0': 'x' * (8 << 20), 'p1': 'source'}])
+        tracemalloc.start()
+        try:
+            with self.assertRaises(ContextLimitError):
+                ContextClient(graph).evidence('Ticket', ['t'], properties=['body'],
+                    source_fields={'url': 'url'})
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+        self.assertTrue(graph.closed)
+
     def test_nodes_parameterize_values_and_return_explicit_evidence(self):
         graph = Graph([{'entity_id': 't-1', 'p0': 'Title', 'p1': 'source://1'}])
         result = ContextClient(graph).nodes('Ticket', ["t-1' OR true"],

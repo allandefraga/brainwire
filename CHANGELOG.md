@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.0-beta.3 — experimental candidate
+
+- Reject obviously oversized context string properties before making an extra
+  JSON copy. Driver allocations and overall process RSS remain unbounded.
+
 ## 0.18.0-beta.2 — experimental candidate
 
 - Check context-search and reranking JSON size incrementally, avoiding a full

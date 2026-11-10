@@ -17,6 +17,11 @@ def _check_json_size(value, maximum, message):
             raise ContextLimitError(message)
 
 
+def _oversized_string(values, remaining):
+    # A string needs at least one UTF-8 byte per character in its JSON form.
+    return any(isinstance(value, str) and len(value) > remaining for value in values)
+
+
 def _entity(value):
     if not isinstance(value, str) or not value or len(value.encode('utf-8')) > 4096:
         raise ValueError('entity IDs must be nonempty strings of at most 4096 UTF-8 bytes')
@@ -58,6 +63,8 @@ class ContextClient:
                     raise ContextLimitError('context returned more than limit records')
                 record = {'label': label, 'entity_id': row['entity_id'],
                           'properties': {name: row[f'p{index}'] for index, name in enumerate(names)}}
+                if _oversized_string([record['entity_id'], *record['properties'].values()], max_bytes - size):
+                    raise ContextLimitError('context exceeds max_bytes; request fewer or smaller properties')
                 # Include separators conservatively without repeatedly encoding prior rows.
                 size += len(json.dumps(record, ensure_ascii=False, allow_nan=False).encode('utf-8')) + 2
                 if size > max_bytes:
@@ -132,6 +139,8 @@ class ContextClient:
                     raise ValueError('evidence record identities must be unique')
                 seen.add(identity)
                 original = {'label': label, 'entity_id': identity, 'properties': values}
+                if _oversized_string(values.values(), (1 << 20) - intermediate):
+                    raise ContextLimitError('context exceeds intermediate limit')
                 intermediate += len(json.dumps(original, ensure_ascii=False,
                                                allow_nan=False).encode('utf-8')) + 2
                 if intermediate > 1 << 20:

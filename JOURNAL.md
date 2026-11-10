@@ -29,6 +29,20 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-10: v0.18.0-beta.3 context read memory
+
+- Reject oversized top-level string properties in bounded context reads and
+  evidence before making a JSON copy. Tests reproduce the previous 16 MiB
+  temporary allocation for an 8 MiB property and verify bounded rejection.
+- Python examples: 296 tests passed (7 skipped); script tests: 132 passed.
+  Authenticated context search, reranking and path checks passed on synthetic
+  data. A 512 MiB pressure smoke and a disposable container restart with
+  indexed overwrites passed. These do not qualify sustained workloads or
+  guarantee a process-wide RSS ceiling. Driver and nested-value allocations
+  remain outside the new check.
+- Next: qualify sustained 2/4/8 GiB workloads and distributed recovery; extend
+  bounded serialization to nested values without changing response semantics.
+
 ## 2026-11-09: v0.18.0-beta.2 context output memory
 
 - **Done:** check the encoded output size of context search and reranking
