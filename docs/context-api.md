@@ -72,9 +72,12 @@ filtering remain on the ordinary read path. The candidate cap bounds logical
 inputs and output, not storage reads: the selected execution plan can scan more
 records, and server memory/deadline limits remain necessary.
 
-Context reads reject obviously oversized top-level string properties before
-encoding the response. The driver may already have fetched those values; this
-check does not bound driver memory, nested values, or process RSS.
+Context reads preflight nested JSON against `max_bytes`, then count encoded
+chunks and reject oversized records without materializing a complete encoded
+copy of each record. The driver may already have fetched those values; this
+check does not bound driver memory or process RSS.
+Context output checks reject JSON values nested more than 256 levels with
+`ContextLimitError` to bound traversal overhead.
 
 ## A context workflow
 

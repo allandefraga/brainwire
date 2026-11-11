@@ -1,3 +1,4 @@
+import json
 import unittest
 import tracemalloc
 from contextlib import contextmanager
@@ -36,9 +37,57 @@ class ContextTests(unittest.TestCase):
         self.assertLess(peak, 1 << 20)
         self.assertTrue(graph.closed)
 
+    def test_early_large_top_level_string_refusal_keeps_its_error_precedence(self):
+        graph = Graph([{'entity_id': 't', 'p0': object(), 'p1': 'x' * 4096}])
+        with self.assertRaises(ContextLimitError):
+            ContextClient(graph).nodes('Ticket', ['t'], properties=['unsupported', 'large'],
+                                       max_bytes=1024)
+        self.assertTrue(graph.closed)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_nested_large_property_is_rejected_without_copying_it(self):
+        graph = Graph([{'entity_id': 't', 'p0': {'sections': ['x' * (8 << 20)]}}])
+        tracemalloc.start()
+        try:
+            with self.assertRaises(ContextLimitError):
+                ContextClient(graph).nodes('Ticket', ['t'], properties=['body'], max_bytes=1024)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+        self.assertTrue(graph.closed)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_many_nested_strings_are_counted_before_record_serialization(self):
+        graph = Graph([{'entity_id': 't', 'p0': {'sections': ['x' * 256] * 20000}}])
+        tracemalloc.start()
+        try:
+            with self.assertRaises(ContextLimitError):
+                ContextClient(graph).nodes('Ticket', ['t'], properties=['body'], max_bytes=1024)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+        self.assertTrue(graph.closed)
+
     @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
     def test_evidence_rejects_large_property_without_copying_it(self):
         graph = Graph([{'entity_id': 't', 'p0': 'x' * (8 << 20), 'p1': 'source'}])
+        tracemalloc.start()
+        try:
+            with self.assertRaises(ContextLimitError):
+                ContextClient(graph).evidence('Ticket', ['t'], properties=['body'],
+                    source_fields={'url': 'url'})
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+        self.assertTrue(graph.closed)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_evidence_rejects_nested_large_property_without_copying_it(self):
+        graph = Graph([{'entity_id': 't', 'p0': {'sections': ['x' * (8 << 20)]},
+                        'p1': 'source'}])
         tracemalloc.start()
         try:
             with self.assertRaises(ContextLimitError):
@@ -116,6 +165,19 @@ class ContextTests(unittest.TestCase):
         self.assertTrue(graph.closed)
         with self.assertRaises(ContextLimitError):
             ContextClient(Graph()).nodes('Ticket', [], max_bytes=1)
+
+    def test_nested_value_output_keeps_existing_envelope_accounting(self):
+        property_value = {'tags': ['café', '🙂'], 'count': 2}
+        expected = {'graph': 'company', 'limit': 20,
+                    'records': [{'label': 'Ticket', 'entity_id': 't',
+                                 'properties': {'details': property_value}}]}
+        size = len(json.dumps(expected, ensure_ascii=False).encode('utf-8'))
+        graph = Graph([{'entity_id': 't', 'p0': property_value}])
+        result = ContextClient(graph).nodes('Ticket', ['t'], properties=['details'], max_bytes=size + 2)
+        self.assertEqual(result, expected)
+        with self.assertRaises(ContextLimitError):
+            ContextClient(Graph([{'entity_id': 't', 'p0': property_value}])).nodes(
+                'Ticket', ['t'], properties=['details'], max_bytes=size + 1)
 
     def test_text_search_is_scoped_parameterized_and_unranked(self):
         graph = Graph([{'entity_id': 't-1', 'p0': 'Delayed release'}])

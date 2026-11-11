@@ -114,6 +114,9 @@ jobs:
       - name: Verify context evidence and ACL isolation
         run: python crates/server/tests/context_rerank.py --binary target/debug/brainwire
 
+      - name: Verify bounded context over Bolt
+        run: python crates/server/tests/context_budget.py --binary target/debug/brainwire
+
       - name: Verify provider search and ACL isolation
         run: python crates/server/tests/context_search.py --binary target/debug/brainwire
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0-beta.4 — experimental candidate
+
+- Check nested context values before serialization and refuse values over the
+  byte budget or 256 levels deep without materializing a large JSON copy.
+  Driver allocations and process RSS remain outside this bound.
+
 ## 0.18.0-beta.3 — experimental candidate
 
 - Reject obviously oversized context string properties before making an extra

@@ -1,6 +1,8 @@
 """Bounded read-only evidence retrieval over a caller-authenticated GraphClient."""
 import hashlib
 import json
+import math
+import re
 
 from .client import identifier
 
@@ -9,16 +11,115 @@ class ContextLimitError(ValueError):
     """Requested context exceeds its output bound; no partial result is returned."""
 
 
+_JSON_COLON = object()
+_JSON_ESCAPE = re.compile(r'["\\\x00-\x1f]')
+_JSON_SURROGATE = re.compile(r'[\ud800-\udfff]')
+
+
 def _check_json_size(value, maximum, message):
+    lower_bound_exceeds = _json_size_lower_bound_exceeds((value,), maximum)
+    if lower_bound_exceeds is None:
+        raise ContextLimitError('context exceeds maximum nesting depth of 256')
+    if lower_bound_exceeds:
+        raise ContextLimitError(message)
     size = 0
     for chunk in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(value):
         size += len(chunk.encode('utf-8'))
         if size > maximum:
             raise ContextLimitError(message)
+    return size
+
+
+def _json_children(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key, True
+            yield _JSON_COLON, False
+            yield child, False
+    else:
+        for child in value:
+            yield child, False
+
+
+def _json_string_size(value, maximum):
+    # Mirror ensure_ascii=False escaping without constructing the encoded chunk.
+    if value.isascii():
+        if len(value) + 2 > maximum:
+            return None
+        if _JSON_ESCAPE.search(value) is None:
+            return len(value) + 2
+    else:
+        if _JSON_SURROGATE.search(value):
+            return False
+        if len(value) + 2 > maximum:
+            return None
+    size = 2
+    for start in range(0, len(value), 4096):
+        encoded = json.dumps(value[start:start + 4096], ensure_ascii=False).encode('utf-8')
+        size += len(encoded) - 2  # Each encoded chunk has its own quotes.
+        if size > maximum:
+            return None
+    return size
+
+
+def _json_size_lower_bound_exceeds(values, remaining):
+    # Count a lower bound so broad/deep valid containers stop at the budget.
+    pending = [(iter((value, False) for value in values), None)]
+    active = set()
+    minimum = 0
+    while pending:
+        iterator, identity = pending[-1]
+        try:
+            value, is_key = next(iterator)
+        except StopIteration:
+            pending.pop()
+            if identity is not None:
+                active.remove(identity)
+                minimum += 1
+                if minimum > remaining:
+                    return True
+            continue
+        if isinstance(value, str):
+            string_size = _json_string_size(value, remaining - minimum)
+            if string_size is False:
+                return False
+            if string_size is None:
+                return True
+            minimum += string_size
+        elif is_key:
+            if value is None or isinstance(value, (int, float)):
+                if isinstance(value, float) and not math.isfinite(value):
+                    return False
+                minimum += 1
+            else:
+                # Let JSONEncoder report malformed dictionary keys.
+                return False
+        elif isinstance(value, (dict, list, tuple)):
+            # Bound both traversal and later JSON encoding for nested input.
+            if len(pending) > 256:
+                return None
+            container_id = id(value)
+            if container_id in active:
+                return False
+            minimum += 1
+            active.add(container_id)
+            pending.append((iter(_json_children(value)), container_id))
+        elif value is _JSON_COLON:
+            minimum += 1
+        elif value is None or isinstance(value, (int, float)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return False
+            minimum += 1
+        else:
+            # Let JSONEncoder report unsupported values.
+            return False
+        if minimum > remaining:
+            return True
+    return False
 
 
 def _oversized_string(values, remaining):
-    # A string needs at least one UTF-8 byte per character in its JSON form.
+    # Preserve the early top-level string refusal used by bounded context reads.
     return any(isinstance(value, str) and len(value) > remaining for value in values)
 
 
@@ -63,10 +164,14 @@ class ContextClient:
                     raise ContextLimitError('context returned more than limit records')
                 record = {'label': label, 'entity_id': row['entity_id'],
                           'properties': {name: row[f'p{index}'] for index, name in enumerate(names)}}
-                if _oversized_string([record['entity_id'], *record['properties'].values()], max_bytes - size):
-                    raise ContextLimitError('context exceeds max_bytes; request fewer or smaller properties')
+                if _oversized_string([record['entity_id'], *record['properties'].values()],
+                                     max_bytes - size):
+                    raise ContextLimitError(
+                        'context exceeds max_bytes; request fewer or smaller properties')
                 # Include separators conservatively without repeatedly encoding prior rows.
-                size += len(json.dumps(record, ensure_ascii=False, allow_nan=False).encode('utf-8')) + 2
+                record_size = _check_json_size(record, max_bytes - size - 2,
+                    'context exceeds max_bytes; request fewer or smaller properties')
+                size += record_size + 2
                 if size > max_bytes:
                     raise ContextLimitError('context exceeds max_bytes; request fewer or smaller properties')
                 result['records'].append(record)
@@ -141,8 +246,9 @@ class ContextClient:
                 original = {'label': label, 'entity_id': identity, 'properties': values}
                 if _oversized_string(values.values(), (1 << 20) - intermediate):
                     raise ContextLimitError('context exceeds intermediate limit')
-                intermediate += len(json.dumps(original, ensure_ascii=False,
-                                               allow_nan=False).encode('utf-8')) + 2
+                original_size = _check_json_size(original, (1 << 20) - intermediate - 2,
+                                                 'context exceeds intermediate limit')
+                intermediate += original_size + 2
                 if intermediate > 1 << 20:
                     raise ContextLimitError('context exceeds intermediate limit')
                 source = {}
@@ -164,12 +270,16 @@ class ContextClient:
                         'record': {'label': label, 'entity_id': identity}, 'source': source}
                 record = {'label': label, 'entity_id': identity,
                     'properties': {name: values[name] for name in names}, 'citation_id': citation}
-                size += len(json.dumps(record, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+                record_size = _check_json_size(record, max_bytes - size -
+                    (2 if result['records'] else 0), 'evidence context exceeds max_bytes')
+                size += record_size
                 if result['records']:
                     size += 2
                 if source_record is not None:
-                    size += len(json.dumps(source_record, ensure_ascii=False,
-                                           allow_nan=False).encode('utf-8'))
+                    source_size = _check_json_size(source_record, max_bytes - size -
+                        (2 if result['sources'] else 0),
+                        'evidence context exceeds max_bytes')
+                    size += source_size
                     if result['sources']:
                         size += 2
                 if size > max_bytes:

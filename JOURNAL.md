@@ -29,6 +29,36 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-11: nested JSON context budgets
+
+- **Done:** preflight nested context values against the remaining byte budget,
+  then count encoded chunks instead of building complete serialized record
+  copies. Apply the same bounded counting to evidence and to the shared search
+  and rerank result checker. Preserve output shapes, UTF-8 counting and the
+  existing early refusal for oversized top-level strings. Handle nested
+  containers iteratively, including shared references and non-string JSON map
+  keys; account for JSON escaping without allocating escaped string copies.
+- **Verification:** all 305 Python example tests passed (seven skipped) and all
+  132 script tests passed. The focused context/search/rerank set passed on
+  Python 3.9 and 3.12. Ten thousand generated JSON values stayed within their
+  exact encoded UTF-8 size during lower-bound preflight; 135 character
+  encodings matched Python's JSON encoder. `tracemalloc` measured 10.9 KiB peak
+  for an 8 MiB nested string, 2.6 KiB for 20,000 nested small strings, and
+  2.1 KiB for escape-heavy text. A 256 KiB ASCII size check averaged about
+  0.9 ms. Follow-up review found and fixed excessive preflight stack growth
+  and a Unicode/escaped-text CPU regression. Values deeper than 256 levels
+  are now refused. A real authenticated Bolt test verifies nested response
+  refusal and a subsequent successful read over the same connection.
+- **Limits:** the driver may allocate values before this check, and this does
+  not provide a process-wide RSS bound. The original work was uncommitted and
+  its previous environment could not run Rust tests; the follow-up uses the
+  local Rust toolchain and keeps the original work intact.
+- The follow-up ran the full Rust tests and Clippy, documentation checks and
+  the Python example and script suites. A one-second benchmark fixture timed
+  out in three script-suite runs; its focused run and a complete subsequent
+  suite passed. This test remains timing-sensitive under load.
+- **Next:** qualify sustained 2/4/8 GiB workloads and distributed recovery.
+
 ## 2026-11-10: v0.18.0-beta.3 context read memory
 
 - Reject oversized top-level string properties in bounded context reads and

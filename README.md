@@ -18,7 +18,7 @@
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.18.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.18.0-beta.4 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
@@ -84,18 +84,18 @@ for local durability, memory budgets and the current settings.
 See the [architecture](docs/architecture.md), [agent context](docs/context-api.md),
 [Cypher guide](docs/local-cypher.md) and [all documentation](docs/README.md).
 
-Context reads reject obviously oversized string properties before encoding them;
-search and reranking check response sizes incrementally. These output limits
-do not bound memory used by the driver or database process.
+Context reads check nested response values before encoding them; search and
+reranking use the same bounded checks. These output limits do not bound memory
+used by the driver or database process. Nesting is limited to 256 levels.
 
 ## Quickstart
 
 Install Git and Docker with Compose, then start a local demo:
 
 ```sh
-git clone --branch v0.18.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.18.0-beta.4 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.18.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.18.0-beta.4 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
