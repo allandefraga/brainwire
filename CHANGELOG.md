@@ -11,6 +11,8 @@
   between Python worker processes.
 - Exercise recovery of two independent graphs with uncommitted writes at a
   crash, and explain how to create another graph while the server is stopped.
+- Record short 512 MiB, 2 GiB and 3 GiB pressure tests plus local mixed-load
+  recovery diagnostics. These do not qualify a global RSS ceiling.
 - Reduce a benchmark test's sensitivity to slow process startup.
 - Document explicit private-CA trust for Python runtimes that ignore
   `SSL_CERT_FILE`; add an opt-in strict TLS test for that configuration.

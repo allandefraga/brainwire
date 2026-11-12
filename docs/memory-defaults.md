@@ -241,6 +241,24 @@ candidate passed at [512 MiB](benchmarks/2026-11-12-pressure-512m-018b6.json)
 controlled refusals, rollback, recovery and a successful offline audit.
 The pressure was artificial and brief; these results do not qualify a
 sustained workload or establish a process-wide RSS ceiling.
+A separate [10-minute local run](benchmarks/2026-11-12-10min-load-2g-018b6.json)
+used a 2 GiB container and 100,002 synthetic customer nodes. It performed
+579 batches of 100 updates and read back one updated node per batch. After
+SIGKILL and restart, the last update, node count and offline audit passed.
+The workload did not sustain memory saturation; Docker memory samples are
+not process RSS.
+A [five-minute mixed run](benchmarks/2026-11-12-mixed-4g-018b6.json) in a
+4 GiB, two-CPU container used 10,000 synthetic nodes and 10,000 edges.
+It completed 13,769 update batches and 11,134 read iterations. Exact rows
+matched before and after SIGKILL, and the offline audit passed. The test
+did not saturate memory and does not qualify multi-machine operation or
+establish a global RSS cap.
+A [one-hour local run](benchmarks/2026-11-12-1h-load-1g-018b6.json) in a
+1 GiB container used 10,002 synthetic customer nodes. It completed 3,464
+batches of 100 updates and point readbacks, then checked the last value and
+node count after SIGKILL, and passed an offline audit. Docker memory samples
+went from 182.3 MiB to 231.7 MiB; they are not process RSS, and this small
+workload did not saturate memory or establish whether a leak exists.
 In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
 the median process RSS rose by about 53 MiB between the first and last
 five-minute windows. This observation needs investigation; it does not prove

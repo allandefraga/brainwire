@@ -1,0 +1,57 @@
+{
+  "synthetic": true,
+  "requested_seconds": 600,
+  "container_limit": "2 GiB",
+  "nodes": 100002,
+  "writes": 579,
+  "reads": 579,
+  "samples": [
+    {
+      "elapsed_seconds": 2.4,
+      "memory": "475.9MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 63.6,
+      "memory": "186MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 125.7,
+      "memory": "178MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 186.9,
+      "memory": "177.4MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 248.0,
+      "memory": "177.2MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 309.1,
+      "memory": "177.9MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 370.2,
+      "memory": "178.5MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 431.4,
+      "memory": "179.6MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 493.4,
+      "memory": "179.9MiB / 2GiB"
+    },
+    {
+      "elapsed_seconds": 555.7,
+      "memory": "179.7MiB / 2GiB"
+    }
+  ],
+  "qualified": false,
+  "limitations": "One container, 100k synthetic records, no sustained memory saturation or multi-machine failover",
+  "client_sha256": "62881d1a5e008ae99c7736df47797f267486e8ed257a82367fcebe8b00adf323",
+  "restart_audit": "passed",
+  "status": "passed",
+  "volume_removed": true,
+  "elapsed_seconds": 603.4
+}

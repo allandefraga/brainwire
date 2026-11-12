@@ -74,8 +74,25 @@ Allan's current language.
 - Generated 100,000 random nested JSON values and confirmed that the
   precheck accepts each at its exact compact UTF-8 byte size. This checks
   one compatibility property; it is not exhaustive.
-- Next: finish the longer 10,002-node synthetic exercise, rerun final release
-  checks and qualify production-like 2/4/8 GiB workloads on a native Linux host.
+- A five-minute mixed 4 GiB container test with 10,000 nodes and 10,000 edges
+  passed: 13,769 update batches and 11,134 reads, exact graph verification
+  before and after SIGKILL, and offline audit. It did not saturate memory.
+- A ten-minute 2 GiB container run with 100,002 nodes passed 579 update
+  batches, point readbacks, restart, last-value/count checks and audit.
+  Its workload also did not saturate memory. Both receipts are linked
+  from the memory guide.
+- Three repeated 500-row local quorum partition/recovery runs passed. A
+  separate protected-server test interrupted three unacknowledged commits
+  and observed whole-transaction outcomes with successful offline audit.
+- README Compose and the documented Python installer passed in disposable
+  environments. Current public branch and tag histories were checked for
+  private naming; historical local-only branches remain untouched.
+- A one-hour 1 GiB synthetic run with 10,002 nodes passed 3,464 update
+  batches and point readbacks, crash/restart, last-value/count checks and
+  offline audit. Docker memory was 182.3 MiB in the first sample and 231.7
+  MiB in the last; this is not an RSS cap or a leak conclusion.
+- Next: qualify sustained, production-like workloads and multi-machine
+  failover; investigate the earlier pressure failure before production claims.
 
 ## 2026-11-12: bounded context input validation
 
