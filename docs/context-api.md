@@ -78,6 +78,8 @@ copy of each record. The driver may already have fetched those values; this
 check does not bound driver memory or process RSS.
 Context output checks reject JSON values nested more than 256 levels with
 `ContextLimitError` to bound traversal overhead.
+IDs and search text are limited to 4,096 UTF-8 bytes and overlong strings are
+rejected before encoding; the application still owns the input string.
 
 ## A context workflow
 

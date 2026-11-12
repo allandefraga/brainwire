@@ -124,7 +124,7 @@ def _oversized_string(values, remaining):
 
 
 def _entity(value):
-    if not isinstance(value, str) or not value or len(value.encode('utf-8')) > 4096:
+    if not isinstance(value, str) or not value or len(value) > 4096 or len(value.encode('utf-8')) > 4096:
         raise ValueError('entity IDs must be nonempty strings of at most 4096 UTF-8 bytes')
     return value
 
@@ -294,7 +294,7 @@ class ContextClient:
         """Filter explicit candidates by case-insensitive substring; no relevance score."""
         label, field = identifier(label), identifier(field)
         names = _options(properties, limit, max_bytes)
-        if not isinstance(text, str) or not text.strip() or len(text.encode('utf-8')) > 4096:
+        if not isinstance(text, str) or len(text) > 4096 or not text.strip() or len(text.encode('utf-8')) > 4096:
             raise ValueError('text must be a nonblank string of at most 4096 UTF-8 bytes')
         if not isinstance(entity_ids, (list, tuple)) or len(entity_ids) > 100:
             raise ValueError('entity_ids must be a list or tuple of at most 100 IDs')

@@ -29,6 +29,19 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-12: bounded context input validation
+
+- Reject IDs and search text longer than 4,096 characters before encoding or
+  trimming, retaining the existing 4,096-byte UTF-8 validation. An 8 MiB
+  string previously caused an additional 8 MiB allocation on validation.
+- Tests cover allocation refusal and valid/invalid multibyte boundaries; the
+  application, Bolt driver and server may still allocate input independently.
+- The Python examples (310 tests, seven skipped), 132 script tests, an
+  authenticated synthetic Bolt context test, a disposable restart test and a
+  2 GiB container pressure smoke passed. This short synthetic smoke does not
+  qualify sustained workloads or guarantee an RSS ceiling.
+- Next: qualify sustained memory workloads and distributed recovery.
+
 ## 2026-11-11: nested JSON context budgets
 
 - **Done:** preflight nested context values against the remaining byte budget,

@@ -25,6 +25,35 @@ class Graph:
 
 class ContextTests(unittest.TestCase):
     @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_oversized_input_strings_are_rejected_without_encoding_copies(self):
+        text = 'x' * (8 << 20)
+        graph = Graph()
+        context = ContextClient(graph)
+        requests = (
+            lambda: context.nodes('Ticket', [text]),
+            lambda: context.search_text('Ticket', text, field='body', entity_ids=['t']),
+        )
+        for request in requests:
+            tracemalloc.start()
+            try:
+                with self.assertRaises(ValueError):
+                    request()
+                peak = tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, 1 << 20)
+        self.assertEqual(graph.calls, [])
+
+    def test_input_limits_still_count_utf8_bytes(self):
+        context = ContextClient(Graph())
+        context.nodes('Ticket', ['é' * 2048])
+        with self.assertRaises(ValueError):
+            context.nodes('Ticket', ['é' * 2049])
+        context.search_text('Ticket', 'é' * 2048, field='body', entity_ids=[])
+        with self.assertRaises(ValueError):
+            context.search_text('Ticket', 'é' * 2049, field='body', entity_ids=[])
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
     def test_large_property_is_rejected_without_copying_it(self):
         graph = Graph([{'entity_id': 't', 'p0': 'x' * (8 << 20)}])
         tracemalloc.start()

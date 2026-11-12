@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.0-beta.5 — experimental candidate
+
+- Reject oversized context IDs and search text before creating a UTF-8 copy.
+  This is input validation, not a process-wide memory limit.
+
 ## 0.18.0-beta.4 — experimental candidate
 
 - Check nested context values before serialization and refuse values over the
