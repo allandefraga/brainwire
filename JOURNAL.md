@@ -63,6 +63,17 @@ Allan's current language.
   UTF-8 and batch-boundary tests passed, as did real Bolt code-graph replay and
   generation isolation. A small 1,000-function local timing showed no clear
   slowdown; this is not a production benchmark.
+- Additional short synthetic cgroup pressure checks passed at 512 MiB, 2 GiB
+  (four runs) and 3 GiB. The first run at each size has a linked receipt in
+  the memory guide. These tests do not qualify sustained pressure or an RSS
+  ceiling; an older pressure failure remains unexplained.
+- A separate 100,000-row local Bolt acceptance and a 1 GiB container run
+  with 100,000 rows and two graphs passed crash recovery and audits. A wheel
+  installed to a temporary directory passed 1,000 writes, oversized-row
+  rejection, update, crash/restart, read and delete against the container.
+- Generated 100,000 random nested JSON values and confirmed that the
+  precheck accepts each at its exact compact UTF-8 byte size. This checks
+  one compatibility property; it is not exhaustive.
 - Next: finish the longer 10,002-node synthetic exercise, rerun final release
   checks and qualify production-like 2/4/8 GiB workloads on a native Linux host.
 
