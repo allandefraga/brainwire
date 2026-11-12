@@ -21,6 +21,23 @@ from compose_auth import DATABASE, ROWS, fixture, self_check
 PROXY_IMAGE = "haproxy:3.2.24-alpine@sha256:1aca32ee932b96d2a75f1882909325839dd23c138ba9c6fd26e4d88179f30f13"
 
 
+def driver_tls_options(encrypted, custom_ca, ca_path):
+    if not encrypted:
+        return 'bolt', {}
+    if custom_ca:
+        from neo4j import TrustCustomCAs
+        return 'bolt', {'encrypted': True, 'trusted_certificates': TrustCustomCAs(str(ca_path))}
+    return 'bolt+s', {}
+
+
+def configure_legacy_ciphers(context):
+    try:
+        context.set_ciphers('DEFAULT:@SECLEVEL=0')
+    except ssl.SSLError:
+        # LibreSSL does not implement the OpenSSL security-level syntax.
+        context.set_ciphers('DEFAULT')
+
+
 def wait_ready(probe, read, logs):
     from neo4j.exceptions import ServiceUnavailable
 
@@ -37,7 +54,7 @@ def wait_ready(probe, read, logs):
     raise RuntimeError(logs()) from last_error
 
 
-def run(image, idle_pool=False):
+def run(image, idle_pool=False, custom_ca=False):
     from neo4j import GraphDatabase, __version__ as driver_version
     from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
@@ -104,10 +121,11 @@ def run(image, idle_pool=False):
         previous_ca = os.environ.get("SSL_CERT_FILE")
         os.environ["SSL_CERT_FILE"] = str(ca)
 
-        def driver(auth, host="localhost", encrypted=True):
-            return GraphDatabase.driver(f"{'bolt+s' if encrypted else 'bolt'}://{host}:{port}", auth=auth,
+        def driver(auth, host="localhost", encrypted=True, **extra):
+            scheme, tls_options = driver_tls_options(encrypted, custom_ca, os.environ["SSL_CERT_FILE"])
+            return GraphDatabase.driver(f"{scheme}://{host}:{port}", auth=auth,
                                        connection_timeout=3, connection_acquisition_timeout=5,
-                                       max_transaction_retry_time=0)
+                                       max_transaction_retry_time=0, **tls_options, **extra)
 
         def query(auth, text, params=None, **kwargs):
             with driver(auth, **kwargs) as connection:
@@ -140,7 +158,8 @@ def run(image, idle_pool=False):
             compose("up", "-d", "--no-build", timeout=120)
             ready()
             compose("exec", "-T", "tls", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg")
-            checks.append("strict bolt+s CA and localhost hostname verification succeeds")
+            checks.append("strict CA and localhost hostname verification succeeds" +
+                          (" with explicit CA" if custom_ca else " with bolt+s"))
             identifiers = {name: compose("ps", "-q", name).stdout.strip() for name in ("brainwire", "tls")}
             assert all(identifiers.values())
             inspections = {name: json.loads(command(["docker", "inspect", identifier]).stdout)[0]
@@ -172,13 +191,13 @@ def run(image, idle_pool=False):
                 warnings.simplefilter("ignore", DeprecationWarning)
                 legacy = ssl.create_default_context(cafile=str(ca))
                 legacy.minimum_version = legacy.maximum_version = ssl.TLSVersion.TLSv1_1
-                legacy.set_ciphers("DEFAULT:@SECLEVEL=0")
+                configure_legacy_ciphers(legacy)
             try:
                 with legacy.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=3), server_hostname="localhost"):
                     raise AssertionError("TLS 1.1 unexpectedly accepted")
             except ssl.SSLError as error:
                 assert error.reason == "TLSV1_ALERT_PROTOCOL_VERSION", error
-            checks.append("TLS 1.2 and 1.3 succeed; TLS 1.1 receives protocol-version rejection")
+            checks.append(f"default negotiation uses {tls_version}; TLS 1.2 succeeds; TLS 1.1 receives protocol-version rejection")
             checks.append("wrong CA, hostname mismatch and plaintext driver connections rejected")
             denied(None, "Neo.ClientError.Security.Unauthorized")
             denied(("reader", "0" * 64), "Neo.ClientError.Security.Unauthorized")
@@ -196,10 +215,7 @@ def run(image, idle_pool=False):
                             if len(fields := line.split()) >= 4 and fields[3] == "01"
                             and fields[1].endswith(":1E08")}
 
-                with GraphDatabase.driver(f"bolt+s://localhost:{port}", auth=reader,
-                                          liveness_check_timeout=30, max_connection_pool_size=1,
-                                          connection_timeout=3, connection_acquisition_timeout=5,
-                                          max_transaction_retry_time=0) as pooled:
+                with driver(reader, liveness_check_timeout=30, max_connection_pool_size=1) as pooled:
                     with pooled.session(database=DATABASE) as session:
                         assert session.run("RETURN 1 AS ok").single()["ok"] == 1
                     before = frontend_connections()
@@ -255,5 +271,6 @@ if __name__ == "__main__":
     parser.add_argument("--image", default="brainwire:mvp-20261012")
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--idle-pool", action="store_true", help="Qualify first reuse after 65 seconds of proxy idle expiry")
+    parser.add_argument("--custom-ca", action="store_true", help="Load the synthetic CA explicitly instead of relying on SSL_CERT_FILE")
     options = parser.parse_args()
-    print(json.dumps(self_check() if options.self_check else run(options.image, options.idle_pool), indent=2))
+    print(json.dumps(self_check() if options.self_check else run(options.image, options.idle_pool, options.custom_ca), indent=2))

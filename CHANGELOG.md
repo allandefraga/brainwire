@@ -12,6 +12,8 @@
 - Exercise recovery of two independent graphs with uncommitted writes at a
   crash, and explain how to create another graph while the server is stopped.
 - Reduce a benchmark test's sensitivity to slow process startup.
+- Document explicit private-CA trust for Python runtimes that ignore
+  `SSL_CERT_FILE`; add an opt-in strict TLS test for that configuration.
 
 ## 0.18.0-beta.5 — experimental candidate
 

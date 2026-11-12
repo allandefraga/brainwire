@@ -96,6 +96,9 @@ jobs:
       - name: Test Kubernetes CSI diagnostic safety
         run: python -m unittest discover -s crates/server/tests -p 'test_kubernetes_csi_handoff.py'
 
+      - name: Test TLS diagnostic configuration
+        run: python -m unittest discover -s crates/server/tests -p 'test_compose_tls.py'
+
       - name: Validate documentation links and site
         run: |
           python scripts/check_docs_links.py

@@ -70,10 +70,11 @@ multiple database owners. See the [HAProxy 3.2 configuration manual](https://doc
 
 ## Python with strict certificate checks
 
-Use `bolt+s`, which requires certificate validation. The qualification uses a
-private CA bundle through Python's `SSL_CERT_FILE`; the fixture proves both
-trust-chain and hostname rejection. A public certificate trusted by Python's
-normal trust store does not need that variable. Do not use `bolt+ssc` to bypass
+Use `bolt+s`, which requires certificate validation. A public certificate
+trusted by Python's normal trust store needs no extra CA configuration. For a
+private CA, `SSL_CERT_FILE` works with some Python/OpenSSL builds, but not all:
+the system Python 3.9/LibreSSL tested on macOS did not load it. If in doubt,
+use the explicit CA configuration below. Do not use `bolt+ssc` to bypass
 verification.
 
 ```sh
@@ -96,6 +97,26 @@ with connect(
     driver = graph.driver
     with driver.session(database='default') as session:
         print(session.run('RETURN 1 AS ok').single()['ok'])
+```
+
+For portable explicit trust of a private CA, use the plain `bolt://` scheme
+with encryption enabled and `TrustCustomCAs`. The driver checks both the CA
+chain and hostname; the hostname must appear in the server certificate.
+
+```python
+from neo4j import TrustCustomCAs
+from brainwire import connect
+
+with connect(
+    'bolt://localhost:7688', 'default',
+    auth=(credentials['principal'], credentials['credentials']),
+    encrypted=True,
+    trusted_certificates=TrustCustomCAs('/absolute/path/private-ca.crt'),
+    connection_timeout=5,
+    liveness_check_timeout=30,
+    max_transaction_retry_time=0,
+) as graph:
+    print(graph.run_cypher('RETURN 1 AS ok'))
 ```
 
 The example checks pooled sockets idle for 30 seconds before reuse. This is
@@ -124,6 +145,9 @@ network and temporary certificates even after failure.
 python3 crates/server/tests/compose_tls.py --self-check
 .venv-brainwire/bin/python crates/server/tests/compose_tls.py --image brainwire:local
 ```
+
+If the local Python runtime does not load `SSL_CERT_FILE`, add `--custom-ca`
+to exercise explicit CA loading with the same strict hostname checks.
 
 Add `--idle-pool` to either runtime command to warm a one-connection pool,
 wait 65 real seconds, and require its first reuse to succeed with

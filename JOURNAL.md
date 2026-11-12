@@ -45,6 +45,14 @@ Allan's current language.
   local deployment rendering passed. A 30-minute synthetic 1 GiB container
   exercise passed with 1,002 nodes, 1,742 acknowledged writes and readbacks,
   then restart and audit; it did not saturate memory or establish an RSS cap.
+- A protected Compose test rejected anonymous and invalid credentials, denied
+  reader writes, and recovered 1,000 committed records after SIGKILL; all
+  test containers, volumes and synthetic credentials were removed.
+- TLS proxy checks passed with Python 3.12/OpenSSL using `bolt+s` and with
+  Python 3.9/LibreSSL using an explicitly trusted private CA. The latter runtime
+  did not load `SSL_CERT_FILE` in a standalone local TLS reproduction; the
+  documentation now gives an explicit-CA alternative. TLS remains terminated
+  at the proxy and the backend connection is plaintext on the isolated host.
 - Next: finish the longer 10,002-node synthetic exercise, rerun final release
   checks and qualify production-like 2/4/8 GiB workloads on a native Linux host.
 

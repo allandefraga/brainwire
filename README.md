@@ -92,6 +92,7 @@ UTF-8 encoding; their existing 4,096-byte limit still applies.
 Batch writes also reject some clearly oversized strings and collections before
 serialization, with `BatchTooLargeError` available to Python callers. Their
 byte limit is not a process-wide memory limit.
+For encrypted shared deployments, see [TLS and private CA setup](docs/protected-transport.md).
 
 ## Quickstart
 
