@@ -408,6 +408,10 @@ turn retrieved strings into agent instructions or permissions.
   syntax before extraction completes. `ast.parse` is a parser, not a sandbox;
   these size checks do not qualify adversarial parser inputs or hard CPU/RSS
   isolation. Use process/container limits for untrusted repositories.
+
+Generated graph sizes are checked in small batches of records, avoiding a
+second full JSON copy just to measure the artifact. Extraction and parsing still
+allocate their own data before that check.
 - `schema_version="1"` and `extractor="brainwire-python-ast-v1"` identify the
   artifact contract. Review these when building an importer for stored artifacts.
 

@@ -14,6 +14,8 @@
 - Reduce a benchmark test's sensitivity to slow process startup.
 - Document explicit private-CA trust for Python runtimes that ignore
   `SSL_CERT_FILE`; add an opt-in strict TLS test for that configuration.
+- Measure generated code-graph JSON in small batches instead of making a
+  second complete serialized graph solely to enforce the output limit.
 
 ## 0.18.0-beta.5 — experimental candidate
 

@@ -13,6 +13,30 @@ _EVIDENCE = ['source_path', 'source_hash', 'start_line', 'end_line', 'evidence']
 _RELATIONS = ('DEFINES', 'IMPORTS', 'LOCAL_MODULE_CANDIDATE', 'HAS_CALL', 'STATIC_CALL_CANDIDATE')
 
 
+def _graph_json_size(value, limit, message):
+    # Generated graph records have bounded fields; encode small slices instead
+    # of allocating a second complete graph just to count its bytes.
+    size = 2
+    for index, (key, item) in enumerate(value.items()):
+        size += (2 if index else 0) + len(json.dumps(key, ensure_ascii=False).encode('utf-8')) + 2
+        if size > limit:
+            raise ValueError(message)
+        if isinstance(item, list):
+            size += 2
+            for start in range(0, len(item), 32):
+                part = json.dumps(item[start:start + 32], ensure_ascii=False).encode('utf-8')
+                size += len(part) - 2 + (2 if start else 0)
+                if size > limit:
+                    raise ValueError(message)
+        else:
+            size += len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
+        if size > limit:
+            raise ValueError(message)
+    if size > limit:
+        raise ValueError(message)
+    return size
+
+
 def ontology():
     """Return the ontology to declare before loading extracted code snapshots."""
     return {'version': '1', 'nodes': [{'label': 'CodeEntity', 'properties': list(_PROPERTIES),
@@ -115,8 +139,7 @@ def _extract_python(source, *, source_path, namespace, max_entities=10000):
     Extractor().visit(tree)
     artifact = {'schema_version': '1', 'extractor': 'brainwire-python-ast-v1',
                 'source_hash': source_hash, 'nodes': nodes, 'edges': edges}
-    if len(json.dumps(artifact, ensure_ascii=False).encode('utf-8')) > 8 << 20:
-        raise ValueError('extracted graph exceeds 8 MiB')
+    _graph_json_size(artifact, 8 << 20, 'extracted graph exceeds 8 MiB')
     return artifact, tree
 
 
@@ -223,9 +246,8 @@ def extract_python_directory(root, *, namespace, max_files=100, max_entities=100
                     facts[path] = _static_call_facts(tree, artifact)
                     if sum(len(item['calls']) for item in facts.values()) > 10000:
                         raise ValueError('source tree exceeds static call analysis bounds')
-                artifact_bytes += len(json.dumps(artifact, ensure_ascii=False).encode('utf-8'))
-                if artifact_bytes > 8 << 20:
-                    raise ValueError('source tree graph exceeds 8 MiB')
+                artifact_bytes += _graph_json_size(artifact, (8 << 20) - artifact_bytes,
+                                                   'source tree graph exceeds 8 MiB')
                 files.append({'path': path, 'source_hash': artifact['source_hash']})
                 nodes.extend(artifact['nodes'])
                 edges.extend(artifact['edges'])
@@ -246,8 +268,7 @@ def extract_python_directory(root, *, namespace, max_files=100, max_entities=100
         identities = _local_import_candidates(result, namespace, calls=resolve_calls)
         if resolve_calls:
             _static_call_candidates(result, facts, identities, max_entities)
-    if len(json.dumps(result, ensure_ascii=False).encode('utf-8')) > 8 << 20:
-        raise ValueError('source tree graph exceeds 8 MiB')
+    _graph_json_size(result, 8 << 20, 'source tree graph exceeds 8 MiB')
     return result
 
 

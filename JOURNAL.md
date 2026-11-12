@@ -58,6 +58,11 @@ Allan's current language.
 - A local, non-isolated diagnostic alternated ten 5,000-row client replays:
   median 0.1267 s before and 0.1291 s after the validation. This small
   synthetic sample is not a performance guarantee or production benchmark.
+- Code-graph artifact sizing now encodes small batches of bounded records
+  instead of serializing the entire generated graph just to count it. Exact
+  UTF-8 and batch-boundary tests passed, as did real Bolt code-graph replay and
+  generation isolation. A small 1,000-function local timing showed no clear
+  slowdown; this is not a production benchmark.
 - Next: finish the longer 10,002-node synthetic exercise, rerun final release
   checks and qualify production-like 2/4/8 GiB workloads on a native Linux host.
 

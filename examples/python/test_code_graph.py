@@ -1,5 +1,38 @@
 import unittest
+import tracemalloc
+import json
 from brainwire.code_graph import extract_python, load_python, ontology
+
+
+class CodeGraphSizeTests(unittest.TestCase):
+    def test_graph_size_uses_exact_utf8_at_the_boundary(self):
+        from brainwire.code_graph import _graph_json_size
+        artifact = {'nodes': [{'name': 'é🙂\n'}], 'edges': []}
+        size = len(json.dumps(artifact, ensure_ascii=False).encode('utf-8'))
+        self.assertEqual(_graph_json_size(artifact, size, 'graph exceeds'), size)
+        with self.assertRaisesRegex(ValueError, 'graph exceeds'):
+            _graph_json_size(artifact, size - 1, 'graph exceeds')
+        for count in (0, 1, 31, 32, 33, 64, 65):
+            graph = {'nodes': [{'name': 'é🙂\n', 'n': index} for index in range(count)],
+                     'edges': [], 'source_hash': 'abc'}
+            expected = len(json.dumps(graph, ensure_ascii=False).encode('utf-8'))
+            with self.subTest(count=count):
+                self.assertEqual(_graph_json_size(graph, expected, 'graph exceeds'), expected)
+                with self.assertRaises(ValueError):
+                    _graph_json_size(graph, expected - 1, 'graph exceeds')
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_oversized_graph_is_rejected_without_serialized_copy(self):
+        from brainwire.code_graph import _graph_json_size
+        artifact = {'nodes': [{'name': 'x' * 4000}] * 1000}
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'graph exceeds'):
+                _graph_json_size(artifact, 1 << 20, 'graph exceeds')
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
 
 
 class CodeGraphTests(unittest.TestCase):
