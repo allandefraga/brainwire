@@ -234,6 +234,13 @@ records a fresh synthetic pressure rejection, rollback and recovery.
 The [beta.12 investigation](benchmarks/2026-11-05-pressure-investigation.md)
 records a failed smoke, controlled repeats and the optional decision trace;
 the original failure remains unexplained.
+On 2026-11-12, short synthetic pressure tests of the v0.18.0-beta.6 local
+candidate passed at [512 MiB](benchmarks/2026-11-12-pressure-512m-018b6.json)
+[2 GiB](benchmarks/2026-11-12-pressure-2g-018b6.json), and
+[3 GiB](benchmarks/2026-11-12-pressure-3g-018b6.json). All recorded
+controlled refusals, rollback, recovery and a successful offline audit.
+The pressure was artificial and brief; these results do not qualify a
+sustained workload or establish a process-wide RSS ceiling.
 In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
 the median process RSS rose by about 53 MiB between the first and last
 five-minute windows. This observation needs investigation; it does not prove
