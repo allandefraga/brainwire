@@ -11,6 +11,7 @@ import platform
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -59,6 +60,7 @@ def run(image, idle_pool=False, custom_ca=False):
     from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
     root = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(root))
     project = f"brainwire-tls-{uuid.uuid4().hex[:12]}"
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -157,6 +159,14 @@ def run(image, idle_pool=False, custom_ca=False):
                     "/opt/brainwire/example-schema.json")
             compose("up", "-d", "--no-build", timeout=120)
             ready()
+            if custom_ca:
+                from brainwire import connect
+                from neo4j import TrustCustomCAs
+                with connect(f"bolt://localhost:{port}", DATABASE,
+                             auth=("reader", tokens["reader"]), encrypted=True,
+                             trusted_certificates=TrustCustomCAs(str(ca))) as graph:
+                    assert graph.run_cypher("RETURN 1 AS ok") == [{"ok": 1}]
+                checks.append("documented Python connect helper accepts an explicitly trusted CA")
             compose("exec", "-T", "tls", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg")
             checks.append("strict CA and localhost hostname verification succeeds" +
                           (" with explicit CA" if custom_ca else " with bolt+s"))

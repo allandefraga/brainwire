@@ -53,6 +53,11 @@ Allan's current language.
   did not load `SSL_CERT_FILE` in a standalone local TLS reproduction; the
   documentation now gives an explicit-CA alternative. TLS remains terminated
   at the proxy and the backend connection is plaintext on the isolated host.
+  The documented `brainwire.connect` example passed with an explicit CA; the
+  default TLS path also passed using driver 5.28.4, the exact CI version.
+- A local, non-isolated diagnostic alternated ten 5,000-row client replays:
+  median 0.1267 s before and 0.1291 s after the validation. This small
+  synthetic sample is not a performance guarantee or production benchmark.
 - Next: finish the longer 10,002-node synthetic exercise, rerun final release
   checks and qualify production-like 2/4/8 GiB workloads on a native Linux host.
 
