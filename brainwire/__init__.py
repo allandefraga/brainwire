@@ -8,6 +8,7 @@ from .semantic import schema_paths
 from .paths import trace_paths
 
 from .client import (
+    BatchTooLargeError,
     BrainwireError,
     CommitOutcomeUnknownError,
     GraphClient,
@@ -17,5 +18,5 @@ from .client import (
 
 __all__ = [
     "GraphClient", "connect", "ContextClient", "ContextLimitError", "ContextProviderError", "rerank_context", "search_context", "schema_paths", "trace_paths", "request_key", "BrainwireError", "MemoryPressureError",
-    "CommitOutcomeUnknownError",
+    "CommitOutcomeUnknownError", "BatchTooLargeError",
 ]

@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
+from brainwire import BatchTooLargeError
 from examples.python.client import GraphClient
 
 UPSERT = """
@@ -224,6 +225,18 @@ limit = "2GiB"
                             assert memory["processLimitBytes"] == 2 << 30
                             assert memory["processRssBytes"] > 0
                             if cycle == 0:
+                                guarded = GraphClient(driver, "ingestion", batch_bytes=1024)
+                                try:
+                                    guarded.load_nodes("Customer", [{"entity_id": "too-large",
+                                        "tags": [["x" * (2 << 20)]]}])
+                                except BatchTooLargeError as error:
+                                    assert "batch byte limit" in str(error)
+                                    assert (error.item_type, error.limit_bytes) == ("node", 1024)
+                                else:
+                                    raise AssertionError("oversized input must be refused")
+                                assert count(session, "{entity_id:'too-large'}") == 0
+                                assert guarded.load_nodes("Customer", [{"entity_id": "after-refusal"}]) == 1
+                                assert guarded.delete_nodes("Customer", ["after-refusal"]) == 1
                                 try:
                                     session.run("UNWIND $rows AS row CREATE (c:Customer {entity_id:row.id, email:row.email})", rows=[
                                         {"id": "duplicate", "email": "must-rollback"},

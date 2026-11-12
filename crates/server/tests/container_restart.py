@@ -7,6 +7,7 @@ only its own uniquely named Docker container and volume.
 
 import argparse
 from contextlib import suppress
+import json
 import socket
 import subprocess
 import time
@@ -72,6 +73,13 @@ def run(image, rows, cycles):
             image, "db", "create", "default", "--ontology",
             "/opt/brainwire/example-schema.json",
         )
+        docker(
+            "run", "--rm", "--mount", f"type=volume,src={volume},dst=/data",
+            "--env", "BRAINWIRE_MEMORY_CACHE=256MiB",
+            "--env", "BRAINWIRE_MEMORY_MEMTABLES=32MiB",
+            image, "db", "create", "other", "--ontology",
+            "/opt/brainwire/example-schema.json",
+        )
         for cycle in range(cycles + 2):
             uri = start_container(container, volume, image)
             try:
@@ -81,7 +89,12 @@ def run(image, rows, cycles):
                         write(driver, rows)
                         with driver.session(database="default") as session:
                             session.run("MATCH (c:Customer {entity_id:'driver-1'}) SET c.email='cycle-0@example.test'").consume()
+                        with driver.session(database="other") as session:
+                            session.run("CREATE (:Customer {entity_id:'driver-1', name:'other-graph'})").consume()
                     else:
+                        with driver.session(database="other") as session:
+                            records = session.run("MATCH (c:Customer) RETURN c.entity_id AS id, c.name AS name").data()
+                            assert records == [{"id": "driver-1", "name": "other-graph"}], records
                         with driver.session(database="default") as session:
                             count = session.run(
                                 "MATCH (c:Customer) RETURN count(*) AS n"
@@ -108,15 +121,20 @@ def run(image, rows, cycles):
                 if cycle <= cycles:
                     # SIGKILL while an indexed overwrite is still uncommitted.
                     with GraphDatabase.driver(uri, auth=None) as driver:
-                        with driver.session(database="default") as session:
+                        with driver.session(database="default") as session, \
+                                driver.session(database="other") as other_session:
                             tx = session.begin_transaction()
+                            other_tx = other_session.begin_transaction()
                             try:
                                 tx.run("MATCH (c:Customer {entity_id:'driver-1'}) SET c.email='uncommitted-crash'").consume()
                                 assert tx.run("MATCH (c:Customer) WHERE c.email='uncommitted-crash' RETURN count(*) AS n").single()["n"] == 1
+                                other_tx.run("MATCH (c:Customer {entity_id:'driver-1'}) SET c.name='uncommitted-crash'").consume()
                                 stop_container(container)
                             finally:
                                 with suppress(Neo4jError, ServiceUnavailable, SessionExpired):
                                     tx.close()
+                                with suppress(Neo4jError, ServiceUnavailable, SessionExpired):
+                                    other_tx.close()
                 print(f"cycle {cycle}: verified after container restart")
             except Exception:
                 print(docker("logs", container, check=False).stdout)
@@ -126,7 +144,13 @@ def run(image, rows, cycles):
         audit = docker("run", "--rm", "--mount", f"type=volume,src={volume},dst=/data",
                        "--env", "BRAINWIRE_MEMORY_CACHE=256MiB", "--env", "BRAINWIRE_MEMORY_MEMTABLES=32MiB",
                        image, "db", "check", "default", "--json")
+        assert json.loads(audit.stdout)["status"] == "ok"
         print(audit.stdout.strip())
+        other_audit = docker("run", "--rm", "--mount", f"type=volume,src={volume},dst=/data",
+                             "--env", "BRAINWIRE_MEMORY_CACHE=256MiB", "--env", "BRAINWIRE_MEMORY_MEMTABLES=32MiB",
+                             image, "db", "check", "other", "--json")
+        assert json.loads(other_audit.stdout)["status"] == "ok"
+        print(other_audit.stdout.strip())
         print("container restart and indexed-overwrite recovery: ok")
     finally:
         docker("rm", "--force", container, check=False)

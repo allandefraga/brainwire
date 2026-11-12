@@ -27,13 +27,13 @@ and access to the package. Do not enter your GitHub account password. Public
 images do not need this step. Then start the published version:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.18.0-beta.5 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.18.0-beta.6 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --wait --wait-timeout 900
 ```
 
-Images use the exact release tag, for example `v0.18.0-beta.5`. <!-- brainwire-release-version -->
+Images use the exact release tag, for example `v0.18.0-beta.6`. <!-- brainwire-release-version -->
 For reproducible deployment, pin the digest from the release receipt. A private
 GHCR image requires package access in addition to repository access. Keep
 credentials out of shell arguments and source files. If `pull` reports
@@ -192,6 +192,19 @@ path to `db create`. That command refuses to replace an existing graph. The
 container runs as UID/GID 10001; bind-mounted data must be writable by that user.
 All named graphs live below `/data`. The image includes the CLI and license at
 `/usr/share/licenses/brainwire/LICENSE`.
+
+One volume can hold multiple independent named graphs. Stop the server before
+creating another graph, then use the same volume and a different name:
+
+```sh
+docker stop --timeout 60 brainwire-local
+docker run --rm --mount type=volume,src=brainwire-data,dst=/data \
+  brainwire:local db create research --ontology /opt/brainwire/example-schema.json
+docker start brainwire-local
+```
+
+Choose `demo` or `research` as the database when connecting. These are separate
+graphs in one server, not replicas or copies on separate machines.
 
 Stop the server before opening the same files with an offline command:
 

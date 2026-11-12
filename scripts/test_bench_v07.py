@@ -101,7 +101,8 @@ print(json.dumps({'phase':phase,'status':%r if phase=='check' else 'ok','rows':4
             binary = folder / "empty"
             binary.write_text("#!/usr/bin/env python3\n")
             binary.chmod(0o700)
-            result = bench_v07.run_phase("empty", [binary], folder, 1, 0, 0.01)
+            # This case tests an empty successful process, not startup timing.
+            result = bench_v07.run_phase("empty", [binary], folder, 10, 0, 0.01)
             self.assertEqual(result["exit_code"], 0)
             self.assertEqual(result["status"], "failed")
             self.assertEqual(result["records"], [])

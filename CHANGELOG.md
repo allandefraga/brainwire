@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.18.0-beta.6 — experimental candidate
+
+- Reject clearly oversized strings and collections in node and edge batch
+  writes and deletions before serializing a complete JSON copy.
+- Keep existing byte accounting and per-batch commit behavior. This does not
+  bound source, driver or server memory.
+- Expose client-side oversized-item failures as `BatchTooLargeError`, a
+  `ValueError` with the item type and configured byte limit that can be passed
+  between Python worker processes.
+- Exercise recovery of two independent graphs with uncommitted writes at a
+  crash, and explain how to create another graph while the server is stopped.
+- Reduce a benchmark test's sensitivity to slow process startup.
+
 ## 0.18.0-beta.5 — experimental candidate
 
 - Reject oversized context IDs and search text before creating a UTF-8 copy.

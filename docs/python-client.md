@@ -297,6 +297,31 @@ generators reading JSONL and DuckDB results. It also accepts Arrow `Table`,
 `RecordBatch`, and `RecordBatchReader` objects directly when they provide
 `to_batches()`, `to_pylist()`, or `read_next_batch()`:
 
+Each row must fit `batch_bytes` in compact UTF-8 JSON. The client rejects
+clearly oversized strings and collections before creating a serialized copy.
+The check includes large strings with JSON escaping, but cannot prevent every
+large temporary allocation. The source, driver and server can still allocate
+additional memory; this is not an RSS limit. Previously committed batches remain
+committed if a later row fails.
+Custom Python string and collection subclasses may bypass the early check;
+the exact serialized byte limit still applies afterward.
+
+If one row cannot fit, the client raises `BatchTooLargeError`, a `ValueError`
+with `item_type` (`node`, `edge`, or `entity_id`) and `limit_bytes` fields.
+This is client-side validation; it is separate from the server's
+`MemoryPressureError`. Reduce that item's size before retrying and reconcile
+any earlier batches that already committed.
+
+```python
+from brainwire import BatchTooLargeError
+
+try:
+    graph.load_nodes("Ticket", rows)
+except BatchTooLargeError as error:
+    print(error.item_type, error.limit_bytes)
+    # Quarantine the item or choose an appropriate limit before retrying.
+```
+
 ```python
 graph.load_nodes("Ticket", (
     {"entity_id":f"t-{i}", "status":"open", "tags":[]} for i in range(1000)

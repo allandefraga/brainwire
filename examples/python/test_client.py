@@ -1,6 +1,11 @@
 import unittest
+import tracemalloc
+import json
+import pickle
+import random
 from contextlib import contextmanager
 from examples.python.client import GraphClient, request_key
+from brainwire.client import _batch_budget_remaining
 
 
 class Result:
@@ -145,6 +150,257 @@ class Driver:
 
 
 class ClientTests(unittest.TestCase):
+    def test_oversized_batch_exposes_typed_validation_error(self):
+        from brainwire import BatchTooLargeError
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=64)
+        operations = [
+            ('node', lambda: graph.load_nodes('Ticket', [{'entity_id': 'a', 'data': 'x' * 1000}])),
+            ('edge', lambda: graph.load_edges('Ticket', 'LINKS', 'Ticket',
+                [{'source_id': 'a', 'target_id': 'b', 'data': 'x' * 1000}])),
+            ('entity_id', lambda: graph.delete_nodes('Ticket', ['x' * 1000])),
+            ('edge', lambda: graph.delete_edges('Ticket', 'LINKS', 'Ticket',
+                [{'source_id': 'x' * 1000, 'target_id': 'b'}])),
+            ('edge', lambda: graph.delete_keyed_edges('Ticket', 'LINKS', 'Ticket',
+                [{'source_id': 'a', 'target_id': 'b', 'key': {'event': 'x' * 1000}}])),
+        ]
+        for kind, operation in operations:
+            with self.subTest(kind=kind):
+                with self.assertRaises(BatchTooLargeError) as caught:
+                    operation()
+                self.assertIsInstance(caught.exception, ValueError)
+                self.assertEqual(caught.exception.item_type, kind)
+                self.assertEqual(caught.exception.limit_bytes, 64)
+                self.assertNotIn('x' * 1000, str(caught.exception))
+
+    def test_exact_encoded_overflow_uses_the_same_typed_error(self):
+        from brainwire import BatchTooLargeError
+        cases = [
+            (4, 'node', lambda graph: graph.load_nodes('Ticket', [{'entity_id': 'a'}])),
+            (6, 'edge', lambda graph: graph.load_edges('Ticket', 'LINKS', 'Ticket',
+                [{'source_id': 'a', 'target_id': 'b'}])),
+            (9, 'edge', lambda graph: graph.delete_keyed_edges('Ticket', 'LINKS', 'Ticket',
+                [{'source_id': 'a', 'target_id': 'b', 'key': {'event': 'x'}}])),
+        ]
+        for bound, kind, operation in cases:
+            with self.subTest(kind=kind, bound=bound):
+                driver = Driver()
+                with self.assertRaises(BatchTooLargeError) as caught:
+                    operation(GraphClient(driver, 'tickets', batch_bytes=bound))
+                self.assertEqual((caught.exception.item_type, caught.exception.limit_bytes), (kind, bound))
+                self.assertEqual(driver.write_count, 0)
+
+    def test_batch_error_survives_process_serialization(self):
+        from brainwire import BatchTooLargeError
+        original = BatchTooLargeError('node', 1024)
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertEqual((restored.item_type, restored.limit_bytes, str(restored)),
+                         ('node', 1024, str(original)))
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_oversized_batch_values_fail_without_serialization_copies(self):
+        large = 'x' * (8 << 20)
+        driver = Driver()
+        graph = GraphClient(driver, 'tickets', batch_bytes=1024)
+        requests = (
+            lambda: graph.load_nodes('Ticket', [{'entity_id': 'a', 'data': {'parts': [large]}}]),
+            lambda: graph.load_nodes('Ticket', [{'entity_id': 'a', 'acl': {'allow': [large]}}],
+                                     with_acl=True),
+            lambda: graph.load_edges('Ticket', 'LINKS', 'Ticket',
+                                     [{'source_id': 'a', 'target_id': 'b', 'data': [large]}]),
+            lambda: graph.delete_nodes('Ticket', [large]),
+            lambda: graph.delete_edges('Ticket', 'LINKS', 'Ticket',
+                                       [{'source_id': large, 'target_id': 'b'}]),
+            lambda: graph.delete_keyed_edges('Ticket', 'LINKS', 'Ticket',
+                [{'source_id': 'a', 'target_id': 'b', 'key': {'event': large}}]),
+        )
+        for request in requests:
+            tracemalloc.start()
+            try:
+                with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                    request()
+                peak = tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, 1 << 20)
+        self.assertEqual(driver.write_count, 0)
+
+    def test_oversized_later_row_preserves_committed_batch(self):
+        driver = Driver()
+        graph = GraphClient(driver, 'tickets', batch_size=1, batch_bytes=128)
+        rows = [{'entity_id': 'first'}, {'entity_id': 'second', 'data': ['x' * 1000]}]
+        with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+            graph.load_nodes('Ticket', rows)
+        self.assertEqual(len(driver.committed), 1)
+        self.assertEqual(driver.committed[0][0][1]['rows'][0]['entity_id'], 'first')
+
+    def test_oversized_identified_batch_never_opens_a_transaction(self):
+        driver = Driver()
+        graph = GraphClient(driver, 'tickets', batch_bytes=128)
+        rows = [{'entity_id': 'first'}, {'entity_id': 'second', 'data': ['x' * 1000]}]
+        with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+            graph.load_nodes('Ticket', rows, request_id='one-batch')
+        self.assertEqual(driver.write_count, 0)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_many_small_values_do_not_materialize_an_oversized_batch(self):
+        values = [0] * 600000
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=1 << 20)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                graph.load_nodes('Ticket', [{'entity_id': 'a', 'data': values}])
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires independent allocation tracking')
+    def test_many_properties_are_rejected_before_copying_the_mapping(self):
+        properties = {f'p{i}': 0 for i in range(50000)}
+        node = {'entity_id': 'a', **properties}
+        edge = {'source_id': 'a', 'target_id': 'b', **properties}
+        key = {name: 'v' for name in properties}
+        deletion = {'source_id': 'a', 'target_id': 'b', 'key': key}
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=1024)
+        for request in (lambda: graph.load_nodes('Ticket', [node]),
+                        lambda: graph.load_edges('Ticket', 'LINKS', 'Ticket', [edge]),
+                        lambda: graph.delete_keyed_edges('Ticket', 'LINKS', 'Ticket', [deletion])):
+            tracemalloc.start()
+            try:
+                with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                    request()
+                peak = tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, 1 << 20)
+
+        for request in (lambda: graph.delete_edges('Ticket', 'LINKS', 'Ticket', [edge]),
+                        lambda: graph.delete_keyed_edges('Ticket', 'LINKS', 'Ticket', [edge]),
+                        lambda: graph.load_nodes('Ticket', [{'entity_id': 'a', 'acl': properties}],
+                                                 with_acl=True)):
+            tracemalloc.start()
+            try:
+                with self.assertRaises(ValueError):
+                    request()
+                peak = tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, 1 << 20)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_escape_expansion_is_checked_without_large_json_copies(self):
+        text = '\x00' * 220000
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=1 << 20)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                graph.load_nodes('Ticket', [{'entity_id': 'a', 'text': text}])
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_combined_strings_are_checked_before_batch_serialization(self):
+        parts = ['x' * 300000] * 4
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=1 << 20)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                graph.load_nodes('Ticket', [{'entity_id': 'a', 'data': parts}])
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires independent allocation tracking')
+    def test_budget_is_shared_across_properties(self):
+        text = 'x' * 300000
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=1 << 20)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                graph.load_nodes('Ticket', [{'entity_id': 'a', 'one': text, 'two': text,
+                                             'three': text, 'four': text}])
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+
+    @unittest.skipIf(tracemalloc.is_tracing(), 'requires isolated allocation tracking')
+    def test_combined_unicode_strings_are_checked_before_serialization(self):
+        parts = ['é' * 100000] * 7
+        graph = GraphClient(Driver(), 'tickets', batch_bytes=1 << 20)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'batch byte limit'):
+                graph.load_nodes('Ticket', [{'entity_id': 'a', 'data': parts}])
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1 << 20)
+
+    def test_batch_precheck_never_rejects_values_that_fit(self):
+        rng = random.Random(13)
+        def value(depth):
+            if depth and rng.randrange(3) == 0:
+                return [value(depth - 1) for _ in range(rng.randrange(5))]
+            if depth and rng.randrange(3) == 0:
+                return {str(index): value(depth - 1) for index in range(rng.randrange(5))}
+            return rng.choice([None, True, 0, 3.5, '', 'é🙂', '\n'])
+        for _ in range(1000):
+            item = value(4)
+            row = {'entity_id': 'a', 'data': item}
+            normalized = {'entity_id': 'a', 'properties': {'data': item}}
+            bound = len(json.dumps(normalized, ensure_ascii=False, separators=(',', ':')).encode())
+            self.assertEqual(GraphClient(Driver(), 'tickets', batch_bytes=bound)
+                             .load_nodes('Ticket', [row]), 1)
+            edge = {'source_id': 'a', 'target_id': 'b', 'data': item}
+            normalized_edge = {'source_id': 'a', 'target_id': 'b', 'properties': {'data': item}}
+            edge_bound = len(json.dumps(normalized_edge, ensure_ascii=False, separators=(',', ':')).encode())
+            self.assertEqual(GraphClient(Driver(), 'tickets', batch_bytes=edge_bound)
+                             .load_edges('Ticket', 'LINKS', 'Ticket', [edge]), 1)
+
+    def test_batch_precheck_handles_unicode_and_escaping_across_chunks(self):
+        for length in (4095, 4096, 4097, 8192, 8193):
+            value = ('é\n"' * (length // 3 + 1))[:length]
+            size = len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode())
+            with self.subTest(length=length):
+                self.assertGreaterEqual(_batch_budget_remaining(value, size), 0)
+                self.assertLess(_batch_budget_remaining(value, size - 1), 0)
+
+    def test_acl_batch_accepts_an_exact_utf8_byte_budget(self):
+        row = {'entity_id': 'a', 'data': ['é'], 'acl': {'allow': ['team:é']}}
+        normalized = {'entity_id': 'a', 'properties': {'data': ['é']},
+                      'acl': {'label': 'Ticket', 'entityId': 'a', 'allow': ['team:é']}}
+        bound = len(json.dumps(normalized, ensure_ascii=False, separators=(',', ':')).encode())
+        driver = Driver()
+        self.assertEqual(GraphClient(driver, 'tickets', batch_bytes=bound)
+                         .load_nodes('Ticket', [row], with_acl=True), 1)
+        self.assertEqual(len(driver.committed), 1)
+
+    def test_custom_container_lengths_do_not_reject_values_that_fit(self):
+        class Text(str):
+            def __len__(self):
+                return 1000000
+        class Items(list):
+            def __len__(self):
+                return 1000000
+        class Fields(dict):
+            def __len__(self):
+                return 1000000
+        for item in (Text('x'), Items([1]), Fields({'x': 1})):
+            normalized = {'entity_id': 'a', 'properties': {'data': item}}
+            bound = len(json.dumps(normalized, ensure_ascii=False, separators=(',', ':')).encode())
+            with self.subTest(item=type(item).__name__):
+                graph = GraphClient(Driver(), 'tickets', batch_bytes=bound)
+                self.assertEqual(graph.load_nodes('Ticket', [{'entity_id': 'a', 'data': item}]), 1)
+        row = Fields({'source_id': 'a', 'target_id': 'b'})
+        self.assertEqual(GraphClient(Driver(), 'tickets').delete_edges('Ticket', 'LINKS', 'Ticket', [row]), 1)
+        self.assertEqual(GraphClient(Driver(), 'tickets').load_edges('Ticket', 'LINKS', 'Ticket', [row]), 1)
+        node = Fields({'entity_id': 'a'})
+        self.assertEqual(GraphClient(Driver(), 'tickets').load_nodes('Ticket', [node]), 1)
+
     def test_run_cypher_uses_named_database_parameters_and_returns_materialized_records(self):
         driver = Driver()
         client = GraphClient(driver, "research")

@@ -29,6 +29,25 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-12: bounded batch ingestion and recovery
+
+- Reject obviously oversized rows before JSON serialization in node/edge
+  writes and deletions. Exact compact JSON byte accounting remains the final
+  authority. `BatchTooLargeError` reports the item type and limit, remains a
+  `ValueError`, and can cross Python worker processes. Driver/source/server
+  allocations, unusual Python subclasses and some aggregate inputs are not
+  bounded by the precheck.
+- Tested synthetic ingestion and recovery with 10,000 rows, multi-graph crash
+  rollback on one Docker volume, offline checkpoint corruption, and quorum
+  partition/restart with 500 records plus a retained-log-cap recovery case.
+  These local tests do not qualify multi-machine failover.
+- Python examples, script tests, Rust workspace tests, Clippy, formatting and
+  local deployment rendering passed. A 30-minute synthetic 1 GiB container
+  exercise passed with 1,002 nodes, 1,742 acknowledged writes and readbacks,
+  then restart and audit; it did not saturate memory or establish an RSS cap.
+- Next: finish the longer 10,002-node synthetic exercise, rerun final release
+  checks and qualify production-like 2/4/8 GiB workloads on a native Linux host.
+
 ## 2026-11-12: bounded context input validation
 
 - Reject IDs and search text longer than 4,096 characters before encoding or

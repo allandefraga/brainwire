@@ -15,6 +15,19 @@ from collections.abc import Mapping
 
 
 
+class BatchTooLargeError(ValueError):
+    """One input item cannot fit in the configured client-side byte budget."""
+
+    def __init__(self, item_type, limit_bytes):
+        self.item_type = item_type
+        self.limit_bytes = limit_bytes
+        label = 'entity ID' if item_type == 'entity_id' else item_type
+        super().__init__(f'one {label} exceeds the batch byte limit')
+
+    def __reduce__(self):
+        return type(self), (self.item_type, self.limit_bytes)
+
+
 class BrainwireError(RuntimeError):
     """A recognized Brainwire server failure, retaining the driver exception."""
 
@@ -94,27 +107,41 @@ def identifier(value):
     return value
 
 
-def _value(value, depth=0):
+def _value(value, depth=0, budget=None):
     if depth > 32:
         raise ValueError("value nesting exceeds 32")
-    if value is None or isinstance(value, (str, bool)):
-        return
-    if type(value) is int and -(1 << 63) <= value < (1 << 63):
-        return
-    if type(value) is float and math.isfinite(value):
+    if (value is None or isinstance(value, (str, bool)) or
+            (type(value) is int and -(1 << 63) <= value < (1 << 63)) or
+            (type(value) is float and math.isfinite(value))):
+        if budget is not None:
+            if type(value) is str and len(value) < 4096 and len(value) * 6 + 2 <= budget[0]:
+                budget[0] -= len(value) + 2
+            else:
+                _charge_batch_value(budget, value)
         return
     if isinstance(value, list):
+        if type(value) is not list:
+            for item in value:
+                _value(item, depth + 1)
+            return
+        _charge_batch_container(budget, len(value), mapping=False)
         for item in value:
-            _value(item, depth + 1)
+            _value(item, depth + 1, budget)
         return
     if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-        for item in value.values():
-            _value(item, depth + 1)
+        if type(value) is not dict:
+            for item in value.values():
+                _value(item, depth + 1)
+            return
+        _charge_batch_container(budget, len(value), mapping=True)
+        for key, item in value.items():
+            _charge_batch_value(budget, key)
+            _value(item, depth + 1, budget)
         return
     raise ValueError("use null, bool, int64, finite float, string, list or string-keyed map")
 
 
-def _properties(properties, remove=()):
+def _properties(properties, remove=(), *, budget=None):
     if not isinstance(properties, dict) or isinstance(remove, (str, bytes)):
         raise ValueError("properties must be a dict; remove must be a collection of names")
     result = dict(properties)
@@ -127,7 +154,7 @@ def _properties(properties, remove=()):
         identifier(name)
         if name == "entity_id":
             raise ValueError("entity_id is immutable")
-        _value(value)
+        _value(value, budget=budget)
     return result
 
 
@@ -153,11 +180,63 @@ def _entity(value):
     return value
 
 
-def _acl_options(label, entity_id, acl):
+def _batch_budget_remaining(value, remaining):
+    # Subtract a lower bound; exact compact JSON size is checked afterward.
+    if isinstance(value, str):
+        if type(value) is not str:
+            return remaining
+        minimum = len(value) + 2
+        if minimum > remaining:
+            return -1
+        if len(value) >= 4096 or len(value) * 6 + 2 > remaining:
+            if value.isascii() and not re.search(r'["\\\x00-\x1f]', value):
+                return remaining - minimum
+            size = 2
+            for start in range(0, len(value), 4096):
+                part = json.dumps(value[start:start + 4096], ensure_ascii=False).encode('utf-8')
+                size += len(part) - 2
+                if size > remaining:
+                    return -1
+            return remaining - size
+        return remaining - minimum
+    return remaining - 1
+
+
+def _charge_batch_value(budget, value):
+    if budget is not None:
+        budget[0] = _batch_budget_remaining(value, budget[0])
+        if budget[0] < 0:
+            raise BatchTooLargeError(budget[1], budget[2])
+
+
+def _charge_batch_container(budget, length, *, mapping):
+    if budget is None:
+        return
+    minimum = ((5 if mapping else 2) * length + 1) if length else 2
+    if minimum > budget[0]:
+        raise BatchTooLargeError(budget[1], budget[2])
+    budget[0] -= 2 + max(0, length - 1) + (length if mapping else 0)
+
+
+def _has_exact_keys(row, names):
+    if not isinstance(row, dict):
+        return False
+    if type(row) is not dict:
+        return set(row) == set(names)
+    return len(row) == len(names) and all(name in row for name in names)
+
+
+def _acl_options(label, entity_id, acl, *, budget=None):
     names = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
-    if not isinstance(acl, dict) or not set(acl).issubset(names):
+    if not isinstance(acl, dict):
         raise ValueError("invalid ACL metadata fields")
-    _value(acl)
+    if type(acl) is dict:
+        invalid = len(acl) > len(names) or any(name not in names for name in acl)
+    else:
+        invalid = not set(acl).issubset(names)
+    if invalid:
+        raise ValueError("invalid ACL metadata fields")
+    _value(acl, budget=budget)
     return {"label": identifier(label), "entityId": _entity(entity_id), **acl}
 
 
@@ -455,13 +534,18 @@ class GraphClient:
                 raise ValueError("each node row must be a dict containing entity_id")
             if ("acl" in row) != with_acl:
                 raise ValueError("rows carry an acl dict exactly when with_acl=True")
-            props = _properties({key: value for key, value in row.items() if key not in ("entity_id", "acl")})
+            # Each valid property needs at least a quoted name, colon and value.
+            if type(row) is dict and 5 * (len(row) - (2 if with_acl else 1)) > self.batch_bytes:
+                raise BatchTooLargeError("node", self.batch_bytes)
+            budget = [self.batch_bytes, "node", self.batch_bytes]
+            props = _properties({key: value for key, value in row.items() if key not in ("entity_id", "acl")}, budget=budget)
             normalized = {"entity_id": _entity(row["entity_id"]), "properties": props}
+            _charge_batch_value(budget, normalized["entity_id"])
             if with_acl:
-                normalized["acl"] = _acl_options(label, row["entity_id"], row["acl"])
+                normalized["acl"] = _acl_options(label, row["entity_id"], row["acl"], budget=budget)
             encoded = json.dumps(normalized, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
             if len(encoded) > self.batch_bytes:
-                raise ValueError("one node exceeds the batch byte limit")
+                raise BatchTooLargeError("node", self.batch_bytes)
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
                 if request_id is not None:
                     raise ValueError("identified input must fit in one bounded batch")
@@ -503,10 +587,12 @@ class GraphClient:
 
         for entity_id in entity_ids:
             entity_id = _entity(entity_id)
+            budget = [self.batch_bytes, "entity_id", self.batch_bytes]
+            _charge_batch_value(budget, entity_id)
             encoded = json.dumps(entity_id, ensure_ascii=False,
                                  separators=(",", ":")).encode("utf-8")
             if len(encoded) > self.batch_bytes:
-                raise ValueError("one entity ID exceeds the batch byte limit")
+                raise BatchTooLargeError("entity_id", self.batch_bytes)
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
                 total += self._write(lambda tx, ids=batch: apply(tx, ids))
                 batch, size = [], 0
@@ -547,12 +633,15 @@ class GraphClient:
             return tx.run(query, rows=records).single()["deleted"]
 
         for row in rows:
-            if not isinstance(row, dict) or set(row) != {"source_id", "target_id"}:
+            if not _has_exact_keys(row, ("source_id", "target_id")):
                 raise ValueError("each deletion row must contain only source_id and target_id")
             row = {"source_id": _entity(row["source_id"]), "target_id": _entity(row["target_id"])}
+            budget = [self.batch_bytes, "edge", self.batch_bytes]
+            _charge_batch_value(budget, row["source_id"])
+            _charge_batch_value(budget, row["target_id"])
             encoded = json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             if len(encoded) > self.batch_bytes:
-                raise ValueError("one edge exceeds the batch byte limit")
+                raise BatchTooLargeError("edge", self.batch_bytes)
             if batch and size + len(encoded) > self.batch_bytes:
                 total += self._write(lambda tx, items=batch: apply(tx, items))
                 batch, size = [], 0
@@ -608,17 +697,22 @@ class GraphClient:
             return count
 
         for row in rows:
-            if not isinstance(row, dict) or set(row) != {"source_id", "target_id", "key"}:
+            if not _has_exact_keys(row, ("source_id", "target_id", "key")):
                 raise ValueError("each keyed deletion row must contain only source_id, target_id and key")
             key = row["key"]
             if (not isinstance(key, dict) or not key
                     or any(not isinstance(value, str) or not value for value in key.values())):
                 raise ValueError("key must be a nonempty dictionary of nonempty strings")
+            if type(key) is dict and 5 * len(key) > self.batch_bytes:
+                raise BatchTooLargeError("edge", self.batch_bytes)
+            budget = [self.batch_bytes, "edge", self.batch_bytes]
             normalized = {"source_id": _entity(row["source_id"]), "target_id": _entity(row["target_id"]),
-                          "key": _properties(key)}
+                          "key": _properties(key, budget=budget)}
+            _charge_batch_value(budget, normalized["source_id"])
+            _charge_batch_value(budget, normalized["target_id"])
             encoded = json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             if len(encoded) > self.batch_bytes:
-                raise ValueError("one edge exceeds the batch byte limit")
+                raise BatchTooLargeError("edge", self.batch_bytes)
             if batch and size + len(encoded) > self.batch_bytes:
                 total += self._write(lambda tx, items=batch: apply(tx, items))
                 batch, size = [], 0
@@ -690,16 +784,23 @@ class GraphClient:
                 on_batch(batches, committed_rows)
 
         for row in _input_rows(rows, self.batch_size):
-            if not isinstance(row, dict) or not {"source_id", "target_id"}.issubset(row):
+            if (not isinstance(row, dict) or
+                    (type(row) is dict and ("source_id" not in row or "target_id" not in row)) or
+                    (type(row) is not dict and not {"source_id", "target_id"}.issubset(row))):
                 raise ValueError("each edge row must contain source_id and target_id")
+            if type(row) is dict and 5 * (len(row) - 2) > self.batch_bytes:
+                raise BatchTooLargeError("edge", self.batch_bytes)
+            budget = [self.batch_bytes, "edge", self.batch_bytes]
             props = _properties({key: value for key, value in row.items()
-                                 if key not in ("source_id", "target_id")})
+                                 if key not in ("source_id", "target_id")}, budget=budget)
             normalized = {"source_id": _entity(row["source_id"]),
                           "target_id": _entity(row["target_id"]), "properties": props}
+            _charge_batch_value(budget, normalized["source_id"])
+            _charge_batch_value(budget, normalized["target_id"])
             encoded = json.dumps(normalized, ensure_ascii=False, allow_nan=False,
                                  separators=(",", ":")).encode()
             if len(encoded) > self.batch_bytes:
-                raise ValueError("one edge exceeds the batch byte limit")
+                raise BatchTooLargeError("edge", self.batch_bytes)
             if batch and (len(batch) == self.batch_size or size + len(encoded) > self.batch_bytes):
                 if request_id is not None:
                     raise ValueError("identified input must fit in one bounded batch")
