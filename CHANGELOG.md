@@ -5,8 +5,8 @@
 - Narrow provider-ranked context to an optional bounded set of candidate IDs
   before authorization and reciprocal-rank fusion. The scope is supplied by
   the application and is not a permission boundary or a shared snapshot.
-- Add a runnable synthetic company-context example with typed nodes, decisions,
-  source references and a project-scoped lookup.
+- Add a runnable synthetic company-context example with a declared ontology,
+  decisions, source references and a project-scoped lookup.
 - Refresh the logo, documentation site and terminal palette. The terminal
   remains a read-only workspace for the capabilities described in its guides.
 
