@@ -68,6 +68,18 @@ class SearchTests(unittest.TestCase):
         self.assertNotIn("hidden", str(result))
         self.assertNotIn("source://b", str(result))
 
+    def test_scoped_fusion_recalculates_each_provider_rank(self):
+        graph = Graph([{"id": "a"}, {"id": "b"}, {"id": "outside"}])
+        result = search_context(graph, "Document", "release blocker",
+            providers={"lexical": provider(["outside", "a", "b"]),
+                       "vector": provider(["b", "outside", "a"])},
+            candidate_ids=["a", "b"])
+        self.assertEqual([row["entity_id"] for row in result["records"]], ["a", "b"])
+        self.assertEqual(result["records"][0]["matches"],
+                         [{"provider": "lexical", "rank": 1}, {"provider": "vector", "rank": 2}])
+        self.assertAlmostEqual(result["records"][0]["score"], 1 / 61 + 1 / 62)
+        self.assertEqual(set(graph.calls[0][1]["ids"]), {"a", "b"})
+
     def test_empty_or_invalid_candidate_scope_does_not_call_provider(self):
         called = []
         def callback(*args, **kwargs):
