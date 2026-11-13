@@ -183,16 +183,20 @@ providers. Narrow results to an explicit set of IDs before ranking:
 ```python
 from brainwire import search_context
 
-# lexical_search is an application-provided callback returning ranked IDs.
+# Synthetic fixture; replace it with your own search provider.
+def sample_provider(query, *, graph_name, label, limit, timeout):
+    return ["customer-1"]
+
 result = search_context(
-    graph, "Customer", "Ada", providers={"lexical": lexical_search},
+    graph, "Customer", "Ada", providers={"sample": sample_provider},
     candidate_ids=["customer-1"], properties=["name"],
 )
+print(result["records"])
 ```
 
 Run this inside the connection block above. The scope narrows candidates;
-normal graph authorization still applies. The application supplies the search
-provider, and separate calls do not share a snapshot. See [context for agents](docs/context-api.md).
+normal graph authorization still applies. This fixture does not perform text
+or vector search, and separate calls do not share a snapshot. See [context for agents](docs/context-api.md).
 
 ### Explore in the terminal
 
