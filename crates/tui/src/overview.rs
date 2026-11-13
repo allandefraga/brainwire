@@ -247,14 +247,14 @@ fn render_disk(
                         if i == state.graph { ">" } else { " " },
                         terminal_text(&g.name)
                     ),
-                    text_style(if i == state.graph { GREEN } else { PALE }, no_color),
+                    text_style(if i == state.graph { ACCENT } else { PALE }, no_color),
                 )
             })
             .collect::<Vec<_>>();
         frame.render_widget(
             Paragraph::new(lines).block(panel(
                 lang.choose("Grafos • ←→", "Graphs • ←→"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
             cols[0],
@@ -282,7 +282,7 @@ fn render_disk(
                     if i == state.file { ">" } else { " " },
                     file.kind
                 ),
-                text_style(if i == state.file { GREEN } else { PALE }, no_color),
+                text_style(if i == state.file { ACCENT } else { PALE }, no_color),
             ));
         }
         if graph.files.is_empty() {
@@ -302,7 +302,7 @@ fn render_disk(
             }
         );
         frame.render_widget(
-            Paragraph::new(lines).block(panel("", GREEN, no_color).title(title)),
+            Paragraph::new(lines).block(panel("", ACCENT, no_color).title(title)),
             cols[1],
         );
     }
@@ -354,7 +354,7 @@ fn render_disk(
             .wrap(Wrap { trim: false })
             .block(panel(
                 lang.choose("FLUXO DE ARMAZENAMENTO", "STORAGE FLOW"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
         parts[1],
@@ -397,7 +397,7 @@ fn render_overview(
     let mut header = vec![
         Span::styled(
             " BRAINWIRE ",
-            text_style(GREEN, no_color).add_modifier(Modifier::BOLD),
+            text_style(ACCENT, no_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("/ {} ", view.display(lang)),
@@ -450,7 +450,7 @@ fn render_overview(
                     Span::styled(
                         format!(" {} {} ", index + 1, label),
                         if selected {
-                            text_style(GREEN, no_color)
+                            text_style(ACCENT, no_color)
                                 .add_modifier(Modifier::REVERSED | Modifier::BOLD)
                         } else {
                             text_style(PALE, no_color)
@@ -464,7 +464,7 @@ fn render_overview(
     frame.render_widget(
         Paragraph::new(vec![header, nav]).block(panel(
             lang.choose("TELAS · 1-5 ou Tab", "VIEWS · 1-5 or Tab"),
-            GREEN,
+            ACCENT,
             no_color,
         )),
         sections[0],
@@ -489,7 +489,7 @@ fn render_overview(
         } else {
             frame.render_widget(
                 Paragraph::new(lang.choose("Nenhum grafo encontrado.", "No graphs found."))
-                    .block(panel(view.display(lang), GREEN, no_color)),
+                    .block(panel(view.display(lang), ACCENT, no_color)),
                 sections[1],
             );
         }
@@ -510,7 +510,7 @@ fn render_overview(
                     " ↑↓ type · Enter details · a catalog · 1-5 views · ? help · q quit",
                 )
             })
-            .block(panel("", GREEN, no_color)),
+            .block(panel("", ACCENT, no_color)),
             sections[2],
         );
         if state.help {
@@ -533,7 +533,7 @@ fn render_overview(
                     " ←→ graph · ↑↓ file · F1 details · 1-5 views · ? help · q quit",
                 )
             })
-            .block(panel("", GREEN, no_color)),
+            .block(panel("", ACCENT, no_color)),
             sections[2],
         );
         if state.help {
@@ -580,7 +580,7 @@ fn render_overview(
         lines.push(Line::styled(
             line,
             if index == selected {
-                text_style(GREEN, no_color).add_modifier(Modifier::BOLD)
+                text_style(ACCENT, no_color).add_modifier(Modifier::BOLD)
             } else {
                 text_style(PALE, no_color)
             },
@@ -589,7 +589,7 @@ fn render_overview(
     frame.render_widget(
         Paragraph::new(lines).block(panel(
             lang.choose("Grafos nomeados", "Named graphs"),
-            GREEN,
+            ACCENT,
             no_color,
         )),
         columns[0],
@@ -680,7 +680,7 @@ fn render_overview(
             " ↑↓ grafo · PgUp/Dn rola · 1-5 telas · ? ajuda · q sai",
             " ↑↓ graph · PgUp/Dn scroll · 1-5 views · ? help · q quit",
         ))
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         sections[2],
     );
     if state.help {
@@ -752,7 +752,7 @@ fn render_page_help(
             lang.choose("? ou Esc fecha a ajuda.", "? or Esc closes help.")
         ))
         .wrap(Wrap { trim: false })
-        .block(panel(title, GREEN, no_color)),
+        .block(panel(title, ACCENT, no_color)),
         popup,
     );
 }

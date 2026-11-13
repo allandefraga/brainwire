@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.0-beta.1 — experimental candidate
+
+- Narrow provider-ranked context to an optional bounded set of candidate IDs
+  before authorization and reciprocal-rank fusion. The scope is supplied by
+  the application and is not a permission boundary or a shared snapshot.
+- Add a runnable synthetic company-context example with typed nodes, decisions,
+  source references and a project-scoped lookup.
+- Refresh the logo, documentation site and terminal palette. The terminal
+  remains a read-only workspace for the capabilities described in its guides.
+
+
 ## 0.18.0-beta.6 — experimental candidate
 
 - Reject clearly oversized strings and collections in node and edge batch

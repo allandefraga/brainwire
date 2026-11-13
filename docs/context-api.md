@@ -171,6 +171,25 @@ historical `AS OF` reads.
 
 ## Search with configured providers
 
+For a company-brain workflow, an application can first collect a bounded set
+of IDs connected to a project or team using its own authorized graph query.
+Pass those IDs as `candidate_ids` to narrow provider results before ranking:
+
+```python
+result = search_context(graph, "Document", "release blocker",
+    providers={"lexical": lexical_search, "vector": vector_search},
+    candidate_ids=["doc-1", "doc-2"], properties=["title"], limit=10)
+```
+
+The optional scope accepts an ordinary list or tuple of at most 100 IDs and
+256 KiB of distinct UTF-8 ID bytes. An empty list returns no records without
+calling a provider. This is application-supplied narrowing,
+not authorization: graph credentials and visibility are still checked on
+read. A separate scope query and search do not share a transaction snapshot.
+Providers still return their own top 100 results before filtering, so relevant
+items outside that top set may be missed; this is not native indexed hybrid
+search. Provider callbacks receive the query and graph namespace as before.
+
 `search_context` combines ranked candidate IDs from application-configured
 providers. It reads the candidates through the caller's graph credentials,
 removes hidden or missing records, then ranks the visible records and returns

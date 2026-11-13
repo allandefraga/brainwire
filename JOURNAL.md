@@ -29,6 +29,33 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-13: agent context scope and visual refresh
+
+- Reviewed the public reference product's typed schema, branch workflow,
+  provider fusion and object-storage design. Brainwire continues to use
+  RocksDB and does not claim equivalent branches, native hybrid indexes or
+  object-storage-native operation. The new agent context roadmap identifies
+  those gaps.
+- `search_context` can narrow provider-ranked IDs to a bounded explicit list
+  before existing authenticated graph reads and ranking. Scope is not an ACL
+  or a shared snapshot; providers can return results outside it and their top-k
+  can limit recall. Unit tests and an authenticated two-identity Bolt test
+  cover visible, hidden, out-of-scope, invalid, empty and oversized inputs.
+- Added a synthetic company-context example with a declared ontology, project
+  scope, decision evidence and source link. A temporary server acceptance test
+  verifies repeated seeding, scoped context and source traversal.
+- Refreshed logo assets, README, documentation site and terminal palette with
+  a neutral and cobalt direction. Inspected desktop and narrow browser renders;
+  the original observatory panel composition and no-color behavior remain.
+- Rust workspace tests and Clippy, 331 Python tests (seven skipped), 132 script
+  tests, docs checks, protected access, local quorum partition/recovery,
+  pressure admission and Docker retained-volume recovery passed. A candidate
+  wheel and the company example were verified locally.
+- A 15-minute synthetic mixed read/write/recovery diagnostic is in progress;
+  finish it, record results and run final publication checks before release.
+- Next: qualify representative capacity and multi-machine failover; native
+  ANN/BM25, historical graph revisions and graph branch/merge remain open.
+
 ## 2026-11-12: bounded batch ingestion and recovery
 
 - Reject obviously oversized rows before JSON serialization in node/edge

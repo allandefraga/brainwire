@@ -39,11 +39,11 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
     let header = Line::from(vec![
         Span::styled(
             " ●─●─● ",
-            style(GREEN, no_color).add_modifier(Modifier::BOLD),
+            style(ACCENT, no_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "BRAINWIRE",
-            style(GREEN, no_color).add_modifier(Modifier::BOLD),
+            style(ACCENT, no_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             app.lang
@@ -60,7 +60,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
         ),
     ]);
     frame.render_widget(
-        Paragraph::new(header).block(block("", GREEN, no_color)),
+        Paragraph::new(header).block(block("", ACCENT, no_color)),
         sections[0],
     );
     let body = Layout::default()
@@ -180,7 +180,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
             frame.render_widget(
                 Paragraph::new(app.query.chars().skip(app.query_scroll).collect::<String>())
                     .wrap(Wrap { trim: false })
-                    .block(block(&title, GREEN, no_color)),
+                    .block(block(&title, ACCENT, no_color)),
                 query_parts[0],
             );
             let result = if app.result.is_empty() {
@@ -246,7 +246,7 @@ pub fn render(frame: &mut Frame, app: &App, no_color: bool) {
                 )
             },
             if app.focus == Focus::Inspector {
-                GREEN
+                ACCENT
             } else {
                 CYAN
             },
@@ -350,7 +350,7 @@ fn shortcut_line(items: &[(&str, &str)], no_color: bool) -> Line<'static> {
                 [
                     Span::styled(
                         format!(" {key} "),
-                        style(GREEN, no_color).add_modifier(Modifier::BOLD),
+                        style(ACCENT, no_color).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(format!("{label} "), style(PALE, no_color)),
                 ]
@@ -399,7 +399,7 @@ fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
     ] {
         lines.push(Line::from(Span::styled(
             label,
-            style(GREEN, no_color).add_modifier(Modifier::BOLD),
+            style(ACCENT, no_color).add_modifier(Modifier::BOLD),
         )));
         lines.extend(text.lines().map(Line::from));
         lines.push(Line::from(""));
@@ -418,7 +418,7 @@ fn help_overlay(frame: &mut Frame, app: &App, body: Rect, no_color: bool) {
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .block(block(&title, GREEN, no_color)),
+            .block(block(&title, ACCENT, no_color)),
         area,
     );
 }
@@ -486,16 +486,16 @@ fn graph(frame: &mut Frame, app: &App, area: Rect, no_color: bool, mini: bool) {
                         x2,
                         y2,
                         color: color(if incident {
-                            GREEN
+                            ACCENT
                         } else {
-                            Color::Rgb(30, 79, 66)
+                            Color::Rgb(50, 67, 96)
                         }),
                     });
                     if incident && !mini {
                         ctx.print(
                             (x1 + x2) / 2.0,
                             (y1 + y2) / 2.0,
-                            Span::styled("*", style(GREEN, no_color)),
+                            Span::styled("*", style(ACCENT, no_color)),
                         );
                     }
                 }
@@ -529,7 +529,7 @@ fn graph(frame: &mut Frame, app: &App, area: Rect, no_color: bool, mini: bool) {
                         if selected {
                             selected_style(no_color)
                         } else {
-                            style(if node.id < 12 { GREEN } else { CYAN }, no_color)
+                            style(if node.id < 12 { ACCENT } else { CYAN }, no_color)
                         },
                     ),
                 );
@@ -561,7 +561,7 @@ fn disk(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
             "Disco e arquivos /data/sandbox/",
             "Disk & Files /data/sandbox/",
         ),
-        GREEN,
+        ACCENT,
         no_color,
     );
     let inner = browser.inner(rows[0]);
@@ -571,7 +571,7 @@ fn disk(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
         let split = Layout::horizontal([Constraint::Length(21), Constraint::Min(1)]).split(inner);
         let tree = vec![
             Line::from("▼ /data"),
-            Line::styled(" └─ sandbox", style(GREEN, no_color)),
+            Line::styled(" └─ sandbox", style(ACCENT, no_color)),
             Line::from("    ├─ graphs"),
             Line::from("    ├─ checkpoints"),
             Line::from("    └─ exports"),
@@ -661,7 +661,7 @@ fn disk(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
             scrolled_text(detail, cols[1], app.inspector_scroll).block(block(
                 app.lang.choose("Arquivo selecionado", "Selected file"),
                 if app.focus == Focus::Inspector {
-                    GREEN
+                    ACCENT
                 } else {
                     CYAN
                 },
@@ -675,7 +675,7 @@ fn memory(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
     let panel = block(
         app.lang
             .choose("Memória • cenário sintético", "Memory • synthetic scenario"),
-        GREEN,
+        ACCENT,
         no_color,
     );
     let inner = panel.inner(area);
@@ -700,7 +700,7 @@ fn memory(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
     {
         frame.render_widget(
             Paragraph::new(format!("\n {value}"))
-                .style(style(GREEN, no_color).add_modifier(Modifier::BOLD))
+                .style(style(ACCENT, no_color).add_modifier(Modifier::BOLD))
                 .block(block(title, CYAN, no_color)),
             cards[i],
         );
@@ -747,7 +747,7 @@ fn memory(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
             Line::styled(
                 app.lang
                     .choose("CACHE 10 GiB configurado", "CACHE 10 GiB budget"),
-                style(GREEN, no_color),
+                style(ACCENT, no_color),
             ),
             Line::from("┌───────────────────────────────────────────┐"),
             Line::from(format!(
@@ -785,7 +785,7 @@ fn memory(frame: &mut Frame, app: &App, area: Rect, no_color: bool) {
                     "11.5 GiB usados / 4.5 GiB livres",
                     "11.5 GiB used / 4.5 GiB headroom",
                 ))
-                .gauge_style(style(GREEN, no_color))
+                .gauge_style(style(ACCENT, no_color))
                 .block(block(
                     app.lang
                         .choose("Contêiner • simulado", "Container • simulated"),
@@ -843,7 +843,7 @@ fn storage_flow(frame: &mut Frame, area: Rect, no_color: bool, lang: Language) {
     let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).split(inner);
     let stages = Layout::horizontal([Constraint::Percentage(25); 4]).split(parts[0]);
     for (i, name) in ["MEMTABLE →", "L0 →", "L1 →", "L2"].iter().enumerate() {
-        let color = if i == 0 { GREEN } else { CYAN };
+        let color = if i == 0 { ACCENT } else { CYAN };
         let stage = Rect::new(
             stages[i].x + 1,
             stages[i].y + 1,

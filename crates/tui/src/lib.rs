@@ -30,21 +30,21 @@ mod ui;
 pub use overview::{run_overview, GraphSummary, StorageFileSummary};
 pub use ui::render;
 
-const GREEN: Color = Color::Rgb(0x65, 0xff, 0x54);
-const BG: Color = Color::Rgb(0x09, 0x10, 0x0e);
-const CYAN: Color = Color::Rgb(0x77, 0xcc, 0xc6);
-const PALE: Color = Color::Rgb(0xe7, 0xf0, 0xeb);
+const ACCENT: Color = Color::Rgb(0x91, 0xb2, 0xff);
+const BG: Color = Color::Rgb(0x10, 0x14, 0x1d);
+const CYAN: Color = Color::Rgb(0x93, 0xc6, 0xd1);
+const PALE: Color = Color::Rgb(0xec, 0xf0, 0xf7);
 const AMBER: Color = Color::Rgb(0xe8, 0xbd, 0x58);
-const BORDER: Color = Color::Rgb(0x30, 0x4a, 0x3e);
-const MUTED: Color = Color::Rgb(0x96, 0xad, 0xa1);
-const SELECTED_BG: Color = Color::Rgb(0x16, 0x35, 0x22);
+const BORDER: Color = Color::Rgb(0x40, 0x4c, 0x60);
+const MUTED: Color = Color::Rgb(0xb1, 0xbb, 0xc9);
+const SELECTED_BG: Color = Color::Rgb(0x25, 0x35, 0x58);
 
 fn selection_style(no_color: bool) -> Style {
     if no_color {
         Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
     } else {
         Style::default()
-            .fg(GREEN)
+            .fg(ACCENT)
             .bg(SELECTED_BG)
             .add_modifier(Modifier::BOLD)
     }

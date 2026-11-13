@@ -54,6 +54,46 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(result["sources"][0]["record"]["entity_id"], "a")
         self.assertTrue(graph.closed)
 
+    def test_candidate_scope_filters_before_authorization_and_ranking(self):
+        graph = Graph([{"id": "a", "title": "Visible", "url": "source://a"},
+                       {"id": "b", "title": "Outside", "url": "source://b"}])
+        result = search_context(graph, "Document", "release blocker",
+            providers={"lexical": provider(["b", "hidden", "a"])},
+            candidate_ids=["a", "hidden"], source_fields={"url": "url"},
+            properties=["title"])
+        self.assertEqual(graph.calls[0][1]["ids"], ["hidden", "a"])
+        self.assertEqual([row["entity_id"] for row in result["records"]], ["a"])
+        self.assertEqual(result["records"][0]["matches"], [{"provider": "lexical", "rank": 1}])
+        self.assertEqual([source["record"]["entity_id"] for source in result["sources"]], ["a"])
+        self.assertNotIn("hidden", str(result))
+        self.assertNotIn("source://b", str(result))
+
+    def test_empty_or_invalid_candidate_scope_does_not_call_provider(self):
+        called = []
+        def callback(*args, **kwargs):
+            called.append(True)
+            return []
+        graph = Graph()
+        result = search_context(graph, "Document", "release blocker",
+                                providers={"lexical": callback}, candidate_ids=[])
+        self.assertEqual(result["records"], [])
+        class LyingList(list):
+            def __len__(self):
+                return 1
+        for ids in ["a", list(range(101)), [""], ["a"] * 101, LyingList(["x"] * 101)]:
+            with self.subTest(ids=ids), self.assertRaises(ValueError):
+                search_context(graph, "Document", "release blocker",
+                               providers={"lexical": callback}, candidate_ids=ids)
+        self.assertEqual(called, [])
+        self.assertEqual(graph.calls, [])
+
+    def test_candidate_scope_bounds_encoded_identity_bytes(self):
+        graph = Graph()
+        with self.assertRaises(ContextLimitError):
+            search_context(graph, "Document", "release blocker", providers={"lexical": provider([])},
+                           candidate_ids=[str(i) + "x" * 4090 for i in range(65)])
+        self.assertEqual(graph.calls, [])
+
     def test_hidden_candidates_cannot_change_scores_ranks_or_sources(self):
         graph = Graph([{"id": "a", "title": "Visible", "url": "source://a"}])
         options = {"source_fields": {"url": "url"}, "properties": ["title"]}

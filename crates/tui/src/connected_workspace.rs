@@ -375,7 +375,7 @@ fn render(
         frame.render_widget(
             Paragraph::new(lines).block(panel(
                 lang.choose("NAVEGAÇÃO", "NAVIGATION"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
             columns[0],
@@ -443,7 +443,7 @@ fn render(
                 terminal_text(graph),
                 terminal_text(address)
             ))
-            .block(panel("", GREEN, no_color)),
+            .block(panel("", ACCENT, no_color)),
             sections[0],
         );
         let error = workspace.initial_errors[workspace.active.index()]
@@ -527,7 +527,7 @@ fn render(
     frame.render_widget(Clear, footer);
     frame.render_widget(
         Paragraph::new(vec![Line::from(views), Line::raw(navigation)])
-            .block(panel(controls, GREEN, no_color)),
+            .block(panel(controls, ACCENT, no_color)),
         footer,
     );
     if let Some(request) = &workspace.request {
@@ -545,7 +545,7 @@ fn render(
                 "INSPECIONAR PEDIDO / EXPERIMENTAL",
                 "INSPECT REQUEST / EXPERIMENTAL",
             ),
-            GREEN,
+            ACCENT,
             no_color,
         );
         let inner = border.inner(popup);
@@ -661,7 +661,7 @@ fn render(
                 lang.choose("? ou Esc fecha a ajuda.", "? or Esc closes help.")
             ))
             .wrap(Wrap { trim: false })
-            .block(panel(title, GREEN, no_color)),
+            .block(panel(title, ACCENT, no_color)),
             popup,
         );
     }
@@ -1139,7 +1139,7 @@ mod tests {
             .buffer()
             .content
             .iter()
-            .any(|c| c.fg == GREEN));
+            .any(|c| c.fg == ACCENT));
         assert!(terminal
             .backend()
             .buffer()

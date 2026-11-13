@@ -171,7 +171,7 @@ pub(crate) fn render_at(
             terminal_text(graph),
             terminal_text(address)
         ))
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         areas[0],
     );
     let mut status = format!(
@@ -214,7 +214,7 @@ pub(crate) fn render_at(
                 " r refresh • ? help • q quit",
             )
         })
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         areas[3],
     );
     if state.help {
@@ -296,7 +296,7 @@ pub(crate) fn render_at(
                 if no_color {
                     Style::default()
                 } else {
-                    Style::default().fg(GREEN)
+                    Style::default().fg(ACCENT)
                 },
             ),
         ]));
@@ -554,7 +554,7 @@ mod tests {
             .draw(|f| render(f, &state, "server", "graph", Language::En, false))
             .unwrap();
         let cells = &terminal.backend().buffer().content;
-        assert!(cells.iter().any(|c| c.fg == GREEN));
+        assert!(cells.iter().any(|c| c.fg == ACCENT));
         assert!(cells.iter().any(|c| c.fg == CYAN));
     }
     #[test]

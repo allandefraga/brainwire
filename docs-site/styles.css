@@ -230,3 +230,33 @@ footer a { color: var(--muted); text-decoration: none; }
   .result { padding: 12px 14px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Light documentation identity; terminal examples retain a dark surface. */
+:root { color-scheme: light; --bg: #f8f9fb; --surface: #eef0f4; --surface-raised: #e6e9ef; --line: #d9dde5; --line-strong: #bfc6d1; --text: #181b24; --muted: #525b69; --green: #174ed3; --mint: #1747b5; }
+.sidebar { background: #fff; }
+.nav-label, .sidebar-footer, .entry-number, .entry-grid b, dt, .use-case-list article > span, footer { color: #566172; }
+.section-nav a[aria-current="location"] { background: #e9efff; }
+.crumb, .release-line, .architecture-link, .layer, figcaption { color: #566172; }
+.button.primary { color: #fff; }
+.button.primary:hover { background: #103caa; border-color: #103caa; }
+.badge { background: #e9efff; color: #1747b5; border-color: #b8c9f2; }
+.entry-grid a, .guide-row a { background: #fff; }
+code { color: #23365e; }
+p code { background: #eef1f6; border-color: #d9dde5; }
+.code-block { background: #171a21; border-color: #272c36; }
+.code-header { color: #c0c8d4; border-color: #343b47; }
+.code-header button { color: #e3e8f1; border-color: #737c8b; }
+.code-block pre code { color: #f0f3f9; }
+.callout { background: #eaf0fc; border-color: #c8d5f0; }
+.callout-icon { border-color: #1747b5; }
+.result { background: #edf2fc; }
+.result > span { color: #526179; }
+.architecture-engine { background: #e8effd; border-color: #a9bde9; }
+.architecture-steps li { background: #fff; border-color: #c6d4ee; }
+.architecture-steps span, .architecture-storage code { color: #526179; }
+.use-case-list code { color: #315bad; }
+kbd { color: #244da8; border-color: #aab7cf; }
+.skip { color: #fff; }
+.hero-graph { margin: 32px 0 0; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: #eef0f4; }
+.hero-graph svg { display: block; width: 100%; height: auto; }
+.hero-graph figcaption { margin-top: 12px; padding-top: 10px; }

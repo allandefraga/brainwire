@@ -13,7 +13,7 @@ class ContextProviderError(RuntimeError):
 
 
 def search_context(graph, label, query_text, *, providers, source_fields=None,
-                   properties=(), limit=10, max_bytes=65536, timeout=10):
+                   properties=(), limit=10, max_bytes=65536, timeout=10, candidate_ids=None):
     """Fuse ranked provider IDs after one authorized graph read.
 
     Each callback receives query_text and keyword graph_name, label, limit=100,
@@ -21,6 +21,10 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
     namespace. Results
     are candidates, never authorization. Hidden/missing IDs are removed before
     ranks are assigned, so they cannot influence visible scores or citations.
+
+    candidate_ids optionally narrows providers to at most 100 explicit IDs.
+    It is not an authorization boundary or a shared graph snapshot; provider
+    top-k results outside the scope can reduce recall.
 
     The deadline is cooperative: callbacks must honor their supplied timeout.
     This helper cannot preempt a blocking provider or Bolt operation.
@@ -51,6 +55,20 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
         if len(set(fields)) != len(fields) or len(set([*names, *fields])) > 16:
             raise ValueError('source fields must be distinct and fit the 16-property bound')
 
+    scope = None
+    if candidate_ids is not None:
+        if type(candidate_ids) not in (list, tuple) or len(candidate_ids) > 100:
+            raise ValueError('candidate_ids must be a list or tuple of at most 100 IDs')
+        scope = set()
+        size = 0
+        for candidate in candidate_ids:
+            identity = _entity(candidate)
+            if identity not in scope:
+                size += len(identity.encode('utf-8'))
+                if size > 256 * 1024:
+                    raise ContextLimitError('candidate_ids exceed their ID byte bound')
+                scope.add(identity)
+
     result = {'graph': graph_name, 'method': 'provider_rrf_v1', 'rrf_k': 60,
               'providers': sorted(providers), 'limit': limit, 'records': [], 'sources': []}
 
@@ -58,6 +76,8 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
         _check_json_size(result, max_bytes, 'searched context exceeds max_bytes')
 
     output_bound()
+    if scope is not None and not scope:
+        return result
     deadline = time.monotonic() + timeout
 
     def remaining():
@@ -85,6 +105,8 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
         for value in values:
             remaining()
             identity = _entity(value)
+            if scope is not None and identity not in scope:
+                continue
             if identity in seen:
                 continue
             seen.add(identity)

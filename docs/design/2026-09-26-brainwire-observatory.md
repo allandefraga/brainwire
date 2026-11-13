@@ -1,5 +1,10 @@
 # Brainwire Observatory: terminal backoffice
 
+> Historical design record: the 2026-11-13 rebrand introduces a cobalt and
+> neutral palette for the site, logo and terminal. The backoffice composition
+> and usability goals below remain useful; references to green and the earlier
+> logo describe the original concept, not the current brand.
+
 Status: visual identity selected by Allan on 2026-09-26. The interactive
 [terminal demo](../tui-demo.md) now implements Graph, guided Query examples,
 Memory and Disk & Files with synthetic data, including a Braille graph canvas,

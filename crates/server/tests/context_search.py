@@ -106,6 +106,13 @@ limit = "2GiB"
                         empty = search_context(graph, "Document", "release blocker",
                             providers={"lexical": provider([hidden, "missing"])}, **options)
                         assert empty["records"] == empty["sources"] == []
+                        scoped = search_context(graph, "Document", "release blocker",
+                            providers={"lexical": provider(["shared", hidden, own])},
+                            candidate_ids=[hidden, own], **options)
+                        assert [row["entity_id"] for row in scoped["records"]] == [own]
+                        assert scoped["records"][0]["matches"][0]["rank"] == 1
+                        assert [source["record"]["entity_id"] for source in scoped["sources"]] == [own]
+                        assert f"source://{hidden}" not in json.dumps(scoped)
                         try:
                             graph.run_cypher("CREATE (:Document {entity_id:'forbidden'})")
                         except Neo4jError:
@@ -115,7 +122,7 @@ limit = "2GiB"
                 return {"result": "PASS", "synthetic": True,
                     "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                     "checks": ["two static ACL identities", "hidden leading provider IDs removed",
-                               "visible ranks and sources invariant", "read grants reject writes"],
+                               "visible ranks and sources invariant", "scoped candidates remain ACL filtered", "read grants reject writes"],
                     "limits": ["providers are synthetic callbacks, not external search indexes",
                                "no shared snapshot across providers and graph", "no performance qualification"]}
             finally:

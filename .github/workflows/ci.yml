@@ -132,6 +132,9 @@ jobs:
       - name: Verify code graph snapshots and replay
         run: python crates/server/tests/code_graph.py --binary target/debug/brainwire
 
+      - name: Verify the synthetic company-context example
+        run: python crates/server/tests/company_brain.py --binary target/debug/brainwire
+
       - name: Verify timeline pagination and ACL isolation
         run: python crates/server/tests/timeline_page.py --binary target/debug/brainwire
 

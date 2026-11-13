@@ -11,14 +11,14 @@
 
 <p align="center">
   <a href="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml"><img src="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-65ff54?style=flat-square" alt="Apache-2.0 license"></a>
-  <img src="https://img.shields.io/badge/status-experimental_beta-65ff54?style=flat-square" alt="Experimental beta">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2255e6?style=flat-square" alt="Apache-2.0 license"></a>
+  <img src="https://img.shields.io/badge/status-experimental_beta-2255e6?style=flat-square" alt="Experimental beta">
 </p>
 
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.18.0-beta.6 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.19.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
@@ -30,9 +30,9 @@ flowchart TB
     access --> engine["Graph engine · Rust<br/>Cypher · ontology · indexes · transactions"]
     engine --> store[("RocksDB<br/>WAL · cache · memtables · SST files")]
     store --> volume[("Persistent volume")]
-    classDef client fill:#101b14,stroke:#4e7659,color:#d6eddd;
-    classDef core fill:#15371f,stroke:#39e75f,color:#edfff1;
-    classDef storage fill:#101b14,stroke:#75b4a8,color:#d6eddd;
+    classDef client fill:#edf1f8,stroke:#97a9cc,color:#18243c;
+    classDef core fill:#dfe9ff,stroke:#2255e6,color:#142d67;
+    classDef storage fill:#edf1f8,stroke:#7b91bc,color:#18243c;
     class app,tui client;
     class bolt,access,engine core;
     class store,volume storage;
@@ -81,6 +81,8 @@ for local durability, memory budgets and the current settings.
 - **Timelines:** model explicit events with stable keys and page through them in the Python example.
 - **Code graphs:** extract local Python structure and explore paths and source links.
 
+Try the [synthetic company context example](examples/company_brain/README.md) to connect a project, decision and source. See the [agent context roadmap](docs/agent-context-roadmap.md) for what exists and what is next.
+
 See the [architecture](docs/architecture.md), [agent context](docs/context-api.md),
 [Cypher guide](docs/local-cypher.md) and [all documentation](docs/README.md).
 
@@ -99,9 +101,9 @@ For encrypted shared deployments, see [TLS and private CA setup](docs/protected-
 Install Git and Docker with Compose, then start a local demo:
 
 ```sh
-git clone --branch v0.18.0-beta.6 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.19.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.18.0-beta.6 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.19.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -172,6 +174,25 @@ After creating the demo records, run the complete read-only context example:
 ```
 
 Its provider returns a fixed demo ID; replace it with your own search provider.
+
+### Give an agent scoped context
+
+`search_context` can combine candidate IDs from your own lexical and vector
+providers. Narrow results to an explicit set of IDs before ranking:
+
+```python
+from brainwire import search_context
+
+# lexical_search is an application-provided callback returning ranked IDs.
+result = search_context(
+    graph, "Customer", "Ada", providers={"lexical": lexical_search},
+    candidate_ids=["customer-1"], properties=["name"],
+)
+```
+
+Run this inside the connection block above. The scope narrows candidates;
+normal graph authorization still applies. The application supplies the search
+provider, and separate calls do not share a snapshot. See [context for agents](docs/context-api.md).
 
 ### Explore in the terminal
 

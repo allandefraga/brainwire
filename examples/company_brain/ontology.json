@@ -1,0 +1,14 @@
+{
+  "version": "1",
+  "nodes": [
+    {"label": "Team", "properties": ["name"]},
+    {"label": "Project", "properties": ["name"]},
+    {"label": "Decision", "properties": ["title", "body", "source_url"]},
+    {"label": "Source", "properties": ["title", "url"]}
+  ],
+  "edges": [
+    {"type": "OWNS", "from": {"label": "Team"}, "to": {"label": "Project"}},
+    {"type": "HAS_DECISION", "from": {"label": "Project"}, "to": {"label": "Decision"}},
+    {"type": "SUPPORTED_BY", "from": {"label": "Decision"}, "to": {"label": "Source"}}
+  ]
+}

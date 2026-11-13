@@ -99,7 +99,7 @@ pub(crate) fn render_at(
             display(graph),
             display(address)
         ))
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         areas[0],
     );
     let mut status = format!(
@@ -196,7 +196,7 @@ pub(crate) fn render_at(
             .wrap(Wrap { trim: false })
             .block(panel(
                 lang.choose("O QUE SIGNIFICA?", "WHAT DOES IT MEAN?"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
         areas[3],
@@ -206,7 +206,7 @@ pub(crate) fn render_at(
             " ↑↓ índice • PgUp/Dn rola • r atualiza • q sai",
             " ↑↓ index • PgUp/Dn scroll • r refresh • q quit",
         ))
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         areas[4],
     );
 }

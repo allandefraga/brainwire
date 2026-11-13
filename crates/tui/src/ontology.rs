@@ -1,7 +1,7 @@
 //! Read-only schema connections, independent of stored instance counts.
 
 use crate::overview::{panel, terminal_text, text_style};
-use crate::{selection_style, Language, CYAN, GREEN, PALE};
+use crate::{selection_style, Language, ACCENT, CYAN, PALE};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Modifier,
@@ -130,7 +130,7 @@ fn connections(
     lang: Language,
     no_color: bool,
 ) -> Vec<Line<'static>> {
-    let green = text_style(GREEN, no_color);
+    let green = text_style(ACCENT, no_color);
     let cyan = text_style(CYAN, no_color);
     let pale = text_style(PALE, no_color);
     let mut lines = vec![
@@ -335,7 +335,7 @@ pub(crate) fn render(
             .style(text_style(PALE, no_color))
             .block(panel(
                 lang.choose("TIPOS • ↑↓", "TYPES • ↑↓"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
         columns[0],
@@ -359,7 +359,7 @@ pub(crate) fn render(
                         "TODAS AS CONEXÕES • PgUp/PgDn",
                         "ALL CONNECTIONS • PgUp/PgDn",
                     ),
-                    GREEN,
+                    ACCENT,
                     no_color,
                 )),
             *scroll,
@@ -377,7 +377,7 @@ pub(crate) fn render(
                 .style(text_style(PALE, no_color))
                 .block(panel(
                     lang.choose("CONEXÕES • PgUp/PgDn", "CONNECTIONS • PgUp/PgDn"),
-                    GREEN,
+                    ACCENT,
                     no_color,
                 ));
             let paragraph = if graph_area.width.saturating_sub(2) < 26 {
@@ -404,7 +404,7 @@ pub(crate) fn render(
         }
     } else {
         frame.render_widget(
-            Paragraph::new(lang.choose("Nenhuma ontologia declarada neste grafo.\n\nTipos e conexões aparecem após declarar o schema.", "No ontology declared for this graph.\n\nTypes and connections appear after declaring a schema.")).style(text_style(PALE, no_color)).wrap(Wrap { trim: false }).block(panel(lang.choose("ONTOLOGIA", "ONTOLOGY"), GREEN, no_color)),
+            Paragraph::new(lang.choose("Nenhuma ontologia declarada neste grafo.\n\nTipos e conexões aparecem após declarar o schema.", "No ontology declared for this graph.\n\nTypes and connections appear after declaring a schema.")).style(text_style(PALE, no_color)).wrap(Wrap { trim: false }).block(panel(lang.choose("ONTOLOGIA", "ONTOLOGY"), ACCENT, no_color)),
             graph_area,
         );
     }

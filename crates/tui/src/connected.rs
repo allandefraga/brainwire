@@ -99,7 +99,7 @@ pub(crate) fn render_at(
         terminal_text(address)
     );
     frame.render_widget(
-        Paragraph::new(title).block(panel("", GREEN, no_color)),
+        Paragraph::new(title).block(panel("", ACCENT, no_color)),
         areas[0],
     );
     let indexed = state
@@ -161,7 +161,7 @@ pub(crate) fn render_at(
             " ↑↓ tipo • Enter/F1 detalhes • PgUp/Dn rola • r atualiza • q sai",
             " ↑↓ type • Enter/F1 inspect • PgUp/Dn scroll • r refresh • q quit",
         )))
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         areas[3],
     );
 }

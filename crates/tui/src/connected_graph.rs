@@ -123,7 +123,7 @@ pub(crate) fn render_at(
     lang: Language,
     no_color: bool,
 ) {
-    let color = if no_color { Color::Reset } else { GREEN };
+    let color = if no_color { Color::Reset } else { ACCENT };
     let cyan = if no_color { Color::Reset } else { CYAN };
     let areas = Layout::vertical([
         Constraint::Length(3),
@@ -139,7 +139,7 @@ pub(crate) fn render_at(
             display(graph),
             display(address)
         ))
-        .block(panel("", GREEN, no_color)),
+        .block(panel("", ACCENT, no_color)),
         areas[0],
     );
     let count = if state.snapshot.found {
@@ -224,7 +224,7 @@ pub(crate) fn render_at(
             .wrap(Wrap { trim: false })
             .block(panel(
                 lang.choose("VIZINHANÇA", "NEIGHBORHOOD"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
             body[0],
@@ -268,7 +268,7 @@ pub(crate) fn render_at(
         }
         frame.render_widget(
             Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-                panel("", GREEN, no_color).title(format!(
+                panel("", ACCENT, no_color).title(format!(
                     "{} {}/{} • {}",
                     lang.choose("RELAÇÃO", "LINK"),
                     if selected_id.is_some() {
@@ -325,7 +325,7 @@ pub(crate) fn render_at(
             Canvas::default()
                 .x_bounds([0.0, f64::from(width.max(1))])
                 .y_bounds([0.0, f64::from(height.max(1))])
-                .block(panel("", GREEN, no_color).title(title))
+                .block(panel("", ACCENT, no_color).title(title))
                 .paint(|ctx| {
                     for (position, (id, _)) in visible.iter().skip(start).take(capacity).enumerate()
                     {
@@ -337,7 +337,7 @@ pub(crate) fn render_at(
                         } else if no_color {
                             Color::Reset
                         } else {
-                            Color::Rgb(46, 115, 70)
+                            Color::Rgb(69, 91, 128)
                         };
                         let from_x = f64::from(if left {
                             source_x
@@ -435,7 +435,7 @@ pub(crate) fn render_at(
                 usize::from(node_width.saturating_sub(2)),
             ))
             .style(Style::default().fg(color))
-            .block(panel("", GREEN, no_color).title(format!(
+            .block(panel("", ACCENT, no_color).title(format!(
                 "● {}",
                 fit(
                     &state.snapshot.node_label,
@@ -556,7 +556,7 @@ pub(crate) fn render_at(
         frame.render_widget(
             Paragraph::new(detail).block(panel(
                 lang.choose("INSPECIONAR RELAÇÃO", "LINK INSPECTOR"),
-                GREEN,
+                ACCENT,
                 no_color,
             )),
             sidebar[0],
@@ -623,7 +623,7 @@ pub(crate) fn render_at(
                 "Arestas apontam da origem ao destino. Sem propriedades.",
                 "Arrows point from source to target. No properties.",
             ),
-            GREEN,
+            ACCENT,
             no_color,
         )),
         areas[3],
