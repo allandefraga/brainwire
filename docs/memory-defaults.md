@@ -259,6 +259,12 @@ batches of 100 updates and point readbacks, then checked the last value and
 node count after SIGKILL, and passed an offline audit. Docker memory samples
 went from 182.3 MiB to 231.7 MiB; they are not process RSS, and this small
 workload did not saturate memory or establish whether a leak exists.
+A [15-minute mixed run](benchmarks/2026-11-13-mixed-2g-019b1.json) of the
+v0.19.0-beta.1 local candidate used a 2 GiB container, 10,000 synthetic nodes
+and 10,000 edges. It completed 41,080 update batches and 32,582 read
+iterations. Exact records matched before and after SIGKILL and the offline audit
+passed. The workload did not saturate memory and does not establish an RSS cap
+or qualify distributed failover.
 In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
 the median process RSS rose by about 53 MiB between the first and last
 five-minute windows. This observation needs investigation; it does not prove

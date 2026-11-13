@@ -47,12 +47,18 @@ Allan's current language.
 - Refreshed logo assets, README, documentation site and terminal palette with
   a neutral and cobalt direction. Inspected desktop and narrow browser renders;
   the original observatory panel composition and no-color behavior remain.
-- Rust workspace tests and Clippy, 331 Python tests (seven skipped), 132 script
+- Rust workspace tests and Clippy, 332 Python tests (seven skipped), 132 script
   tests, docs checks, protected access, local quorum partition/recovery,
   pressure admission and Docker retained-volume recovery passed. A candidate
   wheel and the company example were verified locally.
-- A 15-minute synthetic mixed read/write/recovery diagnostic is in progress;
-  finish it, record results and run final publication checks before release.
+- A 15-minute 2 GiB synthetic mixed read/write/recovery diagnostic passed
+  with 10,000 nodes and 10,000 edges: 41,080 update batches, 32,582 reads,
+  exact checks before and after SIGKILL, and an offline audit. It did not
+  saturate memory or qualify a global RSS cap or multi-machine failover.
+- A 100,000-row two-graph container recovery test passed, as did the documented
+  Docker company example and README quickstart using an installed wheel.
+- Independent architecture review was unavailable in this environment; the
+  context/ACL boundaries were reviewed locally and tested with two identities.
 - Next: qualify representative capacity and multi-machine failover; native
   ANN/BM25, historical graph revisions and graph branch/merge remain open.
 
