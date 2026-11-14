@@ -25,7 +25,7 @@ and recovery steps your application needs.
 | Add an index | [Node indexes](indexes.md) · [Relationship property indexes](relationship-property-indexes.md) |
 | Retrieve context for an agent | [Agent quickstart](agent-quickstart.md) · [Context and reranking](context-api.md) |
 | Keep explicit events and timelines | [Temporal data](temporal-data.md) |
-| Import a source | [Source ingestion](source-ingestion.md) · [DuckLake table sync](parallel-ingestion.md#ducklake-full-load-then-incremental) · [DuckLake snapshots](ducklake-incremental.md) |
+| Import a source | [DuckDB table sync](duckdb-sync.md) · [DuckLake table sync](parallel-ingestion.md#ducklake-full-load-then-incremental) · [DuckLake snapshots](ducklake-incremental.md) · [Source ingestion](source-ingestion.md) |
 | Explore source code as a graph | [Code graph](code-graph.md) |
 | Inspect a running graph | [Connected terminal workspace](connected-status.md) |
 

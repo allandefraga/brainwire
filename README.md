@@ -56,6 +56,7 @@ for local durability, memory budgets and the current settings.
 - **Connected operations:** link customers, projects, documents and tickets and query relationships with Cypher.
 - **Timelines:** model explicit events with stable keys and page through them in the Python example.
 - **DuckLake ingestion:** load a mapped table and sync later changes in bounded batches. The standalone example checks each batch's source lease; see the [ingestion guide](docs/parallel-ingestion.md).
+- **DuckDB ingestion:** compare a local table's snapshots and resume batches after failure; see the [DuckDB guide](docs/duckdb-sync.md).
 - **Code graphs:** extract local Python structure and explore paths and source links.
 
 Try the [synthetic company context example](examples/company_brain/README.md) to connect a project, decision and source. See the [agent context roadmap](docs/agent-context-roadmap.md) for what exists and what is next.
@@ -186,6 +187,7 @@ Brainwire is an experimental beta. Plan a controlled trial:
 - **Memory:** budgets and sampled RSS/cgroup admission can refuse growing queries under pressure. They are partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
 - **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
 - **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
+- **Ingestion:** DuckDB snapshot sync needs a private persistent journal and exclusive ownership of mapped IDs. DuckLake fencing covers cooperating standalone writers; neither sync provides a graph-wide atomic cutover.
 - **Security:** shared deployments need authentication and a verified encrypted boundary; native Bolt TLS is not implemented.
 - **Distribution:** three-voter quorum is experimental. Standard Docker, Kubernetes and Swarm configurations run one instance; multi-machine failover is not qualified.
 

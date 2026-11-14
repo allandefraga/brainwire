@@ -1,0 +1,53 @@
+{
+  "result": "PASS",
+  "synthetic": true,
+  "rows": 100000,
+  "whole_workflow_seconds": 44.177,
+  "scope": "native debug build; whole acceptance workflow with full/incremental/recovery and offline audit; not ingestion throughput",
+  "limitations": [
+    "single local run",
+    "no peak RSS captured",
+    "not the published image",
+    "no power-loss or multi-machine failover",
+    "host not exclusively reserved"
+  ],
+  "host": "Darwin arm64",
+  "duckdb": "1.5.5",
+  "neo4j_driver": "5.28.4",
+  "binary_sha256": "7e83922cc3850065ac9a58772c89fb4ebb2a6d2c7838545b190230aa39327c3f",
+  "runner_sha256": "ce73b455b64f34ccd6678b17f0384e4b08232cb770df8ef6395473d4f72a22ed",
+  "output": [
+    {
+      "database": "sync",
+      "scalar_indexes": "checked_active_declarations",
+      "status": "ok"
+    },
+    {
+      "ok": true,
+      "rows": 100000,
+      "checks": [
+        "initial",
+        "no-op",
+        "edge update",
+        "batch reply lost",
+        "frozen resume",
+        "safe node deletion",
+        "finalization lost",
+        "checkpoint mismatch",
+        "source identity mismatch",
+        "explicit ownership and deletions",
+        "two-journal race",
+        "claim acknowledgement lost",
+        "older journal refused",
+        "journal integrity",
+        "offline audit"
+      ]
+    }
+  ],
+  "python": "3.12.14",
+  "helpers_sha256": {
+    "examples/python/duckdb_sync.py": "1d18942774750c169199b80028136706b95ab74733b38bc0e0113bc639194417",
+    "examples/python/ducklake_sync.py": "8835bd0cb38175d20f17e56ae066e7e5518b17a572cf06ea1b67576e9ff9f2ff",
+    "brainwire/client.py": "62881d1a5e008ae99c7736df47797f267486e8ed257a82367fcebe8b00adf323"
+  }
+}

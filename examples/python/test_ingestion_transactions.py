@@ -27,6 +27,11 @@ class Result:
     def data(self):
         return self.rows
 
+    def single(self, *, strict=False):
+        if strict and len(self.rows) != 1:
+            raise AssertionError("strict result must contain one row")
+        return self.rows[0] if self.rows else None
+
     def consume(self):
         return None
 
@@ -88,6 +93,11 @@ class Session:
                 self.state = {**(self.state or {"snapshot": None}), "lease": params["run"]}
             if "SET s.lease = null, s.snapshot = $snapshot" in query:
                 self.state.update(snapshot=params["snapshot"], lease=None)
+            if query == "CALL db.assertNodeState($label,$entity_id,$expected)":
+                assert params["label"] == "ImportCheckpoint"
+                assert params["entity_id"] == "source"
+                assert params["expected"] == self.state
+                return Result([{"matched": True}])
             return Result()
 
         def commit(self):

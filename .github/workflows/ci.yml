@@ -88,7 +88,11 @@ jobs:
         run: python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL ducklake; INSTALL sqlite; LOAD ducklake; LOAD sqlite')"
 
       - name: Test Python client helpers
-        run: python -m unittest discover -s examples/python -p 'test_*.py'
+        env:
+          BRAINWIRE_INCREMENTAL_BINARY: target/debug/brainwire
+        run: |
+          python -m unittest discover -s examples/python -p 'test_*.py'
+          python -m unittest discover -s examples/source_ingestion -p 'test_*.py'
 
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
@@ -124,6 +128,11 @@ jobs:
         run: >-
           python crates/server/tests/ducklake_sync.py
           --binary target/debug/brainwire --rows 100 --workers 2
+
+      - name: Verify DuckDB snapshot sync and recovery
+        run: >-
+          python -m examples.python.duckdb_acceptance
+          --binary target/debug/brainwire --rows 1000
 
       - name: Verify recovery after an unacknowledged commit
         run: >-

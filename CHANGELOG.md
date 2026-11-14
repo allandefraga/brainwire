@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an incremental local DuckDB snapshot importer with a private resumable
+  journal, bounded batches and explicit deletion ownership. It compares
+  snapshots rather than consuming CDC and requires a single-writer contract.
 - Add bounded `db.assertNodeState` transaction guards for standalone writes.
   DuckLake synchronization verifies each batch's lease, cursor and mapping
   contract in the same transaction. Replicated mode is not supported.

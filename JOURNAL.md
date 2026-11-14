@@ -39,8 +39,14 @@ Allan's current language.
   replay, lease takeover and audit with two workers. This does not fence old
   unguarded clients, other writers or replicated mode; earlier batches persist.
 - Corrected snapshot importer CLI completion reporting and added a regression.
-- Validation and release are in progress. See the final entry and release
-  notes for tested behavior and remaining boundaries.
+- Added local DuckDB snapshot synchronization with a protected resumable
+  journal and bounded transactions. An independent 100,000-row synthetic
+  acceptance exercised incremental updates, deletes, failed acknowledgements,
+  stale checkpoints and restart. The receipt records a debug build, not a
+  production throughput guarantee. This is snapshot comparison, not CDC.
+- Next: qualify sustained memory pressure, distributed recovery and integration
+  against representative workloads; preserve explicit ownership and backup
+  requirements. Local validation and release checks remain necessary.
 
 ## 2026-11-14: DuckLake checkpoint contracts and reproducible comparison
 
