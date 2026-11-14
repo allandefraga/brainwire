@@ -57,6 +57,14 @@ def _fsync(path):
         os.close(fd)
 
 
+def _open_private(path, flags):
+    return os.open(path, flags, 0o600)
+
+
+def _open_source(path, flags):
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0))
+
+
 def copy_checkpoint(source, destination, receipt):
     """Copy SOURCE to DESTINATION atomically and return the written manifest."""
     source, destination = Path(source), Path(destination)
@@ -81,25 +89,33 @@ def copy_checkpoint(source, destination, receipt):
             or partial.exists() or partial.is_symlink()):
         raise FileExistsError(f"{destination} or {partial} already exists")
     # Only the invocation that created the staging directory may remove it.
-    partial.mkdir()
+    partial.mkdir(mode=0o700)
     try:
         # Another invocation may have published after the initial check.
         if destination.exists() or destination.is_symlink():
             raise FileExistsError(f"{destination} already exists")
         entries = []
+        directories = {partial}
         for path in files:
             relative = path.relative_to(source)
             target = partial / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(path, target)
+            for parent in reversed(relative.parents):
+                directory = partial / parent
+                if directory not in directories:
+                    directory.mkdir(mode=0o700)
+                    directories.add(directory)
+            with open(path, "rb", opener=_open_source) as original, \
+                    open(target, "xb", opener=_open_private) as output:
+                shutil.copyfileobj(original, output)
             _fsync(target)
             entries.append({"path": relative.as_posix(), "size": target.stat().st_size,
                             "sha256": _sha256(target)})
         manifest = {"format": FORMAT, "receipt": receipt, "files": entries,
                     "copied_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        (partial / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        with open(partial / MANIFEST, "x", opener=_open_private) as output:
+            output.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         _fsync(partial / MANIFEST)
-        for directory in sorted({p.parent for p in partial.rglob("*")}, reverse=True):
+        for directory in sorted(directories, reverse=True):
             _fsync(directory)
         partial.rename(destination)
     except BaseException:

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Create checkpoint backup directories and files with restrictive POSIX modes
+  from the start, including the manifest; check destination filesystem ACLs.
+
 ## 0.22.0-beta.1 — experimental candidate
 
 - Add a bounded agent-memory example that records and recalls project decisions

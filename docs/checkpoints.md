@@ -108,6 +108,14 @@ files; it exits 1 on any problem. The manifest file
 (`brainwire-manifest.json`) is not part of the store: remove it, or copy the
 directory without it, when restoring into `server.data_dir`.
 
+On POSIX, the helper creates directories with mode `0700` and files, including
+the manifest, with mode `0600`. Your umask may further restrict these modes.
+Keep the backup and receipt private. Check the access controls on the target
+filesystem, including any inherited ACLs, and on backups made by older versions.
+Before restoring into a container, ensure its server user owns or can securely
+read the restored files and write its data directory. Use controlled ownership
+or ACL changes; do not make the backup world-readable to work around permissions.
+
 Only the manifest at the backup root is reserved; a file with the same name in
 a subdirectory is part of the inventory. Verification rejects malformed,
 duplicate or unsafe inventory entries and requires `CURRENT`. Copying an

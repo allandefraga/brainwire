@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -90,6 +92,48 @@ class CheckpointCopyTest(unittest.TestCase):
         self.assertEqual(json.loads((destination / "brainwire-manifest.json").read_text()), manifest)
         self.assertFalse(destination.with_name("nightly-1.partial").exists())
         self.assertEqual(verify_copy(destination), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permissions required")
+    def test_copy_creates_private_directories_and_files_with_permissive_umask(self):
+        nested = self.source / "sub" / "nested"
+        nested.mkdir()
+        (nested / "data").write_bytes(b"synthetic")
+        sst = self.source / "000010.sst"
+        os.link(sst, self.root / "live-sst")
+        script = """
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from examples.python import checkpoint_backup
+
+source, destination, mask, receipt = sys.argv[1:]
+os.umask(int(mask, 8))
+partial = Path(destination + '.partial')
+sync = checkpoint_backup._fsync
+
+def check_permissions(path):
+    if path == partial or partial in path.parents:
+        for entry in (partial, *partial.rglob('*')):
+            expected = 0o700 if entry.is_dir() else 0o600
+            actual = stat.S_IMODE(entry.stat().st_mode) & 0o777
+            assert actual == expected, (entry.name, oct(actual), oct(expected))
+    sync(path)
+
+with patch.object(checkpoint_backup, '_fsync', check_permissions):
+    checkpoint_backup.copy_checkpoint(source, destination, json.loads(receipt))
+"""
+        for mask in ("000", "022"):
+            with self.subTest(mask=mask):
+                destination = self.root / f"copy-{mask}"
+                result = subprocess.run([sys.executable, "-c", script, str(self.source),
+                                         str(destination), mask, json.dumps(receipt())],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((destination / sst.name).samefile(sst))
+                self.assertEqual(verify_copy(destination), [])
 
     def test_copy_refuses_destination_inside_source(self):
         alias = self.root / "source-alias"
@@ -302,12 +346,30 @@ class CheckpointCopyTest(unittest.TestCase):
                 (destination / "finished").write_text("existing backup")
             return result
 
-        with patch.object(Path, "mkdir", late_mkdir), patch("shutil.copyfile") as copy_file:
+        with patch.object(Path, "mkdir", late_mkdir), patch("shutil.copyfileobj") as copy_file:
             with self.assertRaises(FileExistsError):
                 copy_checkpoint(self.source, destination, receipt())
             copy_file.assert_not_called()
         self.assertEqual((destination / "finished").read_text(), "existing backup")
         self.assertFalse(partial.exists())
+
+    def test_copy_refuses_symlink_in_staging_without_touching_target(self):
+        destination = self.root / "copy"
+        partial = self.root / "copy.partial"
+        external = self.root / "external"
+        external.write_bytes(b"existing data")
+        original_mkdir = Path.mkdir
+
+        def insert_symlink(path, *args, **kwargs):
+            original_mkdir(path, *args, **kwargs)
+            if path == partial:
+                (path / "000010.sst").symlink_to(external)
+
+        with patch.object(Path, "mkdir", insert_symlink), self.assertRaises(FileExistsError):
+            copy_checkpoint(self.source, destination, receipt())
+        self.assertEqual(external.read_bytes(), b"existing data")
+        self.assertFalse(partial.exists())
+        self.assertFalse(destination.exists())
 
     def test_sync_failure_after_rename_keeps_reused_staging_directory(self):
         destination = self.root / "copy"

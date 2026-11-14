@@ -23,6 +23,9 @@ the meeting that supports it. [Try the decision memory demo](docs/agent-context-
 
 > **v0.22.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
 
+The [backup guide](docs/checkpoints.md) covers private checkpoint copies and
+restore permissions. Protect backup storage and test the restore procedure.
+
 <p align="center"><img src="assets/launch/brainwire-live.gif" alt="Brainwire records and recalls a project decision with its source, then shows the graph and memory in its connected terminal." width="960"></p>
 
 The demo uses a live Brainwire v0.21.0-beta.2 server and synthetic company data.

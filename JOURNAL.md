@@ -31,6 +31,11 @@ Allan's current language.
 
 ## 2026-11-14: agent memory and initial Markdown vault import
 
+- Fixed checkpoint backup copies that could be readable by other local users
+  under permissive umasks. Staging directories and files are now created with
+  restrictive modes on POSIX. Tests cover modes before publication, symlinks,
+  concurrent copies, hardlinked SST sources and real checkpoint restoration.
+  The backup parent must still be trusted and filesystem ACLs need review.
 - Added a bounded agent-memory example for decisions and reported sources.
   Synthetic authenticated Bolt checks cover idempotent replay, hidden sources
   and reader write refusal. ACL stamping is separate from creation, so do not
