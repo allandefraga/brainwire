@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.23.0-beta.2 — experimental candidate
+
+- Clarify the release history for the native TLS candidate.
+
+## 0.23.0-beta.1 — experimental candidate
+
 - Add optional TLS-only Bolt transport with server certificate verification in
   the native client and probe. Authentication and graph grants remain required
   for protected deployments. Certificate rotation requires a restart.
