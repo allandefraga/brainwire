@@ -71,7 +71,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
     <section id="python" class="doc-section">
       <div class="section-head"><p class="eyebrow">WRITE AND QUERY</p><h2>Connect from Python.</h2><p>Install this checkout's helper in a new environment. It connects to Brainwire over Bolt; a public PyPI package is not available yet.</p></div>
       <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="python-install" aria-label="Copy Python setup">Copy</button></div><pre><code id="python-install">python3 scripts/setup_python.py</code></pre></div>
-      <p>Run the example with <code>.venv-brainwire/bin/python</code> while the Docker demo is running:</p>
+      <p>Run the example with <code>.venv-brainwire/bin/python</code> while the Docker demo is running. If you chose a different host port, replace <code>7687</code> in the connection URL with that port.</p>
       <div class="code-block"><div class="code-header"><span>Python</span><button type="button" data-copy="python-code" aria-label="Copy Python graph example">Copy</button></div><pre><code id="python-code">from brainwire import connect
 
 with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:

@@ -31,6 +31,10 @@ Allan's current language.
 
 ## 2026-11-14: DuckLake checkpoint contracts and reproducible comparison
 
+- Follow-up: clarify that a nondefault Docker host port must also be used in
+  the documentation site's Python client URL. Verified with
+  `python3 scripts/check_docs_site.py`.
+
 - Added a generic authenticated Bolt acceptance test for an ACL revocation
   racing with a stale stamp in the same transaction. The stale commit is
   rejected and the revocation survives restart. Reading an ACL in one
