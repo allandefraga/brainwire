@@ -32,6 +32,10 @@ RSS peaked at about 134 MiB during the read soak, so this did not stress the
 2 GiB limit. The linked receipt is a redacted summary; it records the SHA-256
 of the full local report. It is not a production memory qualification.
 
+An earlier local beta.2 candidate also passed 16 synthetic process-kill
+recovery cycles with an unacknowledged commit. The [recovery report](docs/benchmarks/2026-11-14-uncertain-commit.md)
+records the exact build and scope; it does not simulate a power failure.
+
 ## Choose a test
 
 | Question | Test and results |
