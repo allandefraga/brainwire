@@ -29,6 +29,23 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-14: agent memory and initial Markdown vault import
+
+- Added a bounded agent-memory example for decisions and reported sources.
+  Synthetic authenticated Bolt checks cover idempotent replay, hidden sources
+  and reader write refusal. ACL stamping is separate from creation, so do not
+  use the example to publish sensitive records with delayed ACLs.
+- Added a local preview and initial standalone import of a small Markdown vault.
+  The importer uses a dedicated graph and one transaction; it does not provide
+  incremental synchronization or import filesystem permissions. A Bolt test
+  covered the documented limits, rollback, collision and repeat refusal.
+- Replaced the site illustration with real synthetic-data terminal captures and
+  added a reproducible short video and GIF. Updated the README and site around
+  Docker, context, sources and ingestion. Clarified query-growth cgroup errors.
+- Next: complete release checks and validate the published image, then qualify
+  sustained memory pressure, native TLS and multi-machine failover separately.
+  These examples do not establish production readiness or a process RSS ceiling.
+
 ## 2026-11-14: scoped agent retrieval and safer ingestion
 
 - Added an opt-in provider contract that receives bounded candidate IDs before

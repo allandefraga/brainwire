@@ -1,11 +1,12 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/brainwire-logo.svg"><img src="assets/brainwire-logo-light.svg" alt="Brainwire" width="360"></picture></p>
 
-<h1 align="center">Your data has connections.</h1>
-<p align="center">A graph database for connected application and agent context.</p>
+<h1 align="center">A graph database for agent memory</h1>
+<p align="center">Connect projects, decisions and their evidence. Query the graph with Cypher and give agents the relevant records.</p>
 <p align="center">
   <a href="https://allandefraga.github.io/brainwire/">Documentation</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="docs/local-cypher.md">Cypher</a> ·
+  <a href="#try-agent-context">Agent memory</a> ·
+  <a href="#bring-your-data">Ingestion</a> ·
   <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
@@ -15,66 +16,22 @@
   <img src="https://img.shields.io/badge/status-experimental_beta-2255e6?style=flat-square" alt="Experimental beta">
 </p>
 
-Brainwire connects people, projects, documents and events in named graphs.
-Write from Python, query with Cypher and inspect the database in your terminal.
+Brainwire is an open source graph database built in Rust on RocksDB. Define
+your ontology, write over Bolt and inspect the live graph in your terminal.
+In the company example, an agent can recall a decision and follow it to
+the meeting that supports it. [Try the decision memory demo](docs/agent-context-quickstart.md)
 
-> **v0.21.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.21.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
 
-## How it works
+<p align="center"><img src="assets/launch/brainwire-live.gif" alt="Brainwire records and recalls a project decision with its source, then shows the graph and memory in its connected terminal." width="960"></p>
 
-Applications write and query over Bolt. The Rust engine checks access, executes
-transactions and stores graph records in RocksDB. Keep its files on a persistent
-volume so restarting the container reopens the same graph. A terminal workspace
-provides read-only inspection.
-
-The standard deployment runs one instance. The separate
-[three-voter Raft setup](docs/quorum-replication.md) is experimental. Read the
-[architecture guide](docs/architecture.md) for memory, storage and recovery.
-
-### How RocksDB stores the graph
-
-RocksDB stores Brainwire's records and indexes as key/value data. Writes first
-enter a **write-ahead log (WAL)** on disk and a **memtable** in memory. A flush
-writes the memtable into sorted, immutable **SST files**.
-
-- **L0** receives new files; their key ranges can overlap.
-- **L1 and deeper levels** organize files into non-overlapping key ranges within
-  each level. Deeper levels normally hold more data.
-- **Compaction** merges files, keeping the versions still needed by reads and
-  eventually reclaiming obsolete values and deletion markers.
-
-These are storage levels, not node types, graph hops or history versions. Reads
-combine memory and the relevant SST files; a shared block cache can avoid disk
-reads. Compaction uses CPU, disk bandwidth and temporary disk space, so heavy
-ingestion can slow down when storage cannot keep up. Keep the persistent volume
-and leave disk headroom. See [storage details](docs/architecture.md#rocksdb-files-levels-and-compaction)
-for local durability, memory budgets and the current settings.
-
-## What you can build
-
-- **Agent context:** explore ontology and visible record paths, optionally scope configured search providers before ranking, then return authorized records and sources.
-- **Connected operations:** link customers, projects, documents and tickets and query relationships with Cypher.
-- **Timelines:** model explicit events with stable keys and page through them in the Python example.
-- **DuckLake ingestion:** load a mapped table and sync later changes in bounded batches. The standalone example checks each batch's source lease; see the [ingestion guide](docs/parallel-ingestion.md).
-- **DuckDB ingestion:** compare a local table's snapshots and resume batches after failure; see the [DuckDB guide](docs/duckdb-sync.md).
-- **Code graphs:** extract local Python structure and explore paths and source links.
-
-Try the [synthetic company context example](examples/company_brain/README.md) to connect a project, decision and source. See the [agent context roadmap](docs/agent-context-roadmap.md) for what exists and what is next.
-
-See the [architecture](docs/architecture.md), [agent context](docs/context-api.md),
-[Cypher guide](docs/local-cypher.md) and [all documentation](docs/README.md).
-
-Context and batch APIs have size checks; these are not a process-wide memory
-limit. See [memory settings](docs/memory-defaults.md) and
-[encrypted connections](docs/protected-transport.md) for their boundaries.
+The demo uses a live Brainwire v0.21.0-beta.2 server and synthetic company data.
+[Watch the video](assets/launch/brainwire-live.mp4)
 
 ## Quickstart
 
-Install Git and Docker with Compose, then start a local demo:
-
-On macOS, Colima can provide the Docker engine; with Colima running, run
-`export DOCKER_CONTEXT=colima` in your shell first. Docker's CLI and
-Compose plugin are still required.
+Use Git and Docker with Compose. On macOS, Colima can run the Docker engine.
+With Colima running, run `export DOCKER_CONTEXT=colima` first.
 
 ```sh
 git clone --branch v0.21.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
@@ -83,18 +40,18 @@ export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.21.0-beta.2 # brainwire
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
-Check that it is ready:
+Check readiness with the built-in probe.
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec -T brainwire brainwire probe --mode ready
 ```
 
 The demo listens at `bolt://127.0.0.1:7687` and keeps data in a Docker volume.
-It disables authentication: use it only on a trusted host and container network.
-Other containers on the same network can reach the service. Use Docker Engine
-28 or newer; [older engines can expose localhost ports to the local network](https://docs.docker.com/engine/network/port-publishing/).
-For shared environments, use
-[authentication and encrypted transport](docs/protected-containers.md).
+Use synthetic data on a trusted host and container network. The demo disables
+authentication, and other containers on the demo network can reach it. Use
+Docker Engine 28 or newer because earlier versions can expose loopback ports
+to the local network. [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/)
+· [Protected deployment](docs/protected-containers.md)
 
 ### Write and query from Python
 
@@ -124,16 +81,22 @@ See [Python](docs/python-client.md) and [protected deployment](docs/protected-co
 
 ### Try agent context
 
-After creating the demo records, run the read-only context example:
+The company demo saves a decision and its source in one transaction. In a
+fresh process, recall the project decisions and supporting records the reader
+can see. Repeating the same write returns the same IDs.
+[Set up the company graph with Docker](docs/agent-context-quickstart.md)
+
+After saving the example decision, run the read command in the same shell with
+`BW_PORT` set.
 
 ```sh
-.venv-brainwire/bin/python -m examples.python.agent_context_demo
+.venv-brainwire/bin/python -m examples.python.agent_memory --uri "bolt://$BW_PORT" \
+  recall --project project-release --limit 5
 ```
 
-The example's provider returns a fixed demo ID; bring your own provider for
-text or vector search. Follow the [agent quickstart](docs/agent-quickstart.md)
-for a reusable prompt, or read the [context API guide](docs/context-api.md) for
-access checks and snapshot limits.
+If you are using the Customer and Segment records from the quickstart above,
+run `.venv-brainwire/bin/python -m examples.python.agent_context_demo` to read
+those records and their connection. [Context API and provider configuration](docs/context-api.md)
 
 ### Explore in the terminal
 
@@ -154,6 +117,44 @@ To stop the demo while keeping its volume:
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
+
+## Bring your data
+
+| Source | Start here |
+| --- | --- |
+| Application writes | Upsert nodes and relationships in batches from [Python](docs/python-client.md). |
+| DuckDB | Load a local table, then compare snapshots with a resumable journal. [DuckDB sync](docs/duckdb-sync.md) |
+| DuckLake | Load a mapped table and apply changes between pinned versions. [DuckLake sync](docs/parallel-ingestion.md#ducklake-full-load-then-incremental) |
+| Obsidian | Preview a small Markdown vault and import notes and wikilinks once into an empty graph. [Obsidian example](examples/obsidian/README.md) |
+| Python code | Extract local Python structure and trace source links. [Code graph example](docs/code-graph.md) |
+
+## How it works
+
+Applications write and query over Bolt. The Rust engine checks access, executes
+transactions and stores graph records in RocksDB. Keep its files on a persistent
+volume so restarting the container reopens the same graph. A terminal workspace
+provides read-only inspection.
+
+The standard deployment runs one instance. The separate
+[three-voter Raft setup](docs/quorum-replication.md) is experimental. Read the
+[architecture guide](docs/architecture.md) for memory, storage and recovery.
+
+### How RocksDB stores the graph
+
+RocksDB stores Brainwire's records and indexes as key/value data. Writes first
+enter a **write-ahead log (WAL)** on disk and a **memtable** in memory. A flush
+writes the memtable into sorted, immutable **SST files**.
+
+- **L0** receives new files; their key ranges can overlap.
+- **L1 and deeper levels** organize files into non-overlapping key ranges within
+  each level. Deeper levels normally hold more data.
+- **Compaction** merges files, keeping the versions still needed by reads and
+  eventually reclaiming obsolete values and deletion markers.
+
+Reads combine memory and the relevant SST files. A shared block cache can
+avoid disk reads. Compaction uses CPU, disk bandwidth and temporary disk
+space, so keep the persistent volume and leave room for storage to grow.
+[Storage details](docs/architecture.md#rocksdb-files-levels-and-compaction)
 
 ## A synthetic benchmark
 

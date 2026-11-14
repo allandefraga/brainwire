@@ -93,6 +93,7 @@ jobs:
         run: |
           python -m unittest discover -s examples/python -p 'test_*.py'
           python -m unittest discover -s examples/source_ingestion -p 'test_*.py'
+          python -m unittest examples.obsidian.test_import_vault
 
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
@@ -133,6 +134,9 @@ jobs:
         run: >-
           python -m examples.python.duckdb_acceptance
           --binary target/debug/brainwire --rows 1000
+
+      - name: Verify bounded Markdown vault import
+        run: python -m examples.obsidian.acceptance --binary target/debug/brainwire
 
       - name: Verify recovery after an unacknowledged commit
         run: >-

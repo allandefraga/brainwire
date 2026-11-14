@@ -69,6 +69,12 @@ earlier untraced decision.
 For accounted query growth, `reason=process_limit` can now reflect this
 cgroup margin as well as sampled RSS; the reason alone does not identify which
 measurement caused the refusal.
+On a cgroup v2 ancestor with an active or previously observed memory controller,
+query-growth sampling treats a missing, unreadable or malformed `memory.high`
+or `memory.max` as unavailable headroom. Explicit `max` values are unlimited;
+an ancestor without a visible controller is skipped. This is stricter than the
+RUN admission fallback below: a RUN may be accepted and then refuse its first
+additional accounted reservation until the files are readable.
 See [the design](design/process-memory-ceiling.md).
 
 The component budgets are accounting budgets. Sampling, admission and
@@ -314,7 +320,7 @@ and connection cleanup remain available under pressure.
 Their own execution and reservation limits still apply, including the staged
 commit guard described below.
 
-On cgroup v2, the admission limit is the lower finite value of `memory.high`
+For RUN admission on cgroup v2, the admission limit is the lower finite value of `memory.high`
 and `memory.max` at each visible ancestor. If `memory.high` is missing,
 unreadable, malformed or `max`, the check falls back to `memory.max`. Both
 values are reread on each check. The diagnostic identifies whether `High` or

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add a bounded agent-memory example that records and recalls project decisions
+  and their reported sources, with authenticated Bolt and visibility tests.
+- Add an initial, bounded Markdown vault import example with local preview,
+  wiki links and a single transaction into a dedicated standalone graph.
+- Make the README and documentation site easier to explore, with a recorded
+  synthetic terminal demo and explicit beta boundaries.
+- Clarify the different cgroup failure behavior for RUN admission and active
+  query-growth sampling.
+
 ## 0.21.0-beta.2 — experimental candidate
 
 - Record a new single-run million-node comparison and a separate 100,000-node

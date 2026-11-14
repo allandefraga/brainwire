@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "nodes": [
+    {"label": "Note", "properties": ["title", "body"]}
+  ],
+  "edges": [
+    {"type": "LINKS_TO", "from": {"label": "Note"}, "to": {"label": "Note"}}
+  ]
+}
