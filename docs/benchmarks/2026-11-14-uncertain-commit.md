@@ -4,6 +4,11 @@ On 2026-11-14, a locally built v0.20.0-beta.2 candidate was tested as a single a
 
 All 16 cycles recovered either all 100 nodes and 100 relationships or none: 10 complete, six absent. Previously acknowledged data, indexed values and overwrites survived; the offline audit passed. This is a small synthetic process-kill test, not a power-loss test, a test of failure at a known fsync boundary, or distributed failover qualification. An unacknowledged commit can succeed: reconcile it before retrying.
 
+A [second local native build](2026-11-14-uncertain-commit-020b2-lookup.json),
+including the cgroup query-growth guard and typed primary-key lookup change,
+also passed 16 cycles. Its recovered outcomes were again 10 complete and six
+absent. Both receipts identify their own binaries; neither is a registry image.
+
 To reproduce with an already built binary and the Python Bolt driver installed, from the repository root:
 
 ```sh

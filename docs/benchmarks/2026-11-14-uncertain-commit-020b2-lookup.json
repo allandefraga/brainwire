@@ -1,0 +1,160 @@
+{
+  "binary_sha256": "33d676884f0504cfec5964407c9acfcc6429ad3100f08dfdf6ad9dd18dfedc6f",
+  "driver": "5.28.8",
+  "synthetic": true,
+  "rows_per_batch": 100,
+  "scope": "native protected single-node COMMIT submitted without acknowledgement; process SIGKILL, not power loss or exact commit-phase injection",
+  "cycles": [
+    {
+      "cycle": 0,
+      "requested_delay_seconds": 0,
+      "signal_wait_seconds": 0.003781,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    },
+    {
+      "cycle": 1,
+      "requested_delay_seconds": 5e-05,
+      "signal_wait_seconds": 0.001256,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    },
+    {
+      "cycle": 2,
+      "requested_delay_seconds": 0.0002,
+      "signal_wait_seconds": 0.001558,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    },
+    {
+      "cycle": 3,
+      "requested_delay_seconds": 0.0005,
+      "signal_wait_seconds": 0.001925,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 4,
+      "requested_delay_seconds": 0.001,
+      "signal_wait_seconds": 0.002552,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 5,
+      "requested_delay_seconds": 0.002,
+      "signal_wait_seconds": 0.003481,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 6,
+      "requested_delay_seconds": 0.005,
+      "signal_wait_seconds": 0.009683,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 7,
+      "requested_delay_seconds": 0.01,
+      "signal_wait_seconds": 0.011915,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 8,
+      "requested_delay_seconds": 0.01,
+      "signal_wait_seconds": 0.012845,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 9,
+      "requested_delay_seconds": 0.005,
+      "signal_wait_seconds": 0.006622,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 10,
+      "requested_delay_seconds": 0.002,
+      "signal_wait_seconds": 0.003363,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 11,
+      "requested_delay_seconds": 0.001,
+      "signal_wait_seconds": 0.002554,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 12,
+      "requested_delay_seconds": 0.0005,
+      "signal_wait_seconds": 0.001999,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "committed",
+      "reconciled_nodes": 100,
+      "reconciled_edges": 100
+    },
+    {
+      "cycle": 13,
+      "requested_delay_seconds": 0.0002,
+      "signal_wait_seconds": 0.004098,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    },
+    {
+      "cycle": 14,
+      "requested_delay_seconds": 5e-05,
+      "signal_wait_seconds": 0.003922,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    },
+    {
+      "cycle": 15,
+      "requested_delay_seconds": 0,
+      "signal_wait_seconds": 0.003838,
+      "acknowledgement_consumed": false,
+      "recovered_outcome": "not_committed",
+      "reconciled_nodes": 0,
+      "reconciled_edges": 0
+    }
+  ],
+  "audit": {
+    "database": "default",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "result": "PASS",
+  "owned_resources_removed": true
+}
