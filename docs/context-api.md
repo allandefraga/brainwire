@@ -183,12 +183,29 @@ result = search_context(graph, "Document", "release blocker",
 
 The optional scope accepts an ordinary list or tuple of at most 100 IDs and
 256 KiB of distinct UTF-8 ID bytes. An empty list returns no records without
-calling a provider. This is application-supplied narrowing,
-not authorization: graph credentials and visibility are still checked on
-read. A separate scope query and search do not share a transaction snapshot.
-Providers still return their own top 100 results before filtering, so relevant
-items outside that top set may be missed; this is not native indexed hybrid
-search. Provider callbacks receive the query and graph namespace as before.
+calling a provider. This is application-supplied narrowing, not authorization:
+graph credentials and visibility are still checked on read. A separate scope
+query and search do not share a transaction snapshot.
+
+By default, callbacks return their own top 100 results before the scope is
+applied, so relevant scoped records outside that top set may be missed. A
+provider that supports filtering before ranking can explicitly opt in:
+
+```python
+def scoped_vector_search(query, *, graph_name, label, limit, timeout, candidate_ids):
+    return my_vector_index.search_ids_within(candidate_ids, query, limit=limit)
+
+result = search_context(graph, "Document", "release blocker",
+    providers={"vector": scoped_vector_search},
+    candidate_ids=["doc-1", "doc-2"], scope_aware_providers=["vector"])
+```
+
+An opted-in callback receives the distinct candidate IDs as an immutable tuple.
+It must enforce that scope before ranking; Brainwire also filters its response
+and checks graph visibility. **The IDs reach the callback before graph
+authorization**: opt in only when the application permits that provider to see
+them. Legacy callbacks receive the same arguments as before. This does not
+create a shared snapshot or native indexed hybrid search.
 
 `search_context` combines ranked candidate IDs from application-configured
 providers. It reads the candidates through the caller's graph credentials,

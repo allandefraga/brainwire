@@ -52,7 +52,7 @@ for local durability, memory budgets and the current settings.
 
 ## What you can build
 
-- **Agent context:** explore ontology and visible record paths, combine ranked IDs from configured providers, then return authorized records and sources.
+- **Agent context:** explore ontology and visible record paths, optionally scope configured search providers before ranking, then return authorized records and sources.
 - **Connected operations:** link customers, projects, documents and tickets and query relationships with Cypher.
 - **Timelines:** model explicit events with stable keys and page through them in the Python example.
 - **Code graphs:** extract local Python structure and explore paths and source links.

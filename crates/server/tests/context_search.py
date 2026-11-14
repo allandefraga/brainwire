@@ -106,9 +106,19 @@ limit = "2GiB"
                         empty = search_context(graph, "Document", "release blocker",
                             providers={"lexical": provider([hidden, "missing"])}, **options)
                         assert empty["records"] == empty["sources"] == []
+
+                        def retrieve_with_scope(text, *, graph_name, label, limit, timeout, candidate_ids):
+                            assert candidate_ids == (hidden, own)
+                            ranked = [f"outside-{index}" for index in range(100)] + [hidden, own]
+                            return [identity for identity in ranked if identity in candidate_ids][:limit]
+
                         scoped = search_context(graph, "Document", "release blocker",
                             providers={"lexical": provider(["shared", hidden, own])},
                             candidate_ids=[hidden, own], **options)
+                        prefiltered = search_context(graph, "Document", "release blocker",
+                            providers={"lexical": retrieve_with_scope}, scope_aware_providers=["lexical"],
+                            candidate_ids=[hidden, own, own], **options)
+                        assert prefiltered == scoped, "provider prefilter bypassed scope or ACL"
                         assert [row["entity_id"] for row in scoped["records"]] == [own]
                         assert scoped["records"][0]["matches"][0]["rank"] == 1
                         assert [source["record"]["entity_id"] for source in scoped["sources"]] == [own]
@@ -122,7 +132,7 @@ limit = "2GiB"
                 return {"result": "PASS", "synthetic": True,
                     "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                     "checks": ["two static ACL identities", "hidden leading provider IDs removed",
-                               "visible ranks and sources invariant", "scoped candidates remain ACL filtered", "read grants reject writes"],
+                               "visible ranks and sources invariant", "provider prefilter preserves graph ACL", "read grants reject writes"],
                     "limits": ["providers are synthetic callbacks, not external search indexes",
                                "no shared snapshot across providers and graph", "no performance qualification"]}
             finally:

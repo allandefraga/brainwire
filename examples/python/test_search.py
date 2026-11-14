@@ -80,6 +80,65 @@ class SearchTests(unittest.TestCase):
         self.assertAlmostEqual(result["records"][0]["score"], 1 / 61 + 1 / 62)
         self.assertEqual(set(graph.calls[0][1]["ids"]), {"a", "b"})
 
+    def test_opted_in_provider_can_search_inside_scope_before_top_k(self):
+        graph = Graph([{"id": "a", "url": "source://a"},
+                       {"id": "outside", "url": "source://outside"}])
+        calls = []
+
+        def scoped_provider(text, *, graph_name, label, limit, timeout, candidate_ids):
+            calls.append(candidate_ids)
+            ranked = [f"outside-{i}" for i in range(100)] + ["hidden", "a"]
+            matches = [identity for identity in ranked if identity in candidate_ids]
+            return ["outside", *matches[:limit]]  # Even a misbehaving provider cannot widen the scope.
+
+        result = search_context(graph, "Document", "release blocker",
+            providers={"lexical": provider(["outside"]), "vector": scoped_provider},
+            candidate_ids=["a", "hidden", "a"], scope_aware_providers=["vector"],
+            source_fields={"url": "url"})
+        self.assertEqual(calls, [("a", "hidden")])
+        self.assertEqual(graph.calls[0][1]["ids"], ["hidden", "a"])
+        self.assertEqual([row["entity_id"] for row in result["records"]], ["a"])
+        self.assertEqual(result["records"][0]["matches"], [{"provider": "vector", "rank": 1}])
+        self.assertEqual([source["record"]["entity_id"] for source in result["sources"]], ["a"])
+
+    def test_opted_in_provider_requires_explicit_scope_and_skips_empty_scope(self):
+        calls = []
+
+        def scoped_provider(text, *, graph_name, label, limit, timeout, candidate_ids):
+            calls.append(candidate_ids)
+            return ["a"]
+
+        graph = Graph([{"id": "a"}])
+        options = {"providers": {"vector": scoped_provider}, "scope_aware_providers": ["vector"]}
+        with self.assertRaisesRegex(ValueError, "requires candidate_ids"):
+            search_context(graph, "Document", "release blocker", **options)
+        empty = search_context(graph, "Document", "release blocker", candidate_ids=[], **options)
+        self.assertEqual(empty["records"], [])
+        self.assertEqual(calls, [])
+        self.assertEqual(graph.calls, [])
+
+    def test_callback_cannot_replace_an_opted_in_provider_during_search(self):
+        graph = Graph([{"id": "a"}])
+        calls = []
+
+        def replacement(*args, **kwargs):
+            calls.append("replacement")
+            return []
+
+        def lexical(*args, **kwargs):
+            providers["vector"] = replacement
+            return []
+
+        def vector(text, *, graph_name, label, limit, timeout, candidate_ids):
+            calls.append(candidate_ids)
+            return ["a"]
+
+        providers = {"lexical": lexical, "vector": vector}
+        result = search_context(graph, "Document", "release blocker", providers=providers,
+                                candidate_ids=["a"], scope_aware_providers=["vector"])
+        self.assertEqual(calls, [("a",)])
+        self.assertEqual([row["entity_id"] for row in result["records"]], ["a"])
+
     def test_empty_or_invalid_candidate_scope_does_not_call_provider(self):
         called = []
         def callback(*args, **kwargs):
@@ -130,6 +189,11 @@ class SearchTests(unittest.TestCase):
             {"providers": {"vector": provider([])}, "timeout": float("nan")},
             {"providers": {"vector": provider([])}, "properties": ["acl_allow"]},
             {"providers": {"vector": provider([])}, "source_fields": {"secret": "url"}},
+            {"providers": {"vector": failure}, "scope_aware_providers": ["unknown"]},
+            {"providers": {"vector": failure}, "scope_aware_providers": "vector"},
+            {"providers": {"vector": failure}, "scope_aware_providers": [[]]},
+            {"providers": {"lexical": failure, "vector": failure}, "candidate_ids": ["a"],
+             "scope_aware_providers": ["vector", "vector"]},
         ]:
             with self.subTest(options=options):
                 with self.assertRaises(ValueError):
@@ -142,6 +206,21 @@ class SearchTests(unittest.TestCase):
             raise ValueError("secret-document-id")
         with self.assertRaises(ContextProviderError) as caught:
             search_context(graph, "Document", "release blocker", providers={"vector": failure})
+        self.assertNotIn("secret-document-id", str(caught.exception))
+        self.assertEqual(graph.calls, [])
+
+    def test_scoped_provider_type_error_does_not_fall_back_to_unrestricted_call(self):
+        graph = Graph()
+        calls = []
+
+        def failure(*args, **kwargs):
+            calls.append(kwargs.get("candidate_ids"))
+            raise TypeError("secret-document-id")
+
+        with self.assertRaises(ContextProviderError) as caught:
+            search_context(graph, "Document", "release blocker", providers={"vector": failure},
+                           candidate_ids=["a"], scope_aware_providers=["vector"])
+        self.assertEqual(calls, [("a",)])
         self.assertNotIn("secret-document-id", str(caught.exception))
         self.assertEqual(graph.calls, [])
 

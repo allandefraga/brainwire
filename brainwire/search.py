@@ -13,7 +13,8 @@ class ContextProviderError(RuntimeError):
 
 
 def search_context(graph, label, query_text, *, providers, source_fields=None,
-                   properties=(), limit=10, max_bytes=65536, timeout=10, candidate_ids=None):
+                   properties=(), limit=10, max_bytes=65536, timeout=10, candidate_ids=None,
+                   scope_aware_providers=()):
     """Fuse ranked provider IDs after one authorized graph read.
 
     Each callback receives query_text and keyword graph_name, label, limit=100,
@@ -22,9 +23,14 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
     are candidates, never authorization. Hidden/missing IDs are removed before
     ranks are assigned, so they cannot influence visible scores or citations.
 
-    candidate_ids optionally narrows providers to at most 100 explicit IDs.
-    It is not an authorization boundary or a shared graph snapshot; provider
-    top-k results outside the scope can reduce recall.
+    candidate_ids optionally narrows results to at most 100 explicit IDs.
+    Providers named in scope_aware_providers also receive candidate_ids as
+    an immutable tuple in input order, without duplicates. This opt-in requires
+    an explicit candidate_ids list or tuple. Those providers can apply the scope
+    before ranking. They receive the caller's IDs before graph authorization, so
+    opt in only for providers allowed to receive them. The helper always filters
+    provider results by scope and reads visible records through graph credentials.
+    Providers and the graph read use separate operations and may see different data.
 
     The deadline is cooperative: callbacks must honor their supplied timeout.
     This helper cannot preempt a blocking provider or Bolt operation.
@@ -41,11 +47,23 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
         raise ValueError('timeout must be finite and greater than 0 through 300 seconds')
     if not isinstance(providers, Mapping) or not 1 <= len(providers) <= 4:
         raise ValueError('providers must map 1..4 names to ranked-ID callbacks')
+    # Keep each scope opt-in bound to the callback validated for this search.
+    providers = dict(providers)
+    if not 1 <= len(providers) <= 4:
+        raise ValueError('providers must map 1..4 names to ranked-ID callbacks')
     for name, callback in providers.items():
         if not isinstance(name, str) or re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,31}', name) is None:
             raise ValueError('provider names must be 1..32 ASCII letters, digits, underscore or dash')
         if not callable(callback):
             raise ValueError('providers must be callable')
+    if type(scope_aware_providers) not in (list, tuple) or len(scope_aware_providers) > len(providers):
+        raise ValueError('scope_aware_providers must list names in providers')
+    scoped_names = tuple(scope_aware_providers)
+    if (any(not isinstance(name, str) or name not in providers for name in scoped_names)
+            or len(set(scoped_names)) != len(scoped_names)):
+        raise ValueError('scope_aware_providers must list unique names in providers')
+    if scoped_names and candidate_ids is None:
+        raise ValueError('scope_aware_providers requires candidate_ids')
     if source_fields is not None:
         allowed = {'id', 'title', 'url', 'hash', 'recorded_at'}
         if not isinstance(source_fields, dict) or not source_fields or any(
@@ -59,7 +77,7 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
     if candidate_ids is not None:
         if type(candidate_ids) not in (list, tuple) or len(candidate_ids) > 100:
             raise ValueError('candidate_ids must be a list or tuple of at most 100 IDs')
-        scope = set()
+        scope = {}
         size = 0
         for candidate in candidate_ids:
             identity = _entity(candidate)
@@ -67,7 +85,7 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
                 size += len(identity.encode('utf-8'))
                 if size > 256 * 1024:
                     raise ContextLimitError('candidate_ids exceed their ID byte bound')
-                scope.add(identity)
+                scope[identity] = None
 
     result = {'graph': graph_name, 'method': 'provider_rrf_v1', 'rrf_k': 60,
               'providers': sorted(providers), 'limit': limit, 'records': [], 'sources': []}
@@ -78,6 +96,7 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
     output_bound()
     if scope is not None and not scope:
         return result
+    provider_scope = tuple(scope) if scope is not None and scoped_names else None
     deadline = time.monotonic() + timeout
 
     def remaining():
@@ -91,9 +110,10 @@ def search_context(graph, label, query_text, *, providers, source_fields=None,
     candidate_bytes = 0
     for name in sorted(providers):
         seconds = remaining()
+        scope_kwargs = {'candidate_ids': provider_scope} if name in scoped_names else {}
         try:
             values = providers[name](query_text, graph_name=graph_name, label=label,
-                                     limit=100, timeout=seconds)
+                                     limit=100, timeout=seconds, **scope_kwargs)
         except Exception:
             raise ContextProviderError(f'context provider {name} failed') from None
         remaining()

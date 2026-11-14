@@ -29,6 +29,14 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-14: scoped agent retrieval and safer ingestion
+
+- Added an opt-in provider contract that receives bounded candidate IDs before
+  ranking. The graph still filters scope and enforces node visibility; the
+  caller must trust providers with those IDs before graph authorization.
+- Validation and release are in progress. See the final entry and release
+  notes for tested behavior and remaining boundaries.
+
 ## 2026-11-14: DuckLake checkpoint contracts and reproducible comparison
 
 - Follow-up: clarify that a nondefault Docker host port must also be used in
