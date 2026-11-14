@@ -88,7 +88,10 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec -T brainwire b
 ```
 
 The demo listens at `bolt://127.0.0.1:7687` and keeps data in a Docker volume.
-It disables authentication for local use. For shared environments, use
+It disables authentication: use it only on a trusted host and container network.
+Other containers on the same network can reach the service. Use Docker Engine
+28 or newer; [older engines can expose localhost ports to the local network](https://docs.docker.com/engine/network/port-publishing/).
+For shared environments, use
 [authentication and encrypted transport](docs/protected-containers.md).
 
 ### Write and query from Python

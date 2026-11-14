@@ -34,6 +34,8 @@ Allan's current language.
 - Follow-up: clarify that a nondefault Docker host port must also be used in
   the documentation site's Python client URL. Verified with
   `python3 scripts/check_docs_site.py`.
+- Explain the unauthenticated demo's trusted host/network requirement, including
+  Docker's pre-28 localhost port warning. Checked local documentation links.
 
 - Added a generic authenticated Bolt acceptance test for an ACL revocation
   racing with a stale stamp in the same transaction. The stale commit is
