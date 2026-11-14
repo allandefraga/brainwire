@@ -81,6 +81,32 @@ class TimelineTest(unittest.TestCase):
         self.assertEqual(schema["edges"][0]["from"], {"label": "Ticket"})
         self.assertEqual(schema["edges"][0]["to"], {"label": "TimelineEvent"})
 
+    def test_record_rejects_precision_that_could_make_changed_replays_equal(self):
+        driver, tx = self.driver()
+        subject = ("Ticket", "ticket-1")
+        key = "event-1"
+        record_event(driver, "demo", subject, key, "opened",
+                     "2026-11-03T11:00:00.123456+01:00", {})
+        params = tx.run.call_args_list[2].args[1]
+        self.assertEqual(params["occurred_at"], "2026-11-03T10:00:00.123456+00:00")
+        existing = {k: params[k] for k in ("kind", "occurred_at", "payload_json")}
+        for separator in (".", ","):
+            replay, _ = self.driver(existing)
+            with self.subTest(separator=separator):
+                with self.assertRaisesRegex(ValueError, "occurred_at.*microsecond precision"):
+                    record_event(replay, "demo", subject, key, "opened",
+                                 f"2026-11-03T10:00:00{separator}1234567Z", {})
+                replay.session.assert_not_called()
+
+    def test_record_rejects_offsets_with_seconds_before_connecting(self):
+        for offset in ("+00:00:00.000001", "+00:00:00.000002", "-01:00:30", "+0000"):
+            with self.subTest(offset=offset):
+                driver, _ = self.driver()
+                with self.assertRaisesRegex(ValueError, "occurred_at.*timezone.*HH:MM"):
+                    record_event(driver, "demo", ("Ticket", "ticket-1"), "e", "opened",
+                                 f"2026-11-03T10:00:00{offset}", {})
+                driver.session.assert_not_called()
+
     def test_read_returns_a_chronological_page_with_a_stable_tie_breaker(self):
         driver = MagicMock()
         session = driver.session.return_value.__enter__.return_value
@@ -176,6 +202,39 @@ class TimelineTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_event_page(driver, "demo", ("Ticket", "t"))
             driver.session.return_value.__exit__.assert_called_once()
+
+    def test_event_page_rejects_submicrosecond_bounds_and_cursors(self):
+        timestamp = "2026-11-03T10:00:00.1234567+00:00"
+        cases = (
+            ("start_at", {"start_at": timestamp}),
+            ("end_at", {"end_at": timestamp.replace(".", ",")}),
+            ("cursor occurred_at", {"after": {"occurred_at": timestamp, "id": "event-1"}}),
+        )
+        for field, options in cases:
+            with self.subTest(field=field):
+                driver = MagicMock()
+                with self.assertRaisesRegex(ValueError, f"{field}.*microsecond precision"):
+                    read_event_page(driver, "demo", ("Ticket", "t"), **options)
+                driver.session.assert_not_called()
+
+    def test_event_page_rejects_offsets_with_seconds_in_bounds(self):
+        for field, offset in (("start_at", "+00:00:00.000001"), ("end_at", "-01:00:30")):
+            with self.subTest(field=field):
+                driver = MagicMock()
+                with self.assertRaisesRegex(ValueError, f"{field}.*timezone.*HH:MM"):
+                    read_event_page(driver, "demo", ("Ticket", "t"),
+                                    **{field: f"2026-11-03T10:00:00{offset}"})
+                driver.session.assert_not_called()
+
+    def test_event_page_rejects_excess_precision_in_stored_event(self):
+        driver = MagicMock()
+        session = driver.session.return_value.__enter__.return_value
+        session.run.return_value = iter([
+            {"id": "e", "occurred_at": "2026-11-03T10:00:00.1234567+00:00"},
+        ])
+        with self.assertRaisesRegex(ValueError, "stored occurred_at.*microsecond precision"):
+            read_event_page(driver, "demo", ("Ticket", "t"))
+        driver.session.return_value.__exit__.assert_called_once()
 
     def test_event_page_propagates_read_failure_and_closes_the_session(self):
         driver = MagicMock()

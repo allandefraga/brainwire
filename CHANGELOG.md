@@ -2,6 +2,9 @@
 
 ## 0.20.0-beta.2 — experimental candidate
 
+- Reject unsupported timestamp precision and timezone offsets in the timeline
+  example instead of silently truncating event times. Accepted inputs use `Z`
+  or `±HH:MM` and at most six fractional digits.
 - Add an authenticated Bolt acceptance test for a concurrent ACL revocation:
   a stale stamp in the same transaction conflicts, and the revocation survives
   restart. Document the separate risk of carrying cached ACLs into a new

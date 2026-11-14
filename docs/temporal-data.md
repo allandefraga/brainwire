@@ -39,6 +39,11 @@ if page["next_cursor"] is not None:
 
 Pages use timestamp and event ID as a stable ordering key. The optional
 `end_at` is exclusive. Keep event timestamps immutable while paginating.
+Use ISO 8601 timestamps with `Z` or a `±HH:MM` timezone offset and up to six
+fractional digits for event times and window bounds, for example
+`2026-01-01T00:00:00.123456Z`. The helper stores timestamps in UTC. It rejects
+finer precision, compact offsets such as `+0100`, and offsets with seconds.
+Pass the returned cursor back as-is.
 Calls do not share a snapshot: concurrent changes can affect later pages. The
 limit is 1–100 returned rows; the server may still scan and sort a larger
 timeline. This helper is an example, not automatic graph history.

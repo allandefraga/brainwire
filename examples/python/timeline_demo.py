@@ -25,6 +25,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 
 from examples.python.client import identifier
 
@@ -36,13 +37,19 @@ def _text(value, name, limit=1000):
 
 
 def _timestamp(value, name):
+    timestamp_error = f"{name} must be an ISO timestamp with a timezone (Z or ±HH:MM)"
+    if not isinstance(value, str) or not re.search(r"(?:Z|[+-][0-9]{2}:[0-5][0-9])\Z", value):
+        raise ValueError(timestamp_error)
+    # fromisoformat can silently truncate fractional seconds after six digits.
+    if re.search(r"[.,][0-9]{7}", value):
+        raise ValueError(f"{name} must use at most six fractional digits (microsecond precision)")
     try:
         instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if instant.tzinfo is None or instant.utcoffset() is None:
             raise ValueError()
         return instant.astimezone(timezone.utc).isoformat()
-    except (AttributeError, ValueError, TypeError, OverflowError):
-        raise ValueError(f"{name} must be an ISO timestamp with a timezone") from None
+    except (ValueError, OverflowError):
+        raise ValueError(timestamp_error) from None
 
 
 def event_id(subject, key):
@@ -147,10 +154,10 @@ def read_event_page(driver, database, subject, *, start_at=None, end_at=None,
                     after=None, limit=50):
     """Read explicit milestones in [start_at, end_at), ordered by time and ID.
 
-    Bounds accept timezone-aware ISO timestamps and normalize to the UTC format
-    written by record_event(). Pass the returned next_cursor as after, retaining
-    the same subject and bounds. An extra visible row determines whether a
-    next_cursor is returned; no hidden counts or identities are queried.
+    Bounds accept ISO timestamps with up to six fractional digits and timezone
+    Z or ±HH:MM. They normalize to the UTC format written by record_event().
+    Pass the returned next_cursor as after, retaining the same subject and bounds.
+    An extra visible row determines whether a next_cursor is returned.
 
     Keep event time and identity immutable in the application. Each call has its
     own read snapshot: concurrent insertions, updates and deletions can change
