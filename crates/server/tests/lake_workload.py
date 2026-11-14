@@ -60,7 +60,7 @@ ONTOLOGY = {"version": "1", "nodes": [
     {"label": "Person", "properties": ["name", "email", "company_id", "updated_at"], "indexed_fields": ["email"]},
     {"label": "Ticket", "properties": ["person_id", "status", "priority", "opened_at"],
      "indexed_fields": ["status"]},
-    {"label": "ImportCheckpoint", "properties": ["snapshot", "lease"], "indexed_fields": []}],
+    {"label": "ImportCheckpoint", "properties": ["snapshot", "lease", "contract_fingerprint"], "indexed_fields": []}],
     "edges": [{"type": "WORKS_AT", "from": {"label": "Person"}, "to": {"label": "Company"}},
               {"type": "OPENED", "from": {"label": "Person"}, "to": {"label": "Ticket"}}]}
 TENANTS = ("a", "b")
@@ -74,7 +74,7 @@ def build_lake(writer, scale):
     writer.execute("CREATE SCHEMA w.clean")
     acl_columns = "acl_allow VARCHAR[], acl_connector_ids VARCHAR[], acl_source_table VARCHAR"
     writer.execute(f"CREATE TABLE w.clean.companies(external_id VARCHAR, name VARCHAR, segment VARCHAR, "
-                   f"revenue DECIMAL(18,2), updated_at TIMESTAMP, {acl_columns})")
+                   f"revenue DOUBLE, updated_at TIMESTAMP, {acl_columns})")
     writer.execute(f"CREATE TABLE w.clean.people(external_id VARCHAR, name VARCHAR, email VARCHAR, "
                    f"company_id VARCHAR, updated_at TIMESTAMP, {acl_columns})")
     writer.execute(f"CREATE TABLE w.clean.tickets(external_id VARCHAR, person_id VARCHAR, status VARCHAR, "
@@ -118,9 +118,9 @@ def change_cycle(writer, rng, cycle, scale):
     writer.execute(f"""INSERT INTO {w}.people SELECT {tenant} || '-p-c{cycle}-' || i, 'New ' || i,
         'new{cycle}-' || i || '@example.test', {tenant} || '-co-' || ((i % {scale // 2}) * 2 + i % 2),
         TIMESTAMP '2026-03-01', {acl_sql(tenant, 'people')} FROM range({new}) t(i)""")
-    writer.execute(f"""INSERT INTO {w}.tickets SELECT {tenant} || '-t-c{cycle}-' || i,
-        {tenant} || '-p-c{cycle}-' || (i % {new}), 'open', 3, TIMESTAMP '2026-03-01',
-        {acl_sql(tenant, 'tickets')} FROM range({new * 2}) t(i)""")
+    writer.execute(f"""INSERT INTO {w}.tickets SELECT {tenant} || '-t-c{cycle}-' || (i + replica * {new}),
+        {tenant} || '-p-c{cycle}-' || i, 'open', 3, TIMESTAMP '2026-03-01',
+        {acl_sql(tenant, 'tickets')} FROM range({new}) t(i) CROSS JOIN range(2) copies(replica)""")
 
 
 def lake_state(writer):
@@ -252,6 +252,7 @@ def run(binary, scale, workers, cycles, lake_target=None, data_path=None, load=(
                 with ThreadPoolExecutor(len(group)) as pool:
                     results = list(pool.map(lambda item: sync(
                         item[1], lake_target=target, uri=uri, database="lake", source_id=item[0],
+                        source_identity="lake-workload-v1",
                         workers=workers, batch_size=500, full=full, load=load, init_sql=init_sql),
                         group.items()))
                 return {"seconds": round(time.monotonic() - started, 3),

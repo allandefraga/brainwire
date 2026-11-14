@@ -94,5 +94,6 @@ Relationship properties cannot be dropped.
 - Cluster (replicated) transactions refuse catalog changes with a `Forbidden`
   error. The background backfill writes locally, which replicas would not
   repeat; change the catalog on a standalone server or offline.
-- There is no `SHOW INDEXES`; use `CALL db.indexes()`.
+- `SHOW INDEXES` is a standalone alias for `CALL db.indexes()`. For
+  projections or filters, use `CALL db.indexes()`.
 - Labels and relationship types cannot be dropped online.

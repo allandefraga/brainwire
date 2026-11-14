@@ -1,0 +1,207 @@
+{
+  "status": "passed-diagnostic",
+  "synthetic": true,
+  "image": "brainwire-local-candidate:0.20.0-beta.1",
+  "image_identity": {
+    "image_id": "sha256:6efb2e6281eef61ac28c190d508f6547f398dab8c2e32854d38bed6eb1fdb18a",
+    "repo_digests": [
+      "brainwire-local-candidate@sha256:6efb2e6281eef61ac28c190d508f6547f398dab8c2e32854d38bed6eb1fdb18a"
+    ],
+    "revision_label": null,
+    "source_provenance_verified": false
+  },
+  "rows_per_label": 5000,
+  "expected_nodes": 20000,
+  "expected_edges": 20000,
+  "memory_limit_bytes": 2147483648,
+  "writers": 4,
+  "readers": [
+    "scan",
+    "aggregation",
+    "neighborhood",
+    "cursor"
+  ],
+  "driver": "5.28.4",
+  "workload_settings": {
+    "batch_size": 250,
+    "neighborhood_rows": 1000,
+    "sample_seconds": 1,
+    "reader_pause": 0.01,
+    "query_timeout": 30
+  },
+  "load_seconds": 1.0634101670002565,
+  "ack_rows_per_label": 5000,
+  "read_soak_seconds": 1800.0015150840045,
+  "client_results": [
+    {
+      "role": "scan",
+      "latency": {
+        "requests": 13763,
+        "p50_ms": 108.173,
+        "p95_ms": 191.863,
+        "p99_ms": 257.483
+      },
+      "denials": {},
+      "rows": 68792500
+    },
+    {
+      "role": "aggregation",
+      "latency": {
+        "requests": 30279,
+        "p50_ms": 43.123,
+        "p95_ms": 65.29,
+        "p99_ms": 99.835
+      },
+      "denials": {},
+      "rows": 121108
+    },
+    {
+      "role": "neighborhood",
+      "latency": {
+        "requests": 18000,
+        "p50_ms": 80.84,
+        "p95_ms": 131.812,
+        "p99_ms": 179.025
+      },
+      "denials": {},
+      "rows": 17997250
+    },
+    {
+      "role": "cursor",
+      "latency": {
+        "requests": 59221,
+        "p50_ms": 12.148,
+        "p95_ms": 41.95,
+        "p99_ms": 57.496
+      },
+      "denials": {},
+      "rows": 11388200
+    },
+    {
+      "role": "writer",
+      "index": 0,
+      "ack_rows_per_label": 1250,
+      "latency": {
+        "requests": 5,
+        "p50_ms": 114.652,
+        "p95_ms": 134.794,
+        "p99_ms": 134.794
+      },
+      "denials": {}
+    },
+    {
+      "role": "writer",
+      "index": 1,
+      "ack_rows_per_label": 1250,
+      "latency": {
+        "requests": 5,
+        "p50_ms": 119.836,
+        "p95_ms": 138.693,
+        "p99_ms": 138.693
+      },
+      "denials": {}
+    },
+    {
+      "role": "writer",
+      "index": 2,
+      "ack_rows_per_label": 1250,
+      "latency": {
+        "requests": 5,
+        "p50_ms": 122.425,
+        "p95_ms": 134.497,
+        "p99_ms": 134.497
+      },
+      "denials": {}
+    },
+    {
+      "role": "writer",
+      "index": 3,
+      "ack_rows_per_label": 1250,
+      "latency": {
+        "requests": 5,
+        "p50_ms": 108.076,
+        "p95_ms": 137.554,
+        "p99_ms": 137.554
+      },
+      "denials": {}
+    }
+  ],
+  "counts": {
+    "Usuario": 5000,
+    "Carro": 5000,
+    "Endereco": 5000,
+    "Casa": 5000,
+    "TEM_CARRO": 5000,
+    "TEM_ENDERECO": 5000,
+    "TEM_CASA": 5000,
+    "CASA_FICA_EM": 5000
+  },
+  "cursor": {
+    "rows": 5000,
+    "page_size": 200,
+    "seconds": 0.0878856250201352,
+    "delegated": true
+  },
+  "integrity": {
+    "database": "bench",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "oom_evidence": {
+    "observed": false,
+    "cgroup_oom": false,
+    "docker_oom_event": false,
+    "docker_oom_killed": false,
+    "restart_count": 0,
+    "kernel_log_verified": false
+  },
+  "memory_by_phase": {
+    "setup": {
+      "samples": 1,
+      "current_peak_bytes": 10358784,
+      "rss_peak_bytes": 24887296,
+      "last_current_bytes": 10358784,
+      "last_rss_bytes": 24887296,
+      "last_anon_bytes": 8294400
+    },
+    "mixed-load": {
+      "samples": 1,
+      "current_peak_bytes": 22110208,
+      "rss_peak_bytes": 36257792,
+      "last_current_bytes": 22110208,
+      "last_rss_bytes": 36257792,
+      "last_anon_bytes": 19533824
+    },
+    "read-soak": {
+      "samples": 1707,
+      "current_peak_bytes": 134430720,
+      "rss_peak_bytes": 140554240,
+      "last_current_bytes": 85442560,
+      "last_rss_bytes": 91865088,
+      "last_anon_bytes": 74682368
+    },
+    "post-load-idle": {
+      "samples": 58,
+      "current_peak_bytes": 86077440,
+      "rss_peak_bytes": 92504064,
+      "last_current_bytes": 53067776,
+      "last_rss_bytes": 59752448,
+      "last_anon_bytes": 42569728
+    }
+  },
+  "gaps": [
+    "Kernel logs may be inaccessible; never infer no OOM from Docker OOMKilled=false.",
+    "No disk loss, power-loss, quorum or partition simulation.",
+    "Process RSS is sampled; cgroup memory.peak includes page cache.",
+    "Atomic four-label batches differ from the older embedded sequential-label loading order.",
+    "Concurrent cursor pages are separate transactions; final quiescent cursor is verified exactly."
+  ],
+  "fixture": "Four labels, four edge types, delegated node visibility; writes during load, read-only soak thereafter.",
+  "provenance": "Local candidate image; unredacted report and host details omitted. source_report_sha256 identifies the original local report.",
+  "source_report_sha256": "49a31042ea8c6a7e964974e74430f642c85fecf97821f2110a0bb1ebb7c8c3c5",
+  "limitations": [
+    "Synthetic dataset does not saturate 2 GiB; sampled RSS is not a hard ceiling.",
+    "No independent kernel log, power-loss or multi-machine failover verification.",
+    "One run, not a production capacity qualification."
+  ]
+}

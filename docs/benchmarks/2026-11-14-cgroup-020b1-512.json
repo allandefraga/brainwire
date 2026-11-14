@@ -1,0 +1,1307 @@
+{
+  "result": "PASS",
+  "run_id": "3063f817156d48599beb7983cc7b66d9",
+  "driver": "5.28.4",
+  "image": "brainwire-local-candidate:0.20.0-beta.1",
+  "memory_limit_bytes": 536870912,
+  "threshold_percent": 95,
+  "pressure_basis": "memory.current minus inactive_file; raw usage retained for injection safety",
+  "injection_target_percent": 96,
+  "injection_safety_percent": 98,
+  "scope": "synthetic single-container Linux cgroup-v2 RUN admission",
+  "limitations": [
+    "not a global RSS ceiling",
+    "not sustained 2/4/8 GiB qualification",
+    "not power-loss or distributed failover",
+    "raw usage includes tmpfs and file cache",
+    "kernel logs not independently verified",
+    "persistent observer has fixed memory overhead; samples are not decision-time atomic"
+  ],
+  "image_id": "sha256:6efb2e6281eef61ac28c190d508f6547f398dab8c2e32854d38bed6eb1fdb18a",
+  "pressure_sampling_method": "persistent_shell_builtins",
+  "observer_run_windows": [
+    {
+      "wall_start_ns": 1794659921401370000,
+      "monotonic_start_ns": 179472319446958,
+      "samples": [
+        {
+          "memory.current": 516517888,
+          "memory.max": 536870912,
+          "memory.peak": 517554176,
+          "memory.swap.max": 0,
+          "memory.high": "max",
+          "memory.events": {
+            "low": 0,
+            "high": 0,
+            "max": 0,
+            "oom": 0,
+            "oom_kill": 0,
+            "oom_group_kill": 0
+          },
+          "memory.stat.inactive_file": 307200,
+          "observer_uptime_seconds": "92889.59",
+          "diagnostic_working_set": {
+            "bytes": 516210688,
+            "unit": "bytes",
+            "source": "memory.current minus inactive_file from persistent shell builtins",
+            "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+          },
+          "observer_monotonic_start_ns": 179472319524041,
+          "observer_monotonic_end_ns": 179472320136583,
+          "observer_wall_start_ns": 1794659921401447000
+        }
+      ],
+      "phase": "transaction_run",
+      "operation_monotonic_start_ns": 179472319540125,
+      "operation_wall_start_ns": 1794659921401463000,
+      "operation_monotonic_end_ns": 179472320573750,
+      "operation_wall_end_ns": 1794659921402497000,
+      "monotonic_end_ns": 179472320601916
+    },
+    {
+      "wall_start_ns": 1794659921405609000,
+      "monotonic_start_ns": 179472323686375,
+      "samples": [
+        {
+          "memory.current": 516464640,
+          "memory.max": 536870912,
+          "memory.peak": 517554176,
+          "memory.swap.max": 0,
+          "memory.high": "max",
+          "memory.events": {
+            "low": 0,
+            "high": 0,
+            "max": 0,
+            "oom": 0,
+            "oom_kill": 0,
+            "oom_group_kill": 0
+          },
+          "memory.stat.inactive_file": 307200,
+          "observer_uptime_seconds": "92889.60",
+          "diagnostic_working_set": {
+            "bytes": 516157440,
+            "unit": "bytes",
+            "source": "memory.current minus inactive_file from persistent shell builtins",
+            "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+          },
+          "observer_monotonic_start_ns": 179472323726416,
+          "observer_monotonic_end_ns": 179472324294208,
+          "observer_wall_start_ns": 1794659921405649000
+        }
+      ],
+      "phase": "new_session_run",
+      "operation_monotonic_start_ns": 179472323729458,
+      "operation_wall_start_ns": 1794659921405653000,
+      "operation_monotonic_end_ns": 179472324719083,
+      "operation_wall_end_ns": 1794659921406642000,
+      "monotonic_end_ns": 179472324738833
+    }
+  ],
+  "observer_limits": {
+    "samples_per_window": 256,
+    "bytes_per_snapshot": 65536,
+    "bytes_per_window": 262144,
+    "max_windows": 8
+  },
+  "before": {
+    "memory.current": 9662464,
+    "memory.max": 536870912,
+    "memory.peak": 11350016,
+    "memory.swap.max": 0,
+    "memory.high": "max",
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "memory.stat.inactive_file": 229376,
+    "observer_uptime_seconds": "92889.10",
+    "diagnostic_working_set": {
+      "bytes": 9433088,
+      "unit": "bytes",
+      "source": "memory.current minus inactive_file from persistent shell builtins",
+      "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+    },
+    "observer_monotonic_start_ns": 179471803472166,
+    "observer_monotonic_end_ns": 179471832380458,
+    "observer_wall_start_ns": 1794659920885396000
+  },
+  "server_protocol": "5.4",
+  "pressure_samples": [
+    {
+      "memory.current": 508084224,
+      "memory.max": 536870912,
+      "memory.peak": 509521920,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.32",
+      "diagnostic_working_set": {
+        "bytes": 507777024,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472045381125,
+      "observer_monotonic_end_ns": 179472046172625,
+      "observer_wall_start_ns": 1794659921127304000
+    },
+    {
+      "memory.current": 509177856,
+      "memory.max": 536870912,
+      "memory.peak": 510242816,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.35",
+      "diagnostic_working_set": {
+        "bytes": 508870656,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472079567875,
+      "observer_monotonic_end_ns": 179472080308125,
+      "observer_wall_start_ns": 1794659921161491000
+    },
+    {
+      "memory.current": 510230528,
+      "memory.max": 536870912,
+      "memory.peak": 511258624,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.38",
+      "diagnostic_working_set": {
+        "bytes": 509923328,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472112551041,
+      "observer_monotonic_end_ns": 179472113231833,
+      "observer_wall_start_ns": 1794659921194474000
+    },
+    {
+      "memory.current": 511254528,
+      "memory.max": 536870912,
+      "memory.peak": 512286720,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.42",
+      "diagnostic_working_set": {
+        "bytes": 510947328,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472145163333,
+      "observer_monotonic_end_ns": 179472145871875,
+      "observer_wall_start_ns": 1794659921227087000
+    },
+    {
+      "memory.current": 512344064,
+      "memory.max": 536870912,
+      "memory.peak": 513437696,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.45",
+      "diagnostic_working_set": {
+        "bytes": 512036864,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472180309208,
+      "observer_monotonic_end_ns": 179472180999416,
+      "observer_wall_start_ns": 1794659921262232000
+    },
+    {
+      "memory.current": 513372160,
+      "memory.max": 536870912,
+      "memory.peak": 514387968,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.49",
+      "diagnostic_working_set": {
+        "bytes": 513064960,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472214469083,
+      "observer_monotonic_end_ns": 179472215251250,
+      "observer_wall_start_ns": 1794659921296392000
+    },
+    {
+      "memory.current": 514437120,
+      "memory.max": 536870912,
+      "memory.peak": 515461120,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.52",
+      "diagnostic_working_set": {
+        "bytes": 514129920,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472252523541,
+      "observer_monotonic_end_ns": 179472253282375,
+      "observer_wall_start_ns": 1794659921334447000
+    },
+    {
+      "memory.current": 515481600,
+      "memory.max": 536870912,
+      "memory.peak": 516530176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.56",
+      "diagnostic_working_set": {
+        "bytes": 515174400,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472284775208,
+      "observer_monotonic_end_ns": 179472285546875,
+      "observer_wall_start_ns": 1794659921366699000
+    },
+    {
+      "memory.current": 516521984,
+      "memory.max": 536870912,
+      "memory.peak": 517554176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.59",
+      "diagnostic_working_set": {
+        "bytes": 516214784,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472318115208,
+      "observer_monotonic_end_ns": 179472318826708,
+      "observer_wall_start_ns": 1794659921400039000
+    },
+    {
+      "memory.current": 516726784,
+      "memory.max": 536870912,
+      "memory.peak": 517554176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.59",
+      "diagnostic_working_set": {
+        "bytes": 516419584,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472322477416,
+      "observer_monotonic_end_ns": 179472323063583,
+      "observer_wall_start_ns": 1794659921404400000
+    }
+  ],
+  "pressure_phase": "new_session_run",
+  "run_pressure_checks": [
+    {
+      "before": {
+        "memory.current": 516517888,
+        "memory.max": 536870912,
+        "memory.peak": 517554176,
+        "memory.swap.max": 0,
+        "memory.high": "max",
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "memory.stat.inactive_file": 307200,
+        "observer_uptime_seconds": "92889.59",
+        "diagnostic_working_set": {
+          "bytes": 516210688,
+          "unit": "bytes",
+          "source": "memory.current minus inactive_file from persistent shell builtins",
+          "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+        },
+        "observer_monotonic_start_ns": 179472318840500,
+        "observer_monotonic_end_ns": 179472319434625,
+        "observer_wall_start_ns": 1794659921400764000
+      },
+      "after": {
+        "memory.current": 516534272,
+        "memory.max": 536870912,
+        "memory.peak": 517554176,
+        "memory.swap.max": 0,
+        "memory.high": "max",
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "memory.stat.inactive_file": 307200,
+        "observer_uptime_seconds": "92889.59",
+        "diagnostic_working_set": {
+          "bytes": 516227072,
+          "unit": "bytes",
+          "source": "memory.current minus inactive_file from persistent shell builtins",
+          "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+        },
+        "observer_monotonic_start_ns": 179472320607250,
+        "observer_monotonic_end_ns": 179472321154291,
+        "observer_wall_start_ns": 1794659921402530000
+      },
+      "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+      "scope": "point-in-time samples; no continuous usage guarantee",
+      "phase": "transaction_run",
+      "observer_window": {
+        "wall_start_ns": 1794659921401370000,
+        "monotonic_start_ns": 179472319446958,
+        "samples": [
+          {
+            "memory.current": 516517888,
+            "memory.max": 536870912,
+            "memory.peak": 517554176,
+            "memory.swap.max": 0,
+            "memory.high": "max",
+            "memory.events": {
+              "low": 0,
+              "high": 0,
+              "max": 0,
+              "oom": 0,
+              "oom_kill": 0,
+              "oom_group_kill": 0
+            },
+            "memory.stat.inactive_file": 307200,
+            "observer_uptime_seconds": "92889.59",
+            "diagnostic_working_set": {
+              "bytes": 516210688,
+              "unit": "bytes",
+              "source": "memory.current minus inactive_file from persistent shell builtins",
+              "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+            },
+            "observer_monotonic_start_ns": 179472319524041,
+            "observer_monotonic_end_ns": 179472320136583,
+            "observer_wall_start_ns": 1794659921401447000
+          }
+        ],
+        "phase": "transaction_run",
+        "operation_monotonic_start_ns": 179472319540125,
+        "operation_wall_start_ns": 1794659921401463000,
+        "operation_monotonic_end_ns": 179472320573750,
+        "operation_wall_end_ns": 1794659921402497000,
+        "monotonic_end_ns": 179472320601916
+      },
+      "code": "Neo.TransientError.General.MemoryPressure",
+      "type": "TransientError",
+      "reason": "cgroup",
+      "rolled_back": true
+    },
+    {
+      "before": {
+        "memory.current": 516464640,
+        "memory.max": 536870912,
+        "memory.peak": 517554176,
+        "memory.swap.max": 0,
+        "memory.high": "max",
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "memory.stat.inactive_file": 307200,
+        "observer_uptime_seconds": "92889.60",
+        "diagnostic_working_set": {
+          "bytes": 516157440,
+          "unit": "bytes",
+          "source": "memory.current minus inactive_file from persistent shell builtins",
+          "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+        },
+        "observer_monotonic_start_ns": 179472323117208,
+        "observer_monotonic_end_ns": 179472323680125,
+        "observer_wall_start_ns": 1794659921405040000
+      },
+      "after": {
+        "memory.current": 516726784,
+        "memory.max": 536870912,
+        "memory.peak": 517554176,
+        "memory.swap.max": 0,
+        "memory.high": "max",
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "memory.stat.inactive_file": 307200,
+        "observer_uptime_seconds": "92889.60",
+        "diagnostic_working_set": {
+          "bytes": 516419584,
+          "unit": "bytes",
+          "source": "memory.current minus inactive_file from persistent shell builtins",
+          "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+        },
+        "observer_monotonic_start_ns": 179472324742083,
+        "observer_monotonic_end_ns": 179472325295666,
+        "observer_wall_start_ns": 1794659921406665000
+      },
+      "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+      "scope": "point-in-time samples; no continuous usage guarantee",
+      "phase": "new_session_run",
+      "observer_window": {
+        "wall_start_ns": 1794659921405609000,
+        "monotonic_start_ns": 179472323686375,
+        "samples": [
+          {
+            "memory.current": 516464640,
+            "memory.max": 536870912,
+            "memory.peak": 517554176,
+            "memory.swap.max": 0,
+            "memory.high": "max",
+            "memory.events": {
+              "low": 0,
+              "high": 0,
+              "max": 0,
+              "oom": 0,
+              "oom_kill": 0,
+              "oom_group_kill": 0
+            },
+            "memory.stat.inactive_file": 307200,
+            "observer_uptime_seconds": "92889.60",
+            "diagnostic_working_set": {
+              "bytes": 516157440,
+              "unit": "bytes",
+              "source": "memory.current minus inactive_file from persistent shell builtins",
+              "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+            },
+            "observer_monotonic_start_ns": 179472323726416,
+            "observer_monotonic_end_ns": 179472324294208,
+            "observer_wall_start_ns": 1794659921405649000
+          }
+        ],
+        "phase": "new_session_run",
+        "operation_monotonic_start_ns": 179472323729458,
+        "operation_wall_start_ns": 1794659921405653000,
+        "operation_monotonic_end_ns": 179472324719083,
+        "operation_wall_end_ns": 1794659921406642000,
+        "monotonic_end_ns": 179472324738833
+      },
+      "code": "Neo.TransientError.General.MemoryPressure",
+      "type": "TransientError",
+      "reason": "cgroup",
+      "rolled_back": true
+    }
+  ],
+  "rejected_transaction_run": {
+    "before": {
+      "memory.current": 516517888,
+      "memory.max": 536870912,
+      "memory.peak": 517554176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.59",
+      "diagnostic_working_set": {
+        "bytes": 516210688,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472318840500,
+      "observer_monotonic_end_ns": 179472319434625,
+      "observer_wall_start_ns": 1794659921400764000
+    },
+    "after": {
+      "memory.current": 516534272,
+      "memory.max": 536870912,
+      "memory.peak": 517554176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.59",
+      "diagnostic_working_set": {
+        "bytes": 516227072,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472320607250,
+      "observer_monotonic_end_ns": 179472321154291,
+      "observer_wall_start_ns": 1794659921402530000
+    },
+    "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+    "scope": "point-in-time samples; no continuous usage guarantee",
+    "phase": "transaction_run",
+    "observer_window": {
+      "wall_start_ns": 1794659921401370000,
+      "monotonic_start_ns": 179472319446958,
+      "samples": [
+        {
+          "memory.current": 516517888,
+          "memory.max": 536870912,
+          "memory.peak": 517554176,
+          "memory.swap.max": 0,
+          "memory.high": "max",
+          "memory.events": {
+            "low": 0,
+            "high": 0,
+            "max": 0,
+            "oom": 0,
+            "oom_kill": 0,
+            "oom_group_kill": 0
+          },
+          "memory.stat.inactive_file": 307200,
+          "observer_uptime_seconds": "92889.59",
+          "diagnostic_working_set": {
+            "bytes": 516210688,
+            "unit": "bytes",
+            "source": "memory.current minus inactive_file from persistent shell builtins",
+            "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+          },
+          "observer_monotonic_start_ns": 179472319524041,
+          "observer_monotonic_end_ns": 179472320136583,
+          "observer_wall_start_ns": 1794659921401447000
+        }
+      ],
+      "phase": "transaction_run",
+      "operation_monotonic_start_ns": 179472319540125,
+      "operation_wall_start_ns": 1794659921401463000,
+      "operation_monotonic_end_ns": 179472320573750,
+      "operation_wall_end_ns": 1794659921402497000,
+      "monotonic_end_ns": 179472320601916
+    },
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "after_transaction_rollback": {
+    "memory.current": 516464640,
+    "memory.max": 536870912,
+    "memory.peak": 517554176,
+    "memory.swap.max": 0,
+    "memory.high": "max",
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "memory.stat.inactive_file": 307200,
+    "observer_uptime_seconds": "92889.59",
+    "diagnostic_working_set": {
+      "bytes": 516157440,
+      "unit": "bytes",
+      "source": "memory.current minus inactive_file from persistent shell builtins",
+      "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+    },
+    "observer_monotonic_start_ns": 179472321317875,
+    "observer_monotonic_end_ns": 179472321907875,
+    "observer_wall_start_ns": 1794659921403241000
+  },
+  "rejected_new_run": {
+    "before": {
+      "memory.current": 516464640,
+      "memory.max": 536870912,
+      "memory.peak": 517554176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.60",
+      "diagnostic_working_set": {
+        "bytes": 516157440,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472323117208,
+      "observer_monotonic_end_ns": 179472323680125,
+      "observer_wall_start_ns": 1794659921405040000
+    },
+    "after": {
+      "memory.current": 516726784,
+      "memory.max": 536870912,
+      "memory.peak": 517554176,
+      "memory.swap.max": 0,
+      "memory.high": "max",
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "memory.stat.inactive_file": 307200,
+      "observer_uptime_seconds": "92889.60",
+      "diagnostic_working_set": {
+        "bytes": 516419584,
+        "unit": "bytes",
+        "source": "memory.current minus inactive_file from persistent shell builtins",
+        "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+      },
+      "observer_monotonic_start_ns": 179472324742083,
+      "observer_monotonic_end_ns": 179472325295666,
+      "observer_wall_start_ns": 1794659921406665000
+    },
+    "pressure_basis": "memory.current minus inactive_file (matching runtime estimate)",
+    "scope": "point-in-time samples; no continuous usage guarantee",
+    "phase": "new_session_run",
+    "observer_window": {
+      "wall_start_ns": 1794659921405609000,
+      "monotonic_start_ns": 179472323686375,
+      "samples": [
+        {
+          "memory.current": 516464640,
+          "memory.max": 536870912,
+          "memory.peak": 517554176,
+          "memory.swap.max": 0,
+          "memory.high": "max",
+          "memory.events": {
+            "low": 0,
+            "high": 0,
+            "max": 0,
+            "oom": 0,
+            "oom_kill": 0,
+            "oom_group_kill": 0
+          },
+          "memory.stat.inactive_file": 307200,
+          "observer_uptime_seconds": "92889.60",
+          "diagnostic_working_set": {
+            "bytes": 516157440,
+            "unit": "bytes",
+            "source": "memory.current minus inactive_file from persistent shell builtins",
+            "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+          },
+          "observer_monotonic_start_ns": 179472323726416,
+          "observer_monotonic_end_ns": 179472324294208,
+          "observer_wall_start_ns": 1794659921405649000
+        }
+      ],
+      "phase": "new_session_run",
+      "operation_monotonic_start_ns": 179472323729458,
+      "operation_wall_start_ns": 1794659921405653000,
+      "operation_monotonic_end_ns": 179472324719083,
+      "operation_wall_end_ns": 1794659921406642000,
+      "monotonic_end_ns": 179472324738833
+    },
+    "code": "Neo.TransientError.General.MemoryPressure",
+    "type": "TransientError",
+    "reason": "cgroup",
+    "rolled_back": true
+  },
+  "recovered_counts": {
+    "acknowledged": 1,
+    "pending-before-pressure": 0,
+    "rejected-under-pressure": 0
+  },
+  "after_relief": {
+    "memory.current": 11087872,
+    "memory.max": 536870912,
+    "memory.peak": 518365184,
+    "memory.swap.max": 0,
+    "memory.high": "max",
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "memory.stat.inactive_file": 323584,
+    "observer_uptime_seconds": "92889.66",
+    "diagnostic_working_set": {
+      "bytes": 10764288,
+      "unit": "bytes",
+      "source": "memory.current minus inactive_file from persistent shell builtins",
+      "scope": "sequential readings; no per-sample exec; not an atomic runtime sample"
+    },
+    "observer_monotonic_start_ns": 179472384066125,
+    "observer_monotonic_end_ns": 179472384655208,
+    "observer_wall_start_ns": 1794659921465990000
+  },
+  "final_state": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 43621,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-14T12:38:40.790212168Z",
+    "FinishedAt": "0001-01-01T00:00:00Z",
+    "Health": {
+      "Status": "starting",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "pressure_log_lines": [
+    "memory pressure admission: Available { current: 2539520, limit: 536870912 } PressureUsage { denied_runs: 0, unavailable_samples: 0 } (sampled cgroup usage; not an RSS ceiling)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=1; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 517038080, inactive_file_before_bytes: Some(307200), inactive_file_after_bytes: Some(307200), inactive_file_bytes: 307200, effective_bytes: 516730880, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=2; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 516726784, inactive_file_before_bytes: Some(307200), inactive_file_after_bytes: Some(307200), inactive_file_bytes: 307200, effective_bytes: 516419584, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)"
+  ],
+  "offline_audit": {
+    "database": "demo",
+    "scalar_indexes": "checked_active_declarations",
+    "status": "ok"
+  },
+  "docker_events": [
+    {
+      "action": "create",
+      "time": 1794659920
+    },
+    {
+      "action": "mount",
+      "time": 1794659920
+    },
+    {
+      "action": "start",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_create: /bin/sh -c while IFS= read -r command; do\nif [ \"$command\" = sample ]; then\n read -r uptime rest < /proc/uptime || exit 70\n read -r current < /sys/fs/cgroup/memory.current || exit 70\n read -r maximum < /sys/fs/cgroup/memory.max || exit 70\n read -r peak < /sys/fs/cgroup/memory.peak || exit 70\n read -r swap < /sys/fs/cgroup/memory.swap.max || exit 70\n read -r high < /sys/fs/cgroup/memory.high || exit 70\n printf '{\"uptime\":\"%s\",\"memory.current\":\"%s\",\"memory.max\":\"%s\",\"memory.peak\":\"%s\",\"memory.swap.max\":\"%s\",\"memory.high\":\"%s\",\"inactive_file_values\":[' \"$uptime\" \"$current\" \"$maximum\" \"$peak\" \"$swap\" \"$high\"\n sep=''\n while read -r key value rest; do\n  if [ \"$key\" = inactive_file ]; then printf '%s\"%s\"' \"$sep\" \"$value\"; sep=,; fi\n  :\n done < /sys/fs/cgroup/memory.stat || exit 70\n printf '],\"events\":['\n sep=''\n while read -r key value; do printf '%s[\"%s\",\"%s\"]' \"$sep\" \"$key\" \"$value\"; sep=,; done < /sys/fs/cgroup/memory.events || exit 70\n printf ']}\\n'\nfi\ndone",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_start: /bin/sh -c while IFS= read -r command; do\nif [ \"$command\" = sample ]; then\n read -r uptime rest < /proc/uptime || exit 70\n read -r current < /sys/fs/cgroup/memory.current || exit 70\n read -r maximum < /sys/fs/cgroup/memory.max || exit 70\n read -r peak < /sys/fs/cgroup/memory.peak || exit 70\n read -r swap < /sys/fs/cgroup/memory.swap.max || exit 70\n read -r high < /sys/fs/cgroup/memory.high || exit 70\n printf '{\"uptime\":\"%s\",\"memory.current\":\"%s\",\"memory.max\":\"%s\",\"memory.peak\":\"%s\",\"memory.swap.max\":\"%s\",\"memory.high\":\"%s\",\"inactive_file_values\":[' \"$uptime\" \"$current\" \"$maximum\" \"$peak\" \"$swap\" \"$high\"\n sep=''\n while read -r key value rest; do\n  if [ \"$key\" = inactive_file ]; then printf '%s\"%s\"' \"$sep\" \"$value\"; sep=,; fi\n  :\n done < /sys/fs/cgroup/memory.stat || exit 70\n printf '],\"events\":['\n sep=''\n while read -r key value; do printf '%s[\"%s\",\"%s\"]' \"$sep\" \"$key\" \"$value\"; sep=,; done < /sys/fs/cgroup/memory.events || exit 70\n printf ']}\\n'\nfi\ndone",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_create: touch /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_start: touch /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=473 oflag=append conv=notrunc status=none",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=473 oflag=append conv=notrunc status=none",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: rm -- /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: rm -- /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "kill",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "unmount",
+      "time": 1794659921
+    },
+    {
+      "action": "stop",
+      "time": 1794659921
+    },
+    {
+      "action": "die",
+      "time": 1794659921
+    },
+    {
+      "action": "create",
+      "time": 1794659921
+    },
+    {
+      "action": "attach",
+      "time": 1794659921
+    },
+    {
+      "action": "mount",
+      "time": 1794659921
+    },
+    {
+      "action": "start",
+      "time": 1794659921
+    },
+    {
+      "action": "unmount",
+      "time": 1794659921
+    },
+    {
+      "action": "die",
+      "time": 1794659921
+    },
+    {
+      "action": "destroy",
+      "time": 1794659921
+    }
+  ],
+  "owned_resources_cleaned": true,
+  "cleanup_state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-14T12:38:40.790212168Z",
+    "FinishedAt": "2026-11-14T12:38:41.517068623Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "cleanup_pressure_log_lines": [
+    "memory pressure admission: Available { current: 2539520, limit: 536870912 } PressureUsage { denied_runs: 0, unavailable_samples: 0 } (sampled cgroup usage; not an RSS ceiling)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=1; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 517038080, inactive_file_before_bytes: Some(307200), inactive_file_after_bytes: Some(307200), inactive_file_bytes: 307200, effective_bytes: 516730880, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)",
+    "brainwire memory pressure admission: RUN rejected; denied_runs=2; cgroup_reading=Some(CgroupReading { limit_source: Max, raw_bytes: 516726784, inactive_file_before_bytes: Some(307200), inactive_file_after_bytes: Some(307200), inactive_file_bytes: 307200, effective_bytes: 516419584, limit_bytes: 536870912 }) (decision-time sequential readings; not an atomic snapshot)"
+  ],
+  "cleanup_docker_events": [
+    {
+      "action": "create",
+      "time": 1794659920
+    },
+    {
+      "action": "mount",
+      "time": 1794659920
+    },
+    {
+      "action": "start",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_create: /bin/sh -c while IFS= read -r command; do\nif [ \"$command\" = sample ]; then\n read -r uptime rest < /proc/uptime || exit 70\n read -r current < /sys/fs/cgroup/memory.current || exit 70\n read -r maximum < /sys/fs/cgroup/memory.max || exit 70\n read -r peak < /sys/fs/cgroup/memory.peak || exit 70\n read -r swap < /sys/fs/cgroup/memory.swap.max || exit 70\n read -r high < /sys/fs/cgroup/memory.high || exit 70\n printf '{\"uptime\":\"%s\",\"memory.current\":\"%s\",\"memory.max\":\"%s\",\"memory.peak\":\"%s\",\"memory.swap.max\":\"%s\",\"memory.high\":\"%s\",\"inactive_file_values\":[' \"$uptime\" \"$current\" \"$maximum\" \"$peak\" \"$swap\" \"$high\"\n sep=''\n while read -r key value rest; do\n  if [ \"$key\" = inactive_file ]; then printf '%s\"%s\"' \"$sep\" \"$value\"; sep=,; fi\n  :\n done < /sys/fs/cgroup/memory.stat || exit 70\n printf '],\"events\":['\n sep=''\n while read -r key value; do printf '%s[\"%s\",\"%s\"]' \"$sep\" \"$key\" \"$value\"; sep=,; done < /sys/fs/cgroup/memory.events || exit 70\n printf ']}\\n'\nfi\ndone",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_start: /bin/sh -c while IFS= read -r command; do\nif [ \"$command\" = sample ]; then\n read -r uptime rest < /proc/uptime || exit 70\n read -r current < /sys/fs/cgroup/memory.current || exit 70\n read -r maximum < /sys/fs/cgroup/memory.max || exit 70\n read -r peak < /sys/fs/cgroup/memory.peak || exit 70\n read -r swap < /sys/fs/cgroup/memory.swap.max || exit 70\n read -r high < /sys/fs/cgroup/memory.high || exit 70\n printf '{\"uptime\":\"%s\",\"memory.current\":\"%s\",\"memory.max\":\"%s\",\"memory.peak\":\"%s\",\"memory.swap.max\":\"%s\",\"memory.high\":\"%s\",\"inactive_file_values\":[' \"$uptime\" \"$current\" \"$maximum\" \"$peak\" \"$swap\" \"$high\"\n sep=''\n while read -r key value rest; do\n  if [ \"$key\" = inactive_file ]; then printf '%s\"%s\"' \"$sep\" \"$value\"; sep=,; fi\n  :\n done < /sys/fs/cgroup/memory.stat || exit 70\n printf '],\"events\":['\n sep=''\n while read -r key value; do printf '%s[\"%s\",\"%s\"]' \"$sep\" \"$key\" \"$value\"; sep=,; done < /sys/fs/cgroup/memory.events || exit 70\n printf ']}\\n'\nfi\ndone",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_create: touch /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_start: touch /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=473 oflag=append conv=notrunc status=none",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=473 oflag=append conv=notrunc status=none",
+      "time": 1794659920
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: dd if=/dev/zero of=/pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9 bs=1048576 count=1 oflag=append conv=notrunc status=none",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_create: rm -- /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_start: rm -- /pressure/smoke-fill-3063f817156d48599beb7983cc7b66d9",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "kill",
+      "time": 1794659921
+    },
+    {
+      "action": "exec_die",
+      "time": 1794659921
+    },
+    {
+      "action": "unmount",
+      "time": 1794659921
+    },
+    {
+      "action": "stop",
+      "time": 1794659921
+    },
+    {
+      "action": "die",
+      "time": 1794659921
+    },
+    {
+      "action": "create",
+      "time": 1794659921
+    },
+    {
+      "action": "attach",
+      "time": 1794659921
+    },
+    {
+      "action": "mount",
+      "time": 1794659921
+    },
+    {
+      "action": "start",
+      "time": 1794659921
+    },
+    {
+      "action": "unmount",
+      "time": 1794659921
+    },
+    {
+      "action": "die",
+      "time": 1794659921
+    },
+    {
+      "action": "destroy",
+      "time": 1794659921
+    }
+  ]
+}

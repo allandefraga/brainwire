@@ -8,8 +8,9 @@ import datetime
 import decimal
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from examples.python import ducklake_sync
 from examples.python.ducklake_sync import Mapping, _apply, stale_keys, latest_snapshot, lake, plain, read_partition, validate
@@ -26,6 +27,75 @@ EDGES = Mapping.from_json({"table": "main.follows", "type": "FOLLOWS",
                            "target": {"label": "Customer", "column": "dst"},
                            "properties": ["weight"]})
 EDGE_SIGNATURE = {"name": "FOLLOWS", "source": "Customer", "target": "Customer"}
+
+
+class CheckpointContractTest(unittest.TestCase):
+    def fingerprint(self, mapping=EDGES, *, identity="catalog-v1", database="demo",
+                    principal="importer", require_endpoints=True):
+        return ducklake_sync._contract_fingerprint(mapping, identity, database, principal, require_endpoints)
+
+    def test_fingerprint_normalizes_property_and_acl_order(self):
+        mapping = replace(NODES, acl=(("allow", "users"), ("deny", "blocked")))
+        reordered = replace(mapping, properties=tuple(reversed(mapping.properties)),
+                            acl=tuple(reversed(mapping.acl)))
+        self.assertRegex(self.fingerprint(mapping), r"^[a-f0-9]{64}$")
+        self.assertEqual(self.fingerprint(mapping), self.fingerprint(reordered))
+
+    def test_fingerprint_binds_source_graph_principal_mapping_and_write_policy(self):
+        for other in (
+            self.fingerprint(identity="catalog-v2"),
+            self.fingerprint(database="other"),
+            self.fingerprint(principal="other"),
+            self.fingerprint(principal=None),
+            self.fingerprint(require_endpoints=False),
+            self.fingerprint(replace(EDGES, keys=tuple(reversed(EDGES.keys)))),
+            self.fingerprint(replace(EDGES, target_label="Team")),
+            self.fingerprint(replace(EDGES, properties=(("weight", "new_weight"),))),
+            self.fingerprint(replace(EDGES, table="another")),
+        ):
+            self.assertNotEqual(self.fingerprint(), other)
+        self.assertNotEqual(self.fingerprint(NODES), self.fingerprint(replace(NODES, acl=(("allow", "users"),))))
+        self.assertNotEqual(self.fingerprint(principal=None), self.fingerprint(principal="unauthenticated"))
+
+    def test_source_identity_rejects_locations_and_does_not_echo_secrets(self):
+        for identity in (None, "", "postgres://user:secret@host/db", "/data/catalog.sqlite", "has spaces"):
+            with self.subTest(identity=identity), self.assertRaisesRegex(ValueError, "source.identity") as error:
+                self.fingerprint(identity=identity)
+            self.assertNotIn("secret", str(error.exception))
+
+    def test_existing_checkpoint_without_contract_or_with_wrong_contract_is_unchanged(self):
+        for stored in (None, "another-contract"):
+            for full in (False, True):
+                with self.subTest(stored=stored, full=full):
+                    driver = Mock()
+                    session = driver.session.return_value
+                    session.__enter__ = Mock(return_value=session)
+                    session.__exit__ = Mock(return_value=False)
+                    tx = Mock()
+                    session.begin_transaction.return_value = contextlib.nullcontext(tx)
+                    tx.run.return_value.data.return_value = [
+                        dict(snapshot=None, lease="earlier-run", contract_fingerprint=stored)]
+                    with patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(driver)), \
+                         patch.object(ducklake_sync, "auth_from_env", return_value=None), \
+                         patch.object(ducklake_sync, "lake") as source:
+                        with self.assertRaisesRegex(RuntimeError, "contract"):
+                            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://unused", database="demo",
+                                               source_id="source", source_identity="catalog-v1",
+                                               workers=1, full=full, break_lease=True)
+                    tx.run.assert_called_once()
+                    tx.commit.assert_not_called()
+                    source.assert_not_called()
+
+    def test_release_refuses_contract_changes(self):
+        for rows in ([], [dict(snapshot=7, lease="run", contract_fingerprint="wrong")]):
+            with self.subTest(rows=rows):
+                session, tx = Mock(), Mock()
+                session.begin_transaction.return_value = contextlib.nullcontext(tx)
+                tx.run.return_value.data.return_value = rows
+                with self.assertRaisesRegex(RuntimeError, "contract|cursor"):
+                    ducklake_sync.release(session, "source", "run", 7, 8, contract_fingerprint=self.fingerprint())
+                tx.run.assert_called_once()
+                tx.commit.assert_not_called()
 
 
 def collect(con, mapping, start, end, workers=3):
@@ -80,6 +150,24 @@ class DuckLakeSyncTest(unittest.TestCase):
             ("b",): {"entity_id": "b", "name": "B", "score": 2},
             ("c",): {"entity_id": "c", "name": "C", "score": 3},
         })
+
+    def test_decimal_properties_preserve_precision_in_snapshot_reads(self):
+        self.sql("CREATE TABLE w.invoices(id VARCHAR, amount DECIMAL(38, 2), exact_amount VARCHAR)")
+        self.sql("INSERT INTO w.invoices VALUES ('invoice', 12.50, '12.50')")
+        spec = {"table": "main.invoices", "label": "Invoice", "id": "id"}
+        numeric = Mapping.from_json({**spec, "properties": ["amount"]})
+        exact = Mapping.from_json({**spec, "properties": {"amount": "exact_amount"}})
+        first = self.latest()
+        self.sql("UPDATE w.invoices SET amount = 9007199254740993.01, exact_amount = '9007199254740993.01'")
+        end = self.latest()
+        with lake(self.target) as con:
+            rows, _ = collect(con, numeric, None, first)
+            self.assertIsInstance(rows[("invoice",)]["amount"], float)
+            self.assertEqual(rows[("invoice",)]["amount"], 12.5)
+            with self.assertRaisesRegex(ValueError, "VARCHAR"):
+                collect(con, numeric, first, end)
+            rows, _ = collect(con, exact, first, end)
+            self.assertEqual(rows[("invoice",)]["amount"], "9007199254740993.01")
 
     def test_changes_collapse_to_final_state_including_key_changes(self):
         self.sql("UPDATE w.customers SET name='B2' WHERE id='b'")
@@ -174,7 +262,7 @@ class EdgeIdentityTest(unittest.TestCase):
                     patch.object(ducklake_sync, "ProcessPoolExecutor") as pool:
                 with self.assertRaisesRegex(ValueError, "keyed relationship"):
                     ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
-                                       database="demo", source_id="edges", workers=1,
+                                       database="demo", source_id="edges", source_identity="catalog-v1", workers=1,
                                        full=prune, prune=prune)
                 claim.assert_not_called()
                 source.assert_not_called()
@@ -186,7 +274,7 @@ class EdgeIdentityTest(unittest.TestCase):
                 patch.object(ducklake_sync, "claim") as claim:
             with self.assertRaisesRegex(RuntimeError, "schema unavailable"):
                 ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
-                                   database="demo", source_id="edges", workers=1)
+                                   database="demo", source_id="edges", source_identity="catalog-v1", workers=1)
             claim.assert_not_called()
 
     def test_legacy_identity_and_unrelated_keyed_types_are_allowed(self):
@@ -206,7 +294,7 @@ class EdgeIdentityTest(unittest.TestCase):
                     patch.object(ducklake_sync, "lake") as source:
                 with self.assertRaisesRegex(ValueError, "not visible"):
                     ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
-                                       database="demo", source_id="edges", workers=1)
+                                       database="demo", source_id="edges", source_identity="catalog-v1", workers=1)
                 claim.assert_not_called()
                 source.assert_not_called()
 
@@ -257,7 +345,7 @@ class PruneBatchTest(unittest.TestCase):
                 patch.object(ducklake_sync, "release") as release:
             with self.assertRaisesRegex(RuntimeError, "retries exhausted"):
                 ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://localhost:7687",
-                                   database="demo", source_id="test", workers=2)
+                                   database="demo", source_id="test", source_identity="catalog-v1", workers=2)
             release.assert_not_called()
 
     def test_prune_deletes_each_batch_and_closes_the_source_on_failure(self):
@@ -394,6 +482,16 @@ class PlainValueTest(unittest.TestCase):
         self.assertEqual(plain({"tags": [decimal.Decimal("1"), None]}), {"tags": [1.0, None]})
         with self.assertRaises(ValueError):
             plain(b"raw")
+
+    def test_source_decimals_reject_lossy_float_conversion(self):
+        for value in ("0.1", "9007199254740993", "1e999", "1e-999"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "VARCHAR"):
+                plain({"values": [decimal.Decimal(value)]})
+
+    def test_source_decimals_reject_nonfinite_values(self):
+        for value in ("NaN", "sNaN", "Infinity", "-Infinity"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "must be finite"):
+                plain(decimal.Decimal(value))
 
     def test_mapping_rejects_unsafe_identifiers(self):
         for bad in [{"table": "main.x;drop", "label": "A", "id": "id"},

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="300" viewBox="0 0 860 300" role="img" aria-labelledby="title desc">
+  <title id="title">Time to create a graph with 1 million nodes and 2 million edges</title>
+  <desc id="desc">One synthetic local run. Brainwire 10.88 seconds for nodes and 28.24 for edges, FalkorDB 4.18 and 15.99, Neo4j 10.91 and 22.57.</desc>
+  <rect width="860" height="300" rx="12" fill="#f3f5fa"/>
+  <g font-family="system-ui, sans-serif" fill="#142137">
+    <text x="28" y="39" font-weight="700" font-size="23">Creating 1M nodes and 2M edges</text>
+    <text x="28" y="64" fill="#45536a" font-size="14">One synthetic run · 2 CPUs and 3 GiB per container</text>
+    <rect x="28" y="86" width="14" height="14" rx="2" fill="#2349d8"/>
+    <text x="50" y="98" font-size="13">Node creation</text>
+    <rect x="161" y="86" width="14" height="14" rx="2" fill="#176752"/>
+    <text x="183" y="98" font-size="13">Edge creation</text>
+    <path d="M185 115v135" stroke="#c5cdde"/>
+    <text x="185" y="272" text-anchor="middle" fill="#45536a" font-size="12">0 s</text>
+    <path d="M315 115v135" stroke="#c5cdde"/>
+    <text x="315" y="272" text-anchor="middle" fill="#45536a" font-size="12">10 s</text>
+    <path d="M445 115v135" stroke="#c5cdde"/>
+    <text x="445" y="272" text-anchor="middle" fill="#45536a" font-size="12">20 s</text>
+    <path d="M575 115v135" stroke="#c5cdde"/>
+    <text x="575" y="272" text-anchor="middle" fill="#45536a" font-size="12">30 s</text>
+    <path d="M705 115v135" stroke="#c5cdde"/>
+    <text x="705" y="272" text-anchor="middle" fill="#45536a" font-size="12">40 s</text>
+    <text x="28" y="146" font-weight="600" font-size="15">Brainwire</text>
+    <rect x="185" y="130" width="141.5" height="22" fill="#2349d8"/>
+    <rect x="326.5" y="130" width="367.1" height="22" fill="#176752"/>
+    <text x="702.6" y="146" font-size="13">39.12 s</text>
+    <text x="28" y="188" font-weight="600" font-size="15">FalkorDB</text>
+    <rect x="185" y="172" width="54.3" height="22" fill="#2349d8"/>
+    <rect x="239.3" y="172" width="207.8" height="22" fill="#176752"/>
+    <text x="456.1" y="188" font-size="13">20.16 s</text>
+    <text x="28" y="230" font-weight="600" font-size="15">Neo4j</text>
+    <rect x="185" y="214" width="141.9" height="22" fill="#2349d8"/>
+    <rect x="326.9" y="214" width="293.4" height="22" fill="#176752"/>
+    <text x="629.3" y="230" font-size="13">33.48 s</text>
+  </g>
+</svg>

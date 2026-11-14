@@ -18,31 +18,16 @@
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.19.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.20.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
-```mermaid
-flowchart TB
-    app["Your application<br/>Python · Bolt clients"] --> bolt["Bolt server"]
-    tui["Terminal workspace<br/>Read-only inspection"] --> bolt
-    bolt --> access["Authenticate · check graph grants · apply visibility"]
-    access --> engine["Graph engine · Rust<br/>Cypher · ontology · indexes · transactions"]
-    engine --> store[("RocksDB<br/>WAL · cache · memtables · SST files")]
-    store --> volume[("Persistent volume")]
-    classDef client fill:#edf1f8,stroke:#97a9cc,color:#18243c;
-    classDef core fill:#dfe9ff,stroke:#2255e6,color:#142d67;
-    classDef storage fill:#edf1f8,stroke:#7b91bc,color:#18243c;
-    class app,tui client;
-    class bolt,access,engine core;
-    class store,volume storage;
-```
-
 Applications write and query over Bolt. The Rust engine checks access, executes
 transactions and stores graph records in RocksDB. Keep its files on a persistent
-volume so restarting the container reopens the same graph.
+volume so restarting the container reopens the same graph. A terminal workspace
+provides read-only inspection.
 
-This diagram shows the standard single-instance deployment. The separate
+The standard deployment runs one instance. The separate
 [three-voter Raft setup](docs/quorum-replication.md) is experimental. Read the
 [architecture guide](docs/architecture.md) for memory, storage and recovery.
 
@@ -50,16 +35,7 @@ This diagram shows the standard single-instance deployment. The separate
 
 RocksDB stores Brainwire's records and indexes as key/value data. Writes first
 enter a **write-ahead log (WAL)** on disk and a **memtable** in memory. A flush
-writes the memtable into sorted, immutable **SST files**:
-
-```mermaid
-flowchart LR
-    write["Committed write batch"] --> wal["WAL · recovery log"]
-    write --> memory["Memtable · RAM"]
-    memory -->|flush| l0["L0 · new SST files"]
-    l0 -->|compaction| l1["L1 · sorted key ranges"]
-    l1 -->|compaction| deeper["L2 and deeper · larger levels"]
-```
+writes the memtable into sorted, immutable **SST files**.
 
 - **L0** receives new files; their key ranges can overlap.
 - **L1 and deeper levels** organize files into non-overlapping key ranges within
@@ -86,24 +62,22 @@ Try the [synthetic company context example](examples/company_brain/README.md) to
 See the [architecture](docs/architecture.md), [agent context](docs/context-api.md),
 [Cypher guide](docs/local-cypher.md) and [all documentation](docs/README.md).
 
-Context reads check nested response values before encoding them; search and
-reranking use the same bounded checks. These output limits do not bound memory
-used by the driver or database process. Nesting is limited to 256 levels.
-Context IDs and search text longer than 4,096 characters are rejected before
-UTF-8 encoding; their existing 4,096-byte limit still applies.
-Batch writes also reject some clearly oversized strings and collections before
-serialization, with `BatchTooLargeError` available to Python callers. Their
-byte limit is not a process-wide memory limit.
-For encrypted shared deployments, see [TLS and private CA setup](docs/protected-transport.md).
+Context and batch APIs have size checks; these are not a process-wide memory
+limit. See [memory settings](docs/memory-defaults.md) and
+[encrypted connections](docs/protected-transport.md) for their boundaries.
 
 ## Quickstart
 
 Install Git and Docker with Compose, then start a local demo:
 
+On macOS, Colima can provide the Docker engine; with Colima running, run
+`export DOCKER_CONTEXT=colima` in your shell first. Docker's CLI and
+Compose plugin are still required.
+
 ```sh
-git clone --branch v0.19.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.20.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.19.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.20.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -143,60 +117,18 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
 The demo includes these types. For your own graph, define an ontology first.
 See [Python](docs/python-client.md) and [protected deployment](docs/protected-containers.md).
 
-### Help an agent understand the schema
+### Try agent context
 
-Use the same connection to discover declared routes between types:
-
-```python
-from brainwire import schema_paths, trace_paths
-
-paths = schema_paths(graph, "Customer", "Segment", max_hops=2)
-for path in paths["paths"]:
-    print([edge["name"] for edge in path["relationships"]])
-
-connections = trace_paths(
-    graph, ("Customer", "customer-1"), ("Segment", "segment-1"),
-    relationship="IN_SEGMENT", max_hops=1,
-)
-print(connections["paths"])
-```
-
-Run this inside the connection block above. Schema routes are allowed shapes;
-connection paths are a bounded, unordered sample of records visible to the
-caller. Use `direction="incoming"` or `direction="both"` to follow paths in
-other directions. See [context for agents](docs/context-api.md) for source citations and
-search with configured providers.
-
-After creating the demo records, run the complete read-only context example:
+After creating the demo records, run the read-only context example:
 
 ```sh
 .venv-brainwire/bin/python -m examples.python.agent_context_demo
 ```
 
-Its provider returns a fixed demo ID; replace it with your own search provider.
-
-### Give an agent scoped context
-
-`search_context` can combine candidate IDs from your own lexical and vector
-providers. Narrow results to an explicit set of IDs before ranking:
-
-```python
-from brainwire import search_context
-
-# Synthetic fixture; replace it with your own search provider.
-def sample_provider(query, *, graph_name, label, limit, timeout):
-    return ["customer-1"]
-
-result = search_context(
-    graph, "Customer", "Ada", providers={"sample": sample_provider},
-    candidate_ids=["customer-1"], properties=["name"],
-)
-print(result["records"])
-```
-
-Run this inside the connection block above. The scope narrows candidates;
-normal graph authorization still applies. This fixture does not perform text
-or vector search, and separate calls do not share a snapshot. See [context for agents](docs/context-api.md).
+The example's provider returns a fixed demo ID; bring your own provider for
+text or vector search. Follow the [agent quickstart](docs/agent-quickstart.md)
+for a reusable prompt, or read the [context API guide](docs/context-api.md) for
+access checks and snapshot limits.
 
 ### Explore in the terminal
 
@@ -217,6 +149,28 @@ To stop the demo while keeping its volume:
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
+
+## A synthetic benchmark
+
+One local run loaded **1 million nodes and 2 million relationships** into each
+engine, checked indexed reads, then restarted after a process kill. The engines
+ran sequentially, each with a 3 GiB container limit and two CPUs. Brainwire
+was a locally built **v0.20.0-beta.1 candidate**, not the published image.
+
+![Node and relationship load times for one synthetic run](benchmarks/comparison/ingest-1m-candidate.svg)
+
+| Metric | Brainwire | FalkorDB | Neo4j |
+| --- | ---: | ---: | ---: |
+| Indexed point read, p95 | 1.006 ms | 0.362 ms | 0.626 ms |
+| One-hop read, p95 | 1.061 ms | 0.365 ms | 0.648 ms |
+| Ready after process kill | 0.80 s | 2.79 s | 8.19 s |
+
+Each p95 summarizes 1,000 warm, serial queries; each sampled node had two
+outgoing edges. These are single-run diagnostic results, not production
+promises. Engines used different protocols, internal memory settings,
+authentication and durability settings; peak memory was not measured. Read the
+[workload, exact versions, raw result and limitations](benchmarks/comparison/README.md)
+before comparing or reproducing them.
 
 ## Current limits
 

@@ -82,13 +82,22 @@ jobs:
           python-version: "3.12"
 
       - name: Install Neo4j Bolt driver
-        run: python -m pip install neo4j==5.28.4
+        run: python -m pip install neo4j==5.28.4 duckdb==1.5.5
+
+      - name: Install DuckLake test extensions
+        run: python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL ducklake; INSTALL sqlite; LOAD ducklake; LOAD sqlite')"
 
       - name: Test Python client helpers
         run: python -m unittest discover -s examples/python -p 'test_*.py'
 
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Test comparison runner safety
+        run: |
+          python -m venv "$RUNNER_TEMP/brainwire-comparison"
+          "$RUNNER_TEMP/brainwire-comparison/bin/pip" install -r benchmarks/comparison/requirements.txt
+          "$RUNNER_TEMP/brainwire-comparison/bin/python" -m unittest discover -s benchmarks/comparison -p 'test_*.py'
 
       - name: Test cgroup diagnostic safety
         run: python -m unittest discover -s crates/server/tests -p 'test_cgroup*.py'
@@ -108,6 +117,11 @@ jobs:
         run: >-
           python crates/server/tests/python_ingestion.py
           --binary target/debug/brainwire --rows 100 --batch-size 25 --query-mib 32
+
+      - name: Verify DuckLake checkpoint contracts and incremental sync
+        run: >-
+          python crates/server/tests/ducklake_sync.py
+          --binary target/debug/brainwire --rows 100 --workers 2
 
       - name: Verify recovery after an unacknowledged commit
         run: >-

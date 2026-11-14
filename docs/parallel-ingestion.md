@@ -61,8 +61,9 @@ the credential directory outside the repository.
    ([node ACL](node-acl.md)).
 
 2. Write one mapping file per table (see below) and declare every mapped label,
-   property and edge type, plus `ImportCheckpoint`, in `ontology.json`. The
-   ontology changes offline only, so get it right before loading.
+   property and edge type, plus `ImportCheckpoint`, in `ontology.json`. Apply
+   the whole ontology file offline; selected catalog changes are also available
+   [online on a standalone server](online-catalog.md).
 
 3. Point the sync at the lake. A Postgres catalog with data in S3-compatible
    storage needs the `postgres`, `httpfs` and `aws` extensions installed in
@@ -80,7 +81,7 @@ the credential directory outside the repository.
    .venv-brainwire/bin/python -m examples.python.ducklake_sync people.json \
      --lake 'ducklake:postgres:dbname=lake_catalog host=pg.internal user=lake_reader' \
      --load ducklake,postgres,httpfs,aws --init-sql lake-init.sql \
-     --database lake --source-id clean-people --workers 8
+     --database lake --source-id clean-people --source-identity lake-generation-1 --workers 8
    ```
 
    Run node tables first (they may run at the same time), then edge tables.
@@ -155,7 +156,7 @@ mapped column is authoritative: a source `NULL` removes the property. The graph
 ontology must declare the label/type and properties, plus a cursor label:
 
 ```json
-{"label": "ImportCheckpoint", "properties": ["snapshot", "lease"], "indexed_fields": []}
+{"label": "ImportCheckpoint", "properties": ["snapshot", "lease", "contract_fingerprint"], "indexed_fields": []}
 ```
 
 Rows that carry access control map their columns to the node's private ACL
@@ -176,8 +177,7 @@ The `acl` options are `allow`, `deny`, `connectorIds`, `sourceTable` and
 option empty. The ACL is replaced on every upsert of the row.
 
 Before the first run, create the graph with that ontology and start the
-server; the ontology changes offline, so declare every mapped property up
-front:
+server; declare every mapped property up front for this example:
 
 ```sh
 brainwire db create crm --ontology ontology.json
@@ -185,26 +185,45 @@ brainwire serve
 ```
 
 On a protected server, point `BRAINWIRE_BOLT_AUTH_FILE` at a writer
-credentials file ([Bolt authentication](bolt-auth.md)); every worker reads it.
+credentials file ([Bolt authentication](bolt-auth.md)). The parent reads it
+once and passes the same identity to its workers.
 
 Run it once per table, nodes first:
 
 ```sh
 .venv-brainwire/bin/python -m examples.python.ducklake_sync customers.json \
   --lake ducklake:sqlite:/abs/catalog.sqlite --database crm \
-  --source-id crm-customers --workers 10 --batch-size 500
+  --source-id crm-customers --source-identity crm-lake-generation-1 --workers 10 --batch-size 500
 .venv-brainwire/bin/python -m examples.python.ducklake_sync follows.json \
   --lake ducklake:sqlite:/abs/catalog.sqlite --database crm \
-  --source-id crm-follows --workers 10
+  --source-id crm-follows --source-identity crm-lake-generation-1 --workers 10
 ```
 
 It prints a JSON summary with the snapshot range, mode, upserts, deletes and
 seconds. Run the same commands again later (by hand or from a scheduler) to
 apply only what changed.
 
+`--source-id` names the checkpoint for one mapping. `--source-identity` names
+the source catalog generation: keep it stable across runs, but change it if the
+catalog is replaced. Use 1–128 ASCII letters, digits, underscores, hyphens or
+dots, starting with a letter, digit, underscore or hyphen; do not use a path or
+a credential. The
+checkpoint also binds the mapping, graph, writer principal and missing-endpoint
+policy. A mismatch fails before data workers start, including with `--full` or
+`--break-lease`. Password rotation for the same principal does not change it.
+
+Older checkpoints do not contain a contract fingerprint and are refused. Before
+upgrading, stop and reconcile previous workers and uncertain writes. The safest
+starting point is a new graph with the updated ontology, a fresh checkpoint ID
+and a verified full load. Do not simply discard a checkpoint against an existing
+graph: removed source records and permissions must also be reconciled. If a
+catalog is replaced under the same identity, the fingerprint cannot detect it;
+use a new generation and reconcile deliberately.
+
 ### What a run does
 
-1. Takes a lease on `ImportCheckpoint {entity_id: source_id}` and reads the
+1. Checks the mapping contract and takes a lease on
+   `ImportCheckpoint {entity_id: source_id}` in one transaction, then reads the
    stored snapshot.
 2. Pins the target snapshot (latest, or `--to-snapshot`) and refuses null or
    duplicate identities at that snapshot.
@@ -266,8 +285,12 @@ a synchronous commit per row; see the measurement below.
   Independent sources can run in parallel if they do not own overlapping data.
 - **Ownership.** Deletes are physical (`DETACH DELETE` for nodes). Do not point
   two sources at the same label/keys.
-- **Values.** Decimals become floats, dates/times become ISO strings, UUIDs
-  become strings; blobs are refused. Identity columns are cast to strings.
+- **Values.** Finite decimals are accepted as floats only when exactly
+  representable; otherwise ingestion fails instead of silently rounding. Map a
+  VARCHAR column to preserve exact decimal text, or explicitly convert the
+  source to DOUBLE when approximation is acceptable. Dates/times become ISO
+  strings, UUIDs become strings, and blobs are refused. Identity columns are
+  cast to strings.
 - **Object storage.** Pass `--init-sql` with a `CREATE SECRET` that reads
   credentials from the environment or a provider chain; extensions must
   already be installed (`--load`). A Postgres catalog with Parquet data in a

@@ -16,10 +16,27 @@ container, then verified the count after restart. One local run recorded 2.483 s
 for loading and 12.161 s for the whole workflow. This is not the sustained
 qualification above, a comparison, or a performance guarantee.
 
+On a locally built v0.20.0-beta.1 candidate, short synthetic cgroup-pressure
+checks passed at [512 MiB](docs/benchmarks/2026-11-14-cgroup-020b1-512.json),
+[2 GiB](docs/benchmarks/2026-11-14-cgroup-020b1-2048.json), and
+[3 GiB](docs/benchmarks/2026-11-14-cgroup-020b1-3072.json). They filled tmpfs
+to induce pressure, checked refusal and rollback, then verified recovery and an
+offline audit. They do not establish a global RSS ceiling, sustained capacity,
+or recovery from a machine failure. These receipts describe a local candidate
+image, not a pullable release image.
+
+A separate [30-minute 2 GiB synthetic run](docs/benchmarks/2026-11-14-v09-020b1-30min-summary.json)
+loaded 20,000 nodes and 20,000 relationships with delegated ACLs, then ran four
+read workloads. It passed its count and offline integrity checks. Its sampled
+RSS peaked at about 134 MiB during the read soak, so this did not stress the
+2 GiB limit. The linked receipt is a redacted summary; it records the SHA-256
+of the full local report. It is not a production memory qualification.
+
 ## Choose a test
 
 | Question | Test and results |
 | --- | --- |
+| How did three engines handle one synthetic million-node fixture? | [Indexed graph comparison](benchmarks/comparison/README.md): one run per engine, with different durability and client settings; includes raw receipts and restart checks. |
 | Does a change affect large Bolt responses? | [Response encoding diagnostic](benchmarks/archive/2026-10-29-bolt-response/README.md): compares two local binaries, checks every result and records timings and sampled RSS. |
 | Does pressure admission reject new queries safely? | [Linux cgroup smoke](docs/benchmarks/2026-10-29-cgroup-pressure/README.md): 512 MiB synthetic rollback and recovery, not a production memory qualification. |
 | How does the Raft peer transport behave locally? | [Linux peer diagnostic](docs/benchmarks/2026-11-04-raft-peer.md): two local runs before and after the accepted-socket change, not a multi-machine benchmark. |

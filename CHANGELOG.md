@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.20.0-beta.1 — experimental candidate
+
+- Bind each DuckLake synchronization checkpoint to its source generation,
+  mapping, graph, writer principal and endpoint policy. A changed or legacy
+  contract is refused before workers start. This is a **breaking change**:
+  supply `--source-identity` (or `source_identity=`), declare
+  `ImportCheckpoint.contract_fingerprint`, and follow the
+  [migration guidance](docs/parallel-ingestion.md#ducklake-full-load-then-incremental).
+- Refuse Decimal values that cannot be represented exactly as floats instead of
+  silently rounding; explicitly map source text or `DOUBLE` as appropriate.
+  A failed import can have committed earlier batches and retains its lease.
+- Run a small real DuckLake snapshot, checkpoint race and incremental-sync
+  acceptance test in CI using a pinned DuckDB version.
+- Add a reproducible million-node, two-million-edge synthetic comparison,
+  including raw results, the failed first harness attempt, and process-restart
+  checks. Separate runs use v0.19.0-beta.1 and a locally built v0.20 candidate,
+  not the published v0.20 image. Settings differ between engines and neither
+  run qualifies production performance.
+- Record short 512 MiB, 2 GiB and 3 GiB cgroup pressure checks against a local
+  candidate image, including refusal, rollback and recovery. These are not a
+  hard RSS limit or a sustained-capacity qualification.
+- Record a 30-minute synthetic 2 GiB read soak with delegated ACLs; the small
+  dataset did not approach the memory limit.
+- Simplify the README, add an agent quickstart and reusable prompt, and show the
+  benchmark and its limits on the docs site. Clarify Colima bind mounts and
+  current online-catalog capabilities.
+
 ## 0.19.0-beta.1 — experimental candidate
 
 - Narrow provider-ranked context to an optional bounded set of candidate IDs

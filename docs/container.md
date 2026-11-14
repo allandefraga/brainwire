@@ -6,6 +6,12 @@ published image without compiling Rust, or build from source. You need Docker
 Engine and Docker Compose. Run these commands from a checkout of the matching
 Brainwire release.
 
+On macOS, Colima can supply the engine instead of Docker Desktop. Start
+Colima and run `export DOCKER_CONTEXT=colima` in the shell where you use these
+commands; the Docker CLI and Compose plugin are still required. Bind-mounted
+files must be in a directory shared with the Colima VM. For example, an
+unshared `/private/tmp` path can fail even when it exists on the Mac.
+
 This guide uses an unauthenticated demo on host loopback. For shared or real
 data, use the [protected container setup](protected-containers.md) and a
 [verified encrypted connection](protected-transport.md). The native Bolt server
@@ -27,13 +33,13 @@ and access to the package. Do not enter your GitHub account password. Public
 images do not need this step. Then start the published version:
 
 ```sh
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.19.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.20.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml pull
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --wait --wait-timeout 900
 ```
 
-Images use the exact release tag, for example `v0.19.0-beta.1`. <!-- brainwire-release-version -->
+Images use the exact release tag, for example `v0.20.0-beta.1`. <!-- brainwire-release-version -->
 For reproducible deployment, pin the digest from the release receipt. A private
 GHCR image requires package access in addition to repository access. Keep
 credentials out of shell arguments and source files. If `pull` reports

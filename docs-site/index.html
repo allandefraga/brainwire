@@ -14,7 +14,7 @@
 <div class="docs-layout">
   <aside class="sidebar">
     <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="500" height="128"></a>
-    <div class="edition"><span class="edition-label">Documentation</span><span>v0.19.0-beta.1 <!-- brainwire-release-version --></span></div>
+    <div class="edition"><span class="edition-label">Documentation</span><span>v0.20.0-beta.1 <!-- brainwire-release-version --></span></div>
     <nav class="section-nav" aria-label="Documentation sections">
       <span class="nav-label">GET STARTED</span>
       <a href="#overview">Introduction</a>
@@ -27,6 +27,7 @@
       <a href="#terminal">Terminal workspace</a>
       <span class="nav-label">GO FURTHER</span>
       <a href="#operate">Operate a graph</a>
+      <a href="#benchmark">Benchmark</a>
       <a href="#limits">Beta boundaries</a>
       <a href="#guides">All guides</a>
     </nav>
@@ -41,7 +42,7 @@
       <h1>Connected data.<br>Useful context.</h1>
       <p class="intro-copy">A graph database for connected context. Bring people, projects, decisions and sources together for your applications and agents.</p>
       <div class="actions"><a class="button primary" href="#start">Run Brainwire <span aria-hidden="true">→</span></a><a class="button secondary" href="#architecture">Understand the architecture</a></div>
-      <p class="release-line"><span class="badge">Experimental beta</span> v0.19.0-beta.1 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
+      <p class="release-line"><span class="badge">Experimental beta</span> v0.20.0-beta.1 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
       <figure class="hero-graph" aria-label="Illustrative graph linking a team, project, decision and source">
         <svg viewBox="0 0 820 180" role="img" aria-labelledby="graph-title">
           <title id="graph-title">A team, project, decision and source connected in a graph</title>
@@ -56,9 +57,10 @@
 
     <section id="start" class="doc-section">
       <div class="section-head"><p class="eyebrow">QUICKSTART</p><h2>Run a local graph.</h2><p>You need Git and Docker with Compose. The demo creates a graph, starts the server and keeps its files in a named volume.</p></div>
-      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.19.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+      <p>On macOS, you can use a running Colima engine with <code>export DOCKER_CONTEXT=colima</code>. You still need the Docker CLI and Compose plugin.</p>
+      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.20.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.19.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.20.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --pull always --wait --wait-timeout 900</code></pre></div>
       <dl class="connection-details"><div><dt>Connection</dt><dd><code>bolt://127.0.0.1:7687</code></dd></div><div><dt>Graph</dt><dd><code>demo</code></dd></div><div><dt>Data</dt><dd>Persistent Docker volume</dd></div></dl>
@@ -118,7 +120,7 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
       <div class="section-head"><p class="eyebrow">USE CASES</p><h2>Where a graph helps.</h2></div>
       <div class="use-case-list"><article><span>01</span><div><h3>Company brain</h3><p>Link documents, projects, people and tickets. Give an application the relationships behind a record, with sources it can reference.</p></div><code>Document → Project → Owner</code></article><article><span>02</span><div><h3>Agent memory</h3><p>Store decisions, facts and events using stable identities. Retrieve relevant context and keep access checks in the data path.</p></div><code>Agent → Decision → Evidence</code></article><article><span>03</span><div><h3>Dependencies and timelines</h3><p>Follow what depends on a service, what changed on a ticket or how a repository connects. Model the events your application needs.</p></div><code>Service → Deployment → Event</code></article></div>
       <p>Brainwire does not extract every relationship automatically. Use your pipeline, an explicit connector or your chosen model to map source data into the graph.</p>
-      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/examples/company_brain/README.md">Try the company context example →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-context-roadmap.md">Agent context roadmap →</a></p>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-quickstart.md">Agent quickstart and reusable prompt →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-context-roadmap.md">Agent context roadmap →</a></p>
     </section>
 
     <section id="terminal" class="doc-section">
@@ -153,6 +155,13 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">CLI and Cypher reference →</a></p>
     </section>
 
+    <section id="benchmark" class="doc-section">
+      <div class="section-head"><p class="eyebrow">SYNTHETIC BENCHMARK</p><h2>One workload, three engines.</h2><p>One local run loaded 1 million nodes and 2 million relationships per engine. Brainwire was a locally built v0.20.0-beta.1 candidate, not the published release image.</p></div>
+      <figure class="hero-graph"><img src="assets/benchmark-1m.svg" alt="Load times in seconds for one million nodes and two million relationships in Brainwire, FalkorDB and Neo4j"><figcaption>One run per engine, with a 3 GiB container limit and two CPUs. Internal settings, protocols, authentication and durability differ.</figcaption></figure>
+      <p>All three completed indexed read checks and restarted after a process kill. Peak memory was not measured. These results describe a synthetic workload, not a production guarantee.</p>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/benchmarks/comparison/README.md">See read latencies, exact versions, methodology and raw results →</a></p>
+    </section>
+
     <section id="limits" class="doc-section">
       <div class="section-head"><p class="eyebrow">BETA BOUNDARIES</p><h2>Evaluate the workload you will run.</h2><p>Start with rebuildable data and a tested backup. The beta has useful capabilities, with important deployment boundaries.</p></div>
       <div class="boundary-list"><article><h3>Memory</h3><p>Budgets and pressure admission reject some work under load. A process-wide RSS ceiling and sustained representative capacity remain unqualified.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/memory-defaults.md">Memory guide →</a></article><article><h3>Queries and search</h3><p>Cypher support is a documented subset. Nodes have one fixed label; ANN and BM25 indexes are not native features. Relationship property indexes are experimental and standalone-only.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Language support →</a></article><article><h3>History and security</h3><p>Events are application-managed; native <code>AS OF</code> reads and automatic retention are unavailable. Shared deployments need auth and an encrypted boundary; native Bolt TLS is not implemented.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot →</a></article><article><h3>Distribution and evidence</h3><p>Three-voter quorum is experimental. Standard deployment templates run one instance. Local synthetic tests do not qualify multi-machine failover or production performance.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/quorum-replication.md">Replication guide →</a></article></div>
@@ -164,7 +173,7 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
       <div class="guide-columns"><div><h3>Get started</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.md">Getting started</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker and images</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md">Python installation</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot</a></div><div><h3>Build</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python writes and batches</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Cypher reference</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context for agents</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Events and timelines</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md">Graph algorithms</a></div><div><h3>Operate</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md">Deployments</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/README.md">Performance evidence</a></div></div>
       <details class="pages-note"><summary>What does GitHub Pages host?</summary><p>This static documentation website. It does not run Brainwire or host your graph. Preview it locally with <code>python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1</code>, then open <code>http://127.0.0.1:8000</code>.</p></details>
     </section>
-    <footer><span>Brainwire · v0.19.0-beta.1 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
+    <footer><span>Brainwire · v0.20.0-beta.1 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
   </main>
 </div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>

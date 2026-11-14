@@ -12,6 +12,10 @@ from examples.python import ducklake_sync as syncer
 from examples.source_ingestion import ducklake_incremental as incremental
 
 
+MAPPING = syncer.Mapping.from_json({"table": "customers", "label": "Customer", "id": "id"})
+CONTRACT = syncer._contract_fingerprint(MAPPING, "catalog-v1", "demo", None, True)
+
+
 class LostCommitReply(ConnectionError):
     pass
 
@@ -78,10 +82,12 @@ class Session:
             self.session.queries.append((query, params))
             if "RETURN s.snapshot AS snapshot" in query:
                 return Result([] if self.state is None else [dict(self.state)])
+            if "CREATE (:ImportCheckpoint" in query:
+                self.state = {"snapshot": None, "lease": params["run"], "contract_fingerprint": params["contract"]}
             if "SET s.lease = $run" in query:
                 self.state = {**(self.state or {"snapshot": None}), "lease": params["run"]}
             if "SET s.lease = null, s.snapshot = $snapshot" in query:
-                self.state = {"snapshot": params["snapshot"], "lease": None}
+                self.state.update(snapshot=params["snapshot"], lease=None)
             return Result()
 
         def commit(self):
@@ -119,29 +125,29 @@ class IngestionTransactionTests(unittest.TestCase):
         self.assertEqual(len(session.queries), 1)
 
     def test_claim_unknown_reply_leaves_lease_and_never_retries(self):
-        session = Session({"snapshot": 7, "lease": None}, lose_reply=True)
+        session = Session(lose_reply=True)
         with self.assertRaises(LostCommitReply) as error:
-            syncer.claim(session, "source", "run")
+            syncer.claim(session, "source", "run", contract_fingerprint=CONTRACT)
         self.assertIs(error.exception, session.failure)
-        self.assertEqual(session.state, {"snapshot": 7, "lease": "run"})
+        self.assertEqual(session.state, {"snapshot": None, "lease": "run", "contract_fingerprint": CONTRACT})
         self.assertEqual((session.begins, session.applied, session.managed), (1, 1, 0))
 
     def test_release_unknown_reply_is_not_repeated_or_reported_as_success(self):
-        session = Session({"snapshot": 7, "lease": "run"}, lose_reply=True)
+        session = Session({"snapshot": 7, "lease": "run", "contract_fingerprint": CONTRACT}, lose_reply=True)
         with self.assertRaises(LostCommitReply) as error:
-            syncer.release(session, "source", "run", 7, 8)
+            syncer.release(session, "source", "run", 7, 8, contract_fingerprint=CONTRACT)
         self.assertIs(error.exception, session.failure)
-        self.assertEqual(session.state, {"snapshot": 8, "lease": None})
+        self.assertEqual(session.state, {"snapshot": 8, "lease": None, "contract_fingerprint": CONTRACT})
         self.assertEqual((session.begins, session.applied, session.managed), (1, 1, 0))
 
     def test_successful_claim_and_release_keep_snapshot_contract(self):
-        session = Session({"snapshot": 7, "lease": None})
-        self.assertEqual(syncer.claim(session, "source", "run"), 7)
-        syncer.release(session, "source", "run", 7, 8)
-        self.assertEqual(session.state, {"snapshot": 8, "lease": None})
+        session = Session({"snapshot": 7, "lease": None, "contract_fingerprint": CONTRACT})
+        self.assertEqual(syncer.claim(session, "source", "run", contract_fingerprint=CONTRACT), 7)
+        syncer.release(session, "source", "run", 7, 8, contract_fingerprint=CONTRACT)
+        self.assertEqual(session.state, {"snapshot": 8, "lease": None, "contract_fingerprint": CONTRACT})
         self.assertEqual((session.begins, session.applied, session.managed), (2, 2, 0))
         with self.assertRaisesRegex(RuntimeError, "changed"):
-            syncer.release(session, "source", "run", 7, 8)
+            syncer.release(session, "source", "run", 7, 8, contract_fingerprint=CONTRACT)
         self.assertEqual(session.rollbacks, 1)
 
     def run_sync(self, *, error=None):
@@ -154,6 +160,7 @@ class IngestionTransactionTests(unittest.TestCase):
         else:
             pool.map.return_value = [{"upserted": 1, "deleted": 0, "skipped": 0}]
         with mock.patch.object(syncer, "_driver", return_value=session), \
+             mock.patch.object(syncer, "auth_from_env", return_value=None), \
              mock.patch.object(syncer, "lake", return_value=contextlib.nullcontext(object())), \
              mock.patch.object(syncer, "latest_snapshot", return_value=8), \
              mock.patch.object(syncer, "validate"), \
@@ -161,8 +168,8 @@ class IngestionTransactionTests(unittest.TestCase):
              mock.patch.object(syncer, "release", release), \
              mock.patch.object(syncer, "ProcessPoolExecutor", return_value=pool):
             try:
-                value = syncer.sync(object(), lake_target="synthetic", uri="bolt://unused", database="demo",
-                                    source_id="source", workers=1)
+                value = syncer.sync(MAPPING, lake_target="synthetic", uri="bolt://unused", database="demo",
+                                    source_id="source", source_identity="catalog-v1", workers=1)
             except BaseException:
                 self.assertEqual(release.call_count, 0, "failed runs must retain their source lease")
                 raise
@@ -174,8 +181,8 @@ class IngestionTransactionTests(unittest.TestCase):
                  mock.patch.object(syncer, "_driver", side_effect=AssertionError("invalid batch opened driver")) as driver, \
                  mock.patch.object(syncer, "claim") as claim:
                 with self.assertRaisesRegex(ValueError, "batch_size"):
-                    syncer.sync(object(), lake_target="synthetic", uri="bolt://unused",
-                                database="demo", source_id="source", workers=1,
+                    syncer.sync(MAPPING, lake_target="synthetic", uri="bolt://unused",
+                                database="demo", source_id="source", source_identity="catalog-v1", workers=1,
                                 batch_size=batch_size)
                 driver.assert_not_called()
                 claim.assert_not_called()
@@ -191,6 +198,7 @@ class IngestionTransactionTests(unittest.TestCase):
         self.assertEqual(result["to"], 8)
         self.assertEqual(release.call_count, 1)
         self.assertEqual(release.call_args.args[-2:], (7, 8))
+        self.assertEqual(release.call_args.kwargs, {"contract_fingerprint": CONTRACT})
 
 
 class RegistrationTests(unittest.TestCase):

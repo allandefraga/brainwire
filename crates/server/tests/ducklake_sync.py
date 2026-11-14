@@ -17,15 +17,20 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 import duckdb
 from neo4j import GraphDatabase
+from neo4j.exceptions import Neo4jError
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from examples.python.ducklake_sync import Mapping, claim, sync  # noqa: E402
+from examples.python import ducklake_sync  # noqa: E402
+from examples.python.ducklake_sync import Mapping, claim, release, sync  # noqa: E402
 
 NODES = Mapping.from_json({"table": "main.customers", "label": "Customer", "id": "id",
                            "properties": {"name": "name", "segment": "segment", "score": "score"}})
@@ -34,7 +39,7 @@ EDGES = Mapping.from_json({"table": "main.follows", "type": "FOLLOWS",
                            "target": {"label": "Customer", "column": "dst"}, "properties": ["weight"]})
 ONTOLOGY = {"version": "1", "nodes": [
     {"label": "Customer", "properties": ["name", "segment", "score"], "indexed_fields": ["segment"]},
-    {"label": "ImportCheckpoint", "properties": ["snapshot", "lease"], "indexed_fields": []}],
+    {"label": "ImportCheckpoint", "properties": ["snapshot", "lease", "contract_fingerprint"], "indexed_fields": []}],
     "edges": [{"type": "FOLLOWS", "from": {"label": "Customer"}, "to": {"label": "Customer"},
                "properties": ["weight"]}]}
 
@@ -51,6 +56,47 @@ def lake_state(writer):
     nodes = {r[0]: tuple(r[1:]) for r in writer.execute("SELECT id, name, segment, score FROM w.customers").fetchall()}
     edges = sorted(writer.execute("SELECT src, dst, weight FROM w.follows").fetchall())
     return nodes, edges
+
+
+def check_concurrent_claims(driver, preexisting):
+    source_id = "existing-claim-race" if preexisting else "new-claim-race"
+    contracts = [ducklake_sync._contract_fingerprint(NODES, f"racing-catalog-{i}", "lake", None, True)
+                 for i in ((0, 0) if preexisting else (0, 1))]
+    expected_snapshot = 7 if preexisting else None
+    if preexisting:
+        with driver.session(database="lake") as session:
+            claim(session, source_id, "previous-run", contract_fingerprint=contracts[0])
+            release(session, source_id, "previous-run", None, expected_snapshot, contract_fingerprint=contracts[0])
+    cursor = ducklake_sync._cursor
+    barrier = threading.Barrier(2, timeout=5)
+
+    def synchronized_cursor(tx, source_id):
+        state = cursor(tx, source_id)
+        barrier.wait()
+        return state
+
+    def take(i):
+        with driver.session(database="lake") as session:
+            try:
+                snapshot = claim(session, source_id, f"run-{i}", contract_fingerprint=contracts[i])
+                assert snapshot == expected_snapshot
+                return i, None
+            except Neo4jError as error:
+                return i, error.code
+
+    with patch.object(ducklake_sync, "_cursor", synchronized_cursor), ThreadPoolExecutor(2) as pool:
+        outcomes = list(pool.map(take, range(2)))
+
+    winners = [i for i, code in outcomes if code is None]
+    assert len(winners) == 1, outcomes
+    winner = winners[0]
+    with driver.session(database="lake") as session:
+        row = session.run("MATCH (c:ImportCheckpoint {entity_id:$id}) "
+                          "RETURN c.lease AS lease, c.contract_fingerprint AS contract, c.snapshot AS snapshot",
+                          id=source_id).single(strict=True)
+        assert dict(row) == dict(lease=f"run-{winner}", contract=contracts[winner], snapshot=expected_snapshot), row
+        release(session, source_id, f"run-{winner}", expected_snapshot, contract_fingerprint=contracts[winner])
+    return next(code for _, code in outcomes if code is not None)
 
 
 def run(binary, rows, workers):
@@ -85,7 +131,8 @@ def run(binary, rows, workers):
 
         cli("db", "create", "lake", "--ontology", str(root / "ontology.json"))
         uri = f"bolt://127.0.0.1:{port}"
-        common = dict(lake_target=target, uri=uri, database="lake", workers=workers, batch_size=500)
+        common = dict(lake_target=target, uri=uri, database="lake", source_identity="synthetic-catalog-v1",
+                      workers=workers, batch_size=500)
         log = (root / "server.log").open("w")
         process = subprocess.Popen([str(binary), "serve", "--config", str(config)], env=env, stdout=log, stderr=log)
         try:
@@ -125,13 +172,29 @@ def run(binary, rows, workers):
                 started = time.monotonic()
                 assert graph_state(session) == lake_state(writer), "graph differs from lake snapshot"
                 report["compare_seconds"] = round(time.monotonic() - started, 3)
-                claim(session, "follows", "someone-else")
+                edge_contract = ducklake_sync._contract_fingerprint(EDGES, common["source_identity"], "lake", None, True)
+                claim(session, "follows", "someone-else", contract_fingerprint=edge_contract)
                 try:
                     sync(EDGES, source_id="follows", **common)
                     raise AssertionError("a leased source must refuse a second run")
                 except RuntimeError as error:
                     assert "leased" in str(error), error
+                try:
+                    sync(EDGES, source_id="follows", break_lease=True, full=True, require_endpoints=False, **common)
+                    raise AssertionError("explicit recovery flags must still enforce the contract")
+                except RuntimeError as error:
+                    assert "checkpoint contract mismatch" in str(error), error
                 assert sync(EDGES, source_id="follows", break_lease=True, **common)["upserted"] == 0
+                session.run("CREATE (:ImportCheckpoint {entity_id:'legacy-empty'})").consume()
+                try:
+                    sync(NODES, source_id="legacy-empty", break_lease=True, full=True, **common)
+                    raise AssertionError("a legacy checkpoint without cursor or lease must be rejected")
+                except RuntimeError as error:
+                    assert "legacy checkpoint" in str(error), error
+                report["checkpoint_contract"] = {
+                    "new_claim_conflict": check_concurrent_claims(driver, preexisting=False),
+                    "existing_claim_conflict": check_concurrent_claims(driver, preexisting=True),
+                }
                 session.run("CREATE (:Customer {entity_id:'stray-1'}), (:Customer {entity_id:'stray-2'})").consume()
                 session.run("MATCH (a:Customer {entity_id:'stray-1'}), (b:Customer {entity_id:'c1'}) "
                             "MERGE (a)-[:FOLLOWS]->(b)").consume()

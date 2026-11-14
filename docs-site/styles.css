@@ -258,4 +258,5 @@ kbd { color: #244da8; border-color: #aab7cf; }
 .skip { color: #fff; }
 .hero-graph { margin: 32px 0 0; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: #eef0f4; }
 .hero-graph svg { display: block; width: 100%; height: auto; }
+.hero-graph img { display: block; width: 100%; height: auto; }
 .hero-graph figcaption { margin-top: 12px; padding-top: 10px; }

@@ -29,6 +29,46 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-14: DuckLake checkpoint contracts and reproducible comparison
+
+- Bound DuckLake cursors to an explicit source generation, normalized mapping,
+  graph, writer identity and endpoint policy. Legacy or mismatched cursors are
+  refused; migration requires reconciliation and an updated ontology. Lease
+  breaks do not fence older workers, and batches are not one atomic graph version.
+- Reject Decimal-to-float conversions that lose precision; this is a breaking
+  change. Operators can map exact values as text or explicitly accept DOUBLE.
+- On the v0.20 candidate, a synthetic DuckLake/Bolt acceptance run exercised
+  full load, changes, replay, pruning, two concurrent lease races and an
+  offline database check. An authenticated synthetic workload on the candidate
+  loaded 10,000 nodes and 9,000 edges, ran two incremental cycles and compared
+  the graph to the source. Its 311 tenant-filtered reads had no errors or
+  observed leaks. This is not a multi-machine failover test.
+- On the candidate native binary, local three-voter partition, election and
+  recovery checks passed, as did single-node graceful/forced termination
+  scenarios and their database audit. Snapshot transfer and real machine
+  failure were not qualified.
+- A locally built candidate image passed short cgroup pressure-admission,
+  rollback, relief and offline-audit checks at 512 MiB, 2 GiB and 3 GiB.
+  Synthetic tmpfs supplied pressure; these are not sustained load tests or a
+  guaranteed process RSS limit. Raw receipts are in `docs/benchmarks`.
+- The first four-label memory smoke stopped in setup because Colima did not
+  mount `/private/tmp`. A retry in a shared directory passed. A 30-minute
+  2 GiB synthetic run then passed with 20,000 nodes, 20,000 edges and delegated
+  ACLs. Sampled RSS peaked near 134 MiB during the read soak; it did not
+  saturate memory or establish a production capacity guarantee. The published
+  summary redacts host details and identifies the full local report by SHA-256.
+- Added a reproducible 1M-node/2M-edge three-engine diagnostic and receipts.
+  Separate runs use v0.19.0-beta.1 and the locally built v0.20 candidate;
+  the latter is not the release image. Durability, protocols and internal
+  memory settings differ. They sample recovery after a process kill; no peak
+  memory was captured. An earlier harness failure due to Redis module ordering
+  is retained separately.
+- Removed the README's diagrams and linked the comparison from the site. See
+  the changelog for migration instructions and the benchmark report for scope.
+- Next: representative sustained pressure testing, automatic fencing for stale
+  ingestion workers, consistent graph revisions, and multi-machine Raft recovery.
+  No process-wide RSS guarantee or production qualification is established.
+
 ## 2026-11-13: agent context scope and visual refresh
 
 - Reviewed the public reference product's typed schema, branch workflow,

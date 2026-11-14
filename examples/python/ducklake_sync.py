@@ -18,7 +18,9 @@ Each batch commits atomically. Only an explicitly rolled-back transaction
 conflict is retried, with a bounded backoff; ambiguous failures propagate.
 The cursor (``ImportCheckpoint {entity_id: source_id}``
 with ``snapshot`` and ``lease`` properties, which the ontology must declare)
-advances only after every partition has committed.
+also requires the contract_fingerprint property. It advances only after every
+partition has committed. The contract pins the source generation, target
+graph, writer principal, mapping and endpoint policy for this checkpoint.
 
 Edge mappings identify a relationship only by its endpoint pair. Synchronization
 refuses keyed relationship types before claiming the source lease; their extra
@@ -28,12 +30,13 @@ The target signature must be visible in the authorized graph schema.
     uv run --no-project --with duckdb==1.5.5 --with neo4j==5.28.6 \\
       python -m examples.python.ducklake_sync customers.json \\
       --lake ducklake:sqlite:/data/catalog.sqlite --database crm \\
-      --source-id crm-customers --workers 10
+      --source-id crm-customers --source-identity crm-lake-v1 --workers 10
 """
 import argparse
 import contextlib
 import datetime
 import decimal
+import hashlib
 import json
 import multiprocessing
 import os
@@ -44,8 +47,9 @@ import tempfile
 import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from examples.python.client import GraphClient
+from examples.python.connection import auth_from_env
 
 NAME = r"[A-Za-z_][A-Za-z0-9_]{0,127}"
 ACL_OPTIONS = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
@@ -248,7 +252,15 @@ def plain(value):
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, decimal.Decimal):
-        return float(value)  # ponytail: decimals lose precision as float; map to str if exact cents matter
+        if not value.is_finite():
+            raise ValueError("DuckLake decimal values must be finite")
+        converted = float(value)
+        if decimal.Decimal.from_float(converted) != value:
+            raise ValueError(
+                "DuckLake decimal is not exactly representable as a float. "
+                "Map a VARCHAR source column to preserve precision or a DOUBLE column to accept rounding."
+            )
+        return converted
     if isinstance(value, (datetime.date, datetime.time)):
         return value.isoformat()  # datetime is a date subclass
     if isinstance(value, uuid.UUID):
@@ -260,10 +272,20 @@ def plain(value):
     raise ValueError(f"unsupported source value type {type(value).__name__}")
 
 
-def _driver(uri):
+def _driver(uri, auth):
     from neo4j import GraphDatabase
-    from examples.python.connection import auth_from_env
-    return GraphDatabase.driver(uri, auth=auth_from_env())
+    return GraphDatabase.driver(uri, auth=auth)
+
+
+def _contract_fingerprint(mapping, source_identity, database, principal, require_endpoints):
+    if not isinstance(source_identity, str) or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}", source_identity):
+        raise ValueError("source_identity must be a stable catalog generation identifier, without a path or credentials")
+    canonical_mapping = asdict(mapping)
+    canonical_mapping["properties"] = sorted(mapping.properties)
+    canonical_mapping["acl"] = sorted(mapping.acl)
+    contract = {"version": 1, "source_identity": source_identity, "database": database,
+                "principal": principal, "mapping": canonical_mapping, "require_endpoints": require_endpoints}
+    return hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _validate_edge_identity(driver, database, mapping):
@@ -307,7 +329,7 @@ def sync_partition(job):
     mapping, start, end = job["mapping"], job["start"], job["end"]
     upserted = deleted = skipped = 0
     strict = job.get("require_endpoints", True)
-    with lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con, _driver(job["uri"]) as driver:
+    with lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con, _driver(job["uri"], job["auth"]) as driver:
         client = _ConflictRetryClient(driver, job["database"], batch_size=job["batch_size"])
         upserts, deletes = [], []
         for key, row in read_partition(con, mapping, start, end, job["workers"], job["worker"]):
@@ -338,40 +360,49 @@ def _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_si
 
 
 def _cursor(tx, source_id):
-    rows = tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) RETURN s.snapshot AS snapshot, s.lease AS lease",
+    rows = tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) "
+                  "RETURN s.snapshot AS snapshot, s.lease AS lease, s.contract_fingerprint AS contract_fingerprint",
                   id=source_id).data()
-    return rows[0] if rows else {"snapshot": None, "lease": None}
+    return rows[0] if rows else None
 
 
-def claim(session, source_id, run_id, break_lease=False):
+def _check_contract(state, source_id, fingerprint):
+    if state["contract_fingerprint"] is None:
+        raise RuntimeError(f"source {source_id!r} has a legacy checkpoint without a contract; reconcile before replacing it")
+    if state["contract_fingerprint"] != fingerprint:
+        raise RuntimeError(f"source {source_id!r} checkpoint contract mismatch")
+
+
+def claim(session, source_id, run_id, break_lease=False, *, contract_fingerprint):
     """Take the source lease in one transaction; return the stored snapshot."""
-    def work(tx):
-        state = _cursor(tx, source_id)
-        if state["lease"] not in (None, run_id) and not break_lease:
-            raise RuntimeError(f"source {source_id!r} is leased by run {state['lease']}; "
-                               "resolve that run and its in-flight writes before --break-lease")
-        tx.run("MERGE (s:ImportCheckpoint {entity_id:$id}) SET s.lease = $run", id=source_id, run=run_id)
-        return state["snapshot"]
     with session.begin_transaction() as tx:
-        result = work(tx)
+        state = _cursor(tx, source_id)
+        if state is None:
+            tx.run("CREATE (:ImportCheckpoint {entity_id:$id, lease:$run, contract_fingerprint:$contract})",
+                   id=source_id, run=run_id, contract=contract_fingerprint).consume()
+        else:
+            _check_contract(state, source_id, contract_fingerprint)
+            if state["lease"] not in (None, run_id) and not break_lease:
+                raise RuntimeError(f"source {source_id!r} is leased by run {state['lease']}; "
+                                   "resolve that run and its in-flight writes before --break-lease")
+            tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) SET s.lease = $run", id=source_id, run=run_id).consume()
         tx.commit()
-        return result
+        return None if state is None else state["snapshot"]
 
 
-def release(session, source_id, run_id, start, end=None):
+def release(session, source_id, run_id, start, end=None, *, contract_fingerprint):
     """Drop the lease and, when ``end`` is given, advance the cursor from ``start``."""
-    def work(tx):
-        state = _cursor(tx, source_id)
-        if state["lease"] != run_id or state["snapshot"] != start:
-            raise RuntimeError(f"source {source_id!r} cursor/lease changed during the run; rerun to reconcile")
-        tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) SET s.lease = null, s.snapshot = $snapshot",
-               id=source_id, snapshot=start if end is None else end)
     with session.begin_transaction() as tx:
-        work(tx)
+        state = _cursor(tx, source_id)
+        if state is None or state["lease"] != run_id or state["snapshot"] != start:
+            raise RuntimeError(f"source {source_id!r} cursor/lease changed during the run; rerun to reconcile")
+        _check_contract(state, source_id, contract_fingerprint)
+        tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) SET s.lease = null, s.snapshot = $snapshot",
+               id=source_id, snapshot=start if end is None else end).consume()
         tx.commit()
 
 
-def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_size=500,
+def sync(mapping, *, lake_target, uri, database, source_id, source_identity, workers=10, batch_size=500,
          to_snapshot=None, full=False, prune=False, break_lease=False, load=("ducklake", "sqlite"),
          init_sql=None, require_endpoints=True):
     """Synchronize one mapped table; return a summary dict.
@@ -390,14 +421,16 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
         raise ValueError("prune requires full")
     started = time.monotonic()
     run_id = uuid.uuid4().hex
-    with _driver(uri) as driver:
+    auth = auth_from_env()
+    contract = _contract_fingerprint(mapping, source_identity, database, auth[0] if auth else None, require_endpoints)
+    with _driver(uri, auth) as driver:
         # Check before claiming a lease or mutating rows: pair deletion would
         # otherwise remove every keyed sibling between the same endpoints.
         _validate_edge_identity(driver, database, mapping)
         def session():  # a fresh session per step: a long run can outlive an idle connection
             return driver.session(database=database)
         with session() as s:
-            stored = claim(s, source_id, run_id, break_lease)
+            stored = claim(s, source_id, run_id, break_lease, contract_fingerprint=contract)
         try:
             with lake(lake_target, load=load, init_sql=init_sql) as con:
                 end = latest_snapshot(con) if to_snapshot is None else to_snapshot
@@ -406,7 +439,7 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
                     raise ValueError(f"target snapshot {end} is older than the graph cursor {stored}")
                 validate(con, mapping, start, end)
             jobs = [{"mapping": mapping, "start": start, "end": end, "workers": workers, "worker": k,
-                     "lake": lake_target, "load": tuple(load), "init_sql": init_sql, "uri": uri,
+                     "lake": lake_target, "load": tuple(load), "init_sql": init_sql, "uri": uri, "auth": auth,
                      "database": database, "batch_size": batch_size,
                      "require_endpoints": require_endpoints} for k in range(workers)]
             # spawn, not fork: callers may run several syncs from threads with live drivers.
@@ -420,7 +453,7 @@ def sync(mapping, *, lake_target, uri, database, source_id, workers=10, batch_si
                 error.add_note("source lease retained; resolve previous workers and in-flight writes before --break-lease")
             raise
         with session() as s:
-            release(s, source_id, run_id, stored, end)
+            release(s, source_id, run_id, stored, end, contract_fingerprint=contract)
     return {"source_id": source_id, "from": start, "to": end, "mode": "full" if start is None else "changes",
             "workers": workers, "upserted": sum(p["upserted"] for p in parts),
             "deleted": sum(p["deleted"] for p in parts), "skipped": sum(p["skipped"] for p in parts),
@@ -433,6 +466,7 @@ def main(argv=None):
     parser.add_argument("--lake", required=True, help="DuckLake ATTACH target, e.g. ducklake:sqlite:/abs/catalog.sqlite")
     parser.add_argument("--database", required=True)
     parser.add_argument("--source-id", required=True, help="stable cursor name for this table+mapping")
+    parser.add_argument("--source-identity", required=True, help="stable identifier for this catalog generation, without a path or credentials")
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=500)
@@ -449,7 +483,7 @@ def main(argv=None):
         mapping = Mapping.from_json(json.load(stream))
     init_sql = open(args.init_sql).read() if args.init_sql else None
     summary = sync(mapping, lake_target=args.lake, uri=args.uri, database=args.database,
-                   source_id=args.source_id, workers=args.workers, batch_size=args.batch_size,
+                   source_id=args.source_id, source_identity=args.source_identity, workers=args.workers, batch_size=args.batch_size,
                    to_snapshot=args.to_snapshot, full=args.full, prune=args.prune, require_endpoints=not args.allow_missing_endpoints, break_lease=args.break_lease,
                    load=tuple(filter(None, args.load.split(","))), init_sql=init_sql)
     print(json.dumps(summary))
