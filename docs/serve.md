@@ -117,13 +117,16 @@ are numeric `IP:PORT`; total timeout accepts 1–30,000 ms. Readiness is not a
 certificate of workload capacity or disk integrity. Docker's image health check
 uses `handshake`; the demo Compose profile overrides it with `ready`.
 
-Authenticated native probes default to loopback addresses and refuse other
-destinations before opening a connection. Run health checks inside the container
-using the default `127.0.0.1:7687`, or connect to a loopback endpoint of an
-encrypted tunnel. Set `BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1` for a non-loopback
-probe only when you have verified encryption across the network path. The
-override relies on that external encryption and still uses plaintext Bolt.
-`handshake` never loads a credential file and can check remote listeners.
+For a TLS listener, set `BRAINWIRE_BOLT_TLS_CA_FILE` for every native probe
+mode. The certificate must include the probe IP in its SAN. Image and Compose
+probes use `127.0.0.1:7687` by default, so give them the CA bundle and include
+`127.0.0.1` in the SAN, or customize the probe address. The `handshake` mode
+verifies TLS when configured and skips the credential file.
+
+Authenticated plaintext probes accept loopback. Use a loopback endpoint of an
+encrypted tunnel to reach a remote plaintext Bolt listener. Set
+`BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1` for a non-loopback probe only after
+verifying encryption across the network path.
 
 On Unix, native Bolt clients reject credential files writable by group or others.
 Read-only secret mounts remain supported. Use a private owner-readable file such
@@ -178,8 +181,10 @@ For shared access, set `server.auth_file` or `BRAINWIRE_SERVER_AUTH_FILE` to a
 private service-token policy file. A configured policy must be valid before the
 server listens. Use [protected Bolt](bolt-auth.md) for grants and credentials,
 [protected containers](protected-containers.md) for secret mounts, and
-[protected transport](protected-transport.md) for the optional TLS proxy.
-Native Bolt and native TUI TLS are not implemented.
+[protected transport](protected-transport.md) to configure verified encryption.
+Set both `server.tls_cert_file` and `server.tls_key_file` to enable native
+Bolt TLS. The listener then requires TLS before Bolt negotiation. Certificate
+updates take effect after restarting the server.
 
 A Docker network, Kubernetes Service or Swarm overlay does not provide the
 authentication/encrypted boundary by itself. The standard deployment templates
@@ -190,13 +195,13 @@ run one instance; extra pods are not automatic replicas.
 | Setting | Default / role |
 | --- | --- |
 | Connections | At most 64 admitted sessions |
-| Handshake | Absolute 10-second IO deadline |
+| Handshake | Absolute 10-second IO deadline shared by TLS (when enabled) and Bolt negotiation |
 | Authentication | Separate absolute 10-second IO deadline; LOGOFF starts another |
 | `server.io_timeout_ms` | 300,000 ms for each complete authenticated request read and response write |
 | `server.query_timeout_ms` | 30,000 ms cooperative query execution deadline |
 | `server.max_message` | 256 MiB assembled payload per request |
 | `server.max_decoded_message` | 64 MiB accounted owned decoded storage per request |
-| `memory.ingress` | Shared admission of accounted request storage across connections |
+| `memory.ingress` | Shared admission of accounted Bolt request storage across connections. TLS buffers use additional memory. |
 | `memory.query` | Shared query reservation pool plus per-RUN accounting |
 
 Partial bytes and NOOPs do not renew an IO deadline. Complete request processing

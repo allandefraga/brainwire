@@ -18,9 +18,11 @@ store. Every live-source/deployment step needs an explicit selected environment.
 3. Generate private service-token files using the quickstart. Keep reader, writer,
    health and optional observer privileges distinct. Memory requires instance
    administration; graph read grants do not imply access to process telemetry.
-4. Choose trusted same-host loopback or the verified single-host TLS proxy.
-   For Python TLS, verify both CA and hostname with `bolt+s`; do not disable
-   verification. Native TUI/probe clients use plaintext on the trusted side.
+4. Use trusted same-host loopback for a local trial. For shared connections,
+   require authentication and a verified TLS endpoint. For Python, verify the
+   CA and destination name or IP. For the native TUI and probe, supply a CA
+   bundle and check that the certificate covers their exact destination IP.
+   [Transport setup](protected-transport.md)
 5. Freeze source IDs, authoritative fields, null/overwrite semantics, ontology and
    source snapshot identity before importing. For DuckLake use an explicit version
    and existing retained local managed files. The original bridge provides snapshot

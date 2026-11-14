@@ -146,9 +146,9 @@ Configured node-visibility rules filter records and traversal endpoints in
 supported query paths. The client chooses credentials; an agent-supplied user
 name alone does not grant access.
 
-Native Bolt TLS is not implemented. Shared environments need authentication
-and a verified encrypted network boundary. The local demo explicitly enables
-unauthenticated access for synthetic data on host loopback. Read
+Shared environments need authentication and verified encryption. Native Bolt
+TLS is optional. When enabled, the listener requires TLS. The local demo
+explicitly enables unauthenticated access for synthetic data on host loopback. Read
 [authentication](bolt-auth.md), [protected containers](protected-containers.md)
 and [transport](protected-transport.md) before connecting an application.
 

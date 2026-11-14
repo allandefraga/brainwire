@@ -4,7 +4,7 @@ Python commands below use the environment from [Python setup](python-package.md)
 
 The beta can require random service tokens and graph-scoped read/write grants.
 This is not the planned human-password/Argon2 or JWT/JWKS authentication, field
-ACLs, online user management or native encrypted transport. The credentials
+ACLs or online user management. TLS is configured separately. The credentials
 generated here have graph-wide visibility, including every stored tenant; they
 do not configure node ACL filtering. Existing trusted policies can restrict
 [node visibility](node-acl.md). Source-qualified IDs alone do not isolate tenants
@@ -211,9 +211,10 @@ and a connected TUI refresh opens a new connection.
 
 ## Transport and acceptance boundary
 
-Native clients and this server currently use cleartext Bolt. Use isolated
-loopback or a trusted encrypted tunnel/network boundary; tokens and query data
-must not traverse an untrusted link. Mounted secrets do not provide TLS. The
+Use native Bolt TLS with verified client trust, or keep plaintext Bolt within
+isolated loopback or a verified encrypted boundary. Set the CA bundle for
+native clients to use TLS. Mounting service-token secrets configures
+authentication only. [Protected transport](protected-transport.md) The
 protected Docker/Swarm/Kubernetes profiles are single-instance configurations,
 not replication or failover; see [protected containers](protected-containers.md).
 

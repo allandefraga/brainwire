@@ -50,10 +50,11 @@ with connect("bolt://127.0.0.1:7687", "customers", auth=None, liveness_check_tim
         print(records.single()["c"])
 ```
 
-The example uses unprotected development mode on trusted loopback. Use the
-[credentials-file connection](bolt-auth.md) for a protected service; native TLS
-remains pending. Different
-session database names select separate graphs. They share process cache and
+The example uses unprotected development mode on trusted loopback. For a
+protected service, configure the credentials file and verify the encrypted
+connection. [Credentials](bolt-auth.md) · [TLS setup](protected-transport.md)
+
+Different session database names select separate graphs. They share process cache and
 write-buffer resources, but have independent RocksDB directories and catalogs.
 
 ## Insertion, overwrite and MERGE

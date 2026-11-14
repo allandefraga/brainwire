@@ -29,6 +29,22 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: native Bolt TLS and mixed-load recovery
+
+- Added optional TLS-only Bolt transport and verified server identity in the
+  native client. Certificate rotation requires restart; Bolt service tokens
+  still authorize users. No client-certificate authentication is implemented.
+- Verified the local Linux image with a disposable authenticated Compose stack:
+  a trusted client could write and read, an unrelated CA and plaintext Bolt
+  were rejected, grants held, and data survived container restart. Added the
+  acceptance to both release image jobs. Multi-machine operation is untested.
+- The published v0.22.0-beta.3 image completed a 60-minute synthetic mixed
+  diagnostic with 500,000 nodes and edges and a quiescent kill/restart. The
+  [receipt](docs/benchmarks/2026-11-14-mixed-recovery-022b3.json) records
+  parameters and limitations; it did not approach the 2 GiB cgroup limit.
+- Next: qualify longer representative memory-pressure, lost-acknowledgment and
+  multi-machine failure scenarios before promising production guarantees.
+
 ## 2026-11-14: agent memory and initial Markdown vault import
 
 - Hardened native TUI/probe authentication to refuse non-loopback plaintext

@@ -347,8 +347,8 @@ SAN must match its configured peer hostname/IP: receivers verify the presented
 certificate against the authenticated sender's fixed peer address, and clients
 verify the destination address. Use distinct stable peer names. The shared token
 file accepts 32–256 ASCII token characters; keep keys and tokens private. This
-secures the peer plane. Native Bolt is still plaintext; client ingress needs the
-separate [protected transport](protected-transport.md) boundary.
+secures the peer plane. Configure the Bolt listener and client trust separately
+for application traffic. [Protected Bolt transport](protected-transport.md)
 
 Voters reuse authenticated peer connections for Raft replication and votes
 (up to 8 idle per peer, reused within 10 s; a server keeps an authenticated

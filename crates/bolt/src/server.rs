@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{watch, Semaphore};
+use tokio_rustls::TlsAcceptor;
 
 #[cfg(test)]
 use crate::chunk::encode_message;
@@ -83,7 +84,7 @@ where
 }
 
 /// Serve with an explicit authentication policy. Protected engines must accept
-/// authenticated access contexts; this transport does not provide native TLS.
+/// authenticated access contexts. Use [`serve_with_listener_options`] for TLS.
 pub async fn serve_with_auth_and_limit<E, F>(
     listener: TcpListener,
     make_engine: F,
@@ -196,7 +197,7 @@ where
         auth,
         shutdown,
         grace,
-        (process_headroom, None),
+        (process_headroom, None, None),
     )
     .await
 }
@@ -215,6 +216,37 @@ where
     E: QueryEngine + Send + 'static,
     F: Fn() -> E + Send + Sync + 'static,
 {
+    serve_with_listener_options(
+        listener,
+        make_engine,
+        limits,
+        auth,
+        shutdown,
+        grace,
+        ListenerOptions { ledger, tls: None },
+    )
+    .await
+}
+
+/// Optional transport and shared ingress admission for the Bolt listener.
+pub struct ListenerOptions {
+    pub ledger: Option<Arc<brainwire_core::admission::MemoryAdmission>>,
+    pub tls: Option<TlsAcceptor>,
+}
+
+pub async fn serve_with_listener_options<E, F>(
+    listener: TcpListener,
+    make_engine: F,
+    limits: ConnectionLimits,
+    auth: AuthMode,
+    shutdown: impl std::future::Future<Output = ()>,
+    grace: std::time::Duration,
+    options: ListenerOptions,
+) -> std::io::Result<usize>
+where
+    E: QueryEngine + Send + 'static,
+    F: Fn() -> E + Send + Sync + 'static,
+{
     serve_admitted(
         listener,
         make_engine,
@@ -222,7 +254,7 @@ where
         auth,
         shutdown,
         grace,
-        (None, ledger),
+        (None, options.ledger, options.tls),
     )
     .await
 }
@@ -230,6 +262,7 @@ where
 type Admission = (
     Option<ProcessHeadroom>,
     Option<Arc<brainwire_core::admission::MemoryAdmission>>,
+    Option<TlsAcceptor>,
 );
 async fn serve_admitted<E, F>(
     listener: TcpListener,
@@ -238,7 +271,7 @@ async fn serve_admitted<E, F>(
     auth: AuthMode,
     shutdown: impl std::future::Future<Output = ()>,
     grace: std::time::Duration,
-    (process_headroom, ledger): Admission,
+    (process_headroom, ledger, tls): Admission,
 ) -> std::io::Result<usize>
 where
     E: QueryEngine + Send + 'static,
@@ -302,10 +335,46 @@ where
         };
         let make = Arc::clone(&make_engine);
         let auth = auth.clone();
-        let draining = draining.clone();
+        let mut draining = draining.clone();
+        let tls = tls.clone().map(|acceptor| {
+            let deadline = tokio::time::Instant::now() + DEFAULT_HANDSHAKE_TIMEOUT;
+            (acceptor, deadline)
+        });
         let ingress_pool = Arc::clone(&ingress_pool);
         tokio::spawn(async move {
             let _permit = permit;
+            if let Some((tls, deadline)) = tls {
+                let accepted = tokio::select! {
+                    biased;
+                    () = drain_started(&mut draining) => return,
+                    accepted = tokio::time::timeout_at(deadline, tls.accept(stream)) => accepted,
+                };
+                let Ok(Ok(mut stream)) = accepted else {
+                    return;
+                };
+                let engine = make();
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    return;
+                }
+                let result = handle_connection_with_ingress(
+                    &mut stream,
+                    engine,
+                    limits,
+                    auth,
+                    (remaining, DEFAULT_AUTHENTICATION_TIMEOUT),
+                    draining,
+                    ingress_pool,
+                )
+                .await;
+                if result.is_ok() {
+                    // Send TLS close_notify on clean Bolt shutdown.
+                    let _ =
+                        tokio::time::timeout(std::time::Duration::from_secs(1), stream.shutdown())
+                            .await;
+                }
+                return;
+            }
             let _ = handle_connection_with_ingress(
                 stream,
                 make(),
@@ -543,6 +612,7 @@ async fn handle_connection_with_ingress<
         let proposals: [u8; 16] = hello[4..].try_into().expect("16 bytes");
         let version = negotiate(&proposals);
         stream.write_all(&response(version)).await?;
+        stream.flush().await?;
         Ok(version.is_some())
     });
     let negotiated = tokio::select! {

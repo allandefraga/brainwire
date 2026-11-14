@@ -23,8 +23,9 @@ unknown names fail rather than switching to the default database. `--connect`
 cannot be combined with `--overview`, `--demo`, `--config` or `--estimated`.
 Connected mode also supports [Memory and Indexes](connected-status.md). Other real
 overview panels remain offline; this does not provide a live query editor or disk browser.
-The server supports optional [service-token authentication](bolt-auth.md),
-while native TLS is pending; retain a trusted/encrypted transport boundary.
+For a protected server, configure service-token credentials. To use TLS,
+provide the client CA bundle and use an IP covered by the certificate.
+[Connected workspace setup](connected-status.md#connect-to-a-protected-server)
 
 ## Snapshot and refresh
 

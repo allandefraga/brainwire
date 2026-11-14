@@ -1,5 +1,8 @@
 # Distributed deployment and client routing concepts
 
+> The transport details below reflect the original design proposal.
+> [Current Bolt TLS configuration](../protected-transport.md)
+
 Status: proposed, unimplemented. The first distributed Brainwire would run three
 complete replicas on three independent machines, with one Raft group covering
 every named graph. Kubernetes or Swarm would manage placement and process

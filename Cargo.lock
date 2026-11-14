@@ -183,6 +183,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]
@@ -241,6 +242,8 @@ dependencies = [
  "libc",
  "openraft",
  "rocksdb",
+ "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "sha2",
@@ -250,6 +253,7 @@ dependencies = [
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
  "tokio",
+ "tokio-rustls",
  "toml",
  "uuid",
 ]

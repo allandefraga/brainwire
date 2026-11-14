@@ -9,10 +9,13 @@ with [service-token setup](bolt-auth.md), granting the health principal the
 configured **default database**. Policy/token updates require a server restart;
 secret-file projection alone does not reload Brainwire's in-memory policy.
 
-The auth overlays supply no native Bolt TLS, graph replication, quorum durability
-or machine-loss failover. A separate [single-host TLS proxy overlay](protected-transport.md)
-now qualifies Python client-to-proxy encryption; its isolated bridge backend remains
-plaintext. The server's container listener binds all interfaces. Keep it inside an
+The auth overlays configure service tokens for one standalone instance. Bolt
+uses plaintext unless you configure native TLS and give clients and health probes
+a way to verify the server certificate. The optional single-host HAProxy overlay
+encrypts the client-to-proxy connection and forwards plaintext over its private
+bridge. [Transport options](protected-transport.md)
+
+The server's container listener binds all interfaces. Keep it inside an
 appropriate trusted/encrypted transport boundary: Kubernetes networking is
 unencrypted by default, and NetworkPolicy filters traffic rather than encrypting
 it. [Kubernetes multi-tenancy documentation](https://kubernetes.io/docs/concepts/security/multi-tenancy/).

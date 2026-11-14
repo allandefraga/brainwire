@@ -51,7 +51,7 @@ lookups can be denied by server permissions or configuration. See
 
 ## Select a graph neighborhood
 
-Populate the demo using the [README Python example](../README.md#write-from-python),
+Populate the demo using the [README Python example](../README.md#write-and-query-from-python),
 then select one source and one outgoing relationship signature:
 
 ```sh
@@ -106,15 +106,24 @@ The generator does not print tokens or overwrite an existing directory. The
 server must use the matching generated policy. Ordinary graph readers/writers
 do not gain telemetry access from possessing a graph grant.
 
-The native TUI uses plaintext Bolt. When `BRAINWIRE_BOLT_AUTH_FILE` is set,
-the client accepts loopback destinations by default and refuses other addresses
-before opening a connection. For a remote server, connect to a loopback endpoint
-of an encrypted tunnel. If encryption already protects the full network path
-to a non-loopback address, set `BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1` for that
-invocation. The override sends the token in plaintext over Bolt and relies on
-the external transport for encryption. The [optional TLS proxy](protected-transport.md)
-supports encrypted connections from Python clients. The connected workspace has
-no query editor, graph selector, property editor or import controller.
+To connect over TLS, pass the CA bundle as well. The certificate must list
+the exact connection IP in its Subject Alternative Name (SAN). The client
+checks the certificate chain and IP address. A failed TLS handshake ends the
+connection without a plaintext retry.
+
+```sh
+export BRAINWIRE_BOLT_TLS_CA_FILE=/private/path/ca.pem
+./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo
+```
+
+Without a CA bundle, authenticated connections are allowed on loopback by
+default. Use a loopback endpoint of an encrypted tunnel for a remote plaintext
+Bolt listener. Set `BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1` for a non-loopback
+connection only if external encryption protects the whole path.
+[Protected Bolt transport](protected-transport.md)
+
+The connected workspace has no query editor, graph selector, property editor
+or import controller.
 
 ## Memory values and permissions
 

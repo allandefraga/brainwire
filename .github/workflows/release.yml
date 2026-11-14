@@ -121,6 +121,10 @@ jobs:
           test "$architecture" = "$ARCH"
           python crates/server/tests/container_restart.py --image "$CANDIDATE" --rows 100 --cycles 1
 
+      - name: Verify protected native TLS Compose and recovery
+        timeout-minutes: 10
+        run: python crates/server/tests/native_tls_compose_runtime.py "$CANDIDATE"
+
       - name: Publish only the verified candidate and record its digest
         env:
           ALREADY_EXISTS: ${{ steps.candidate.outputs.exists }}

@@ -6,7 +6,8 @@ The [experimental quorum profile](quorum-replication.md) has a separate deployme
 path. Keep one writer per RocksDB directory. Non-loopback listeners now require
 a valid auth policy. Use the protected [Compose, Kubernetes or Swarm profile](protected-containers.md)
 for real data and shared access. The unauthenticated opt-in is only for isolated
-synthetic development. Native TLS remains unavailable; see [transport guidance](protected-transport.md).
+synthetic development. For optional native Bolt TLS, configure the listener,
+client trust and probes together. [Transport guidance](protected-transport.md)
 
 The proposed [distributed deployment and routing design](design/2026-10-12-distributed-deployment.md)
 explains future member identities, separate peer/client endpoints, host placement,

@@ -115,6 +115,12 @@ jobs:
       - name: Test TLS diagnostic configuration
         run: python -m unittest discover -s crates/server/tests -p 'test_compose_tls.py'
 
+      - name: Verify native Bolt TLS and recovery
+        run: python crates/server/tests/native_bolt_tls.py --binary target/debug/brainwire
+
+      - name: Verify native TLS Compose configuration
+        run: python crates/server/tests/native_tls_compose_config.py
+
       - name: Validate documentation links and site
         run: |
           python scripts/check_docs_links.py

@@ -65,7 +65,8 @@ not a verified approval workflow. Higher scores do not establish factual truth.
 The server supports optional [named-graph service-token grants](bolt-auth.md),
 but no per-source ACL. `domain` is an exact-match relevance filter, **not access
 control**. A reader can rank all sources in its allowed graph; use separate graphs
-when records require separate permissions. Native TLS remains pending.
+when records require separate permissions. Use authenticated and encrypted
+connections for shared graphs. [Protected transport](protected-transport.md)
 
 ## Query and resource contract
 

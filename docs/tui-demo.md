@@ -79,8 +79,9 @@ an explicit source/type selection; see the
 
 All connected data travels over Bolt. The TUI does not open the running server's
 RocksDB files. A protected server needs the credentials file described in
-[protected Bolt](bolt-auth.md). Native TUI connections use plaintext Bolt, so
-keep them on trusted loopback or behind an appropriate encrypted tunnel.
+[protected Bolt](bolt-auth.md). For a TLS endpoint, supply a CA bundle
+and connect to an IP covered by the certificate. Use trusted loopback or an
+encrypted tunnel for plaintext connections. [Connection setup](connected-status.md#connect-to-a-protected-server)
 
 ## Inspect local files with the server stopped
 

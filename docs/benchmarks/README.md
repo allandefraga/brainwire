@@ -5,6 +5,16 @@ raw receipts and reports so a result can be traced to its workload and binary.
 The dates matter: historical results describe those candidates, not the current
 working tree or latest release.
 
+A [60-minute mixed read/write and restart diagnostic](2026-11-14-mixed-recovery-022b3.json)
+passed against the published v0.22.0-beta.3 image in one local standalone
+2 GiB container. It used 500,000 synthetic nodes and 500,000 relationships,
+with 138,668 committed update batches and 34,848 reads. Sampled process RSS
+peaked at 700.6 MiB. The test checked every record before and after SIGKILL
+and restart. The graph was quiescent before the kill; the workload did not
+approach the memory limit, simulate lost acknowledgments or test multi-machine
+failure. These results do not establish a process-wide memory ceiling or a
+production capacity guarantee.
+
 The [v0.18 recovery and memory checks](2026-11-08-recovery-memory.md) exercise interrupted commits and synthetic 512 MiB/2 GiB pressure on a shared host.
 
 The [v0.17 beta.2 mixed-load diagnostic](2026-11-07-beta2-mixed.md) compares two short synthetic runs on a shared host.

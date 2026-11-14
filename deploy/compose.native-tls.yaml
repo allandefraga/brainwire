@@ -1,0 +1,26 @@
+# Combine compose.yaml, compose.auth.yaml, and this overlay in that order.
+# Keep the project name to retain its existing data volume. Use a TLS-capable image.
+# Set absolute host paths. The files must be readable by UID 10001 in the container.
+# The inherited ready probe verifies an IP SAN of 127.0.0.1 against the supplied CA.
+services:
+  brainwire:
+    image: ${BRAINWIRE_NATIVE_TLS_IMAGE:?Set an explicitly verified TLS-capable Brainwire image}
+    environment:
+      BRAINWIRE_SERVER_TLS_CERT_FILE: /run/secrets/brainwire-native-tls-chain.pem
+      BRAINWIRE_SERVER_TLS_KEY_FILE: /run/secrets/brainwire-native-tls-key.pem
+      BRAINWIRE_BOLT_TLS_CA_FILE: /run/secrets/brainwire-native-tls-ca.pem
+    secrets:
+      - source: brainwire-native-tls-chain
+        target: brainwire-native-tls-chain.pem
+      - source: brainwire-native-tls-key
+        target: brainwire-native-tls-key.pem
+      - source: brainwire-native-tls-ca
+        target: brainwire-native-tls-ca.pem
+
+secrets:
+  brainwire-native-tls-chain:
+    file: ${BRAINWIRE_NATIVE_TLS_CHAIN_FILE:?Set the server certificate chain PEM file path}
+  brainwire-native-tls-key:
+    file: ${BRAINWIRE_NATIVE_TLS_KEY_FILE:?Set the server private key PEM file path}
+  brainwire-native-tls-ca:
+    file: ${BRAINWIRE_NATIVE_TLS_CA_FILE:?Set the probe CA PEM file path}

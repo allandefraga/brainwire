@@ -123,7 +123,8 @@ pub(crate) async fn write_packstream_message<W: tokio::io::AsyncWrite + Unpin>(
         frame[..2].copy_from_slice(&(payload_len as u16).to_be_bytes());
         frame.extend_from_slice(&[0, 0]);
     }
-    stream.write_all(&frame).await
+    stream.write_all(&frame).await?;
+    stream.flush().await
 }
 
 #[derive(Default)]

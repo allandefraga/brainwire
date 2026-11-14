@@ -1,12 +1,123 @@
-# Protected Bolt transport for a single-host pilot
+# Protected Bolt transport
 
-Python commands below use the environment from [Python setup](python-package.md).
+Use a service-token policy and verify the server certificate for shared
+connections. Brainwire can terminate TLS on its Bolt listener. The Compose
+HAProxy overlay is another option for a single-host pilot. Both use the
+[Python setup](python-package.md) for the client examples below.
 
-Brainwire currently serves plaintext Bolt. The optional Compose TLS overlay
-terminates TLS in HAProxy and forwards Bolt to Brainwire over the project's
-private container network. Bolt authentication and per-graph grants still run
-inside Brainwire. This is a qualified client-to-proxy path, not native server
-TLS, replication, or protection of traffic between separate machines.
+## Enable native Bolt TLS
+
+Prepare a certificate chain in PEM format, with the server certificate first,
+and a separate PEM file containing the matching private key. Keep the key
+private and readable by the server process. The certificate's Subject
+Alternative Name (SAN) must cover each DNS name or IP that clients use. For a
+local probe that connects to `127.0.0.1`, include `IP:127.0.0.1` in the SAN.
+Configure a [service-token policy](bolt-auth.md) for the graph before sharing it.
+
+```sh
+export BRAINWIRE_SERVER_AUTH_FILE=/absolute/private/policy.json
+export BRAINWIRE_SERVER_TLS_CERT_FILE=/absolute/private/server-chain.pem
+export BRAINWIRE_SERVER_TLS_KEY_FILE=/absolute/private/server-key.pem
+brainwire serve
+```
+
+The equivalent TOML options are `server.tls_cert_file` and
+`server.tls_key_file`. Set both together. The configured listener accepts TLS
+1.2 and 1.3 and starts Bolt negotiation after successful TLS setup. With no
+certificate and key configured, the listener serves plaintext. Rotate the
+certificate or key by replacing the files and restarting the server. Raft peer
+TLS has its own configuration.
+
+Python's `bolt+s://` validates certificates against its trust store. For a
+private CA, use the [explicit CA example](#python-with-strict-certificate-checks)
+with the native listener's host and port, such as `bolt://localhost:7687` for a
+certificate with `DNS:localhost`. Keep hostname or IP verification enabled.
+
+The native probe and terminal take numeric `IP:PORT` addresses. Provide a PEM
+CA bundle with `BRAINWIRE_BOLT_TLS_CA_FILE`. The IP must appear as an IP SAN in
+the certificate. The client checks the chain against the supplied bundle and
+never falls back to plaintext after a failed TLS handshake.
+
+```sh
+export BRAINWIRE_BOLT_TLS_CA_FILE=/absolute/private/ca.pem
+export BRAINWIRE_BOLT_AUTH_FILE=/absolute/private/health.json
+brainwire probe --mode ready --address 127.0.0.1:7687
+```
+
+For `brainwire shell`, use a credential with the appropriate graph read grants
+and the same CA setting. With containers, mount certificate files and the CA
+bundle read-only and set the probe's CA variable in the container environment.
+The default image and Compose probes connect to `127.0.0.1:7687`. If the
+certificate lacks that IP SAN, configure a probe address whose IP is covered.
+`handshake` only verifies the endpoint and Bolt negotiation. `ready` also
+needs a valid credential on a protected server and makes a query.
+
+The connection limit still applies while TLS negotiates. TLS uses memory in
+addition to the `memory.ingress` budget, which accounts for Bolt request
+storage. TLS authenticates the server only. Client authentication uses Bolt
+service tokens.
+
+## Run native Bolt TLS with Compose
+
+Use a pinned Brainwire image that includes native Bolt TLS. To build one from a
+checkout that includes this feature, use `docker build -t brainwire:native-tls .`
+from the repository root. The overlay requires an explicit image in
+`BRAINWIRE_NATIVE_TLS_IMAGE`. Keep the existing Compose project name to reuse
+its volume. Use a certificate with `IP:127.0.0.1` for the inherited readiness
+probe and a SAN for any separate address your application uses.
+
+```sh
+export BRAINWIRE_NATIVE_TLS_IMAGE=brainwire:native-tls
+export BRAINWIRE_PILOT_PROJECT=brainwire-pilot-YOUR_UNIQUE_SUFFIX
+export BRAINWIRE_AUTH_POLICY_FILE=/absolute/private/policy.json
+export BRAINWIRE_HEALTH_AUTH_FILE=/absolute/private/health.json
+export BRAINWIRE_NATIVE_TLS_CHAIN_FILE=/absolute/private/server-chain.pem
+export BRAINWIRE_NATIVE_TLS_KEY_FILE=/absolute/private/server-key.pem
+export BRAINWIRE_NATIVE_TLS_CA_FILE=/absolute/private/ca.pem
+
+docker compose -p "$BRAINWIRE_PILOT_PROJECT" \
+  -f deploy/compose.yaml -f deploy/compose.auth.yaml \
+  -f deploy/compose.native-tls.yaml config
+
+# Run only for a fresh volume. Use your ontology for real data.
+docker compose -p "$BRAINWIRE_PILOT_PROJECT" \
+  -f deploy/compose.yaml -f deploy/compose.auth.yaml \
+  -f deploy/compose.native-tls.yaml run --rm --no-deps brainwire \
+  db create default --ontology /opt/brainwire/example-schema.json
+
+docker compose -p "$BRAINWIRE_PILOT_PROJECT" \
+  -f deploy/compose.yaml -f deploy/compose.auth.yaml \
+  -f deploy/compose.native-tls.yaml up --no-build --wait --wait-timeout 900
+```
+
+Compose mounts the files as secrets. Keep the private key and tokens private
+and readable by Brainwire's container UID 10001. The health principal needs
+read access to the default database. The service publishes Bolt on host
+loopback. Set `BRAINWIRE_BIND_PORT` to choose a different host port.
+
+Verify the actual endpoint from outside the container before connecting your
+application. A healthy status alone may come from an older image running
+plaintext. With a TLS-capable `brainwire` client on the host, the first command
+below must succeed with the expected CA and IP SAN. The second must fail
+because it tries plaintext Bolt negotiation without credentials. Change the
+port in both commands if you set `BRAINWIRE_BIND_PORT`.
+
+```sh
+BRAINWIRE_BOLT_TLS_CA_FILE="$BRAINWIRE_NATIVE_TLS_CA_FILE" \
+  BRAINWIRE_BOLT_AUTH_FILE="$BRAINWIRE_HEALTH_AUTH_FILE" \
+  brainwire probe --mode ready --address 127.0.0.1:7687
+
+env -u BRAINWIRE_BOLT_TLS_CA_FILE \
+  brainwire probe --mode handshake --address 127.0.0.1:7687
+```
+
+## Use the Compose TLS overlay
+
+The optional overlay terminates TLS in HAProxy. It forwards plaintext Bolt to
+Brainwire over the project's private container network. Brainwire checks Bolt
+credentials and graph grants. Use the overlay with a plaintext Brainwire
+backend. The archived test receipts below cover the client-to-proxy path on a
+single host.
 
 Only `127.0.0.1:7688` is published by default. The overlay removes the base
 plaintext database host port. Do not expose the backend separately or attach
@@ -19,9 +130,9 @@ network boundary.
 Use Docker Compose 2.24.4 or newer; this profile was qualified with 5.4.0.
 The [`!reset` merge tag](https://docs.docker.com/reference/compose-file/merge/)
 removes the base host port.
-Use a server certificate whose Subject Alternative Name matches the client's
-hostname. `BRAINWIRE_TLS_PEM_FILE` must contain the certificate chain followed
-by the private key. Keep the key private and readable by the proxy process.
+Use a server certificate with a SAN matching the address clients connect to.
+`BRAINWIRE_TLS_PEM_FILE` must contain the certificate chain followed by the
+private key. Keep the key private and readable by the proxy process.
 The pinned proxy image runs as its `haproxy` user; on a Linux host, arrange
 private file ownership/read access for UID/GID 99 as well. The PEM and
 configuration are mounted read-only. There are no credentials in YAML.
@@ -127,9 +238,10 @@ arrives, treat the mutation outcome as unknown and reconcile durable IDs or
 checkpoints before retrying. Proxy expiry is not native query cancellation or
 graceful drain.
 
-The native TUI/probe currently connects to plaintext Bolt and does not validate
-this TLS endpoint. Run it on the trusted database side with file credentials;
-do not route it through this proxy until native TLS client support exists.
+The native TUI and probe can connect to the TLS frontend when its certificate
+includes the frontend IP as an IP SAN. Set `BRAINWIRE_BOLT_TLS_CA_FILE` for the
+frontend CA bundle. With a DNS-only certificate, use a client that connects
+by the matching DNS name.
 
 ## Reproduce the synthetic qualification
 
@@ -175,6 +287,6 @@ Their idle-pool pauses were 65.807 and 65.811 seconds; both observed a different
 TLS frontend peer and passed their first reuse with liveness set to 30 seconds.
 Both receipts also record successful graph/index audits and owned-resource cleanup.
 
-Certificate rotation, remote ingress, Kubernetes/Swarm TLS, mTLS, native TUI TLS
-and encryption of the backend connection remain separate qualification work.
-The harness uses synthetic data and does not certify a production deployment.
+The proxy harness uses synthetic data. Its coverage is limited to the
+single-host client-to-proxy setup described above. Remote ingress,
+Kubernetes/Swarm TLS and backend encryption require separate tests.

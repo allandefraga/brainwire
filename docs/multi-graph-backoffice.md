@@ -123,10 +123,10 @@ with connect("bolt://127.0.0.1:7687", "tickets", auth=None) as graph:
         print(session.run("RETURN 1 AS ready").single()["ready"])
 ```
 
-The server is single-node. This example uses unprotected development mode;
-[service-token connections](bolt-auth.md) are optional and native TLS is pending, so the
-example is for a trusted local test network. The [server guide](serve.md)
-covers configuration and transaction behavior.
+The server is single-node. This example uses unauthenticated development mode
+on a trusted local test network. For shared use, configure [service tokens](bolt-auth.md)
+and [protected transport](protected-transport.md). See the [server guide](serve.md)
+for configuration and transaction behavior.
 
 ## What each terminal surface can do
 

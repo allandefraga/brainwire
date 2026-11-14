@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 
 use crate::config;
 use crate::databases::Databases;
@@ -26,6 +27,7 @@ pub fn run(
     if let Some(warning) = config::memory_overcommit_warning(&loaded) {
         eprintln!("warning: {warning}; review explicit budgets before serving");
     }
+    let tls = tls_acceptor(&loaded.config.server)?;
     let memory_pressure = crate::memory_pressure::PressureGuard::shared();
     eprintln!(
         "memory pressure admission: {:?} {:?} (sampled cgroup usage; not an RSS ceiling)",
@@ -127,8 +129,9 @@ pub fn run(
         let stores = Arc::clone(&databases);
         let default_name = loaded.config.server.default_database.clone();
         println!(
-            "brainwire serve {} databases={:?} cache={} memtables={} query={} ingress={} limit={} (query reservations refused near the process RSS limit)",
+            "brainwire serve {} transport={} databases={:?} cache={} memtables={} query={} ingress={} limit={} (query reservations refused near the process RSS limit)",
             listener.local_addr().map_err(|e| e.to_string())?,
+            if tls.is_some() { "tls" } else { "plaintext" },
             databases.names(),
             loaded.config.memory.cache,
             loaded.config.memory.memtables,
@@ -136,7 +139,7 @@ pub fn run(
             loaded.config.memory.ingress,
             loaded.config.memory.limit,
         );
-        let open = brainwire_bolt::server::serve_until_with_shared_admission(
+        let open = brainwire_bolt::server::serve_with_listener_options(
             listener,
             move || {
                 let engine = if let Some(replica) = &replica {
@@ -157,7 +160,10 @@ pub fn run(
             auth,
             stop,
             grace,
-            shared_admission,
+            brainwire_bolt::server::ListenerOptions {
+                ledger: shared_admission,
+                tls,
+            },
         )
         .await
         .map_err(|e| format!("Bolt server stopped: {e}"))?;
@@ -182,6 +188,42 @@ pub fn run(
 /// Engine worker threads release their store handles after their sessions
 /// end. Close RocksDB on this thread before `exit()` runs C++ static
 /// destructors: a store closing concurrently with them aborts the process.
+fn tls_acceptor(server: &config::ServerSection) -> Result<Option<TlsAcceptor>, String> {
+    let Some(cert_path) = &server.tls_cert_file else {
+        return Ok(None);
+    };
+    let key_path = server
+        .tls_key_file
+        .as_ref()
+        .ok_or("missing Bolt TLS private key file")?;
+    let mut cert_pem =
+        config::read_tls_pem(cert_path).map_err(|e| format!("Bolt TLS certificate file: {e}"))?;
+    let certs = rustls_pemfile::certs(&mut cert_pem)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "invalid Bolt TLS certificate PEM")?;
+    if certs.is_empty()
+        || certs
+            .iter()
+            .any(|cert| rustls::server::ParsedCertificate::try_from(cert).is_err())
+    {
+        return Err("invalid Bolt TLS certificate chain".into());
+    }
+    let mut key_pem =
+        config::read_tls_pem(key_path).map_err(|e| format!("Bolt TLS private key file: {e}"))?;
+    let key = rustls_pemfile::private_key(&mut key_pem)
+        .map_err(|_| "invalid Bolt TLS private key PEM")?
+        .ok_or("missing Bolt TLS private key in PEM")?;
+    let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|_| "invalid Bolt TLS protocol configuration")?
+    .with_no_client_auth()
+    .with_single_cert(certs, key)
+    .map_err(|_| "invalid Bolt TLS certificate chain or mismatched private key")?;
+    Ok(Some(TlsAcceptor::from(Arc::new(tls))))
+}
+
 fn close_stores(stores: Arc<Databases>) {
     // ponytail: fixed bound; a running engine call honours query_timeout_ms cooperatively.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

@@ -1,5 +1,8 @@
 # Brainwire installation and desktop delivery
 
+> The transport details below reflect the original design proposal.
+> [Current Bolt TLS configuration](../protected-transport.md)
+
 Status: design proposal based on the current repository. Docker Compose and
 source builds exist. No Homebrew formula/tap, desktop application, cask or
 signed native installer is claimed to be published or tested here.

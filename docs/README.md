@@ -46,7 +46,7 @@ and recovery steps your application needs.
 ## Evaluate the beta
 
 Read the [operator checklist](beta-operator-checklist.md) before using real
-data. Memory admission is cooperative, native Bolt TLS is not implemented,
+data. Memory admission is cooperative, Bolt TLS requires opt-in configuration,
 and distributed production failover remains unqualified. The standard Docker,
 Kubernetes and Swarm templates run one instance. The replication guide is a
 separate experimental setup.

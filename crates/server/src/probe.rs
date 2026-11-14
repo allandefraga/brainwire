@@ -2,7 +2,8 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use brainwire_bolt::chunk::encode_message;
 use brainwire_bolt::handshake::MAGIC;
@@ -29,7 +30,12 @@ pub fn run(address: &str, mode: Mode, timeout_ms: u64) -> Result<(), String> {
         return Err("--timeout-ms must be between 1 and 30000".into());
     }
     if matches!(mode, Mode::Handshake) {
-        BoltClient::hello(parse_address(address)?, timeout_ms, MAX_PROBE_RESPONSE)?;
+        BoltClient::hello(
+            parse_address(address)?,
+            timeout_ms,
+            MAX_PROBE_RESPONSE,
+            client_tls()?,
+        )?;
         return Ok(());
     }
     let mut client = BoltClient::connect(address, timeout_ms, MAX_PROBE_RESPONSE)?;
@@ -56,8 +62,8 @@ pub fn run(address: &str, mode: Mode, timeout_ms: u64) -> Result<(), String> {
 
 /// The two bounded, synchronous read-only clients share framing and deadlines.
 pub(crate) struct BoltClient {
-    stream: TcpStream,
-    deadline: std::time::Instant,
+    stream: Box<dyn Transport + Send>,
+    deadline: Instant,
     remaining_wire: usize,
 }
 
@@ -65,14 +71,16 @@ impl BoltClient {
     pub(crate) fn connect(address: &str, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
         let address = parse_address(address)?;
         let credentials = crate::client_auth::Credentials::load()?;
+        let tls = client_tls()?;
         if credentials.is_some()
+            && tls.is_none()
             && !is_loopback_endpoint(address)
             && std::env::var_os("BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH").as_deref()
                 != Some(std::ffi::OsStr::new("1"))
         {
-            return Err("refusing to send Bolt credentials over plaintext to a non-loopback address. Use a loopback tunnel endpoint or set BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1 only after verifying network encryption".into());
+            return Err("refusing to send Bolt credentials over plaintext to a non-loopback address. Configure BRAINWIRE_BOLT_TLS_CA_FILE, use a loopback tunnel endpoint, or set BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1 only after verifying network encryption".into());
         }
-        let mut client = Self::hello(address, timeout_ms, max_wire)?;
+        let mut client = Self::hello(address, timeout_ms, max_wire, tls)?;
         let auth = credentials
             .as_ref()
             .map(|credentials| credentials.logon())
@@ -83,11 +91,28 @@ impl BoltClient {
     }
 
     /// Version negotiation and HELLO, before any authentication.
-    fn hello(address: SocketAddr, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
+    fn hello(
+        address: SocketAddr,
+        timeout_ms: u64,
+        max_wire: usize,
+        tls: Option<Arc<rustls::ClientConfig>>,
+    ) -> Result<Self, String> {
         let timeout = Duration::from_millis(timeout_ms);
-        let deadline = std::time::Instant::now() + timeout;
+        let deadline = Instant::now() + timeout;
         let stream = TcpStream::connect_timeout(&address, timeout)
             .map_err(|e| format!("cannot connect to {address}: {e}"))?;
+        let mut socket = DeadlineSocket { stream, deadline };
+        let stream: Box<dyn Transport + Send> = if let Some(config) = tls {
+            let name = rustls::pki_types::ServerName::IpAddress(address.ip().to_canonical().into());
+            let mut connection = rustls::ClientConnection::new(config, name)
+                .map_err(|e| format!("cannot start Bolt TLS: {e}"))?;
+            connection
+                .complete_io(&mut socket)
+                .map_err(|e| format!("Bolt TLS handshake failed: {e}"))?;
+            Box::new(rustls::StreamOwned::new(connection, socket))
+        } else {
+            Box::new(socket)
+        };
         let mut client = Self {
             stream,
             deadline,
@@ -108,17 +133,11 @@ impl BoltClient {
     }
 
     fn timeout(&self) -> Result<Duration, String> {
-        self.deadline
-            .checked_duration_since(std::time::Instant::now())
-            .filter(|duration| !duration.is_zero())
-            .ok_or_else(|| "Bolt request deadline exceeded".into())
+        remaining(self.deadline).map_err(|e| e.to_string())
     }
 
     fn write(&mut self, mut bytes: &[u8]) -> Result<(), String> {
         while !bytes.is_empty() {
-            self.stream
-                .set_write_timeout(Some(self.timeout()?))
-                .map_err(|e| e.to_string())?;
             match self.stream.write(bytes) {
                 Ok(0) => return Err("Bolt request write: connection closed".into()),
                 Ok(n) => bytes = &bytes[n..],
@@ -134,6 +153,9 @@ impl BoltClient {
                 Err(e) => return Err(format!("Bolt request write: {e}")),
             }
         }
+        self.stream
+            .flush()
+            .map_err(|e| format!("Bolt request flush: {e}"))?;
         self.timeout()?;
         Ok(())
     }
@@ -143,9 +165,6 @@ impl BoltClient {
             return Err("Bolt response exceeds wire limit".into());
         }
         while !bytes.is_empty() {
-            self.stream
-                .set_read_timeout(Some(self.timeout()?))
-                .map_err(|e| e.to_string())?;
             match self.stream.read(bytes) {
                 Ok(0) => return Err("Bolt response read: connection closed".into()),
                 Ok(n) => {
@@ -205,9 +224,6 @@ impl BoltClient {
         // GOODBYE closes the server side, so delayed extra records cannot race a peek.
         self.send(0x02, vec![])?;
         loop {
-            self.stream
-                .set_read_timeout(Some(self.timeout()?))
-                .map_err(|e| e.to_string())?;
             match self.stream.read(&mut [0u8; 1]) {
                 Ok(0) => {
                     self.timeout()?;
@@ -227,6 +243,72 @@ impl BoltClient {
             }
         }
     }
+}
+
+trait Transport: Read + Write {}
+impl<T: Read + Write> Transport for T {}
+
+struct DeadlineSocket {
+    stream: TcpStream,
+    deadline: Instant,
+}
+
+fn remaining(deadline: Instant) -> std::io::Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Bolt request deadline exceeded",
+            )
+        })
+}
+
+// rustls can issue several socket operations inside one outer read or write.
+impl Read for DeadlineSocket {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.stream
+            .set_read_timeout(Some(remaining(self.deadline)?))?;
+        self.stream.read(buf)
+    }
+}
+
+impl Write for DeadlineSocket {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.stream
+            .set_write_timeout(Some(remaining(self.deadline)?))?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+fn client_tls() -> Result<Option<Arc<rustls::ClientConfig>>, String> {
+    let Some(path) = std::env::var_os("BRAINWIRE_BOLT_TLS_CA_FILE") else {
+        return Ok(None);
+    };
+    let mut pem = crate::config::read_tls_pem(std::path::Path::new(&path))
+        .map_err(|e| format!("Bolt TLS CA file: {e}"))?;
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_pemfile::certs(&mut pem) {
+        roots
+            .add(cert.map_err(|_| "invalid Bolt TLS CA PEM")?)
+            .map_err(|_| "invalid Bolt TLS CA certificate")?;
+    }
+    if roots.is_empty() {
+        return Err("Bolt TLS CA file contains no certificates".into());
+    }
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|_| "invalid Bolt TLS protocol configuration")?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    Ok(Some(Arc::new(tls)))
 }
 
 fn parse_address(address: &str) -> Result<SocketAddr, String> {
@@ -319,12 +401,10 @@ mod tests {
             stream.write_all(&[0; 34]).unwrap();
         });
         let stream = TcpStream::connect(addr).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
         let mut client = BoltClient {
-            stream,
-            deadline: std::time::Instant::now() + Duration::from_secs(1),
+            stream: Box::new(DeadlineSocket { stream, deadline }),
+            deadline,
             remaining_wire: MAX_PROBE_RESPONSE,
         };
         assert!(client.receive().unwrap_err().contains("too many empty"));

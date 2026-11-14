@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add optional TLS-only Bolt transport with server certificate verification in
+  the native client and probe. Authentication and graph grants remain required
+  for protected deployments. Certificate rotation requires a restart.
+- Add a protected Compose overlay for a TLS-capable image and tests for
+  connection security, authenticated access and restart recovery.
+- Record a 60-minute mixed-load and restart diagnostic on the published
+  v0.22.0-beta.3 image, with its workload and limitations.
+
 ## 0.22.0-beta.4 — experimental candidate
 
 - Refuse authenticated native TUI and probe connections to non-loopback

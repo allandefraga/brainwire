@@ -9,6 +9,7 @@
 //! for collecting the process environment.
 
 use std::collections::BTreeMap;
+use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,8 @@ pub struct ServerSection {
     pub query_timeout_ms: u64,
     pub shutdown_grace_ms: u64,
     pub auth_file: Option<PathBuf>,
+    pub tls_cert_file: Option<PathBuf>,
+    pub tls_key_file: Option<PathBuf>,
     /// Root for online `CALL db.checkpoint(name)`; unset disables it.
     pub checkpoint_dir: Option<PathBuf>,
     /// Experimental standalone request ledger; new graphs only, authenticated.
@@ -58,6 +61,8 @@ impl Default for ServerSection {
             // Below Docker's default 10 s stop timeout, so the drain ends first.
             shutdown_grace_ms: 8_000,
             auth_file: None,
+            tls_cert_file: None,
+            tls_key_file: None,
             checkpoint_dir: None,
             request_ledger: false,
             relationship_indexes: false,
@@ -126,7 +131,7 @@ pub enum ConfigError {
 /// prints them. `pub(crate)` so `main.rs` and `describe` share this single
 /// list instead of each keeping their own copy (fix round 1: a second,
 /// hand-copied list in `main.rs` could drift and panic on lookup).
-pub(crate) const KEYS: [&str; 17] = [
+pub(crate) const KEYS: [&str; 19] = [
     "server.listen",
     "server.data_dir",
     "server.default_database",
@@ -136,6 +141,8 @@ pub(crate) const KEYS: [&str; 17] = [
     "server.query_timeout_ms",
     "server.shutdown_grace_ms",
     "server.auth_file",
+    "server.tls_cert_file",
+    "server.tls_key_file",
     "server.checkpoint_dir",
     "server.request_ledger",
     "server.relationship_indexes",
@@ -195,6 +202,8 @@ struct FileServerSection {
     shutdown_grace_ms: Option<u64>,
     #[serde(default)]
     auth_file: Option<PathBuf>,
+    tls_cert_file: Option<PathBuf>,
+    tls_key_file: Option<PathBuf>,
     #[serde(default)]
     checkpoint_dir: Option<PathBuf>,
     #[serde(default)]
@@ -328,6 +337,14 @@ fn apply_file(
         config.server.auth_file = Some(auth_file_path(path_value)?);
         sources.insert("server.auth_file", Source::File(path.to_path_buf()));
     }
+    if let Some(value) = file.server.tls_cert_file {
+        config.server.tls_cert_file = Some(nonblank_path("server.tls_cert_file", value)?);
+        sources.insert("server.tls_cert_file", Source::File(path.to_path_buf()));
+    }
+    if let Some(value) = file.server.tls_key_file {
+        config.server.tls_key_file = Some(nonblank_path("server.tls_key_file", value)?);
+        sources.insert("server.tls_key_file", Source::File(path.to_path_buf()));
+    }
     if let Some(path_value) = file.server.checkpoint_dir {
         config.server.checkpoint_dir = Some(nonblank_path("server.checkpoint_dir", path_value)?);
         sources.insert("server.checkpoint_dir", Source::File(path.to_path_buf()));
@@ -438,6 +455,16 @@ fn apply_env(
         config.server.auth_file = Some(auth_file_path(PathBuf::from(value))?);
         sources.insert("server.auth_file", Source::Env(var));
     }
+    let var = env_var_name("server.tls_cert_file");
+    if let Some(value) = env.get(&var) {
+        config.server.tls_cert_file = Some(nonblank_path("server.tls_cert_file", value.into())?);
+        sources.insert("server.tls_cert_file", Source::Env(var));
+    }
+    let var = env_var_name("server.tls_key_file");
+    if let Some(value) = env.get(&var) {
+        config.server.tls_key_file = Some(nonblank_path("server.tls_key_file", value.into())?);
+        sources.insert("server.tls_key_file", Source::Env(var));
+    }
 
     let var = env_var_name("server.checkpoint_dir");
     if let Some(value) = env.get(&var) {
@@ -529,6 +556,11 @@ fn parse_byte_size(value: &str, key: &str) -> Result<ByteSize, ConfigError> {
 }
 
 fn validate(config: &Config) -> Result<(), ConfigError> {
+    if config.server.tls_cert_file.is_some() != config.server.tls_key_file.is_some() {
+        return Err(ConfigError::Invalid(
+            "server.tls_cert_file and server.tls_key_file must be configured together".into(),
+        ));
+    }
     if config.server.request_ledger
         && (config.server.auth_file.is_none() || config.server.checkpoint_dir.is_some())
     {
@@ -633,6 +665,9 @@ pub fn default_file() -> String {
          \n\
          # Optional protected Bolt policy; omit for local development mode.\n\
          # auth_file = \"/run/secrets/brainwire-policy.json\"\n\
+         # Optional TLS-only Bolt listener; configure both PEM files together.\n\
+         # tls_cert_file = \"/run/secrets/brainwire-chain.pem\"\n\
+         # tls_key_file = \"/run/secrets/brainwire-key.pem\"\n\
          \n\
          # Optional root for online admin `CALL db.checkpoint(name)`; must be\n\
          # outside data_dir. Omit to disable online checkpoints.\n\
@@ -800,6 +835,18 @@ fn value_text(config: &Config, key: &str) -> String {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<unset>".into()),
+        "server.tls_cert_file" => config
+            .server
+            .tls_cert_file
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unset>".into()),
+        "server.tls_key_file" => config
+            .server
+            .tls_key_file
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unset>".into()),
         "server.checkpoint_dir" => config
             .server
             .checkpoint_dir
@@ -813,6 +860,35 @@ fn value_text(config: &Config, key: &str) -> String {
         "memory.limit" => config.memory.limit.to_string(),
         _ => String::new(),
     }
+}
+
+/// Keep PEM input bounded; allow secret mounts backed by symbolic links.
+pub(crate) fn read_tls_pem(path: &Path) -> Result<Cursor<Vec<u8>>, &'static str> {
+    const MAX_PEM_BYTES: usize = 1 << 20;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A named pipe must not stall startup before the type check.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("TLS PEM input must be a regular file");
+    }
+    let file = options.open(path).map_err(|_| "cannot open TLS PEM file")?;
+    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        return Err("TLS PEM input must be a regular file");
+    }
+    let mut input = Vec::new();
+    file.take((MAX_PEM_BYTES + 1) as u64)
+        .read_to_end(&mut input)
+        .map_err(|_| "cannot read TLS PEM file")?;
+    if input.len() > MAX_PEM_BYTES {
+        return Err("TLS PEM input exceeds 1 MiB");
+    }
+    Ok(Cursor::new(input))
 }
 
 fn source_text(source: &Source) -> String {
@@ -1524,6 +1600,8 @@ mod tests {
                 ("BRAINWIRE_SERVER_QUERY_TIMEOUT_MS", "1250"),
                 ("BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS", "20000"),
                 ("BRAINWIRE_SERVER_AUTH_FILE", "/run/secrets/policy.json"),
+                ("BRAINWIRE_SERVER_TLS_CERT_FILE", "/run/secrets/chain.pem"),
+                ("BRAINWIRE_SERVER_TLS_KEY_FILE", "/run/secrets/key.pem"),
                 ("BRAINWIRE_SERVER_CHECKPOINT_DIR", "/backups"),
                 ("BRAINWIRE_SERVER_REQUEST_LEDGER", "false"),
                 ("BRAINWIRE_SERVER_RELATIONSHIP_INDEXES", "true"),
@@ -1550,6 +1628,14 @@ mod tests {
         assert_eq!(
             loaded.config.server.auth_file.as_deref(),
             Some(Path::new("/run/secrets/policy.json"))
+        );
+        assert_eq!(
+            loaded.config.server.tls_cert_file.as_deref(),
+            Some(Path::new("/run/secrets/chain.pem"))
+        );
+        assert_eq!(
+            loaded.config.server.tls_key_file.as_deref(),
+            Some(Path::new("/run/secrets/key.pem"))
         );
         assert_eq!(
             loaded.config.server.checkpoint_dir.as_deref(),

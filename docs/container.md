@@ -248,9 +248,11 @@ Use the [protected profiles](protected-containers.md) before sharing real data.
 Use the [protected container setup](protected-containers.md) to mount a server
 auth policy and a separate health credential; leave the development override
 disabled. Keep the host listener on loopback or an explicitly trusted network.
-For traffic outside that boundary, configure and verify the
-[TLS proxy](protected-transport.md). Native Bolt TLS is not available, and the
-proxy-to-database connection remains plaintext on its internal bridge.
+For a shared deployment, configure native Bolt TLS or another verified encrypted
+boundary. With native TLS, give the container health probe the CA bundle and
+include its destination IP in the certificate SAN. The optional HAProxy overlay
+encrypts the client-to-proxy connection and uses plaintext on its internal
+bridge. [Protected transport](protected-transport.md)
 
 The Compose profiles run one active database on one retained volume. They do
 not provide machine-loss failover. The experimental beta still needs
