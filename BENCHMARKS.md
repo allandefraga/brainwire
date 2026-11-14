@@ -43,6 +43,11 @@ RSS peak was about 419 MiB, so this did not stress the container limit. A
 separate [active-query cgroup diagnostic](docs/benchmarks/2026-11-14-active-query-pressure.md)
 compares the same short pressure episode before and after the guard.
 
+The [same 30-minute mixed test with the query-growth guard](docs/benchmarks/2026-11-14-mixed-recovery-020b2-headroom.json)
+also passed on a local image: 100,000 nodes and relationships were verified
+after restart and sampled RSS peaked at about 437 MiB. This image predates the
+later typed-lookup change. Neither run saturated 2 GiB or qualifies a hard limit.
+
 ## Choose a test
 
 | Question | Test and results |
