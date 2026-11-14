@@ -58,11 +58,17 @@ for that sampling window.
 For cgroup admission, the server reads the inactive file-cache counter on both
 sides of the usage reading and discounts the smaller value. If either cache
 reading is missing or inconsistent, it discounts no cache. These readings are
-not atomic. Cgroup pressure is checked when admitting a new RUN, not when an
-already running query grows its reservation. Active queries still use their
-query budget and sampled process-RSS headroom, but can continue growing while
-the cgroup is pressured. These checks cannot guarantee a process-wide ceiling
-or explain an earlier untraced decision.
+not atomic. New RUNs are checked on admission; growth of an active query's
+accounted reservation also uses a sampled margin from the visible cgroups.
+The sampler attempts a reading every 100 ms and limits growth by the smallest available
+margin across visible ancestors. A stale or unreadable known limit closes
+query growth until a fresh sample is available. Existing reservations can still
+be reused, and Bolt ingress and other allocations do not share this cgroup
+margin. These checks cannot guarantee a process-wide ceiling or explain an
+earlier untraced decision.
+For accounted query growth, `reason=process_limit` can now reflect this
+cgroup margin as well as sampled RSS; the reason alone does not identify which
+measurement caused the refusal.
 See [the design](design/process-memory-ceiling.md).
 
 The component budgets are accounting budgets. Sampling, admission and

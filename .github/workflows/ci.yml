@@ -100,7 +100,9 @@ jobs:
           "$RUNNER_TEMP/brainwire-comparison/bin/python" -m unittest discover -s benchmarks/comparison -p 'test_*.py'
 
       - name: Test cgroup diagnostic safety
-        run: python -m unittest discover -s crates/server/tests -p 'test_cgroup*.py'
+        run: |
+          python -m unittest discover -s crates/server/tests -p 'test_cgroup*.py'
+          python crates/server/tests/cgroup_active_commit.py --self-check
 
       - name: Test Kubernetes CSI diagnostic safety
         run: python -m unittest discover -s crates/server/tests -p 'test_kubernetes_csi_handoff.py'

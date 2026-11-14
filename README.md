@@ -158,15 +158,15 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 One local run loaded **1 million nodes and 2 million relationships** into each
 engine, checked indexed reads, then restarted after a process kill. The engines
 ran sequentially, each with a 3 GiB container limit and two CPUs. Brainwire
-was a locally built **v0.20.0-beta.1 candidate**, not the published image.
+was a locally built **v0.20.0-beta.2 candidate**, not the published image.
 
-![Node and relationship load times for one synthetic run](benchmarks/comparison/ingest-1m-candidate.svg)
+![Node and relationship load times for one synthetic run](benchmarks/comparison/ingest-1m-020b2.svg)
 
 | Metric | Brainwire | FalkorDB | Neo4j |
 | --- | ---: | ---: | ---: |
-| Indexed point read, p95 | 1.006 ms | 0.362 ms | 0.626 ms |
-| One-hop read, p95 | 1.061 ms | 0.365 ms | 0.648 ms |
-| Ready after process kill | 0.80 s | 2.79 s | 8.19 s |
+| Indexed point read, p95 | 0.724 ms | 0.350 ms | 0.700 ms |
+| One-hop read, p95 | 0.733 ms | 0.364 ms | 0.704 ms |
+| Ready after process kill | 0.79 s | 2.89 s | 8.45 s |
 
 Each p95 summarizes 1,000 warm, serial queries; each sampled node had two
 outgoing edges. These are single-run diagnostic results, not production
@@ -175,11 +175,13 @@ authentication and durability settings; peak memory was not measured. Read the
 [workload, exact versions, raw result and limitations](benchmarks/comparison/README.md)
 before comparing or reproducing them.
 
+[See the memory and recovery test results](BENCHMARKS.md).
+
 ## Current limits
 
 Brainwire is an experimental beta. Plan a controlled trial:
 
-- **Memory:** budgets and admission provide partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
+- **Memory:** budgets and sampled RSS/cgroup admission can refuse growing queries under pressure. They are partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
 - **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
 - **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
 - **Security:** shared deployments need authentication and a verified encrypted boundary; native Bolt TLS is not implemented.

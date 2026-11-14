@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="300" viewBox="0 0 860 300" role="img" aria-labelledby="title desc">
   <title id="title">Graph creation in the local candidate comparison</title>
-  <desc id="desc">One synthetic local run with 1 million nodes and 2 million edges. Brainwire candidate 9.72 seconds for nodes and 25.43 for edges; FalkorDB 4.45 seconds for nodes and 15.91 for edges; Neo4j 9.86 seconds for nodes and 21.02 for edges.</desc>
+  <desc id="desc">One synthetic local run with 1 million nodes and 2 million edges. Brainwire candidate 10.13 seconds for nodes and 25.75 for edges; FalkorDB 4.30 seconds for nodes and 15.93 for edges; Neo4j 9.95 seconds for nodes and 20.98 for edges.</desc>
   <rect width="860" height="300" rx="12" fill="#f3f5fa"/>
   <g font-family="system-ui, sans-serif" fill="#142137">
     <text x="28" y="39" font-weight="700" font-size="23">Creating 1M nodes and 2M edges</text>
-    <text x="28" y="64" fill="#45536a" font-size="14">Local v0.20.0-beta.1 candidate · one synthetic run · 2 CPUs and 3 GiB per container</text>
+    <text x="28" y="64" fill="#45536a" font-size="14">Local v0.20.0-beta.2 candidate · one synthetic run · 2 CPUs and 3 GiB per container</text>
     <rect x="28" y="86" width="14" height="14" rx="2" fill="#2349d8"/>
     <text x="50" y="98" font-size="13">Node creation</text>
     <rect x="161" y="86" width="14" height="14" rx="2" fill="#176752"/>
@@ -20,16 +20,16 @@
     <path d="M740.0 115v135" stroke="#c5cdde"/>
     <text x="740.0" y="272" text-anchor="middle" fill="#45536a" font-size="12">40 s</text>
     <text x="28" y="146" font-weight="600" font-size="15">Brainwire candidate</text>
-    <rect x="185" y="130" width="134.9" height="22" fill="#2349d8"/>
-    <rect x="319.9" y="130" width="352.9" height="22" fill="#176752"/>
-    <text x="681.7" y="146" font-size="13">35.15 s</text>
+    <rect x="185" y="130" width="140.5" height="22" fill="#2349d8"/>
+    <rect x="325.5" y="130" width="357.2" height="22" fill="#176752"/>
+    <text x="691.7" y="146" font-size="13">35.87 s</text>
     <text x="28" y="188" font-weight="600" font-size="15">FalkorDB</text>
-    <rect x="185" y="172" width="61.7" height="22" fill="#2349d8"/>
-    <rect x="246.7" y="172" width="220.7" height="22" fill="#176752"/>
-    <text x="476.4" y="188" font-size="13">20.36 s</text>
+    <rect x="185" y="172" width="59.6" height="22" fill="#2349d8"/>
+    <rect x="244.6" y="172" width="221.1" height="22" fill="#176752"/>
+    <text x="474.7" y="188" font-size="13">20.23 s</text>
     <text x="28" y="230" font-weight="600" font-size="15">Neo4j</text>
-    <rect x="185" y="214" width="136.7" height="22" fill="#2349d8"/>
-    <rect x="321.7" y="214" width="291.7" height="22" fill="#176752"/>
-    <text x="622.4" y="230" font-size="13">30.88 s</text>
+    <rect x="185" y="214" width="138.1" height="22" fill="#2349d8"/>
+    <rect x="323.1" y="214" width="291.1" height="22" fill="#176752"/>
+    <text x="623.1" y="230" font-size="13">30.93 s</text>
   </g>
 </svg>

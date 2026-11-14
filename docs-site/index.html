@@ -156,10 +156,11 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
     </section>
 
     <section id="benchmark" class="doc-section">
-      <div class="section-head"><p class="eyebrow">SYNTHETIC BENCHMARK</p><h2>One workload, three engines.</h2><p>One local run loaded 1 million nodes and 2 million relationships per engine. Brainwire was a locally built v0.20.0-beta.1 candidate, not the published release image.</p></div>
+      <div class="section-head"><p class="eyebrow">SYNTHETIC BENCHMARK</p><h2>One workload, three engines.</h2><p>One local run loaded 1 million nodes and 2 million relationships per engine. Brainwire was a locally built v0.20.0-beta.2 candidate, not the published release image.</p></div>
       <figure class="hero-graph"><img src="assets/benchmark-1m.svg" alt="Load times in seconds for one million nodes and two million relationships in Brainwire, FalkorDB and Neo4j"><figcaption>One run per engine, with a 3 GiB container limit and two CPUs. Internal settings, protocols, authentication and durability differ.</figcaption></figure>
       <p>All three completed indexed read checks and restarted after a process kill. Peak memory was not measured. These results describe a synthetic workload, not a production guarantee.</p>
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/benchmarks/comparison/README.md">See read latencies, exact versions, methodology and raw results →</a></p>
+      <p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/2026-11-14-active-query-pressure.md">See the active-query pressure test and its limits →</a></p>
     </section>
 
     <section id="limits" class="doc-section">

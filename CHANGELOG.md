@@ -2,6 +2,9 @@
 
 ## 0.20.0-beta.2 — experimental candidate
 
+- Bound accounted query growth by a periodically sampled cgroup margin as well
+  as RSS. Stale or unreadable known limits refuse new growth; the change adds
+  no cgroup gate to Bolt ingress. This is not a global RSS ceiling.
 - Reject unsupported timestamp precision and timezone offsets in the timeline
   example instead of silently truncating event times. Accepted inputs use `Z`
   or `±HH:MM` and at most six fractional digits.

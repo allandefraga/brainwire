@@ -58,6 +58,30 @@ has SHA-256 `f9c02a8d6e5758c347b8a1a92bf9fa5f40fca6879ff9d1863df9938c7213c9ea`
 and uses the same [archived helpers](results/2026-11-14-helpers.py.txt) with
 SHA-256 `6e0b9dd59d947f8a76bdd2057048775dcac1dc87ee5f4b4d2acef4802e95305d`.
 
+## Local v0.20.0-beta.2 candidate with query-growth guard
+
+The latest local run used the same fixture and container limits as the earlier
+comparison, with the sampled cgroup query-growth guard enabled. Brainwire was a
+locally built image, not a published release. The source tree had uncommitted
+changes when the image was built: the receipt's `runner_git_commit` identifies
+the runner's parent commit, **not the complete image source**. The image ID and
+runner hash are recorded in the [raw receipt](results/2026-11-14-1m-local-020b2-headroom.json).
+
+![Times for the latest local candidate](ingest-1m-020b2.svg)
+
+| Engine | Create nodes | Create edges | Update 10k rows | Point p95 | One hop p95 | Ready after SIGKILL |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Brainwire candidate | 10.13 s | 25.75 s | 0.116 s | 0.724 ms | 0.733 ms | 0.79 s |
+| FalkorDB | 4.30 s | 15.93 s | 0.036 s | 0.350 ms | 0.364 ms | 2.89 s |
+| Neo4j | 9.95 s | 20.98 s | 0.141 s | 0.700 ms | 0.704 ms | 8.45 s |
+
+All three completed count and sample checks after restart. This is one run per
+engine with different durability, authentication and client settings. Peak
+memory was not measured. Do not generalize the ranking or interpret this as a
+production SLO. The [archived runner](results/2026-11-14-local-020b1-run.py.txt)
+matches the recorded runner hash; it imports the same [archived helpers](results/2026-11-14-helpers.py.txt)
+described above.
+
 ## Run it
 
 Use a Docker context with a local Unix socket, such as `colima`. The runner

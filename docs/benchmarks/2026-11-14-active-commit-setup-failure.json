@@ -1,0 +1,23 @@
+{
+  "result": "FAIL",
+  "image_id": "sha256:d83806b908bee4e3fb21c481d8585b30506d661b0ad4a66e9214545fbe8bdf99",
+  "image_revision": null,
+  "docker_endpoint_kind": "local Unix socket",
+  "bolt_endpoint_scope": "IPv4 loopback",
+  "runner_sha256": "d1a4d02555bcbc40a93354e406a807ac8e3d88b901d9b8dec41897f6b20a7c43",
+  "helper_sha256": "9c0f35b0666a68be8a84c3468e3be611757f2251392ec48d54606b007a1f9846",
+  "driver": "5.28.8",
+  "expect": "commit",
+  "memory_limit_bytes": 536870912,
+  "rows": 32,
+  "payload_bytes": 1024,
+  "scope": "synthetic single-container cgroup-v2 pressure across an active explicit transaction",
+  "limitations": [
+    "external cgroup samples bracket COMMIT; exact decision-time usage is unobserved",
+    "one bounded pressure episode; not sustained capacity or an RSS ceiling"
+  ],
+  "rss_admission_disabled": true,
+  "owned_resources_cleaned": true,
+  "cleanup_docker_events": [],
+  "error_type": "RuntimeError"
+}

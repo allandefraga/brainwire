@@ -85,6 +85,8 @@ pub fn run(
         if !crate::process_memory::init_allocator() {
             eprintln!("warning: allocator background decay unavailable; idle memory returns only on activity");
         }
+        let cgroup = crate::memory_pressure::CgroupQueryHeadroom::start()
+            .map_err(|error| format!("cannot start cgroup memory sampler: {error}"))?;
         let shared_admission = if loaded.config.memory.limit.0 > 0 {
             let memory = crate::process_memory::ProcessMemory::new(loaded.config.memory.limit.0);
             crate::process_memory::install(Arc::clone(&memory));
@@ -92,7 +94,9 @@ pub fn run(
             let admission = brainwire_core::admission::MemoryAdmission::new(Arc::new(move || ceiling.headroom()));
             databases.query_pool().set_shared_admission(Arc::clone(&admission));
             let ceiling = Arc::clone(&memory);
-            databases.query_pool().set_process_headroom(move || ceiling.headroom());
+            databases.query_pool().set_process_headroom(move || {
+                cgroup.as_ref().map_or(usize::MAX, |sample| sample.bytes()).min(ceiling.headroom())
+            });
             databases.query_pool().set_process_memory(
                 usize::try_from(loaded.config.memory.limit.0).unwrap_or(usize::MAX),
                 || crate::process_memory::resident_bytes().and_then(|rss| usize::try_from(rss).ok()),
@@ -112,6 +116,9 @@ pub fn run(
             });
             Some(admission)
         } else {
+            if let Some(cgroup) = cgroup {
+                databases.query_pool().set_process_headroom(move || cgroup.bytes());
+            }
             None
         };
         // Registered after the stores open, so a signal during recovery still
@@ -215,6 +222,10 @@ fn validate_listener_security(
     }
     Err("refusing unauthenticated non-loopback Bolt listener; configure server.auth_file or explicitly opt in with --allow-unauthenticated-remote on an isolated development network".into())
 }
+
+#[cfg(test)]
+#[path = "query_pressure_bolt_test.rs"]
+mod query_pressure_bolt_test;
 
 #[cfg(test)]
 mod tests {

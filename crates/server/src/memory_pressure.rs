@@ -1,7 +1,8 @@
-//! Cooperative RUN admission from visible cgroup pressure, separate from RSS.
+//! Cooperative RUN and query-growth admission from visible cgroup pressure.
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 #[cfg(any(target_os = "linux", test))]
 use crate::config::memory_defaults::visible_memory_groups;
@@ -11,6 +12,131 @@ use brainwire_bolt::session::EngineError;
 
 const PRESSURE_PERCENT: u128 = 95;
 const ADMISSION_TRACE_LIMIT: usize = 64;
+const HEADROOM_SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
+const MAX_HEADROOM_SAMPLE_AGE: Duration = Duration::from_secs(1);
+
+/// Sampled growth margin for accounted query memory in the visible cgroups.
+pub(crate) struct CgroupQueryHeadroom {
+    sample: Mutex<(Instant, Option<usize>)>,
+}
+
+impl CgroupQueryHeadroom {
+    pub(crate) fn start() -> std::io::Result<Option<Arc<Self>>> {
+        #[cfg(target_os = "linux")]
+        let groups = visible_memory_groups(
+            &std::fs::read_to_string("/proc/self/cgroup")?,
+            &std::fs::read_to_string("/proc/self/mountinfo")?,
+        );
+        #[cfg(not(target_os = "linux"))]
+        let groups = Vec::new();
+
+        if groups.is_empty() {
+            return Ok(None);
+        }
+        let mut finite = vec![false; groups.len()];
+        let now = Instant::now();
+        let bytes = query_headroom(&groups, &mut finite, read_cgroup_file);
+        let monitor = Arc::new(Self {
+            sample: Mutex::new((now, bytes)),
+        });
+        let owner = Arc::downgrade(&monitor);
+        std::thread::Builder::new()
+            .name("brainwire-cgroup-memory".into())
+            .spawn(move || loop {
+                std::thread::sleep(HEADROOM_SAMPLE_INTERVAL);
+                let Some(monitor) = owner.upgrade() else {
+                    break;
+                };
+                let now = Instant::now();
+                let bytes = query_headroom(&groups, &mut finite, read_cgroup_file);
+                *monitor.sample.lock().expect("cgroup sample lock poisoned") = (now, bytes);
+            })?;
+        Ok(Some(monitor))
+    }
+
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes_at(Instant::now())
+    }
+
+    fn bytes_at(&self, now: Instant) -> usize {
+        let (sampled_at, bytes) = *self.sample.lock().expect("cgroup sample lock poisoned");
+        if now.saturating_duration_since(sampled_at) > MAX_HEADROOM_SAMPLE_AGE {
+            return 0;
+        }
+        bytes.unwrap_or(usize::MAX)
+    }
+}
+
+fn read_cgroup_file(path: &Path) -> std::io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn query_headroom(
+    groups: &[MemoryGroup],
+    finite: &mut [bool],
+    read: impl Fn(&Path) -> std::io::Result<Option<String>>,
+) -> Option<usize> {
+    let mut minimum = None;
+    for (group, was_finite) in groups.iter().zip(finite) {
+        let limit_file = if group.v2 {
+            "memory.max"
+        } else {
+            "memory.limit_in_bytes"
+        };
+        let boundary = |file| {
+            read(&group.directory.join(file))
+                .map_err(|_| ())?
+                .map(|text| parse_query_boundary(&text, group.v2))
+                .transpose()
+        };
+        let limit = boundary(limit_file);
+        let high = if group.v2 {
+            boundary("memory.high")
+        } else {
+            Ok(Some(None))
+        };
+        // A finite boundary remains evidence even after an explicit unlimited sample.
+        *was_finite |= matches!(limit, Ok(Some(Some(_)))) || matches!(high, Ok(Some(Some(_))));
+        let allowance =
+            match (limit, high) {
+                // A v2 root or a hierarchy without a memory controller has neither file.
+                (Ok(None), Ok(None)) if group.v2 && !*was_finite => {
+                    if matches!(read(&group.directory.join("memory.current")), Ok(None)) {
+                        continue;
+                    }
+                    0
+                }
+                (Ok(Some(limit)), Ok(Some(high))) => {
+                    let Some(limit) = limit.into_iter().chain(high).min() else {
+                        continue;
+                    };
+                    let cap = (u128::from(limit) * PRESSURE_PERCENT / 100) as u64;
+                    read_working_set(group, limit, LimitSource::Max, |p| read(p).ok().flatten())
+                        .map_or(0, |used| {
+                            usize::try_from(cap.saturating_sub(used.effective_bytes))
+                                .unwrap_or(usize::MAX)
+                        })
+                }
+                _ => 0,
+            };
+        minimum = Some(minimum.map_or(allowance, |current: usize| current.min(allowance)));
+    }
+    minimum
+}
+
+fn parse_query_boundary(text: &str, v2: bool) -> Result<Option<u64>, ()> {
+    let text = text.trim();
+    if v2 && text == "max" {
+        return Ok(None);
+    }
+    text.parse::<u64>()
+        .map(|limit| (v2 || limit < (1_u64 << 60)).then_some(limit))
+        .map_err(|_| ())
+}
 
 fn admission_trace_enabled(value: Option<&str>) -> bool {
     value == Some("1")
@@ -363,43 +489,12 @@ fn sample_observed(
         let Some(limit) = limit else {
             continue;
         };
-        let used_path = group.directory.join(if group.v2 {
-            "memory.current"
-        } else {
-            "memory.usage_in_bytes"
-        });
-        // Bracket the usage read: a changing cache counter must not be fully
-        // discounted based on just one side of a non-atomic observation.
-        let stat_path = group.directory.join("memory.stat");
-        let before = read(&stat_path).and_then(|stat| inactive_file(&stat, group.v2));
-        let Some(raw_current) = read(&used_path).and_then(|s| s.trim().parse::<u64>().ok()) else {
+        let Some(reading) = read_working_set(group, limit, limit_source, &read) else {
             unavailable = true;
             continue;
         };
-        // Approximate working set: inactive file cache may be reclaimable, but can
-        // contain pages that cannot be reclaimed immediately. Raw usage can remain
-        // or written (the kernel reclaims cache only at the limit), so admitting on it
-        // refused every RUN of an idle server whose anonymous memory was a third of it.
-        let after = read(&stat_path).and_then(|stat| inactive_file(&stat, group.v2));
-        let reclaimable = before.zip(after).map_or(0, |(a, b)| {
-            let smaller = a.min(b);
-            if smaller <= raw_current {
-                smaller
-            } else {
-                0
-            }
-        });
-        let current = raw_current.saturating_sub(reclaimable);
-        // u128 avoids overflow even at u64::MAX and includes zero-limit pressure.
-        let reading = CgroupReading {
-            limit_source,
-            raw_bytes: raw_current,
-            inactive_file_before_bytes: before,
-            inactive_file_after_bytes: after,
-            inactive_file_bytes: reclaimable,
-            effective_bytes: current,
-            limit_bytes: limit,
-        };
+        let current = reading.effective_bytes;
+        let raw_current = reading.raw_bytes;
         if u128::from(current) * 100 >= u128::from(limit) * PRESSURE_PERCENT {
             return PressureObservation {
                 status: PressureStatus::Pressured { current, limit },
@@ -442,6 +537,46 @@ fn sample_observed(
             },
         )
     }
+}
+
+fn read_working_set(
+    group: &MemoryGroup,
+    limit: u64,
+    limit_source: LimitSource,
+    read: impl Fn(&Path) -> Option<String>,
+) -> Option<CgroupReading> {
+    let used_path = group.directory.join(if group.v2 {
+        "memory.current"
+    } else {
+        "memory.usage_in_bytes"
+    });
+    // Bracket the usage read: a changing cache counter must not be fully
+    // discounted based on just one side of a non-atomic observation.
+    let stat_path = group.directory.join("memory.stat");
+    let before = read(&stat_path).and_then(|stat| inactive_file(&stat, group.v2));
+    let raw_current = read(&used_path).and_then(|s| s.trim().parse::<u64>().ok())?;
+    // Approximate working set: inactive file cache may be reclaimable, but can
+    // contain pages that cannot be reclaimed immediately. Raw usage can remain
+    // or written (the kernel reclaims cache only at the limit), so admitting on it
+    // refused every RUN of an idle server whose anonymous memory was a third of it.
+    let after = read(&stat_path).and_then(|stat| inactive_file(&stat, group.v2));
+    let reclaimable = before.zip(after).map_or(0, |(a, b)| {
+        let smaller = a.min(b);
+        if smaller <= raw_current {
+            smaller
+        } else {
+            0
+        }
+    });
+    Some(CgroupReading {
+        limit_source,
+        raw_bytes: raw_current,
+        inactive_file_before_bytes: before,
+        inactive_file_after_bytes: after,
+        inactive_file_bytes: reclaimable,
+        effective_bytes: raw_current.saturating_sub(reclaimable),
+        limit_bytes: limit,
+    })
 }
 
 /// The inactive file cache of a `memory.stat` (hierarchical on v1), if it reports one.
@@ -699,6 +834,247 @@ mod tests {
             .map(|(p, v)| (PathBuf::from(p), v.to_string()))
             .collect();
         sample(groups, |p| files.get(p).cloned())
+    }
+
+    #[test]
+    fn query_headroom_uses_minimum_bytes_not_highest_utilization() {
+        let groups = [group("/cg/child", true), group("/cg", true)];
+        let read = |path: &Path| {
+            Ok(match path.to_str().unwrap() {
+                "/cg/child/memory.max" => Some("1000".into()),
+                "/cg/child/memory.high" | "/cg/memory.max" => Some("max".into()),
+                "/cg/child/memory.current" => Some("900".into()),
+                "/cg/memory.high" => Some("100".into()),
+                "/cg/memory.current" => Some("80".into()),
+                "/cg/memory.stat" => Some("inactive_file 10".into()),
+                _ => None,
+            })
+        };
+        // Child uses 90% and leaves 50 bytes. Parent uses 70% and leaves 25.
+        assert_eq!(query_headroom(&groups, &mut [false; 2], read), Some(25));
+    }
+
+    #[test]
+    fn query_headroom_separates_unlimited_from_failed_reads_and_recovers() {
+        let groups = [group("/cg", true), group("/cg/v1", false)];
+        let mut files = BTreeMap::from([
+            ("/cg/memory.max", "max"),
+            ("/cg/memory.high", "max"),
+            ("/cg/v1/memory.limit_in_bytes", "9223372036854771712"),
+        ]);
+        let mut finite = [false; 2];
+        let sample = |files: &BTreeMap<&str, &str>, finite: &mut [bool]| {
+            query_headroom(&groups, finite, |p| {
+                Ok(files.get(p.to_str().unwrap()).map(|s| s.to_string()))
+            })
+        };
+        assert_eq!(query_headroom(&[], &mut [], |_| unreachable!()), None);
+        assert_eq!(
+            query_headroom(&[group("/root", true)], &mut [false], |_| Ok(None)),
+            None
+        );
+        assert_eq!(sample(&files, &mut finite), None);
+
+        files.insert("/cg/memory.high", "100");
+        assert_eq!(sample(&files, &mut finite), Some(0)); // current absent
+        files.remove("/cg/memory.max");
+        files.remove("/cg/memory.high");
+        assert_eq!(sample(&files, &mut finite), Some(0)); // known finite limit vanished
+        files.insert("/cg/memory.max", "100");
+        files.insert("/cg/memory.high", "bad");
+        files.insert("/cg/memory.current", "80");
+        assert_eq!(sample(&files, &mut finite), Some(0));
+        files.insert("/cg/memory.high", "max");
+        assert_eq!(sample(&files, &mut finite), Some(15));
+        files.insert("/cg/memory.max", "max");
+        assert_eq!(sample(&files, &mut finite), None); // explicitly unlimited
+        files.remove("/cg/memory.max");
+        files.remove("/cg/memory.high");
+        files.remove("/cg/memory.current");
+        assert_eq!(sample(&files, &mut finite), Some(0)); // finite history survives max/max
+        files.insert("/cg/memory.max", "100");
+        files.insert("/cg/memory.high", "max");
+        files.insert("/cg/memory.current", "80");
+        assert_eq!(sample(&files, &mut finite), Some(15));
+
+        assert_eq!(
+            query_headroom(&[group("/cg", true)], &mut [false], |_| {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            }),
+            Some(0),
+        );
+    }
+
+    #[test]
+    fn active_query_samples_expire_and_recover_even_when_unlimited() {
+        let start = Instant::now();
+        let monitor = CgroupQueryHeadroom {
+            sample: Mutex::new((start, Some(83))),
+        };
+        let latest = start + MAX_HEADROOM_SAMPLE_AGE;
+        assert_eq!(monitor.bytes_at(latest), 83);
+        let expired = latest + Duration::from_nanos(1);
+        assert_eq!(monitor.bytes_at(expired), 0);
+        *monitor.sample.lock().unwrap() = (expired, Some(31));
+        assert_eq!(monitor.bytes_at(expired), 31);
+        *monitor.sample.lock().unwrap() = (start, None);
+        assert_eq!(monitor.bytes_at(latest), usize::MAX);
+        assert_eq!(monitor.bytes_at(expired), 0);
+        *monitor.sample.lock().unwrap() = (expired, None);
+        assert_eq!(monitor.bytes_at(expired), usize::MAX);
+    }
+
+    #[test]
+    fn concurrent_queries_cannot_each_spend_the_sampled_margin() {
+        use brainwire_cypher::{ExecError, ExecutionLimits, QueryMemoryPool, QueryTransaction};
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+        use std::sync::Barrier;
+
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let pool = Arc::new(QueryMemoryPool::new(1 << 20));
+        let sampled_at = Instant::now();
+        let monitor = Arc::new(CgroupQueryHeadroom {
+            sample: Mutex::new((sampled_at, Some(100_000))),
+        });
+        pool.set_process_headroom(move || monitor.bytes_at(sampled_at));
+        let limits = ExecutionLimits {
+            memory_bytes: 1 << 20,
+            timeout: None,
+        };
+        let barrier = Barrier::new(2);
+        let admitted = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut tx =
+                            QueryTransaction::begin_with_pool(&db, limits, Arc::clone(&pool))
+                                .unwrap();
+                        barrier.wait();
+                        let result = tx.admit_control_request(60_000, &BTreeMap::new());
+                        barrier.wait();
+                        tx.rollback();
+                        match result {
+                            Ok(()) => 1,
+                            Err(ExecError::ProcessMemoryLimit { .. }) => 0,
+                            Err(other) => panic!("unexpected query error {other:?}"),
+                        }
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .sum::<usize>()
+        });
+        assert_eq!(admitted, 1);
+        assert_eq!(pool.usage().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn cgroup_query_margin_rolls_back_materialization_and_allows_whole_transaction_retry() {
+        use brainwire_cypher::{exec::IdentifiedCommitError, ExecError, ExecutionLimits};
+        use brainwire_cypher::{QueryMemoryPool, QueryTransaction, QueryTransactionState};
+        use brainwire_store::db::{request_ledger::LedgerLimits, Database, Resources, StoreConfig};
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("graph");
+        let resources = Resources::new(StoreConfig::for_tests());
+        let mut db = Database::create_with_request_ledger(
+            &path,
+            &resources,
+            LedgerLimits {
+                max_entries: 100,
+                max_bytes: 100_000,
+            },
+        )
+        .unwrap();
+        db.apply_ontology(
+            &serde_json::from_str(include_str!("../../core/tests/fixtures/graph_mapping.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        let pool = Arc::new(QueryMemoryPool::new(1 << 20));
+        let sampled_at = Instant::now();
+        let monitor = Arc::new(CgroupQueryHeadroom {
+            sample: Mutex::new((sampled_at, Some(1 << 20))),
+        });
+        let source = Arc::clone(&monitor);
+        pool.set_process_headroom(move || source.bytes_at(sampled_at));
+        let limits = ExecutionLimits {
+            memory_bytes: 1 << 20,
+            timeout: None,
+        };
+
+        fn begin_write<'db>(
+            db: &'db Database,
+            limits: ExecutionLimits,
+            pool: &Arc<QueryMemoryPool>,
+            identified: bool,
+        ) -> QueryTransaction<'db> {
+            let transaction =
+                QueryTransaction::begin_with_pool(db, limits, Arc::clone(pool)).unwrap();
+            if identified {
+                transaction.with_identified_write().unwrap()
+            } else {
+                transaction.with_replicated_ids()
+            }
+        }
+        for identified in [false, true] {
+            let mut tx = begin_write(&db, limits, &pool, identified);
+            let query = "CREATE (:Customer {entity_id:'pressure-retry'})";
+            tx.run(query, &BTreeMap::new()).unwrap();
+            let reserved = pool.usage().reserved_bytes;
+            assert!(reserved > 0);
+            // The cap exactly covers the staged high-water mark. A denial
+            // therefore requires commit to ask for additional materialization.
+            *monitor.sample.lock().unwrap() = (sampled_at, Some(reserved));
+            let sequence = db.commit_sequence();
+            let failure = if identified {
+                match tx.commit_identified("test", "same-request") {
+                    Err(IdentifiedCommitError::Execution(error)) => Some(error),
+                    other => panic!("expected a materialization refusal, got {other:?}"),
+                }
+            } else {
+                tx.prepare_replication().err()
+            };
+            assert!(
+                matches!(failure, Some(ExecError::ProcessMemoryLimit { requested, .. }) if requested > 0)
+            );
+            assert_eq!(tx.state(), QueryTransactionState::Failed);
+            assert_eq!(pool.usage().reserved_bytes, 0);
+            drop(tx);
+            drop(db);
+            db = Database::open_with_request_ledger(&path, &resources).unwrap();
+            assert_eq!(db.commit_sequence(), sequence);
+            assert_eq!(db.stats().unwrap().nodes, 0);
+            assert!(db
+                .request_receipt("test", "same-request")
+                .unwrap()
+                .is_none());
+
+            *monitor.sample.lock().unwrap() = (sampled_at, Some(1 << 20));
+            let mut retry = begin_write(&db, limits, &pool, identified);
+            retry.run(query, &BTreeMap::new()).unwrap();
+            if identified {
+                let receipt = retry.commit_identified("test", "same-request").unwrap();
+                assert_eq!(
+                    db.request_receipt("test", "same-request").unwrap(),
+                    Some(receipt)
+                );
+                assert_eq!(db.stats().unwrap().nodes, 1);
+            } else {
+                assert!(retry.prepare_replication().unwrap().is_some());
+                assert_eq!(db.commit_sequence(), sequence);
+            }
+            assert_eq!(pool.usage().reserved_bytes, 0);
+        }
+        let mut read = QueryTransaction::begin_with_pool(&db, limits, Arc::clone(&pool)).unwrap();
+        read.run("RETURN 1", &BTreeMap::new()).unwrap();
+        *monitor.sample.lock().unwrap() = (sampled_at, Some(0));
+        assert_eq!(read.commit().unwrap(), None);
+        assert_eq!(pool.usage().reserved_bytes, 0);
     }
 
     #[test]

@@ -36,6 +36,13 @@ An earlier local beta.2 candidate also passed 16 synthetic process-kill
 recovery cycles with an unacknowledged commit. The [recovery report](docs/benchmarks/2026-11-14-uncertain-commit.md)
 records the exact build and scope; it does not simulate a power failure.
 
+Another local beta.2 build, before the query-growth guard, passed a
+[30-minute mixed read/write and restart test](docs/benchmarks/2026-11-14-mixed-recovery-020b2-baseline.json)
+with 100,000 nodes and 100,000 relationships in a 2 GiB container. The sampled
+RSS peak was about 419 MiB, so this did not stress the container limit. A
+separate [active-query cgroup diagnostic](docs/benchmarks/2026-11-14-active-query-pressure.md)
+compares the same short pressure episode before and after the guard.
+
 ## Choose a test
 
 | Question | Test and results |

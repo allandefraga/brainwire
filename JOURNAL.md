@@ -36,6 +36,19 @@ Allan's current language.
   `python3 scripts/check_docs_site.py`.
 - Explain the unauthenticated demo's trusted host/network requirement, including
   Docker's pre-28 localhost port warning. Checked local documentation links.
+- Timeline example rejects timestamps that Python would silently truncate,
+  including unsupported high-precision and timezone-offset forms; existing
+  event history is not repaired. Tests cover record, cursor and bounds.
+- Add sampled cgroup headroom to accounted query growth, keeping ingress on its
+  existing RSS ledger. Local tests cover stale observations, recovery, commit
+  rollback, retries and Bolt control. An isolated 512 MiB cgroup A/B diagnostic
+  covers an active commit, with receipts and its failed setup attempt recorded;
+  it does not establish a process-wide RSS ceiling.
+- A separate local beta.2 build, before the cgroup query-growth change, passed a
+  30-minute 2 GiB mixed read/write and restart test with 100,000 nodes and
+  relationships; sampled RSS was far below the limit. An unacknowledged commit
+  crash diagnostic passed 16 small local cycles. Neither qualifies distributed
+  recovery, crash at an exact fsync boundary, or production capacity.
 
 - Added a generic authenticated Bolt acceptance test for an ACL revocation
   racing with a stale stamp in the same transaction. The stale commit is
