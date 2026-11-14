@@ -151,6 +151,13 @@ Probe and inspect reports also include `retained_log_capacity`: `normal`,
 validated. It describes the configured retained Raft log cap, not free disk
 space. The warning is advisory: it neither reserves capacity nor guarantees the
 next write will fit. Current experimental replication does not purge this log.
+The cap counts serialized retained log entries, not the RocksDB directory: the
+request-outcome ledger, WAL, metadata, compaction overhead and filesystem use
+need additional disk space. With no log purge, ordinary applied requests retain
+their corresponding log entries, so the cap also limits ledger growth indirectly;
+it is not a separate ledger quota. Monitor actual disk usage as well as the log
+capacity. Startup validates the retained entries and request outcomes, so recovery
+time can grow with the retained history.
 When all three initialized voters report committed and applied indexes,
 `replication_progress` shows the sampled min/max/spread and each voter's lag
 behind the highest sampled index. These requests run concurrently but are not
