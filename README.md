@@ -21,7 +21,7 @@ your ontology, write over Bolt and inspect the live graph in your terminal.
 In the company example, an agent can recall a decision and follow it to
 the meeting that supports it. [Try the decision memory demo](docs/agent-context-quickstart.md)
 
-> **v0.22.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
+> **v0.22.0-beta.4 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
 
 The [backup guide](docs/checkpoints.md) covers private checkpoint copies and
 restore permissions. Protect backup storage and test the restore procedure.
@@ -37,9 +37,9 @@ Use Git and Docker with Compose. On macOS, Colima can run the Docker engine.
 With Colima running, run `export DOCKER_CONTEXT=colima` first.
 
 ```sh
-git clone --branch v0.22.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.22.0-beta.4 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.22.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.22.0-beta.4 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
