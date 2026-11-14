@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.22.0-beta.1 — experimental candidate
+
 - Add a bounded agent-memory example that records and recalls project decisions
   and their reported sources, with authenticated Bolt and visibility tests.
 - Add an initial, bounded Markdown vault import example with local preview,
