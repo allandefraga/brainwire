@@ -2,6 +2,9 @@
 
 ## 0.20.0-beta.2 — experimental candidate
 
+- Reduce intermediate allocations for label-qualified `entity_id` lookups,
+  preserving transaction snapshots and node visibility checks. Clarify that
+  `db.propertyKeys()` describes declared catalog fields, not arbitrary extras.
 - Bound accounted query growth by a periodically sampled cgroup margin as well
   as RSS. Stale or unreadable known limits refuse new growth; the change adds
   no cgroup gate to Bolt ingress. This is not a global RSS ceiling.

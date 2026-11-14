@@ -66,6 +66,8 @@ locally built image, not a published release. The source tree had uncommitted
 changes when the image was built: the receipt's `runner_git_commit` identifies
 the runner's parent commit, **not the complete image source**. The image ID and
 runner hash are recorded in the [raw receipt](results/2026-11-14-1m-local-020b2-headroom.json).
+The tested memory implementation was later committed as `64f9fea`; the local
+image has no signed source attestation.
 
 ![Times for the latest local candidate](ingest-1m-020b2.svg)
 
@@ -78,7 +80,8 @@ runner hash are recorded in the [raw receipt](results/2026-11-14-1m-local-020b2-
 All three completed count and sample checks after restart. This is one run per
 engine with different durability, authentication and client settings. Peak
 memory was not measured. Do not generalize the ranking or interpret this as a
-production SLO. The [archived runner](results/2026-11-14-local-020b1-run.py.txt)
+production SLO. Point and one-hop reads run sequentially for the same key, so
+the latter can benefit from a warmed cache. The [archived runner](results/2026-11-14-local-020b1-run.py.txt)
 matches the recorded runner hash; it imports the same [archived helpers](results/2026-11-14-helpers.py.txt)
 described above.
 

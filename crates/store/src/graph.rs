@@ -973,21 +973,29 @@ pub fn visit_nodes_of_type<E: From<GraphError> + From<StoreError>>(
     )
 }
 
+/// Look up an entity ID within one label in the transaction's current view.
+pub fn find_typed_entity_id(
+    txn: &Txn,
+    entity_id: &str,
+    ty: TypeId,
+) -> Result<Option<NodeId>, GraphError> {
+    txn.with_get(Cf::Pk, &pk_key(entity_id, ty), |value| {
+        value
+            .map(node_id_value)
+            .transpose()
+            .map_err(GraphError::from)
+    })
+}
+
 pub fn find_by_entity_id(
     txn: &Txn,
     entity_id: &str,
     label: Option<TypeId>,
 ) -> Result<Vec<NodeId>, GraphError> {
     if let Some(ty) = label {
-        return txn
-            .get(Cf::Pk, &pk_key(entity_id, ty))?
-            .map(|value| {
-                node_id_value(&value)
-                    .map(|id| vec![id])
-                    .map_err(GraphError::from)
-            })
-            .transpose()
-            .map(|found| found.unwrap_or_default());
+        return Ok(find_typed_entity_id(txn, entity_id, ty)?
+            .into_iter()
+            .collect());
     }
     let mut found = Vec::new();
     for (key, value) in txn.scan_prefix(Cf::Pk, &pk_prefix(entity_id))? {
@@ -2628,6 +2636,71 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn typed_entity_lookup_preserves_snapshots_overlays_and_tombstones() {
+        let (_d, _r, db, cat) = setup();
+        let customer = cat.node_type("Customer").unwrap().id;
+        let company = cat.node_type("Company").unwrap().id;
+        let before_create = db.begin();
+        let mut writer = db.begin();
+        let person = merge_node(&mut writer, &cat, "Customer", "shared", &BTreeMap::new()).unwrap();
+        let business =
+            merge_node(&mut writer, &cat, "Company", "shared", &BTreeMap::new()).unwrap();
+        assert_eq!(
+            find_typed_entity_id(&writer, "shared", customer).unwrap(),
+            Some(person)
+        );
+        assert_eq!(
+            find_typed_entity_id(&writer, "shared", company).unwrap(),
+            Some(business)
+        );
+        assert_eq!(
+            find_typed_entity_id(&writer, "missing", customer).unwrap(),
+            None
+        );
+        writer.commit().unwrap();
+        assert_eq!(
+            find_typed_entity_id(&before_create, "shared", customer).unwrap(),
+            None
+        );
+
+        let before_delete = db.begin();
+        let mut writer = db.begin();
+        detach_delete(&mut writer, person).unwrap();
+        assert_eq!(
+            find_typed_entity_id(&writer, "shared", customer).unwrap(),
+            None
+        );
+        assert_eq!(
+            find_typed_entity_id(&writer, "shared", company).unwrap(),
+            Some(business)
+        );
+        writer.commit().unwrap();
+        assert_eq!(
+            find_typed_entity_id(&before_delete, "shared", customer).unwrap(),
+            Some(person)
+        );
+        assert_eq!(
+            find_typed_entity_id(&db.begin(), "shared", customer).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn typed_entity_lookup_surfaces_malformed_primary_keys() {
+        let (_d, _r, db, cat) = setup();
+        let customer = cat.node_type("Customer").unwrap().id;
+        let mut writer = db.begin();
+        writer.put(Cf::Pk, pk_key("broken", customer), vec![0; 7]);
+        let corrupt = |txn: &Txn| {
+            assert!(matches!(find_typed_entity_id(txn, "broken", customer),
+                Err(GraphError::Store(StoreError::Corrupt(message))) if message == "node id value"));
+        };
+        corrupt(&writer);
+        writer.commit().unwrap();
+        corrupt(&db.begin());
     }
 
     #[test]

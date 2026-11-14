@@ -1461,10 +1461,11 @@ fn anchor(
         Access::Scan => scan(&mut candidate),
         Access::EntityEq(expr) => {
             let ty = ty.expect("entity access has a label");
-            if let Val::Str(entity_id) = eval(expr, &row, ctx)? {
-                for id in store::find_by_entity_id(ctx.txn, &entity_id, Some(ty.id))? {
-                    candidate(id, None)?;
-                }
+            let Val::Str(entity_id) = eval(expr, &row, ctx)? else {
+                return Ok(());
+            };
+            if let Some(id) = store::find_typed_entity_id(ctx.txn, &entity_id, ty.id)? {
+                candidate(id, None)?;
             }
             Ok(())
         }

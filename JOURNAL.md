@@ -39,6 +39,10 @@ Allan's current language.
 - Timeline example rejects timestamps that Python would silently truncate,
   including unsupported high-precision and timezone-offset forms; existing
   event history is not repaired. Tests cover record, cursor and bounds.
+- Reduce intermediate allocations for label-qualified primary-key lookups;
+  test snapshot/overlay, corrupt keys and ACL-preserving one-hop reads. Document
+  that `db.propertyKeys()` describes catalog fields, not stored extra fields.
+  No latency improvement is claimed without comparable measurements.
 - Add sampled cgroup headroom to accounted query growth, keeping ingress on its
   existing RSS ledger. Local tests cover stale observations, recovery, commit
   rollback, retries and Bolt control. An isolated 512 MiB cgroup A/B diagnostic

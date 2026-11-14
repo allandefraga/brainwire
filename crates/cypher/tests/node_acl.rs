@@ -67,6 +67,63 @@ fn int(value: i64) -> Out {
 }
 
 #[test]
+fn property_keys_reports_catalog_fields_and_never_discovers_row_extras() {
+    let (_dir, db) = setup();
+    execute(
+        &db,
+        "MATCH (n:Doc {entity_id:'a'}) SET n.visible_extra='visible'",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    execute(
+        &db,
+        "MATCH (n:Doc {entity_id:'hidden'}) SET n.hidden_extra='hidden'",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let catalog =
+        "CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey ORDER BY propertyKey";
+    let expected: Vec<_> = [
+        "authority",
+        "document_id",
+        "entity_id",
+        "term",
+        "title",
+        "weight",
+    ]
+    .into_iter()
+    .map(|key| vec![string(key)])
+    .collect();
+    assert_eq!(
+        execute(&db, catalog, &BTreeMap::new()).unwrap().rows,
+        expected
+    );
+    assert_eq!(restricted(&db, catalog).unwrap().rows, expected);
+
+    let rows = "MATCH (n:Doc) RETURN n.entity_id, keys(n) ORDER BY n.entity_id";
+    let all_rows = execute(&db, rows, &BTreeMap::new()).unwrap().rows;
+    assert!(all_rows.iter().any(|row| row[0] == string("hidden")
+        && matches!(&row[1], Out::Value(Value::List(keys)) if keys.contains(&Value::Str("hidden_extra".into())))));
+    let visible_rows = restricted(&db, rows).unwrap().rows;
+    assert_eq!(
+        visible_rows
+            .iter()
+            .map(|row| row[0].clone())
+            .collect::<Vec<_>>(),
+        vec![string("a"), string("b"), string("document")]
+    );
+    assert_eq!(
+        visible_rows[0][1],
+        Out::Value(Value::List(
+            ["authority", "term", "title", "visible_extra"]
+                .map(|key| Value::Str(key.into()))
+                .to_vec()
+        ))
+    );
+}
+
+#[test]
 fn acl_filters_scans_primary_keys_indexes_bound_variables_counts_and_both_edge_directions() {
     let (_dir, db) = setup();
     assert_eq!(
@@ -115,6 +172,25 @@ fn acl_filters_scans_primary_keys_indexes_bound_variables_counts_and_both_edge_d
                 vec![string("b"), string("a")]
             ]
         );
+    }
+    for (key, expected) in [("a", vec![vec![string("b")]]), ("hidden", vec![])] {
+        let mut tx = QueryTransaction::begin(&db)
+            .unwrap()
+            .with_read_visibility(policy())
+            .unwrap();
+        let query = "MATCH (a:Doc {entity_id:$key})-[:LINK]->(b:Doc) RETURN b.entity_id";
+        let params = BTreeMap::from([("key".into(), Value::Str(key.into()))]);
+        let result = tx
+            .run_with_access(
+                query,
+                &params,
+                QueryAccess {
+                    write: false,
+                    instance_admin: false,
+                },
+            )
+            .unwrap();
+        assert_eq!(result.rows, expected);
     }
     assert_eq!(
         restricted(&db, "MATCH (a:Doc)-[:LINK]->(b:Doc) RETURN count(*)")
