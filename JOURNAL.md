@@ -44,6 +44,10 @@ Allan's current language.
   acceptance exercised incremental updates, deletes, failed acknowledgements,
   stale checkpoints and restart. The receipt records a debug build, not a
   production throughput guarantee. This is snapshot comparison, not CDC.
+- The tagged beta.1 local image completed a single synthetic million-node
+  comparison and short 512 MiB / 2 GiB pressure diagnostics; its DuckLake
+  acceptance also covered 100,000 nodes and edges on a native debug build.
+  These tests do not establish a global RSS ceiling or production failover.
 - Next: qualify sustained memory pressure, distributed recovery and integration
   against representative workloads; preserve explicit ownership and backup
   requirements. Local validation and release checks remain necessary.

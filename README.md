@@ -178,6 +178,10 @@ authentication and durability settings; peak memory was not measured. Read the
 [workload, exact versions, raw result and limitations](benchmarks/comparison/README.md)
 before comparing or reproducing them.
 
+A [newer single-run diagnostic](benchmarks/comparison/README.md#latest-local-candidate-one-run)
+also tests the local v0.21.0-beta.1 candidate with the same graph size. It is
+reported separately because one run is not comparable to the median above.
+
 [See the memory and recovery test results](BENCHMARKS.md).
 
 ## Current limits

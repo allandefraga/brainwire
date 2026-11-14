@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.21.0-beta.2 — experimental candidate
+
+- Record a new single-run million-node comparison and a separate 100,000-node
+  DuckLake acceptance, with their conditions and limitations.
+
 ## 0.21.0-beta.1 — experimental candidate
 
 - Add an incremental local DuckDB snapshot importer with a private resumable

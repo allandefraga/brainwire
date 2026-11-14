@@ -1,0 +1,118 @@
+{
+  "date": "2026-11-14",
+  "result": "PASS",
+  "scope": "synthetic local DuckLake acceptance, one native debug server; not a production benchmark",
+  "source_revision": "d00aced6681e7e0e300ab7d3d47b738a040da215",
+  "binary_version": "0.21.0-beta.1",
+  "binary_sha256": "21ea0471cc45a15e5f7dbf4675ca05adf309d6d00a8b06f4b9b38806737cafac",
+  "runner_sha256": "753655dea8e6fc7dc8e05c782344650c57f5300fa91ad8ef1e7766c10403e0d8",
+  "sync_helper_sha256": "8835bd0cb38175d20f17e56ae066e7e5518b17a572cf06ea1b67576e9ff9f2ff",
+  "duckdb_version": "1.5.5",
+  "bolt_driver_version": "5.28.4",
+  "initial_nodes": 100000,
+  "initial_edges": 100000,
+  "workers": 4,
+  "limitations": [
+    "One local synthetic run; host not exclusively reserved.",
+    "Native debug build, not published container image.",
+    "Times cover sync calls only; fixture setup and comparison are excluded.",
+    "Peak memory, power loss, native CDC and multi-machine failover are not measured."
+  ],
+  "measurements": {
+    "full_nodes": {
+      "source_id": "customers",
+      "from": null,
+      "to": 4,
+      "mode": "full",
+      "workers": 4,
+      "upserted": 100000,
+      "deleted": 0,
+      "skipped": 0,
+      "pruned": 0,
+      "seconds": 2.214
+    },
+    "full_edges": {
+      "source_id": "follows",
+      "from": null,
+      "to": 4,
+      "mode": "full",
+      "workers": 4,
+      "upserted": 100000,
+      "deleted": 0,
+      "skipped": 0,
+      "pruned": 0,
+      "seconds": 2.339
+    },
+    "changes_nodes": {
+      "source_id": "customers",
+      "from": 4,
+      "to": 10,
+      "mode": "changes",
+      "workers": 4,
+      "upserted": 15001,
+      "deleted": 5001,
+      "skipped": 0,
+      "pruned": 0,
+      "seconds": 1.105
+    },
+    "changes_edges": {
+      "source_id": "follows",
+      "from": 4,
+      "to": 10,
+      "mode": "changes",
+      "workers": 4,
+      "upserted": 1785,
+      "deleted": 1785,
+      "skipped": 0,
+      "pruned": 0,
+      "seconds": 0.537
+    },
+    "rerun_nodes": {
+      "source_id": "customers",
+      "from": 10,
+      "to": 10,
+      "mode": "changes",
+      "workers": 4,
+      "upserted": 0,
+      "deleted": 0,
+      "skipped": 0,
+      "pruned": 0,
+      "seconds": 0.35
+    },
+    "compare_seconds": 2.404,
+    "checkpoint_contract": {
+      "new_claim_conflict": "Neo.TransientError.Transaction.Outdated",
+      "existing_claim_conflict": "Neo.TransientError.Transaction.Outdated"
+    },
+    "stale_batch_fencing": "PASS",
+    "prune_edges": {
+      "source_id": "follows",
+      "from": null,
+      "to": 10,
+      "mode": "full",
+      "workers": 4,
+      "upserted": 90270,
+      "deleted": 0,
+      "skipped": 0,
+      "pruned": 2,
+      "seconds": 4.337
+    },
+    "prune_nodes": {
+      "source_id": "customers",
+      "from": null,
+      "to": 10,
+      "mode": "full",
+      "workers": 4,
+      "upserted": 100000,
+      "deleted": 0,
+      "skipped": 0,
+      "pruned": 2,
+      "seconds": 2.549
+    },
+    "final": {
+      "nodes": 100000,
+      "edges": 90270
+    },
+    "db_check": "ok"
+  }
+}

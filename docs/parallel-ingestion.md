@@ -308,9 +308,15 @@ readers can see partial progress between committed batches during a run.
 
 ## Measured
 
-One local run each, debug build in a Linux container, synthetic data, 10
-worker processes, 500-row batches. These are smoke numbers, not benchmarks;
-a release build is faster.
+The historical runs below used a debug build in a Linux container, synthetic
+data, 10 worker processes and 500-row batches. They are smoke measurements,
+not production throughput guarantees.
+
+A newer [100K-node, 100K-edge acceptance](benchmarks/2026-11-14-ducklake-sync-100k.json)
+passed with the guarded v0.21.0-beta.1 native debug build and four workers.
+It checked initial load, changes, deletion, replay, stale-batch refusal and
+the offline audit. This was one local synthetic run; peak memory and
+multi-machine recovery were not measured.
 
 **Concurrent writers** (`concurrent_writers.py`, 20K rows): 10 processes
 writing disjoint keys reached about 51,000 rows/s with no conflicts. Ten

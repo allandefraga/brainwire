@@ -6,7 +6,29 @@ and `2N` directed edges and keeps only one batch of fixture rows in the client.
 It checks the number accepted per batch, graph counts, every measured read,
 and a sample of graph records and committed updates after a process `SIGKILL`.
 
-## Latest local candidate: three runs
+## Latest local candidate: one run
+
+On November 14, a local v0.21.0-beta.1 image completed the same synthetic
+1-million-node, 2-million-edge workload on Apple silicon with Colima, two
+CPUs and a 3 GiB container limit. Values below come from one run, not the
+three-run median below. The image was built locally from commit `d00aced`; it
+was not the published image.
+
+| Engine | Create nodes | Create edges | Point p95 | One-hop p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Brainwire | 9.944 s | 25.451 s | 0.727 ms | 0.742 ms |
+| FalkorDB | 4.824 s | 15.827 s | 0.368 ms | 0.372 ms |
+| Neo4j | 9.741 s | 21.004 s | 0.590 ms | 0.616 ms |
+
+All three recovered the expected counts and sampled updates after a process
+kill. Each p95 covers 1,000 serial reads. The engines use different protocols,
+authentication, memory settings and durability configurations, and the host
+was not exclusively reserved. Peak memory was not measured. This is a
+synthetic diagnostic, not a general ranking or production promise. See the
+[raw receipt](results/2026-11-14-1m-local-021b1.json) for image identities,
+settings, all measurements and recovery details.
+
+## Previous local candidate: three runs
 
 Three sequential runs on the same host used the complete local v0.20.0-beta.2
 candidate with the cgroup query-growth guard and typed-lookup change. Each

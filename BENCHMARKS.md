@@ -10,6 +10,12 @@ qualification attempts stopped during loading or reading and did not complete th
 of OOM. Start with the [v0.9 report](PRODUCTION-v0.9.md) and
 [production readiness roadmap](docs/production-readiness-roadmap.md).
 
+A local v0.21.0-beta.1 image passed short cgroup admission diagnostics at
+[512 MiB](docs/benchmarks/2026-11-14-pressure-021b1-512.json) and
+[2 GiB](docs/benchmarks/2026-11-14-pressure-021b1-2048.json). The tests inject
+tmpfs pressure and verify refusal and recovery in a single container; they do
+not qualify sustained capacity, power loss or a hard process RSS ceiling.
+
 A separate [short beta.6 load smoke](docs/benchmarks/2026-11-04-load100k-015b6.json)
 loaded 100,000 synthetic nodes in batches of 250 into a 2 GiB Linux arm64
 container, then verified the count after restart. One local run recorded 2.483 s
