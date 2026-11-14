@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="310" viewBox="0 0 860 310" role="img" aria-labelledby="title desc">
+<title id="title">Creating 1M nodes and 2M edges</title>
+<desc id="desc">Median creation times across three synthetic runs. Brainwire: 11.05 seconds for nodes and 27.94 for edges. FalkorDB: 4.51 seconds for nodes and 17.41 for edges. Neo4j: 11.49 seconds for nodes and 23.47 for edges.</desc>
+<rect width="860" height="310" rx="12" fill="#f3f5fa"/>
+<g font-family="system-ui, sans-serif" fill="#142137">
+<text x="28" y="39" font-weight="700" font-size="23">Creating 1M nodes and 2M edges</text>
+<text x="28" y="64" fill="#45536a" font-size="14">Median times across three synthetic runs</text>
+<rect x="28" y="83" width="14" height="14" rx="2" fill="#2349d8"/>
+<text x="50" y="95" font-size="13">Node creation</text>
+<rect x="165" y="83" width="14" height="14" rx="2" fill="#176752"/>
+<text x="187" y="95" font-size="13">Edge creation</text>
+<path d="M165 111v169" stroke="#c5cdde"/>
+<text x="28" y="141" font-size="15" font-weight="600">Brainwire</text>
+<rect x="165" y="120" width="233.4" height="15" fill="#2349d8"/>
+<text x="406.4" y="132" font-size="12">11.05 s</text>
+<rect x="165" y="139" width="590.0" height="15" fill="#176752"/>
+<text x="763.0" y="151" font-size="12">27.94 s</text>
+<text x="28" y="198" font-size="15" font-weight="600">FalkorDB</text>
+<rect x="165" y="177" width="95.1" height="15" fill="#2349d8"/>
+<text x="268.1" y="189" font-size="12">4.51 s</text>
+<rect x="165" y="196" width="367.6" height="15" fill="#176752"/>
+<text x="540.6" y="208" font-size="12">17.41 s</text>
+<text x="28" y="255" font-size="15" font-weight="600">Neo4j</text>
+<rect x="165" y="234" width="242.7" height="15" fill="#2349d8"/>
+<text x="415.7" y="246" font-size="12">11.49 s</text>
+<rect x="165" y="253" width="495.6" height="15" fill="#176752"/>
+<text x="668.6" y="265" font-size="12">23.47 s</text>
+</g>
+</svg>

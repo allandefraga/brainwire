@@ -15,6 +15,8 @@
   a stale stamp in the same transaction conflicts, and the revocation survives
   restart. Document the separate risk of carrying cached ACLs into a new
   transaction; this is not a general serializable-read guarantee.
+- Repeat the synthetic one-million-node comparison three times on a local
+  candidate image, retaining the raw receipts and a reproducible median chart.
 - Keep the ingestion safeguards and synthetic benchmark evidence from beta.1.
 
 ## 0.20.0-beta.1 — experimental candidate

@@ -11,6 +11,9 @@ The [baseline receipt](2026-11-14-active-commit-baseline.json) and [candidate re
 
 These are local candidate images, not verified registry images. The test checks a short synthetic episode, one transaction and one container. External samples bracket COMMIT; they do not reveal the exact reading used by the sampler. This is not a global RSS guarantee, a sustained capacity test, or evidence of distributed failover.
 
+A [later local build](2026-11-14-active-commit-final.json), including the
+typed-lookup optimization, passed the same guarded-COMMIT and retry scenario.
+
 Run the diagnostic only on a dedicated local Docker daemon with the Python Bolt driver installed and two prebuilt images. It fills a temporary filesystem inside a disposable container. Each invocation requires a new output path and cleans only its own labelled resources:
 
 ```sh

@@ -53,6 +53,10 @@ Allan's current language.
   relationships; sampled RSS was far below the limit. An unacknowledged commit
   crash diagnostic passed 16 small local cycles. Neither qualifies distributed
   recovery, crash at an exact fsync boundary, or production capacity.
+- Repeat the one-million-node comparison three times with the later local image
+  including the cgroup guard and typed lookup. Document medians, per-run
+  receipts, fixed engine order and different durability settings; the image is
+  not the published release. Recheck the image and CI before announcing.
 
 - Added a generic authenticated Bolt acceptance test for an ACL revocation
   racing with a stale stamp in the same transaction. The stale commit is

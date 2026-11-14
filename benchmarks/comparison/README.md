@@ -6,6 +6,44 @@ and `2N` directed edges and keeps only one batch of fixture rows in the client.
 It checks the number accepted per batch, graph counts, every measured read,
 and a sample of graph records and committed updates after a process `SIGKILL`.
 
+## Latest local candidate: three runs
+
+Three sequential runs on the same host used the complete local v0.20.0-beta.2
+candidate with the cgroup query-growth guard and typed-lookup change. Each
+engine loaded one million nodes and two million edges, with 500-row batches,
+1,000 reads of each kind, two CPUs and a 3 GiB container limit. Brainwire was
+a local image, not a release image; its recorded image ID has no signed source
+attestation. The executable code corresponds to local commit `5047e21`; the
+receipt's runner commit identifies the checkout used to launch the benchmark.
+
+![Median creation times across three synthetic runs](ingest-1m-020b2-repeated.svg)
+
+| Engine | Nodes | Edges | Update 10k rows | Point median p95 | One-hop median p95 | Ready after SIGKILL |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Brainwire | 11.055 s | 27.945 s | 0.112 s | 0.898 ms | 0.905 ms | 0.862 s |
+| FalkorDB | 4.506 s | 17.413 s | 0.039 s | 0.361 ms | 0.367 ms | 3.175 s |
+| Neo4j | 11.494 s | 23.473 s | 0.163 s | 0.724 ms | 0.702 ms | 9.286 s |
+
+Each value is the median of three runs. Read values are the median of three
+per-run p95s, not a pooled p95. Runs used a fixed engine order; the point read
+warms the same key before the one-hop read. Compare the [first](results/2026-11-14-1m-local-020b2-final-1.json),
+[second](results/2026-11-14-1m-local-020b2-final-2.json) and
+[third](results/2026-11-14-1m-local-020b2-final-3.json) receipts to see the
+individual measurements. All runs checked counts, sampled reads and recovery.
+These are synthetic diagnostics, not a production ranking: internal settings,
+client protocols, authentication and durability differ, and peak memory was
+not measured. The host was not exclusively reserved.
+
+Generate the table and SVG from those receipts with:
+
+```sh
+python3 benchmarks/comparison/summarize.py \
+  benchmarks/comparison/results/2026-11-14-1m-local-020b2-final-1.json \
+  benchmarks/comparison/results/2026-11-14-1m-local-020b2-final-2.json \
+  benchmarks/comparison/results/2026-11-14-1m-local-020b2-final-3.json \
+  --svg /tmp/brainwire-comparison.svg
+```
+
 ## Measured baseline
 
 The November 14, 2026 run used Brainwire v0.19.0-beta.1, FalkorDB 6.0.0 and Neo4j

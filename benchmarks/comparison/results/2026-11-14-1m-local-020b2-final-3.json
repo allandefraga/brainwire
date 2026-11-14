@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "run_id": "e22781738229",
+  "started_at_utc": "2026-11-14T15:47:17.555493+00:00",
+  "runner_git_commit": "943f65441fc52af861b55754ddc20633af9aff0a",
+  "runner_sha256": "f9c02a8d6e5758c347b8a1a92bf9fa5f40fca6879ff9d1863df9938c7213c9ea",
+  "host": {
+    "platform": "macOS-27.2-arm64-arm-64bit",
+    "architecture": "arm64",
+    "python": "3.9.6"
+  },
+  "docker": {
+    "ServerVersion": "29.5.2",
+    "OperatingSystem": "Ubuntu 24.04.4 LTS",
+    "Architecture": "aarch64",
+    "NCPU": 4,
+    "MemTotal": 4095197184
+  },
+  "images": {
+    "brainwire": {
+      "reference": "brainwire-local-final:0.20.0-beta.2",
+      "id": "sha256:77e9081f772f5b62c14fadd6acdcd732c35ebaa9c85cabb9fac895ee1a8e276e",
+      "repo_digests": [
+        "brainwire-local-final@sha256:77e9081f772f5b62c14fadd6acdcd732c35ebaa9c85cabb9fac895ee1a8e276e"
+      ],
+      "source_labels": {}
+    },
+    "falkordb": {
+      "reference": "falkordb/falkordb-server:6.0.0",
+      "id": "sha256:09928c7f8335147f13eec1d686e10a5a9a5a53f2e6df520f2847f94cb7e14925",
+      "repo_digests": [
+        "falkordb/falkordb-server@sha256:09928c7f8335147f13eec1d686e10a5a9a5a53f2e6df520f2847f94cb7e14925"
+      ],
+      "source_labels": {}
+    },
+    "neo4j": {
+      "reference": "neo4j:2026.09.0",
+      "id": "sha256:d6269a020149934597c8c3df926d080a612796dbbb48861ca9d5b1109cabf0d8",
+      "repo_digests": [
+        "neo4j@sha256:d6269a020149934597c8c3df926d080a612796dbbb48861ca9d5b1109cabf0d8"
+      ],
+      "source_labels": {}
+    }
+  },
+  "clients": {
+    "neo4j": "5.28.8",
+    "falkordb": "1.2.2",
+    "redis": "6.4.0"
+  },
+  "parameters": {
+    "nodes": 1000000,
+    "batch": 500,
+    "reads": 1000,
+    "update_batches": 20,
+    "memory_mib": 3072,
+    "cpus": 2
+  },
+  "fixture": "one node label, one edge type, deterministic ring plus skip edges; outgoing degree 2",
+  "configured_engine_memory_mib": {
+    "brainwire": {
+      "cache": 768,
+      "memtables": 192,
+      "query": 96
+    },
+    "falkordb": {
+      "redis_maxmemory": 2304
+    },
+    "neo4j": {
+      "heap": 768,
+      "page_cache": 1152
+    }
+  },
+  "durability_scope": "process SIGKILL and volume reuse; durability and authentication settings vary by engine",
+  "status": "passed",
+  "results": [
+    {
+      "system": "brainwire",
+      "image": {
+        "reference": "brainwire-local-final:0.20.0-beta.2",
+        "id": "sha256:77e9081f772f5b62c14fadd6acdcd732c35ebaa9c85cabb9fac895ee1a8e276e",
+        "repo_digests": [
+          "brainwire-local-final@sha256:77e9081f772f5b62c14fadd6acdcd732c35ebaa9c85cabb9fac895ee1a8e276e"
+        ],
+        "source_labels": {}
+      },
+      "durability": "default single-node RocksDB WAL, synced on commit",
+      "runtime_settings": null,
+      "node_create": {
+        "records": 1000000,
+        "seconds": 9.751202666000001,
+        "records_per_second": 102551.45280558564
+      },
+      "edge_create": {
+        "records": 2000000,
+        "seconds": 25.780104458000004,
+        "records_per_second": 77579.2046637486
+      },
+      "property_update": {
+        "records": 10000,
+        "seconds": 0.11167970800000404,
+        "records_per_second": 89541.78139505557
+      },
+      "indexed_point_read": {
+        "count": 1000,
+        "p50_ms": 0.649,
+        "p95_ms": 0.714,
+        "p99_ms": 0.758,
+        "mean_ms": 0.657
+      },
+      "outgoing_one_hop": {
+        "count": 1000,
+        "p50_ms": 0.656,
+        "p95_ms": 0.725,
+        "p99_ms": 0.78,
+        "mean_ms": 0.664
+      },
+      "sigkill_recovery": {
+        "nodes": 1000000,
+        "edges": 2000000,
+        "verified_update_rows": 2,
+        "ready_seconds": 0.7846933329999999
+      }
+    },
+    {
+      "system": "falkordb",
+      "image": {
+        "reference": "falkordb/falkordb-server:6.0.0",
+        "id": "sha256:09928c7f8335147f13eec1d686e10a5a9a5a53f2e6df520f2847f94cb7e14925",
+        "repo_digests": [
+          "falkordb/falkordb-server@sha256:09928c7f8335147f13eec1d686e10a5a9a5a53f2e6df520f2847f94cb7e14925"
+        ],
+        "source_labels": {}
+      },
+      "durability": "Redis AOF enabled with appendfsync always; verified before and after recovery",
+      "runtime_settings": {
+        "config": {
+          "appendonly": "yes",
+          "appendfsync": "always",
+          "maxmemory": 2415919104
+        },
+        "redis_version": "8.10.2",
+        "modules": [
+          {
+            "name": "graph",
+            "ver": 60000
+          },
+          {
+            "name": "vectorset",
+            "ver": 1
+          }
+        ]
+      },
+      "node_create": {
+        "records": 1000000,
+        "seconds": 4.310403458000003,
+        "records_per_second": 231996.8443195322
+      },
+      "edge_create": {
+        "records": 2000000,
+        "seconds": 15.755824292,
+        "records_per_second": 126937.18608016576
+      },
+      "property_update": {
+        "records": 10000,
+        "seconds": 0.03860454200000163,
+        "records_per_second": 259036.8770596884
+      },
+      "indexed_point_read": {
+        "count": 1000,
+        "p50_ms": 0.285,
+        "p95_ms": 0.361,
+        "p99_ms": 0.379,
+        "mean_ms": 0.284
+      },
+      "outgoing_one_hop": {
+        "count": 1000,
+        "p50_ms": 0.296,
+        "p95_ms": 0.367,
+        "p99_ms": 0.385,
+        "mean_ms": 0.295
+      },
+      "sigkill_recovery": {
+        "nodes": 1000000,
+        "edges": 2000000,
+        "verified_update_rows": 2,
+        "ready_seconds": 2.8113837499999974
+      }
+    },
+    {
+      "system": "neo4j",
+      "image": {
+        "reference": "neo4j:2026.09.0",
+        "id": "sha256:d6269a020149934597c8c3df926d080a612796dbbb48861ca9d5b1109cabf0d8",
+        "repo_digests": [
+          "neo4j@sha256:d6269a020149934597c8c3df926d080a612796dbbb48861ca9d5b1109cabf0d8"
+        ],
+        "source_labels": {}
+      },
+      "durability": "default single-node Neo4j transaction-log settings",
+      "runtime_settings": null,
+      "node_create": {
+        "records": 1000000,
+        "seconds": 9.989352957999998,
+        "records_per_second": 100106.58390032635
+      },
+      "edge_create": {
+        "records": 2000000,
+        "seconds": 21.353649125000004,
+        "records_per_second": 93660.80655781121
+      },
+      "property_update": {
+        "records": 10000,
+        "seconds": 0.16847750000000872,
+        "records_per_second": 59355.106764995224
+      },
+      "indexed_point_read": {
+        "count": 1000,
+        "p50_ms": 0.535,
+        "p95_ms": 0.724,
+        "p99_ms": 1.438,
+        "mean_ms": 0.575
+      },
+      "outgoing_one_hop": {
+        "count": 1000,
+        "p50_ms": 0.551,
+        "p95_ms": 0.702,
+        "p99_ms": 1.507,
+        "mean_ms": 0.592
+      },
+      "sigkill_recovery": {
+        "nodes": 1000000,
+        "edges": 2000000,
+        "verified_update_rows": 2,
+        "ready_seconds": 7.827361917000005
+      }
+    }
+  ],
+  "finished_at_utc": "2026-11-14T15:49:08.120741+00:00"
+}

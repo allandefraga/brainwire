@@ -155,22 +155,23 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 
 ## A synthetic benchmark
 
-One local run loaded **1 million nodes and 2 million relationships** into each
-engine, checked indexed reads, then restarted after a process kill. The engines
-ran sequentially, each with a 3 GiB container limit and two CPUs. Brainwire
-was a locally built **v0.20.0-beta.2 candidate**, not the published image.
+Three local runs loaded **1 million nodes and 2 million relationships** into
+each engine, checked indexed reads, then restarted after a process kill. The
+engines ran sequentially, each with a 3 GiB container limit and two CPUs.
+Brainwire was a locally built **v0.20.0-beta.2 candidate**, not the published image.
 
-![Node and relationship load times for one synthetic run](benchmarks/comparison/ingest-1m-020b2.svg)
+![Median node and relationship load times across three synthetic runs](benchmarks/comparison/ingest-1m-020b2-repeated.svg)
 
 | Metric | Brainwire | FalkorDB | Neo4j |
 | --- | ---: | ---: | ---: |
-| Indexed point read, p95 | 0.724 ms | 0.350 ms | 0.700 ms |
-| One-hop read, p95 | 0.733 ms | 0.364 ms | 0.704 ms |
-| Ready after process kill | 0.79 s | 2.89 s | 8.45 s |
+| Indexed point read, median p95 | 0.898 ms | 0.361 ms | 0.724 ms |
+| One-hop read, median p95 | 0.905 ms | 0.367 ms | 0.702 ms |
+| Ready after process kill, median | 0.862 s | 3.175 s | 9.286 s |
 
-Each p95 summarizes 1,000 warm, serial queries; each sampled node had two
-outgoing edges. These are single-run diagnostic results, not production
-promises. Engines used different protocols, internal memory settings,
+Each p95 summarizes 1,000 warm, serial queries per run; the table shows the
+median of those three p95 values, not a pooled p95. Each sampled node had two
+outgoing edges. These are diagnostic results, not production promises. Engines
+used different protocols, internal memory settings,
 authentication and durability settings; peak memory was not measured. Read the
 [workload, exact versions, raw result and limitations](benchmarks/comparison/README.md)
 before comparing or reproducing them.
