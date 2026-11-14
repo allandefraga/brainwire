@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.22.0-beta.4 — experimental candidate
+
+- Refuse authenticated native TUI and probe connections to non-loopback
+  addresses by default, before opening a socket. This changes remote client
+  behavior: use a loopback tunnel, or explicitly opt in only when the entire
+  external network path is already encrypted. This does not add native TLS.
+
 ## 0.22.0-beta.3 — experimental candidate
 
 - Record a 30-minute synthetic mixed read/write and process-restart diagnostic

@@ -117,6 +117,14 @@ are numeric `IP:PORT`; total timeout accepts 1–30,000 ms. Readiness is not a
 certificate of workload capacity or disk integrity. Docker's image health check
 uses `handshake`; the demo Compose profile overrides it with `ready`.
 
+Authenticated native probes default to loopback addresses and refuse other
+destinations before opening a connection. Run health checks inside the container
+using the default `127.0.0.1:7687`, or connect to a loopback endpoint of an
+encrypted tunnel. Set `BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1` for a non-loopback
+probe only when you have verified encryption across the network path. The
+override relies on that external encryption and still uses plaintext Bolt.
+`handshake` never loads a credential file and can check remote listeners.
+
 On Unix, native Bolt clients reject credential files writable by group or others.
 Read-only secret mounts remain supported. Use a private owner-readable file such
 as mode `0600` where possible; accepting a readable file is not a confidentiality

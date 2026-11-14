@@ -31,6 +31,11 @@ Allan's current language.
 
 ## 2026-11-14: agent memory and initial Markdown vault import
 
+- Hardened native TUI/probe authentication to refuse non-loopback plaintext
+  destinations by default before connecting. An explicit operator override
+  supports externally encrypted routes and does not implement or verify TLS.
+  Loopback assumes a trusted local listener. This intentionally changes remote
+  authenticated client behavior.
 - Fixed checkpoint backup copies that could be readable by other local users
   under permissive umasks. Staging directories and files are now created with
   restrictive modes on POSIX. Tests cover modes before publication, symlinks,

@@ -196,7 +196,7 @@ Brainwire is an experimental beta. Plan a controlled trial:
 - **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
 - **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
 - **Ingestion:** DuckDB snapshot sync needs a private persistent journal and exclusive ownership of mapped IDs. DuckLake fencing covers cooperating standalone writers; neither sync provides a graph-wide atomic cutover.
-- **Security:** shared deployments need authentication and a verified encrypted boundary; native Bolt TLS is not implemented.
+- **Security:** shared deployments need authentication and a verified encrypted boundary; native Bolt TLS is not implemented. The native terminal and probe refuse authenticated non-loopback connections by default; see [connection guidance](docs/connected-status.md).
 - **Distribution:** three-voter quorum is experimental. Standard Docker, Kubernetes and Swarm configurations run one instance; multi-machine failover is not qualified.
 
 See [memory](docs/memory-defaults.md), [security](docs/protected-containers.md),

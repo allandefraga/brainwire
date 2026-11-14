@@ -29,7 +29,7 @@ pub fn run(address: &str, mode: Mode, timeout_ms: u64) -> Result<(), String> {
         return Err("--timeout-ms must be between 1 and 30000".into());
     }
     if matches!(mode, Mode::Handshake) {
-        BoltClient::hello(address, timeout_ms, MAX_PROBE_RESPONSE)?;
+        BoltClient::hello(parse_address(address)?, timeout_ms, MAX_PROBE_RESPONSE)?;
         return Ok(());
     }
     let mut client = BoltClient::connect(address, timeout_ms, MAX_PROBE_RESPONSE)?;
@@ -63,8 +63,16 @@ pub(crate) struct BoltClient {
 
 impl BoltClient {
     pub(crate) fn connect(address: &str, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
-        let mut client = Self::hello(address, timeout_ms, max_wire)?;
+        let address = parse_address(address)?;
         let credentials = crate::client_auth::Credentials::load()?;
+        if credentials.is_some()
+            && !is_loopback_endpoint(address)
+            && std::env::var_os("BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH").as_deref()
+                != Some(std::ffi::OsStr::new("1"))
+        {
+            return Err("refusing to send Bolt credentials over plaintext to a non-loopback address. Use a loopback tunnel endpoint or set BRAINWIRE_ALLOW_PLAINTEXT_BOLT_AUTH=1 only after verifying network encryption".into());
+        }
+        let mut client = Self::hello(address, timeout_ms, max_wire)?;
         let auth = credentials
             .as_ref()
             .map(|credentials| credentials.logon())
@@ -75,10 +83,7 @@ impl BoltClient {
     }
 
     /// Version negotiation and HELLO, before any authentication.
-    fn hello(address: &str, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
-        let address: SocketAddr = address
-            .parse()
-            .map_err(|e| format!("invalid Bolt address: {e}"))?;
+    fn hello(address: SocketAddr, timeout_ms: u64, max_wire: usize) -> Result<Self, String> {
         let timeout = Duration::from_millis(timeout_ms);
         let deadline = std::time::Instant::now() + timeout;
         let stream = TcpStream::connect_timeout(&address, timeout)
@@ -224,6 +229,16 @@ impl BoltClient {
     }
 }
 
+fn parse_address(address: &str) -> Result<SocketAddr, String> {
+    address
+        .parse()
+        .map_err(|e| format!("invalid Bolt address: {e}"))
+}
+
+fn is_loopback_endpoint(address: SocketAddr) -> bool {
+    address.ip().to_canonical().is_loopback()
+}
+
 fn decode_response(body: &[u8], decoded_limit: usize) -> Result<PackValue, String> {
     let mut input = body;
     let value = unpack_with_limit(&mut input, decoded_limit)
@@ -269,6 +284,31 @@ pub(crate) fn success(response: PackValue) -> Result<PackValue, String> {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn authenticated_endpoint_recognizes_only_loopback_without_a_network() {
+        for (address, loopback) in [
+            ("127.0.0.1:7687", true),
+            ("127.1.2.3:7687", true),
+            ("10.0.0.1:7687", false),
+            ("192.0.2.1:7687", false),
+            ("169.254.1.1:7687", false),
+            ("0.0.0.0:7687", false),
+            ("[::1]:7687", true),
+            ("[::]:7687", false),
+            ("[2001:db8::1]:7687", false),
+            ("[fe80::1%3]:7687", false),
+            ("[::ffff:127.0.0.1]:7687", true),
+            ("[::ffff:192.0.2.1]:7687", false),
+            ("[::ffff:0.0.0.0]:7687", false),
+        ] {
+            assert_eq!(
+                is_loopback_endpoint(parse_address(address).unwrap()),
+                loopback,
+                "{address}"
+            );
+        }
+    }
 
     #[test]
     fn repeated_empty_chunks_cannot_hold_a_probe_open_forever() {
