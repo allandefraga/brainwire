@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.21.0-beta.1 — experimental candidate
+
 - Add an incremental local DuckDB snapshot importer with a private resumable
   journal, bounded batches and explicit deletion ownership. It compares
   snapshots rather than consuming CDC and requires a single-writer contract.
