@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.22.0-beta.2 — experimental candidate
+
 - Create checkpoint backup directories and files with restrictive POSIX modes
   from the start, including the manifest; check destination filesystem ACLs.
 
