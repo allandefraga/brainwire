@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.22.0-beta.3 — experimental candidate
+
+- Record a 30-minute synthetic mixed read/write and process-restart diagnostic
+  for the local v0.22.0-beta.1 candidate, with its memory and recovery limits.
+
 ## 0.22.0-beta.2 — experimental candidate
 
 - Create checkpoint backup directories and files with restrictive POSIX modes

@@ -10,6 +10,13 @@ qualification attempts stopped during loading or reading and did not complete th
 of OOM. Start with the [v0.9 report](PRODUCTION-v0.9.md) and
 [production readiness roadmap](docs/production-readiness-roadmap.md).
 
+A local v0.22.0-beta.1 candidate completed a [30-minute mixed read/write
+and restart diagnostic](docs/benchmarks/2026-11-14-mixed-recovery-022b1.json)
+with 100,000 synthetic nodes and relationships in a 2 GiB container. Exact
+data checks passed before and after a process kill, and sampled RSS peaked at
+about 441 MiB. This run did not approach the limit, simulate power loss, or
+test a multi-machine cluster; it does not establish a hard RSS ceiling.
+
 A local v0.21.0-beta.1 image passed short cgroup admission diagnostics at
 [512 MiB](docs/benchmarks/2026-11-14-pressure-021b1-512.json) and
 [2 GiB](docs/benchmarks/2026-11-14-pressure-021b1-2048.json). The tests inject

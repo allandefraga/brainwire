@@ -47,6 +47,11 @@ Allan's current language.
 - Replaced the site illustration with real synthetic-data terminal captures and
   added a reproducible short video and GIF. Updated the README and site around
   Docker, context, sources and ingestion. Clarified query-growth cgroup errors.
+- A local v0.22.0-beta.1 image completed a 30-minute synthetic mixed workload
+  with 100,000 nodes and relationships and exact checks after SIGKILL. RSS
+  stayed far below the 2 GiB limit; this is not sustained pressure or a hard
+  ceiling. A count-scan no-copy experiment passed correctness tests but showed
+  no consistent latency gain in an interleaved local A/B and was not merged.
 - Next: complete release checks and validate the published image, then qualify
   sustained memory pressure, native TLS and multi-machine failover separately.
   These examples do not establish production readiness or a process RSS ceiling.
