@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from examples.python import ducklake_sync
 from examples.python.ducklake_sync import Mapping, _apply, stale_keys, latest_snapshot, lake, plain, read_partition, validate
@@ -96,6 +96,39 @@ class CheckpointContractTest(unittest.TestCase):
                     ducklake_sync.release(session, "source", "run", 7, 8, contract_fingerprint=self.fingerprint())
                 tx.run.assert_called_once()
                 tx.commit.assert_not_called()
+
+    def test_claim_refuses_servers_without_checkpoint_assertions(self):
+        for rows in ([], [dict(snapshot=7, lease="old", contract_fingerprint=self.fingerprint())]):
+            with self.subTest(rows=rows):
+                session, tx = Mock(), Mock()
+                session.begin_transaction.return_value = contextlib.nullcontext(tx)
+                cursor = Mock()
+                cursor.data.return_value = rows
+                tx.run.side_effect = [cursor, Mock(), RuntimeError("unknown procedure")]
+                with self.assertRaisesRegex(RuntimeError, "unknown procedure"):
+                    ducklake_sync.claim(session, "source", "new", break_lease=True,
+                                       contract_fingerprint=self.fingerprint())
+                tx.commit.assert_not_called()
+
+    def test_checkpoint_cannot_be_a_data_mapping(self):
+        mappings = (replace(NODES, label="ImportCheckpoint"),
+                    replace(EDGES, source_label="ImportCheckpoint"),
+                    replace(EDGES, target_label="ImportCheckpoint"))
+        for mapping in mappings:
+            with self.subTest(mapping=mapping), patch.object(ducklake_sync, "_driver") as driver:
+                with self.assertRaisesRegex(ValueError, "ImportCheckpoint"):
+                    ducklake_sync.sync(mapping, lake_target="lake", uri="bolt://unused",
+                                       database="demo", source_id="source", source_identity="catalog-v1")
+                driver.assert_not_called()
+
+    def test_source_id_must_fit_guard_byte_limit(self):
+        for source in (None, "", "\ud800", "é" * 513):
+            with self.subTest(source=source), patch.object(ducklake_sync, "_driver") as driver:
+                with self.assertRaisesRegex(ValueError, "source_id.*1024 UTF-8 bytes"):
+                    ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://unused",
+                                       database="demo", source_id=source, source_identity="catalog-v1")
+                driver.assert_not_called()
+        ducklake_sync._validate_source_id("é" * 512)
 
 
 def collect(con, mapping, start, end, workers=3):
@@ -321,6 +354,27 @@ class EdgeIdentityTest(unittest.TestCase):
 
 
 class PruneBatchTest(unittest.TestCase):
+    def test_full_run_uses_persisted_cursor_for_workers_and_prune(self):
+        driver = Mock()
+        driver.session.side_effect = lambda **kwargs: contextlib.nullcontext(None)
+        with patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(driver)), \
+                patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(None)), \
+                patch.object(ducklake_sync, "claim", return_value=7) as claim, \
+                patch.object(ducklake_sync, "validate"), \
+                patch.object(ducklake_sync, "ProcessPoolExecutor") as executor, \
+                patch.object(ducklake_sync, "_prune", return_value=0) as prune, \
+                patch.object(ducklake_sync, "release") as release:
+            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://unused", database="demo",
+                               source_id="source", source_identity="catalog-v1", to_snapshot=8,
+                               workers=2, full=True, prune=True)
+        lease = ducklake_sync._Lease("source", claim.call_args.args[2], 7,
+                                    claim.call_args.kwargs["contract_fingerprint"])
+        _, jobs = executor.return_value.__enter__.return_value.map.call_args.args
+        self.assertEqual([job["start"] for job in jobs], [None, None])
+        self.assertEqual([job["lease"] for job in jobs], [lease, lease])
+        self.assertEqual(prune.call_args.kwargs["lease"], lease)
+        self.assertEqual(release.call_args.args[3:5], (7, 8))
+
     def test_failed_worker_retains_lease_and_does_not_advance_cursor(self):
         class Driver:
             def session(self, **kwargs):
@@ -383,12 +437,14 @@ class PruneBatchTest(unittest.TestCase):
             with patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(None)), \
                     patch.object(ducklake_sync, "_stale_key_batches", side_effect=batches), \
                     patch.object(ducklake_sync, "_apply", side_effect=apply), \
-                    patch.object(ducklake_sync, "_ConflictRetryClient"):
+                    patch.object(ducklake_sync, "_ConflictRetryClient") as client:
+                lease = ducklake_sync._Lease("source", "run", 1, "contract")
                 if fail:
                     with self.assertRaisesRegex(RuntimeError, "delete failed"):
-                        ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2)
+                        ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2, lease=lease)
                 else:
-                    self.assertEqual(ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2), 4)
+                    self.assertEqual(ducklake_sync._prune(Driver(), "demo", NODES, "lake", (), None, 1, 2, lease=lease), 4)
+                self.assertEqual(client.call_args.kwargs["lease"], lease)
             self.assertEqual(closed, [True])
             self.assertEqual(seen, [[("a",), ("b",)], [("c",)]] if fail else
                              [[("a",), ("b",)], [("c",)], [("d",)]])
@@ -400,7 +456,7 @@ class PruneBatchTest(unittest.TestCase):
 
         conflict = Error("Neo.TransientError.Transaction.Outdated",
                          "transaction conflict [brainwire.commit outcome=rolled_back]")
-        client = ducklake_sync._ConflictRetryClient(None, "demo")
+        client = ducklake_sync._ConflictRetryClient(None, "demo", lease=ducklake_sync._Lease("source", "run", None, "contract"))
         with patch.object(ducklake_sync.GraphClient, "_write", side_effect=[conflict, 7]) as write, \
                 patch.object(ducklake_sync.time, "sleep"):
             self.assertEqual(client._write(lambda tx: None), 7)
@@ -419,6 +475,50 @@ class PruneBatchTest(unittest.TestCase):
             with self.assertRaises(Error):
                 client._write(lambda tx: None)
             self.assertEqual(write.call_count, 8)
+
+    def test_each_subdivided_batch_asserts_ownership_in_its_own_transaction(self):
+        driver = Mock()
+        session = driver.session.return_value
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        transactions = [Mock(), Mock()]
+        session.begin_transaction.side_effect = [contextlib.nullcontext(tx) for tx in transactions]
+        lease = ducklake_sync._Lease("source", "run", None, "contract")
+        for tx in transactions:
+            tx.run.return_value.single.side_effect = [{"matched": True}, {"processed": 1}]
+        client = ducklake_sync._ConflictRetryClient(driver, "demo", lease=lease, batch_size=1)
+        self.assertEqual(client.load_nodes("Customer", [{"entity_id": "a"}, {"entity_id": "b"}]), 2)
+        for tx in transactions:
+            self.assertEqual(tx.run.call_args_list[0], call(
+                "CALL db.assertNodeState($label,$entity_id,$expected)",
+                label="ImportCheckpoint", entity_id="source",
+                expected={"lease": "run", "snapshot": None, "contract_fingerprint": "contract"}))
+            self.assertEqual(tx.run.call_count, 2)
+            tx.commit.assert_called_once()
+
+    def test_conflict_retry_cannot_repeat_delete_after_lease_takeover(self):
+        driver = Mock()
+        session = driver.session.return_value
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        first, retry = Mock(), Mock()
+        session.begin_transaction.side_effect = [contextlib.nullcontext(tx) for tx in (first, retry)]
+        first.run.return_value.single.side_effect = [{"matched": True}, {"deleted": 1}]
+        conflict = RuntimeError("transaction conflict")
+        conflict.code = "Neo.TransientError.Transaction.Outdated"
+        conflict.message = "transaction conflict [brainwire.commit outcome=rolled_back]"
+        first.commit.side_effect = conflict
+        stale = RuntimeError("node state assertion failed")
+        stale.code = "Neo.ClientError.Transaction.PreconditionFailed"
+        retry.run.side_effect = stale
+        lease = ducklake_sync._Lease("source", "old-run", 7, "contract")
+        client = ducklake_sync._ConflictRetryClient(driver, "demo", lease=lease)
+        with patch.object(ducklake_sync.time, "sleep"), self.assertRaisesRegex(RuntimeError, "assertion failed"):
+            client.delete_nodes("Customer", ["gone"])
+        self.assertEqual(first.run.call_count, 2)
+        retry.run.assert_called_once_with(*first.run.call_args_list[0].args,
+                                          **first.run.call_args_list[0].kwargs)
+        retry.commit.assert_not_called()
 
     def test_stale_keys_are_fetched_in_bounded_batches_and_spool_is_removed(self):
         class Cursor:

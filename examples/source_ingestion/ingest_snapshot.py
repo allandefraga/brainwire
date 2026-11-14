@@ -9,6 +9,7 @@ an older snapshot after a newer one can overwrite newer properties.
 import argparse
 from collections import Counter
 import json
+from pathlib import Path
 
 from examples.python.resumable_customers import ingest
 

@@ -1345,6 +1345,7 @@ fn error_code(error: &ExecError) -> &'static str {
         | ExecError::ProcessMemoryLimit { .. } => brainwire_bolt::session::MEMORY_REFUSED,
         ExecError::TimedOut => "Neo.ClientError.Statement.ExecutionTimedOut",
         ExecError::Conflict => "Neo.TransientError.Transaction.Outdated",
+        ExecError::PreconditionFailed => "Neo.ClientError.Transaction.PreconditionFailed",
         ExecError::Graph(_) => "Neo.DatabaseError.General.UnknownError",
     }
 }
@@ -1667,6 +1668,10 @@ mod tests {
             "Neo.TransientError.Transaction.Outdated"
         );
         assert_eq!(
+            error_code(&ExecError::PreconditionFailed),
+            "Neo.ClientError.Transaction.PreconditionFailed"
+        );
+        assert_eq!(
             error_code(&ExecError::ConstraintViolation("duplicate".into())),
             "Neo.ClientError.Schema.ConstraintValidationFailed"
         );
@@ -1762,6 +1767,59 @@ mod tests {
             failure.code,
             failure.message
         );
+    }
+
+    #[test]
+    fn node_state_guard_reports_takeover_at_commit_without_disclosing_values() {
+        let (_directory, databases, mut old_writer) = scoped_engine_fixture();
+        let mut new_writer = DbEngine::new(Arc::clone(&databases), "default".into()).unwrap();
+        old_writer.set_access(AccessContext::Unrestricted).unwrap();
+        new_writer.set_access(AccessContext::Unrestricted).unwrap();
+        let none = PackValue::Map(vec![]);
+        new_writer.begin(None).unwrap();
+        new_writer
+            .run(
+                None,
+                "CREATE (:Customer {entity_id:'checkpoint', lease:'old-token'})",
+                &none,
+            )
+            .unwrap();
+        new_writer.commit().unwrap();
+
+        let assertion = "CALL db.assertNodeState('Customer', 'checkpoint', {lease:'old-token'})";
+        old_writer.begin(None).unwrap();
+        old_writer.run(None, assertion, &none).unwrap();
+        old_writer
+            .run(
+                None,
+                "CREATE (:Customer {entity_id:'abandoned-batch'})",
+                &none,
+            )
+            .unwrap();
+
+        new_writer.begin(None).unwrap();
+        new_writer
+            .run(
+                None,
+                "MATCH (n:Customer {entity_id:'checkpoint'}) SET n.lease='new-token'",
+                &none,
+            )
+            .unwrap();
+        new_writer.commit().unwrap();
+        let conflict = old_writer.commit().unwrap_err();
+        assert_eq!(conflict.code, "Neo.TransientError.Transaction.Outdated");
+        assert!(conflict
+            .message
+            .ends_with("[brainwire.commit outcome=rolled_back]"));
+        assert_eq!(databases.get("default").unwrap().stats().unwrap().nodes, 1);
+
+        new_writer.begin(None).unwrap();
+        let failure = new_writer.run(None, assertion, &none).err().unwrap();
+        assert_eq!(
+            failure.code,
+            "Neo.ClientError.Transaction.PreconditionFailed"
+        );
+        assert_eq!(failure.message, "node state precondition failed");
     }
 
     #[test]

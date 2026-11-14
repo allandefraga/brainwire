@@ -16,6 +16,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
         "db.commitState" => Ok(&["sequence", "tracked", "scope"]),
         "db.checkpoint" => Ok(&["name", "path", "sequence", "tracked"]),
         "db.setNodeAcl" | "db.setNodeAcls" => Ok(&["updated"]),
+        ASSERT_NODE_STATE => Ok(&["matched"]),
         "db.nodeAcls" => Ok(&[
             "label",
             "entityId",
@@ -201,6 +202,12 @@ pub(super) fn validate(
         checkpoint_destination(args, ctx)?;
     } else if name == "db.nodeAcls" {
         acl_refs(args, ctx)?;
+    } else if name == ASSERT_NODE_STATE {
+        if args.len() != 3 {
+            return Err(semantic(
+                "db.assertNodeState requires a label, entity ID and expected map",
+            ));
+        }
     } else if matches!(
         name,
         "db.indexes"
@@ -233,6 +240,52 @@ pub(super) fn validate(
         }
     }
     Ok(())
+}
+
+pub(super) fn node_state_arguments(
+    args: &[Expr],
+    ctx: &Context<'_, '_>,
+) -> Result<(String, String, BTreeMap<String, Value>), ExecError> {
+    let [label, entity_id, expected] = args else {
+        return Err(semantic(
+            "db.assertNodeState requires a label, entity ID and expected map",
+        ));
+    };
+    let Value::Str(label) = eval::constant(label, ctx)? else {
+        return Err(semantic("db.assertNodeState label must be a string"));
+    };
+    let Value::Str(entity_id) = eval::constant(entity_id, ctx)? else {
+        return Err(semantic("db.assertNodeState entity ID must be a string"));
+    };
+    let Value::Map(expected) = eval::constant(expected, ctx)? else {
+        return Err(semantic("db.assertNodeState expected state must be a map"));
+    };
+    if label.is_empty() || label.len() > 128 || entity_id.is_empty() || entity_id.len() > 1024 {
+        return Err(semantic(
+            "db.assertNodeState requires a 1..128 byte label and a 1..1024 byte entity ID",
+        ));
+    }
+    if expected.is_empty() || expected.len() > 16 || budget::map_bytes(&expected) > 16 * 1024 {
+        return Err(semantic(
+            "db.assertNodeState expected state requires 1..16 fields within 16 KiB",
+        ));
+    }
+    for (name, value) in &expected {
+        if name.is_empty() || name.len() > 128 || graph::acl_property(name) {
+            return Err(semantic(
+                "db.assertNodeState expected state requires ordinary property names",
+            ));
+        }
+        if !matches!(
+            value,
+            Value::Null | Value::Bool(_) | Value::Int(_) | Value::Str(_)
+        ) {
+            return Err(semantic(
+                "db.assertNodeState expected fields must be null, booleans, integers or strings",
+            ));
+        }
+    }
+    Ok((label, entity_id, expected))
 }
 
 /// Only a plain name under the operator-configured root; never a caller path.

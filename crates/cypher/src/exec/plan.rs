@@ -88,7 +88,7 @@ impl Op {
         matches!(
             self,
             Op::Create(_) | Op::Merge { .. } | Op::Set(_) | Op::Delete { .. }
-        ) || matches!(self, Op::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls")
+        ) || matches!(self, Op::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls" || name == ASSERT_NODE_STATE)
     }
     /// Operators that need all of their input rows before producing output.
     pub fn blocking(&self) -> bool {

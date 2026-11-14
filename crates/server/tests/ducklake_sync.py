@@ -99,6 +99,34 @@ def check_concurrent_claims(driver, preexisting):
     return next(code for _, code in outcomes if code is not None)
 
 
+def check_stale_batches(driver):
+    source = "stale-batch-race"
+    fingerprint = ducklake_sync._contract_fingerprint(NODES, "synthetic-catalog-v1", "lake", None, True)
+    lease = ducklake_sync._Lease(source, "first-run", None, fingerprint)
+    client = ducklake_sync._ConflictRetryClient(driver, "lake", lease=lease)
+    stale_operations = 0
+
+    with driver.session(database="lake") as session:
+        claim(session, source, lease.run_id, contract_fingerprint=fingerprint)
+
+        def in_flight(tx):
+            nonlocal stale_operations
+            stale_operations += 1
+            tx.run("CREATE (:Customer {entity_id:'stale-batch-race-row'})").consume()
+            # The replacement lease commits after the guarded batch's assertion
+            # and staged write, before its COMMIT. The retry must recheck ownership.
+            claim(session, source, "replacement-run", break_lease=True, contract_fingerprint=fingerprint)
+
+        try:
+            client._write(in_flight)
+            raise AssertionError("the stale batch must not commit after takeover")
+        except Neo4jError as error:
+            assert error.code == "Neo.ClientError.Transaction.PreconditionFailed", error
+        assert stale_operations == 1, "the failed assertion must precede the retry's mutations"
+        assert session.run("MATCH (c:Customer {entity_id:'stale-batch-race-row'}) RETURN count(c)").single()[0] == 0
+        release(session, source, "replacement-run", None, contract_fingerprint=fingerprint)
+
+
 def run(binary, rows, workers):
     rng = random.Random(7)
     report = {}
@@ -195,6 +223,8 @@ def run(binary, rows, workers):
                     "new_claim_conflict": check_concurrent_claims(driver, preexisting=False),
                     "existing_claim_conflict": check_concurrent_claims(driver, preexisting=True),
                 }
+                check_stale_batches(driver)
+                report["stale_batch_fencing"] = "PASS"
                 session.run("CREATE (:Customer {entity_id:'stray-1'}), (:Customer {entity_id:'stray-2'})").consume()
                 session.run("MATCH (a:Customer {entity_id:'stray-1'}), (b:Customer {entity_id:'c1'}) "
                             "MERGE (a)-[:FOLLOWS]->(b)").consume()

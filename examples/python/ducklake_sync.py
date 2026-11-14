@@ -6,10 +6,12 @@ pinned snapshot; later runs read ``ducklake_table_changes`` from the snapshot
 after the stored cursor up to the target snapshot, collapse every key to its
 final state (upsert or delete) and apply only that. Replaying the same range
 converges only under the single-owner source contract with no newer concurrent
-writes. Failed work retains its lease: resolve prior workers and in-flight
-write outcomes before explicitly breaking the lease and reconciling. A lost
-final release reply may already have advanced the cursor and cleared the lease;
-reconcile that outcome before starting another run.
+writes. Every mutation batch asserts its lease, saved cursor and contract in
+the same standalone transaction. A takeover prevents older guarded batches
+from committing. Stop older clients that do not use this guard before a
+takeover, and reconcile commits whose outcome is unknown. Failed work leaves
+lease recovery to the operator. A lost final release reply may already have
+advanced the cursor and cleared the lease.
 
 Work is split into ``--workers`` processes by ``hash(key) % workers``; each
 opens its own read-only DuckLake connection and Bolt driver, so one key is
@@ -48,6 +50,8 @@ import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
+from typing import Optional
+
 from examples.python.client import GraphClient
 from examples.python.connection import auth_from_env
 
@@ -57,13 +61,48 @@ RESERVED_COLUMNS = {"snapshot_id", "rowid", "change_type", "brainwire_rank"}  # 
 PRESENT = "change_type IN ('insert', 'update_postimage')"
 
 
+@dataclass(frozen=True)
+class _Lease:
+    source_id: str
+    run_id: str
+    snapshot: Optional[int]
+    contract_fingerprint: str
+
+    def assert_held(self, tx):
+        row = tx.run("CALL db.assertNodeState($label,$entity_id,$expected)",
+                     label="ImportCheckpoint", entity_id=self.source_id,
+                     expected={"lease": self.run_id, "snapshot": self.snapshot,
+                               "contract_fingerprint": self.contract_fingerprint}).single(strict=True)
+        if row["matched"] is not True:
+            raise RuntimeError("checkpoint assertion was not acknowledged")
+
+
+def _validate_source_id(source_id):
+    if not isinstance(source_id, str) or not 1 <= len(source_id) <= 1024:
+        raise ValueError("source_id must contain 1..1024 UTF-8 bytes")
+    try:
+        size = len(source_id.encode("utf-8"))
+    except UnicodeError:
+        raise ValueError("source_id must contain 1..1024 UTF-8 bytes") from None
+    if size > 1024:
+        raise ValueError("source_id must contain 1..1024 UTF-8 bytes")
+
+
 class _ConflictRetryClient(GraphClient):
-    """Retry only a single transaction with a confirmed rolled-back conflict."""
+    """Guard each batch and retry only a confirmed rolled-back conflict."""
+
+    def __init__(self, driver, database, *, lease, **options):
+        super().__init__(driver, database, **options)
+        self.lease = lease
 
     def _write(self, operation):
+        def guarded(tx):
+            self.lease.assert_held(tx)
+            return operation(tx)
+
         for attempt in range(8):
             try:
-                return super()._write(operation)
+                return super()._write(guarded)
             except Exception as error:
                 if (attempt == 7
                     or getattr(error, "code", None) != "Neo.TransientError.Transaction.Outdated"
@@ -330,7 +369,7 @@ def sync_partition(job):
     upserted = deleted = skipped = 0
     strict = job.get("require_endpoints", True)
     with lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con, _driver(job["uri"], job["auth"]) as driver:
-        client = _ConflictRetryClient(driver, job["database"], batch_size=job["batch_size"])
+        client = _ConflictRetryClient(driver, job["database"], lease=job["lease"], batch_size=job["batch_size"])
         upserts, deletes = [], []
         for key, row in read_partition(con, mapping, start, end, job["workers"], job["worker"]):
             (deletes if row is None else upserts).append(key if row is None else row)
@@ -343,14 +382,14 @@ def sync_partition(job):
             "skipped": skipped + len(upserts) - u}
 
 
-def _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size):
+def _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size, *, lease):
     if mapping.label:
         query = f"MATCH (n:{mapping.label}) RETURN n.entity_id"
     else:
         query = (f"MATCH (a:{mapping.source_label})-[:{mapping.type}]->(b:{mapping.target_label}) "
                  "RETURN a.entity_id, b.entity_id")
     with driver.session(database=database) as session, lake(lake_target, load=load, init_sql=init_sql) as con:
-        client = _ConflictRetryClient(driver, database, batch_size=batch_size)
+        client = _ConflictRetryClient(driver, database, lease=lease, batch_size=batch_size)
         keys = (tuple(record.values()) for record in session.run(query))
         deleted = 0
         with contextlib.closing(_stale_key_batches(con, mapping, end, keys, batch_size)) as batches:
@@ -375,6 +414,7 @@ def _check_contract(state, source_id, fingerprint):
 
 def claim(session, source_id, run_id, break_lease=False, *, contract_fingerprint):
     """Take the source lease in one transaction; return the stored snapshot."""
+    _validate_source_id(source_id)
     with session.begin_transaction() as tx:
         state = _cursor(tx, source_id)
         if state is None:
@@ -384,10 +424,13 @@ def claim(session, source_id, run_id, break_lease=False, *, contract_fingerprint
             _check_contract(state, source_id, contract_fingerprint)
             if state["lease"] not in (None, run_id) and not break_lease:
                 raise RuntimeError(f"source {source_id!r} is leased by run {state['lease']}; "
-                                   "resolve that run and its in-flight writes before --break-lease")
+                                   "check its progress and reconcile unknown commits before --break-lease")
             tx.run("MATCH (s:ImportCheckpoint {entity_id:$id}) SET s.lease = $run", id=source_id, run=run_id).consume()
+        # Check support before committing the lease, including for empty sources.
+        snapshot = None if state is None else state["snapshot"]
+        _Lease(source_id, run_id, snapshot, contract_fingerprint).assert_held(tx)
         tx.commit()
-        return None if state is None else state["snapshot"]
+        return snapshot
 
 
 def release(session, source_id, run_id, start, end=None, *, contract_fingerprint):
@@ -419,6 +462,9 @@ def sync(mapping, *, lake_target, uri, database, source_id, source_identity, wor
         raise ValueError("batch_size must be a positive integer")
     if prune and not full:
         raise ValueError("prune requires full")
+    if "ImportCheckpoint" in (mapping.label, mapping.source_label, mapping.target_label):
+        raise ValueError("ImportCheckpoint is reserved for synchronization checkpoints")
+    _validate_source_id(source_id)
     started = time.monotonic()
     run_id = uuid.uuid4().hex
     auth = auth_from_env()
@@ -431,6 +477,7 @@ def sync(mapping, *, lake_target, uri, database, source_id, source_identity, wor
             return driver.session(database=database)
         with session() as s:
             stored = claim(s, source_id, run_id, break_lease, contract_fingerprint=contract)
+        lease = _Lease(source_id, run_id, stored, contract)
         try:
             with lake(lake_target, load=load, init_sql=init_sql) as con:
                 end = latest_snapshot(con) if to_snapshot is None else to_snapshot
@@ -440,17 +487,17 @@ def sync(mapping, *, lake_target, uri, database, source_id, source_identity, wor
                 validate(con, mapping, start, end)
             jobs = [{"mapping": mapping, "start": start, "end": end, "workers": workers, "worker": k,
                      "lake": lake_target, "load": tuple(load), "init_sql": init_sql, "uri": uri, "auth": auth,
-                     "database": database, "batch_size": batch_size,
+                     "database": database, "batch_size": batch_size, "lease": lease,
                      "require_endpoints": require_endpoints} for k in range(workers)]
             # spawn, not fork: callers may run several syncs from threads with live drivers.
             with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn")) as pool:
                 parts = list(pool.map(sync_partition, jobs))
-            pruned = _prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size) if prune else 0
+            pruned = (_prune(driver, database, mapping, lake_target, load, init_sql, end, batch_size, lease=lease)
+                      if prune else 0)
         except BaseException as error:
-            # A failed worker may still have an in-flight COMMIT. Keep ownership
-            # until its outcome is reconciled; clearing it permits racing runs.
+            # Earlier batches may already be committed. Leave recovery to the operator.
             if hasattr(error, "add_note"):
-                error.add_note("source lease retained; resolve previous workers and in-flight writes before --break-lease")
+                error.add_note("source lease was not released by this run; check current ownership and reconcile unknown commits")
             raise
         with session() as s:
             release(s, source_id, run_id, stored, end, contract_fingerprint=contract)
@@ -475,7 +522,7 @@ def main(argv=None):
     parser.add_argument("--prune", action="store_true", help="with --full: delete graph keys absent from the source")
     parser.add_argument("--allow-missing-endpoints", action="store_true",
                         help="skip and count edge rows whose endpoint node does not exist")
-    parser.add_argument("--break-lease", action="store_true", help="take over only after prior workers and in-flight writes are resolved")
+    parser.add_argument("--break-lease", action="store_true", help="take over after stopping unguarded workers and reconciling unknown commits")
     parser.add_argument("--load", default="ducklake,sqlite", help="DuckDB extensions to LOAD (already installed)")
     parser.add_argument("--init-sql", help="SQL file run before ATTACH, e.g. CREATE SECRET for object storage")
     args = parser.parse_args(argv)

@@ -1,5 +1,10 @@
 """Run from the repository root: python3 -m unittest discover -s examples/source_ingestion."""
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 from examples.source_ingestion import ingest_snapshot as adapter
 
 
@@ -41,6 +46,17 @@ class Transaction:
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_cli_reports_complete_after_successful_import(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "input.jsonl"
+            path.write_text("{}\n")
+            with patch("sys.argv", ["ingest_snapshot", str(path), "--source-id", "synthetic"]), \
+                    patch("neo4j.GraphDatabase.driver", return_value=MagicMock()), \
+                    patch.object(adapter, "ingest_snapshot", return_value=path.stat().st_size), \
+                    redirect_stdout(StringIO()) as output:
+                adapter.main()
+            self.assertIn("complete", output.getvalue())
+
     def test_identity_is_collision_free_and_nullable_fields_are_authoritative(self):
         first = adapter.normalize_row(ticket())
         self.assertEqual(first["priority"], None)

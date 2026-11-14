@@ -235,7 +235,8 @@ use a new generation and reconcile deliberately.
    edge whose endpoint moved deletes the old pair.
 4. Starts `--workers` processes. Each attaches the lake read-only, reads only
    `hash(key) % workers == k`, and writes upserts with `load_nodes`/`load_edges`
-   and deletes with `delete_nodes`/`delete_edges` in atomic batches.
+   and deletes with `delete_nodes`/`delete_edges` in atomic batches. Each batch
+   asserts the lease, checkpoint and mapping contract inside its transaction.
 5. After every worker succeeds, advances the cursor to the target snapshot and
    releases the lease in one transaction. Failed work retains the lease, even
    for validation or conflict errors. A lost final release reply may already
@@ -245,9 +246,12 @@ Replaying a range converges under the single-owner source contract, provided
 there are no concurrent newer writes. A batch retries up to eight times with
 backoff only when the server returns `Transaction.Outdated` and explicitly
 confirms rollback. Network errors, unknown commit outcomes and lease operations
-are not retried automatically. After failure, resolve previous workers and all in-flight write
-outcomes before explicitly using `--break-lease` and reconciling the graph. A
-client disconnect alone does not prove its server transaction has finished.
+are not retried automatically. A successful takeover causes older guarded
+batches to conflict or fail their assertion, but does not undo batches that
+already committed. Stop older clients that do not use this guard, reconcile
+unknown commit outcomes, and select a target no older than the interrupted run
+or perform an authoritative full reconciliation. A client disconnect alone
+does not prove its server transaction has finished.
 
 ### Row by row or in batches?
 
@@ -280,8 +284,9 @@ a synchronous commit per row; see the measurement below.
   unless its row changes again, so follow up with `--full --prune`.
 - **Reserved columns.** `snapshot_id`, `rowid`, `change_type` and
   `brainwire_rank` cannot be mapped; they come from the change feed.
-- **One run per source.** The lease coordinates source ownership; it is not a
-  fencing token. Never break it while prior workers or writes may remain active.
+- **One run per source.** Guarded batches on a standalone server check the
+  lease in the same transaction as their writes. This does not fence old
+  clients that omit the guard, other authorized writers, or replicated mode.
   Independent sources can run in parallel if they do not own overlapping data.
 - **Ownership.** Deletes are physical (`DETACH DELETE` for nodes). Do not point
   two sources at the same label/keys.

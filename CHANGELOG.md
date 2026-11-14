@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add bounded `db.assertNodeState` transaction guards for standalone writes.
+  DuckLake synchronization verifies each batch's lease, cursor and mapping
+  contract in the same transaction. Replicated mode is not supported.
+- Let explicitly opted-in search providers receive a bounded candidate scope
+  before ranking. Graph visibility and scope are still enforced on returned IDs.
+- Fix snapshot import CLI status reporting after a successful import.
+
 ## 0.20.0-beta.2 — experimental candidate
 
 - Reduce intermediate allocations for label-qualified `entity_id` lookups,

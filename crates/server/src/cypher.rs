@@ -104,6 +104,7 @@ fn category(e: &ExecError) -> &'static str {
         | ExecError::ProcessMemoryLimit { .. } => "resource",
         ExecError::TimedOut => "timeout",
         ExecError::Conflict => "conflict",
+        ExecError::PreconditionFailed => "precondition-failed",
         ExecError::Graph(_) => "storage",
     }
 }

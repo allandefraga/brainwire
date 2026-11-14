@@ -55,6 +55,7 @@ for local durability, memory budgets and the current settings.
 - **Agent context:** explore ontology and visible record paths, optionally scope configured search providers before ranking, then return authorized records and sources.
 - **Connected operations:** link customers, projects, documents and tickets and query relationships with Cypher.
 - **Timelines:** model explicit events with stable keys and page through them in the Python example.
+- **DuckLake ingestion:** load a mapped table and sync later changes in bounded batches. The standalone example checks each batch's source lease; see the [ingestion guide](docs/parallel-ingestion.md).
 - **Code graphs:** extract local Python structure and explore paths and source links.
 
 Try the [synthetic company context example](examples/company_brain/README.md) to connect a project, decision and source. See the [agent context roadmap](docs/agent-context-roadmap.md) for what exists and what is next.

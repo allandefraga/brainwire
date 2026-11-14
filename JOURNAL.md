@@ -34,6 +34,11 @@ Allan's current language.
 - Added an opt-in provider contract that receives bounded candidate IDs before
   ranking. The graph still filters scope and enforces node visibility; the
   caller must trust providers with those IDs before graph authorization.
+- Added a standalone transaction guard and used it per DuckLake batch. Local
+  synthetic Bolt acceptance covered initial load, incremental updates, deletes,
+  replay, lease takeover and audit with two workers. This does not fence old
+  unguarded clients, other writers or replicated mode; earlier batches persist.
+- Corrected snapshot importer CLI completion reporting and added a regression.
 - Validation and release are in progress. See the final entry and release
   notes for tested behavior and remaining boundaries.
 

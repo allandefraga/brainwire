@@ -987,6 +987,39 @@ pub fn find_typed_entity_id(
     })
 }
 
+/// Compare node fields against the current transaction view and register exact
+/// primary-key and row dependencies for conflict checks at commit.
+pub fn guard_node_state<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn<'_>,
+    ty: &NodeType,
+    entity_id: &str,
+    expected: &BTreeMap<String, Value>,
+    mut control: impl FnMut(usize) -> Result<(), E>,
+) -> Result<bool, E> {
+    control(0)?;
+    let pk = pk_key(entity_id, ty.id);
+    txn.depend(Cf::Pk, &pk);
+    let id = txn.with_get(Cf::Pk, &pk, |bytes| bytes.map(node_id_value).transpose())?;
+    let Some(id) = id else { return Ok(false) };
+    let key = node_key(id);
+    txn.depend(Cf::Node, &key);
+    txn.with_get(Cf::Node, &key, |bytes| {
+        let Some(bytes) = bytes else { return Ok(false) };
+        if id.type_id() != ty.id || split_node(bytes)?.0 != entity_id {
+            return Err(StoreError::Corrupt("node primary key identity mismatch".into()).into());
+        }
+        for (name, value) in expected {
+            control(0)?;
+            let actual =
+                decode_node_field_with_control(bytes, ty.column(name), name, &mut control)?;
+            if actual != *value {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    })
+}
+
 pub fn find_by_entity_id(
     txn: &Txn,
     entity_id: &str,
@@ -2701,6 +2734,31 @@ mod tests {
         corrupt(&writer);
         writer.commit().unwrap();
         corrupt(&db.begin());
+    }
+
+    #[test]
+    fn node_state_guard_rejects_corrupt_or_misdirected_primary_keys() {
+        let (_d, _r, db, cat) = setup();
+        let customer = cat.node_type("Customer").unwrap();
+        let mut writer = db.begin();
+        let other_label =
+            merge_node(&mut writer, &cat, "Company", "target", &BTreeMap::new()).unwrap();
+        let other_id =
+            merge_node(&mut writer, &cat, "Customer", "other", &BTreeMap::new()).unwrap();
+        let expected = BTreeMap::from([("absent".into(), Value::Null)]);
+        let primary = pk_key("target", customer.id);
+        for invalid in [vec![0; 7], node_key(other_label), node_key(other_id)] {
+            writer.put(Cf::Pk, primary.clone(), invalid);
+            assert!(matches!(
+                guard_node_state(&mut writer, customer, "target", &expected, |_| Ok::<
+                    _,
+                    GraphError,
+                >(
+                    ()
+                )),
+                Err(GraphError::Store(StoreError::Corrupt(_)))
+            ));
+        }
     }
 
     #[test]

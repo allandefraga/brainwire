@@ -28,6 +28,8 @@ use brainwire_store::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+const ASSERT_NODE_STATE: &str = "db.assertNodeState";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryOutput {
     pub fields: Vec<String>,
@@ -121,6 +123,8 @@ pub enum ExecError {
     ParameterMissing(String),
     #[error("constraint violation: {0}")]
     ConstraintViolation(String),
+    #[error("node state precondition failed")]
+    PreconditionFailed,
     #[error("forbidden: {0}")]
     Forbidden(&'static str),
     #[error("query allocation guard exceeded: attempted {attempted} bytes, limit {limit} bytes")]
@@ -335,6 +339,11 @@ impl QueryAccess {
                             ));
                         }
                     }
+                    ASSERT_NODE_STATE => {
+                        if !self.write {
+                            return Err(ExecError::Forbidden("graph write access required"));
+                        }
+                    }
                     "db.createIndex"
                     | "db.dropIndex"
                     | "db.createLabel"
@@ -392,6 +401,7 @@ pub struct QueryTransaction<'db> {
     txn: Option<Txn<'db>>,
     catalog: Catalog,
     wrote: bool,
+    has_guards: bool,
     state: QueryTransactionState,
     limits: ExecutionLimits,
     transaction_deadline: Option<std::time::Instant>,
@@ -429,6 +439,7 @@ impl<'db> QueryTransaction<'db> {
             txn: Some(txn),
             catalog,
             wrote: false,
+            has_guards: false,
             state: QueryTransactionState::Active,
             limits,
             transaction_deadline: None,
@@ -811,6 +822,23 @@ impl<'db> QueryTransaction<'db> {
             self.fail();
             return Err(error);
         }
+        let asserts_node_state = query
+            .clauses
+            .iter()
+            .chain(query.unions.iter().flat_map(|(_, part)| part))
+            .any(|clause| matches!(clause, Clause::Call { name, .. } if name == ASSERT_NODE_STATE));
+        if asserts_node_state && (self.replicated_mode || self.visibility.is_some()) {
+            self.fail();
+            return Err(ExecError::Forbidden(
+                "node state assertions require an unrestricted standalone write transaction",
+            ));
+        }
+        if asserts_node_state && (query.clauses.len() != 1 || !query.unions.is_empty()) {
+            self.fail();
+            return Err(ExecError::Semantic(
+                "db.assertNodeState must be the only clause of its query".into(),
+            ));
+        }
         let changes_catalog = query
             .clauses
             .iter()
@@ -845,6 +873,7 @@ impl<'db> QueryTransaction<'db> {
         match result {
             Ok((output, wrote)) => {
                 self.wrote |= wrote;
+                self.has_guards |= asserts_node_state;
                 if changes_catalog {
                     // Later runs in this transaction see the staged catalog.
                     match load_catalog(self.txn.as_mut().expect("active transaction")) {
@@ -868,16 +897,18 @@ impl<'db> QueryTransaction<'db> {
     /// Commit once, returning a store sequence for a write transaction, or
     /// `None` for read-only completion. Write sequences are durable per store;
     /// they are not global, fork-aware bookmarks or instance Raft indexes.
-    /// Read-only completion drops the snapshot without checking write conflicts,
-    /// preserving the standalone executor's read-only behavior.
+    /// Ordinary read-only completion drops the snapshot without checking conflicts.
+    /// Explicit query guards are checked without allocating a commit sequence.
     pub fn commit(&mut self) -> Result<Option<u64>, ExecError> {
         self.check_transaction_deadline()?;
         self.reserve_write_materialization()?;
         let mut txn = self.txn.take().expect("active transaction");
-        let result = if self.wrote {
+        let result = if self.wrote || self.has_guards {
             // Rejects a catalog migration committed since this snapshot.
             txn.depend(Cf::Meta, b"catalog");
-            txn.commit().map(Some).map_err(ExecError::from)
+            txn.commit()
+                .map(|sequence| self.wrote.then_some(sequence))
+                .map_err(ExecError::from)
         } else {
             drop(txn);
             Ok(None)
@@ -1146,7 +1177,7 @@ fn execute_clauses_with<T>(
                 | Clause::Set(_)
                 | Clause::Remove(_)
                 | Clause::Delete { .. }
-        ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls" || plan::is_admin_call(name))
+        ) || matches!(clause, Clause::Call { name, .. } if name == "db.setNodeAcl" || name == "db.setNodeAcls" || name == ASSERT_NODE_STATE || plan::is_admin_call(name))
     };
     if visibility.is_some() && clauses.clone().any(mutates) {
         return Err(ExecError::Forbidden(

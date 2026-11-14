@@ -76,6 +76,29 @@ pub(super) fn apply(
             Ok(rows)
         }
         Op::Call {
+            name, args, slots, ..
+        } if name == ASSERT_NODE_STATE => {
+            let (label, entity_id, expected) =
+                procedures::node_state_arguments(args, &env_ctx(env, txn))?;
+            let ty = env
+                .catalog
+                .node_type(&label)
+                .ok_or(ExecError::PreconditionFailed)?;
+            // Cover both dependency keys and transient lookup key copies.
+            env.budget.charge(384 + 3 * entity_id.len())?;
+            if !store::guard_node_state::<ExecError>(txn, ty, &entity_id, &expected, |bytes| {
+                env.budget.check_deadline()?;
+                env.budget.charge(bytes)
+            })? {
+                return Err(ExecError::PreconditionFailed);
+            }
+            let mut rows = rows;
+            for row in &mut rows {
+                row[slots[0]] = Val::Bool(true);
+            }
+            Ok(rows)
+        }
+        Op::Call {
             name,
             args,
             yields,

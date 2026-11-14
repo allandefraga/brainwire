@@ -205,10 +205,20 @@ equal; otherwise it returns `a`. Comparisons that evaluate to unknown, such as
 
 **Procedures.** `db.labels`, `db.relationshipTypes`, `db.propertyKeys`,
 `dbms.components`, `db.schema`, `db.indexes`, `db.commitState`,
-`db.checkpoint`, `db.memory`, `db.setNodeAcl(s)`, `db.nodeAcls`,
+`db.checkpoint`, `db.memory`, `db.setNodeAcl(s)`, `db.nodeAcls`, `db.assertNodeState`,
 `graph.project`, `graph.degree`, `graph.pagerank` and `knowledge.rank`. See
 [sparse analytics](sparse-analytics.md) and
 [explainable knowledge ranking](knowledge-ranking.md).
+
+`CALL db.assertNodeState($label, $entity_id, $expected)` checks a node's
+bounded scalar properties and adds a transaction dependency. Use it in the
+**same explicit standalone write transaction** as the protected mutations.
+If the node changes before commit, the transaction conflicts and rolls back.
+Missing nodes and mismatched fields return a generic precondition error. A
+null expected value matches an absent property. The call requires unrestricted
+graph-write access; identified or replicated transactions are not supported.
+An autocommit call only guards itself, not a later write. This is not a lock or
+a guarantee against writers that do not participate in the protocol.
 
 **Returned values.** Nodes, relationships, paths and lists or maps of them are
 returned as Bolt Node, Relationship and Path structures (JSON envelopes with
