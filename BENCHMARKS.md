@@ -48,6 +48,11 @@ also passed on a local image: 100,000 nodes and relationships were verified
 after restart and sampled RSS peaked at about 437 MiB. This image predates the
 later typed-lookup change. Neither run saturated 2 GiB or qualifies a hard limit.
 
+The [later image including both changes](docs/benchmarks/2026-11-14-mixed-recovery-020b2-final.json)
+also passed the same 30-minute workload and exact post-restart verification.
+Its sampled RSS peak was about 427 MiB. It is a local image, not the registry
+build, and this does not qualify behavior near the container limit.
+
 ## Choose a test
 
 | Question | Test and results |

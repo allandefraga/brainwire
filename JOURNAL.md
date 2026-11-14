@@ -57,6 +57,9 @@ Allan's current language.
   including the cgroup guard and typed lookup. Document medians, per-run
   receipts, fixed engine order and different durability settings; the image is
   not the published release. Recheck the image and CI before announcing.
+- The same later local image passed a 30-minute, 2 GiB mixed workload with
+  100,000 nodes and edges, a process restart and exact data verification. RSS
+  peaked around 427 MiB in samples: it did not approach the limit.
 
 - Added a generic authenticated Bolt acceptance test for an ACL revocation
   racing with a stale stamp in the same transaction. The stale commit is
