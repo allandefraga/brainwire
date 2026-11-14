@@ -128,6 +128,9 @@ jobs:
           python crates/server/tests/uncertain_commit.py
           --binary target/debug/brainwire --rows 32
 
+      - name: Verify ACL revocation conflict and recovery
+        run: python crates/server/tests/acl_revocation_conflict.py --binary target/debug/brainwire
+
       - name: Verify context evidence and ACL isolation
         run: python crates/server/tests/context_rerank.py --binary target/debug/brainwire
 

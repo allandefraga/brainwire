@@ -31,6 +31,11 @@ Allan's current language.
 
 ## 2026-11-14: DuckLake checkpoint contracts and reproducible comparison
 
+- Added a generic authenticated Bolt acceptance test for an ACL revocation
+  racing with a stale stamp in the same transaction. The stale commit is
+  rejected and the revocation survives restart. Reading an ACL in one
+  transaction and writing its cached copy in a new one has no CAS protection;
+  clients must recompute and reconcile rather than carry stale permissions.
 - Bound DuckLake cursors to an explicit source generation, normalized mapping,
   graph, writer identity and endpoint policy. Legacy or mismatched cursors are
   refused; migration requires reconciliation and an updated ontology. Lease

@@ -119,6 +119,23 @@ It has the same privilege requirements as `db.setNodeAcl`. Bolt `mode:'r'` trans
 mutations even for an unrestricted writer/admin, including this procedure.
 Legacy protocol engines without READ-mode support fail closed.
 
+### Avoid restoring a revoked grant
+
+`db.setNodeAcls` replaces the ACL with the supplied values. An application that
+reads an ACL, closes its transaction, and later writes a cached copy can restore
+a grant revoked in between. There is no cross-transaction ACL compare-and-set.
+Read the ACL and stamp the result in the **same write transaction**; a
+concurrent stamp after that transaction's snapshot causes a commit conflict.
+Reread and recompute after a confirmed rollback, and reconcile an unknown commit
+outcome before retrying. Plain `MATCH` reads alone are snapshot reads, not a
+general serializable lock.
+
+If an application also stores its own source-level ACL bookkeeping, it must
+keep that bookkeeping and the native ACL consistent in the same transaction.
+When they disagree, stop and reconcile from authoritative data instead of
+deriving a new grant from the stale copy. See
+[transaction behavior](transactions.md) and [identified request outcomes](standalone-requests.md).
+
 The connected Graph pane inherits these filters through its existing Cypher API;
 an invisible source appears missing, and neighbors/counts never include hidden
 endpoints. Schema and index declarations remain graph metadata, not per-node

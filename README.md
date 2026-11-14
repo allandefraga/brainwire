@@ -18,7 +18,7 @@
 Brainwire connects people, projects, documents and events in named graphs.
 Write from Python, query with Cypher and inspect the database in your terminal.
 
-> **v0.20.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
+> **v0.20.0-beta.2 · experimental beta.** <!-- brainwire-release-version --> Start with rebuildable data and a tested backup. Read the [current limits](#current-limits) before a shared deployment.
 
 ## How it works
 
@@ -75,9 +75,9 @@ On macOS, Colima can provide the Docker engine; with Colima running, run
 Compose plugin are still required.
 
 ```sh
-git clone --branch v0.20.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.20.0-beta.2 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.20.0-beta.1 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.20.0-beta.2 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
