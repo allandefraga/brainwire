@@ -58,8 +58,11 @@ for that sampling window.
 For cgroup admission, the server reads the inactive file-cache counter on both
 sides of the usage reading and discounts the smaller value. If either cache
 reading is missing or inconsistent, it discounts no cache. These readings are
-not atomic; they reduce one source of undercounting but cannot guarantee a
-process-wide ceiling or explain an earlier untraced decision.
+not atomic. Cgroup pressure is checked when admitting a new RUN, not when an
+already running query grows its reservation. Active queries still use their
+query budget and sampled process-RSS headroom, but can continue growing while
+the cgroup is pressured. These checks cannot guarantee a process-wide ceiling
+or explain an earlier untraced decision.
 See [the design](design/process-memory-ceiling.md).
 
 The component budgets are accounting budgets. Sampling, admission and
