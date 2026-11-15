@@ -4,7 +4,7 @@ import hashlib
 import json
 
 from brainwire import connect
-from examples.python.connection import auth_from_env
+from examples.python.connection import auth_from_env, bolt_connection_options
 
 
 PREFIX = "agent-memory-"
@@ -83,6 +83,7 @@ def recall(graph, project, limit=5):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--database", default="company_demo")
     subparsers = parser.add_subparsers(dest="command", required=True)
     write = subparsers.add_parser("remember", help="record a decision and source in an existing project")
@@ -93,7 +94,8 @@ def main(argv=None):
     read.add_argument("--limit", type=int, default=5)
     args = parser.parse_args(argv)
     try:
-        with connect(args.uri, args.database, auth=auth_from_env(), connection_timeout=5) as graph:
+        uri, config = bolt_connection_options(args.uri, args.tls_ca)
+        with connect(uri, args.database, auth=auth_from_env(), connection_timeout=5, **config) as graph:
             if args.command == "remember":
                 result = remember(graph, args.project, args.title, args.body, args.source_title, args.source_url)
             else:

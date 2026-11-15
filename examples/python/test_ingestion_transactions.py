@@ -178,7 +178,7 @@ class IngestionTransactionTests(unittest.TestCase):
              mock.patch.object(syncer, "release", release), \
              mock.patch.object(syncer, "ProcessPoolExecutor", return_value=pool):
             try:
-                value = syncer.sync(MAPPING, lake_target="synthetic", uri="bolt://unused", database="demo",
+                value = syncer.sync(MAPPING, lake_target="synthetic", uri="bolt://127.0.0.1:7687", database="demo",
                                     source_id="source", source_identity="catalog-v1", workers=1)
             except BaseException:
                 self.assertEqual(release.call_count, 0, "failed runs must retain their source lease")

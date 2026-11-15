@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"label": "Project", "entity_id": "platform-release", "properties": {"name": "Platform release"}},
+    {"label": "Decision", "entity_id": "bounded-retries", "properties": {"title": "Bound retries", "approved": true}}
+  ],
+  "relationships": [
+    {"type": "HAS_DECISION", "source_id": "platform-release", "target_id": "bounded-retries",
+     "properties": {"position": 1, "confidence": 0.9}}
+  ]
+}

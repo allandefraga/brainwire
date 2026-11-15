@@ -7,7 +7,7 @@ import argparse
 import json
 
 from brainwire import connect, search_context, trace_paths
-from examples.python.connection import auth_from_env
+from examples.python.connection import auth_from_env, bolt_connection_options
 
 
 def seed(graph):
@@ -45,16 +45,21 @@ def read_context(graph):
             "note": "Fixture provider, not text or vector search. Scope is unordered; reads use separate snapshots."}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--database", default="company_demo")
     parser.add_argument("--seed", action="store_true", help="upsert synthetic records into a disposable graph")
-    args = parser.parse_args()
-    with connect(args.uri, args.database, auth=auth_from_env(), connection_timeout=5) as graph:
-        if args.seed:
-            seed(graph)
-        print(json.dumps(read_context(graph), indent=2, ensure_ascii=False))
+    args = parser.parse_args(argv)
+    try:
+        uri, config = bolt_connection_options(args.uri, args.tls_ca)
+        with connect(uri, args.database, auth=auth_from_env(), connection_timeout=5, **config) as graph:
+            if args.seed:
+                seed(graph)
+            print(json.dumps(read_context(graph), indent=2, ensure_ascii=False))
+    except ValueError as error:
+        parser.exit(2, f"{error}\n")
 
 
 if __name__ == "__main__":

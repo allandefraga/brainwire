@@ -47,19 +47,30 @@ def ingest(driver, database, rows, batch_size=250):
     return committed
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file")
     parser.add_argument("--database", default="customers")
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--batch-size", type=int, default=250)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.batch_size <= 0:
         parser.error("batch-size must be positive")
     if __package__:
-        from .connection import auth_from_env
+        from .connection import auth_from_env, bolt_connection_options
     else:
-        from connection import auth_from_env
-    with open(args.file) as stream, GraphDatabase.driver(args.uri, auth=auth_from_env(), liveness_check_timeout=30) as driver:
+        from connection import auth_from_env, bolt_connection_options
+    try:
+        uri, options = bolt_connection_options(args.uri, args.tls_ca)
+    except ValueError as error:
+        parser.error(str(error))
+    with open(args.file) as stream, GraphDatabase.driver(
+        uri, auth=auth_from_env(), liveness_check_timeout=30, **options
+    ) as driver:
         total = ingest(driver, args.database, read_rows(stream), args.batch_size)
     print(f"Committed {total} input rows to {args.database}; repeated IDs update existing nodes.")
+
+
+if __name__ == "__main__":
+    main()

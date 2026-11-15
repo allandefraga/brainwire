@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "nodes": {
+    "Project": {
+      "name": {"type": "string", "required": true}
+    },
+    "Decision": {
+      "title": {"type": "string", "required": true},
+      "approved": {"type": "boolean", "required": true}
+    }
+  },
+  "relationships": {
+    "HAS_DECISION": {
+      "from": "Project",
+      "to": "Decision",
+      "properties": {
+        "position": {"type": "integer", "required": true},
+        "confidence": {"type": "float", "nullable": true}
+      }
+    }
+  }
+}

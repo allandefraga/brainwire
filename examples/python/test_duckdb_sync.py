@@ -1,5 +1,7 @@
 """DuckDB snapshots and resumable batch planning, using real local files."""
+from contextlib import redirect_stderr
 import importlib.util
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +12,28 @@ from examples.python.ducklake_sync import Mapping
 
 
 MAPPING = Mapping.from_json({'table': 'items', 'label': 'Item', 'id': 'id', 'properties': ['value']})
+
+
+class DuckDBCli(unittest.TestCase):
+    def test_remote_plaintext_is_refused_before_authorization_or_connection(self):
+        with patch.object(sync, 'auth_from_env') as auth, patch.object(sync, '_driver') as driver, \
+                redirect_stderr(io.StringIO()) as stderr, self.assertRaises(SystemExit) as failure:
+            sync.main(['mapping.json', '--source', 'source.duckdb', '--journal', 'journal.sqlite',
+                       '--database', 'demo', '--source-id', 'demo', '--source-identity', 'source-v1',
+                       '--uri', 'bolt://192.0.2.1:7687'])
+        self.assertEqual(failure.exception.code, 2)
+        self.assertIn('verified TLS', stderr.getvalue())
+        auth.assert_not_called()
+        driver.assert_not_called()
+
+    def test_sync_refuses_remote_plaintext_before_authorization_or_connection(self):
+        with patch.object(sync, 'auth_from_env') as auth, patch.object(sync, '_driver') as driver, \
+                self.assertRaisesRegex(ValueError, 'verified TLS'):
+            sync.sync(MAPPING, source='source.duckdb', journal='journal.sqlite',
+                      database='demo', source_id='demo', source_identity='source-v1',
+                      exclusive=True, uri='bolt://192.0.2.1:7687')
+        auth.assert_not_called()
+        driver.assert_not_called()
 
 
 @unittest.skipUnless(importlib.util.find_spec('duckdb'), 'DuckDB is optional')
@@ -110,7 +134,7 @@ class DuckDBSnapshots(unittest.TestCase):
                                             pending, 'contract'), 1)
 
     def test_source_id_is_bounded_in_utf8_before_looking_up_checkpoint(self):
-        options = dict(source=self.source, journal=self.journal, uri='unreachable', database='test',
+        options = dict(source=self.source, journal=self.journal, uri='bolt://127.0.0.1:7687', database='test',
                        source_identity='synthetic', exclusive=True)
         for too_large in ('x' * 1025, 'ó' * 512 + 'x'):
             with self.assertRaisesRegex(ValueError, '1024 UTF-8 bytes'):

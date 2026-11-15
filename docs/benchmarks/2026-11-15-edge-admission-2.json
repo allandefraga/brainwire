@@ -1,0 +1,125 @@
+{
+  "binaries": {
+    "baseline": {
+      "version": "brainwire 0.23.0-beta.2",
+      "sha256": "74ce04e199dac5bc505e79a622d4e023550bfa749231dc5476155c5263394a5f"
+    },
+    "candidate": {
+      "version": "brainwire 0.23.0-beta.2",
+      "sha256": "ebb310f93550f33eaa5de3e300801b83f883231ebef8e6a4d0e0b994337b178d"
+    }
+  },
+  "environment": {
+    "system": "Darwin",
+    "release": "27.2.0",
+    "machine": "arm64",
+    "bolt_driver": "5.28.4",
+    "memory": {
+      "BRAINWIRE_MEMORY_CACHE": "64MiB",
+      "BRAINWIRE_MEMORY_MEMTABLES": "4MiB",
+      "BRAINWIRE_MEMORY_QUERY": "16MiB",
+      "BRAINWIRE_MEMORY_LIMIT": "2GiB"
+    }
+  },
+  "method": "Loopback Bolt round-trip and autocommit. Two temporary local stores; one request at a time; alternating binary order; workloads run sequentially. Nearest-rank p95. One synthetic edge per case; shared host; no concurrency or capacity claims.",
+  "warmup_per_binary_per_case": 20,
+  "samples_per_binary_per_case": 100,
+  "results": [
+    {
+      "operation": "pair_merge",
+      "payload_bytes": 64,
+      "baseline": {
+        "p50_ms": 0.482042,
+        "p95_ms": 0.611875
+      },
+      "candidate": {
+        "p50_ms": 0.4943545,
+        "p95_ms": 0.608166
+      }
+    },
+    {
+      "operation": "pair_set",
+      "payload_bytes": 64,
+      "baseline": {
+        "p50_ms": 0.486146,
+        "p95_ms": 0.6285
+      },
+      "candidate": {
+        "p50_ms": 0.480354,
+        "p95_ms": 0.618667
+      }
+    },
+    {
+      "operation": "keyed_merge",
+      "payload_bytes": 64,
+      "baseline": {
+        "p50_ms": 0.503854,
+        "p95_ms": 0.617541
+      },
+      "candidate": {
+        "p50_ms": 0.499521,
+        "p95_ms": 0.59525
+      }
+    },
+    {
+      "operation": "keyed_set",
+      "payload_bytes": 64,
+      "baseline": {
+        "p50_ms": 0.4750835,
+        "p95_ms": 0.563333
+      },
+      "candidate": {
+        "p50_ms": 0.4790215,
+        "p95_ms": 0.541667
+      }
+    },
+    {
+      "operation": "pair_merge",
+      "payload_bytes": 262144,
+      "baseline": {
+        "p50_ms": 0.784146,
+        "p95_ms": 1.286209
+      },
+      "candidate": {
+        "p50_ms": 0.7295835,
+        "p95_ms": 1.389416
+      }
+    },
+    {
+      "operation": "pair_set",
+      "payload_bytes": 262144,
+      "baseline": {
+        "p50_ms": 0.7515625,
+        "p95_ms": 1.30375
+      },
+      "candidate": {
+        "p50_ms": 0.7436665,
+        "p95_ms": 1.303709
+      }
+    },
+    {
+      "operation": "keyed_merge",
+      "payload_bytes": 262144,
+      "baseline": {
+        "p50_ms": 0.893792,
+        "p95_ms": 1.499292
+      },
+      "candidate": {
+        "p50_ms": 0.843104,
+        "p95_ms": 1.426834
+      }
+    },
+    {
+      "operation": "keyed_set",
+      "payload_bytes": 262144,
+      "baseline": {
+        "p50_ms": 0.785771,
+        "p95_ms": 1.725292
+      },
+      "candidate": {
+        "p50_ms": 0.755916,
+        "p95_ms": 1.527167
+      }
+    }
+  ]
+}

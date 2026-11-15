@@ -1,0 +1,11 @@
+{
+  "version": "1",
+  "nodes": [
+    {"label": "Project", "properties": ["name"]},
+    {"label": "Decision", "properties": ["title", "approved"]}
+  ],
+  "edges": [
+    {"type": "HAS_DECISION", "from": {"label": "Project"}, "to": {"label": "Decision"},
+     "properties": ["position", "confidence"]}
+  ]
+}

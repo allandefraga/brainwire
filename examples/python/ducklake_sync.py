@@ -53,7 +53,7 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 from examples.python.client import GraphClient
-from examples.python.connection import auth_from_env
+from examples.python.connection import auth_from_env, bolt_connection_options
 
 NAME = r"[A-Za-z_][A-Za-z0-9_]{0,127}"
 ACL_OPTIONS = {"allow", "deny", "connectorIds", "sourceTable", "sources"}
@@ -311,9 +311,11 @@ def plain(value):
     raise ValueError(f"unsupported source value type {type(value).__name__}")
 
 
-def _driver(uri, auth):
+def _driver(uri, auth, *, tls_ca=None):
+    endpoint, options = bolt_connection_options(uri, tls_ca)
     from neo4j import GraphDatabase
-    return GraphDatabase.driver(uri, auth=auth)
+
+    return GraphDatabase.driver(endpoint, auth=auth, **options)
 
 
 def _contract_fingerprint(mapping, source_identity, database, principal, require_endpoints):
@@ -368,7 +370,8 @@ def sync_partition(job):
     mapping, start, end = job["mapping"], job["start"], job["end"]
     upserted = deleted = skipped = 0
     strict = job.get("require_endpoints", True)
-    with lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con, _driver(job["uri"], job["auth"]) as driver:
+    with _driver(job["uri"], job["auth"], tls_ca=job.get("tls_ca")) as driver, \
+            lake(job["lake"], load=job["load"], init_sql=job["init_sql"]) as con:
         client = _ConflictRetryClient(driver, job["database"], lease=job["lease"], batch_size=job["batch_size"])
         upserts, deletes = [], []
         for key, row in read_partition(con, mapping, start, end, job["workers"], job["worker"]):
@@ -447,7 +450,7 @@ def release(session, source_id, run_id, start, end=None, *, contract_fingerprint
 
 def sync(mapping, *, lake_target, uri, database, source_id, source_identity, workers=10, batch_size=500,
          to_snapshot=None, full=False, prune=False, break_lease=False, load=("ducklake", "sqlite"),
-         init_sql=None, require_endpoints=True):
+         init_sql=None, require_endpoints=True, tls_ca=None):
     """Synchronize one mapped table; return a summary dict.
 
     ``prune`` (only with ``full``) then deletes graph keys of this label/type
@@ -455,6 +458,7 @@ def sync(mapping, *, lake_target, uri, database, source_id, source_identity, wor
     history is unavailable. It lists every graph key in one query, bounded by
     the server's ``memory.query``. ``require_endpoints=False`` skips (and
     counts) edge rows whose endpoint node is absent instead of failing the run.
+    Remote Bolt requires verified TLS. Pass ``tls_ca`` for a private PEM CA.
     """
     if type(workers) is not int or not 1 <= workers <= 64:
         raise ValueError("workers must be 1..64")
@@ -467,9 +471,10 @@ def sync(mapping, *, lake_target, uri, database, source_id, source_identity, wor
     _validate_source_id(source_id)
     started = time.monotonic()
     run_id = uuid.uuid4().hex
+    bolt_connection_options(uri, tls_ca)
     auth = auth_from_env()
     contract = _contract_fingerprint(mapping, source_identity, database, auth[0] if auth else None, require_endpoints)
-    with _driver(uri, auth) as driver:
+    with _driver(uri, auth, tls_ca=tls_ca) as driver:
         # Check before claiming a lease or mutating rows: pair deletion would
         # otherwise remove every keyed sibling between the same endpoints.
         _validate_edge_identity(driver, database, mapping)
@@ -487,6 +492,7 @@ def sync(mapping, *, lake_target, uri, database, source_id, source_identity, wor
                 validate(con, mapping, start, end)
             jobs = [{"mapping": mapping, "start": start, "end": end, "workers": workers, "worker": k,
                      "lake": lake_target, "load": tuple(load), "init_sql": init_sql, "uri": uri, "auth": auth,
+                     "tls_ca": tls_ca,
                      "database": database, "batch_size": batch_size, "lease": lease,
                      "require_endpoints": require_endpoints} for k in range(workers)]
             # spawn, not fork: callers may run several syncs from threads with live drivers.
@@ -515,6 +521,7 @@ def main(argv=None):
     parser.add_argument("--source-id", required=True, help="stable cursor name for this table+mapping")
     parser.add_argument("--source-identity", required=True, help="stable identifier for this catalog generation, without a path or credentials")
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument("--to-snapshot", type=int, help="default: latest source snapshot")
@@ -526,13 +533,17 @@ def main(argv=None):
     parser.add_argument("--load", default="ducklake,sqlite", help="DuckDB extensions to LOAD (already installed)")
     parser.add_argument("--init-sql", help="SQL file run before ATTACH, e.g. CREATE SECRET for object storage")
     args = parser.parse_args(argv)
+    try:
+        bolt_connection_options(args.uri, args.tls_ca)
+    except ValueError as error:
+        parser.error(str(error))
     with open(args.mapping) as stream:
         mapping = Mapping.from_json(json.load(stream))
     init_sql = open(args.init_sql).read() if args.init_sql else None
     summary = sync(mapping, lake_target=args.lake, uri=args.uri, database=args.database,
                    source_id=args.source_id, source_identity=args.source_identity, workers=args.workers, batch_size=args.batch_size,
                    to_snapshot=args.to_snapshot, full=args.full, prune=args.prune, require_endpoints=not args.allow_missing_endpoints, break_lease=args.break_lease,
-                   load=tuple(filter(None, args.load.split(","))), init_sql=init_sql)
+                   load=tuple(filter(None, args.load.split(","))), init_sql=init_sql, tls_ca=args.tls_ca)
     print(json.dumps(summary))
     return 0
 

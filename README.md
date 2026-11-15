@@ -115,6 +115,14 @@ The connected TUI is read-only; it shows schema, indexes, memory diagnostics
 and a bounded relationship sample. Add `--lang pt-BR` for Portuguese.
 [Explore the TUI](docs/connected-status.md).
 
+### Define a metric
+
+Give an agent a named, read-only question such as “how many decisions can I
+see?” The [semantic metrics example](docs/semantic-metrics.md) defines
+`count`, `sum` and `avg` over one node type and can group by a declared field.
+It uses the caller's graph permissions. This is a bounded Python example, not
+a complete MetricFlow implementation.
+
 To stop the demo while keeping its volume:
 
 ```sh
@@ -130,6 +138,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 | DuckLake | Load a mapped table and apply changes between pinned versions. [DuckLake sync](docs/parallel-ingestion.md#ducklake-full-load-then-incremental) |
 | Obsidian | Preview a small Markdown vault and import notes and wikilinks once into an empty graph. [Obsidian example](examples/obsidian/README.md) |
 | Python code | Extract local Python structure and trace source links. [Code graph example](docs/code-graph.md) |
+| Typed batches | Validate a small JSON batch before writing it. [Typed ingestion example](examples/typed_ingest/README.md) |
 
 ## How it works
 
@@ -194,6 +203,7 @@ Brainwire is an experimental beta. Plan a controlled trial:
 
 - **Memory:** budgets and sampled RSS/cgroup admission can refuse growing queries under pressure. They are partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
 - **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
+- **Types and metrics:** typed ingestion is client-side validation, not a database constraint. Named metrics are a limited Python example, not full semantic-model compatibility.
 - **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
 - **Ingestion:** DuckDB snapshot sync needs a private persistent journal and exclusive ownership of mapped IDs. DuckLake fencing covers cooperating standalone writers; neither sync provides a graph-wide atomic cutover.
 - **Security:** shared deployments need a service-token policy and verified encryption. Optional native Bolt TLS requires a server certificate, a matching private key and client trust configuration. Rotate the server certificate by restarting. [Protected transport](docs/protected-transport.md)

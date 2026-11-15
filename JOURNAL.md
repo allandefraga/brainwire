@@ -29,6 +29,22 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: semantic examples and safer relationship writes
+
+- Added named read-only metric and typed-batch examples. Metric authorization
+  follows the reader's graph permissions; batch typing is client-side only.
+- Added a relationship merge-key inspection helper. Keyed types must be
+  declared before writing; checking the catalog is not an atomic write guard.
+- Added admission before decoding existing edge payloads and avoided copying
+  endpoint properties for relationship existence checks. Synthetic Bolt tests
+  cover refusal, rollback and recovery; this does not establish an RSS ceiling.
+- Protected example and ingestion entrypoints from plaintext remote Bolt;
+  verified DuckLake subprocesses use the configured private CA.
+- A synthetic consumer pilot exposed a timeline type declared without its key;
+  a separate client-side correction was tested outside this repository.
+- Next: qualify types enforced by the engine, larger representative pressure
+  workloads and multi-machine failover before making production claims.
+
 ## 2026-11-15: native Bolt TLS and mixed-load recovery
 
 - Added optional TLS-only Bolt transport and verified server identity in the

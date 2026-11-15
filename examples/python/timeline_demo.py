@@ -240,6 +240,7 @@ def main(argv=None):
     parser.add_argument("--occurred-at")
     parser.add_argument("--payload-json", default="{}")
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--database")
     args = parser.parse_args(argv)
     if args.print_ontology:
@@ -248,8 +249,12 @@ def main(argv=None):
     if not all((args.database, args.subject_id, args.event_key, args.kind, args.occurred_at)):
         parser.error("recording requires --database, --subject-id, --event-key, --kind and --occurred-at")
     from neo4j import GraphDatabase
-    from examples.python.connection import auth_from_env
-    with GraphDatabase.driver(args.uri, auth=auth_from_env()) as driver:
+    from examples.python.connection import auth_from_env, bolt_connection_options
+    try:
+        uri, options = bolt_connection_options(args.uri, args.tls_ca)
+    except ValueError as error:
+        parser.error(str(error))
+    with GraphDatabase.driver(uri, auth=auth_from_env(), **options) as driver:
         identity = record_event(driver, args.database, (args.subject_label, args.subject_id),
                                 args.event_key, args.kind, args.occurred_at, json.loads(args.payload_json))
     print(identity)

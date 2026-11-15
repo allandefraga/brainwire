@@ -25,6 +25,13 @@ specific Bolt endpoint or graph with `--uri` and `--database`. Configure
 credentials as described in the [Python guide](../../docs/python-client.md)
 when the server requires them.
 
+For a remote server, use `--uri bolt+s://db.example:7687` to verify its
+certificate with the system trust store. For a private CA, use
+`--uri bolt://db.example:7687 --tls-ca /path/to/ca.pem`. The certificate must
+match the hostname or IP in the URI. Plaintext Bolt is limited to loopback,
+including SSH tunnels or forwarded ports on `127.0.0.1` or `::1`.
+Plaintext `localhost` resolves directly to `127.0.0.1` in this example.
+
 The fixture provider returns two predefined IDs and performs no semantic or
 keyword search. Replace it with an application-managed provider. Scope and
 context reads use separate snapshots, and the scope does not replace ACLs.

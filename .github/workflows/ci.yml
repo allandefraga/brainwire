@@ -94,6 +94,7 @@ jobs:
           python -m unittest discover -s examples/python -p 'test_*.py'
           python -m unittest discover -s examples/source_ingestion -p 'test_*.py'
           python -m unittest examples.obsidian.test_import_vault
+          python -m unittest examples.semantic_metrics.test_metrics examples.typed_ingest.test_ingest
 
       - name: Test local release versioning
         run: python -m unittest discover -s scripts -p 'test_*.py'
@@ -117,6 +118,15 @@ jobs:
 
       - name: Verify native Bolt TLS and recovery
         run: python crates/server/tests/native_bolt_tls.py --binary target/debug/brainwire
+
+      - name: Verify semantic examples and graph visibility
+        run: |
+          python -m examples.semantic_metrics.acceptance --binary target/debug/brainwire
+          python -m examples.typed_ingest.acceptance --binary target/debug/brainwire
+          python -m examples.python.ducklake_tls_acceptance --binary target/debug/brainwire
+
+      - name: Verify edge write memory admission and recovery
+        run: python crates/server/tests/edge_write_memory.py --binary target/debug/brainwire
 
       - name: Verify native TLS Compose configuration
         run: python crates/server/tests/native_tls_compose_config.py

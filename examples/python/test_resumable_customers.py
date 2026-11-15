@@ -1,12 +1,30 @@
 """Run: python3 -m unittest discover -s examples/python -p test_resumable_customers.py"""
 
+from contextlib import redirect_stderr
 import copy
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import resumable_customers as importer
+
+
+class CustomerCli(unittest.TestCase):
+    def test_ingestion_clis_refuse_remote_plaintext_before_authorization_or_connection(self):
+        from examples.python import ingest_customers, resumable_customers
+
+        for cli, options in ((ingest_customers, []), (resumable_customers, ["--source-id", "test"])):
+            with self.subTest(cli=cli), patch("examples.python.connection.auth_from_env") as auth, \
+                    patch("neo4j.GraphDatabase.driver") as driver, redirect_stderr(io.StringIO()) as stderr, \
+                    self.assertRaises(SystemExit) as failure:
+                cli.main(["customers.jsonl", "--uri", "bolt://192.0.2.1:7687", *options])
+            self.assertEqual(failure.exception.code, 2)
+            self.assertIn("verified TLS", stderr.getvalue())
+            auth.assert_not_called()
+            driver.assert_not_called()
 
 
 class Result:

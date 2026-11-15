@@ -6,6 +6,9 @@ Needs duckdb with cached ducklake/sqlite extensions; skips otherwise:
 import contextlib
 import datetime
 import decimal
+import importlib.util
+import io
+import pickle
 import tempfile
 import unittest
 from dataclasses import replace
@@ -27,6 +30,41 @@ EDGES = Mapping.from_json({"table": "main.follows", "type": "FOLLOWS",
                            "target": {"label": "Customer", "column": "dst"},
                            "properties": ["weight"]})
 EDGE_SIGNATURE = {"name": "FOLLOWS", "source": "Customer", "target": "Customer"}
+
+
+class DuckLakeCli(unittest.TestCase):
+    def test_remote_plaintext_is_refused_before_authorization_or_connection(self):
+        with patch.object(ducklake_sync, "auth_from_env") as auth, \
+                patch.object(ducklake_sync, "_driver") as driver, \
+                contextlib.redirect_stderr(io.StringIO()) as stderr, self.assertRaises(SystemExit) as failure:
+            ducklake_sync.main(["mapping.json", "--lake", "lake", "--database", "demo",
+                                "--source-id", "demo", "--source-identity", "source-v1",
+                                "--uri", "bolt://192.0.2.1:7687"])
+        self.assertEqual(failure.exception.code, 2)
+        self.assertIn("verified TLS", stderr.getvalue())
+        auth.assert_not_called()
+        driver.assert_not_called()
+
+    def test_sync_refuses_remote_plaintext_before_authorization_or_connection(self):
+        with patch.object(ducklake_sync, "auth_from_env") as auth, \
+                patch.object(ducklake_sync, "_driver") as driver, self.assertRaisesRegex(ValueError, "verified TLS"):
+            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://192.0.2.1:7687", database="demo",
+                               source_id="demo", source_identity="source-v1")
+        auth.assert_not_called()
+        driver.assert_not_called()
+
+    @unittest.skipIf(importlib.util.find_spec("neo4j") is None, "Bolt driver is optional")
+    def test_worker_rejects_insecure_endpoint_and_driver_override(self):
+        auth = ("writer", "test")
+        with patch("neo4j.GraphDatabase.driver") as driver, patch.object(ducklake_sync, "lake") as lake:
+            with self.assertRaisesRegex(ValueError, "verified TLS"):
+                ducklake_sync.sync_partition({"mapping": NODES, "start": None, "end": 1,
+                                             "uri": "bolt://192.0.2.1:7687", "auth": auth,
+                                             "driver_options": {"encrypted": False}})
+            with self.assertRaises(TypeError):
+                ducklake_sync._driver("bolt+s://graph.example:7687", auth, encrypted=False)
+            driver.assert_not_called()
+            lake.assert_not_called()
 
 
 class CheckpointContractTest(unittest.TestCase):
@@ -79,7 +117,7 @@ class CheckpointContractTest(unittest.TestCase):
                          patch.object(ducklake_sync, "auth_from_env", return_value=None), \
                          patch.object(ducklake_sync, "lake") as source:
                         with self.assertRaisesRegex(RuntimeError, "contract"):
-                            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://unused", database="demo",
+                            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://127.0.0.1:7687", database="demo",
                                                source_id="source", source_identity="catalog-v1",
                                                workers=1, full=full, break_lease=True)
                     tx.run.assert_called_once()
@@ -117,7 +155,7 @@ class CheckpointContractTest(unittest.TestCase):
         for mapping in mappings:
             with self.subTest(mapping=mapping), patch.object(ducklake_sync, "_driver") as driver:
                 with self.assertRaisesRegex(ValueError, "ImportCheckpoint"):
-                    ducklake_sync.sync(mapping, lake_target="lake", uri="bolt://unused",
+                    ducklake_sync.sync(mapping, lake_target="lake", uri="bolt://127.0.0.1:7687",
                                        database="demo", source_id="source", source_identity="catalog-v1")
                 driver.assert_not_called()
 
@@ -125,7 +163,7 @@ class CheckpointContractTest(unittest.TestCase):
         for source in (None, "", "\ud800", "é" * 513):
             with self.subTest(source=source), patch.object(ducklake_sync, "_driver") as driver:
                 with self.assertRaisesRegex(ValueError, "source_id.*1024 UTF-8 bytes"):
-                    ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://unused",
+                    ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://127.0.0.1:7687",
                                        database="demo", source_id=source, source_identity="catalog-v1")
                 driver.assert_not_called()
         ducklake_sync._validate_source_id("é" * 512)
@@ -294,7 +332,7 @@ class EdgeIdentityTest(unittest.TestCase):
                     patch.object(ducklake_sync, "lake") as source, \
                     patch.object(ducklake_sync, "ProcessPoolExecutor") as pool:
                 with self.assertRaisesRegex(ValueError, "keyed relationship"):
-                    ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
+                    ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://127.0.0.1:7687",
                                        database="demo", source_id="edges", source_identity="catalog-v1", workers=1,
                                        full=prune, prune=prune)
                 claim.assert_not_called()
@@ -306,7 +344,7 @@ class EdgeIdentityTest(unittest.TestCase):
                 patch.object(ducklake_sync.GraphClient, "schema", side_effect=RuntimeError("schema unavailable")), \
                 patch.object(ducklake_sync, "claim") as claim:
             with self.assertRaisesRegex(RuntimeError, "schema unavailable"):
-                ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
+                ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://127.0.0.1:7687",
                                    database="demo", source_id="edges", source_identity="catalog-v1", workers=1)
             claim.assert_not_called()
 
@@ -326,7 +364,7 @@ class EdgeIdentityTest(unittest.TestCase):
                     patch.object(ducklake_sync, "claim") as claim, \
                     patch.object(ducklake_sync, "lake") as source:
                 with self.assertRaisesRegex(ValueError, "not visible"):
-                    ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://unused",
+                    ducklake_sync.sync(EDGES, lake_target="lake", uri="bolt://127.0.0.1:7687",
                                        database="demo", source_id="edges", source_identity="catalog-v1", workers=1)
                 claim.assert_not_called()
                 source.assert_not_called()
@@ -354,6 +392,37 @@ class EdgeIdentityTest(unittest.TestCase):
 
 
 class PruneBatchTest(unittest.TestCase):
+    @unittest.skipIf(importlib.util.find_spec("neo4j") is None, "Bolt driver is optional")
+    def test_private_ca_options_survive_spawn_and_reach_worker_driver(self):
+        from neo4j import TrustCustomCAs
+
+        endpoint = "bolt://graph.example:7687"
+        driver = Mock()
+        driver.session.side_effect = lambda **kwargs: contextlib.nullcontext(None)
+        with patch.object(ducklake_sync, "_driver", return_value=contextlib.nullcontext(driver)) as driver_factory, \
+                patch.object(ducklake_sync, "auth_from_env", return_value=("writer", "test")), \
+                patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(None)), \
+                patch.object(ducklake_sync, "claim", return_value=7), \
+                patch.object(ducklake_sync, "validate"), \
+                patch.object(ducklake_sync, "ProcessPoolExecutor") as executor, \
+                patch.object(ducklake_sync, "release"):
+            ducklake_sync.sync(NODES, lake_target="lake", uri=endpoint, database="demo",
+                               source_id="source", source_identity="catalog-v1", to_snapshot=8,
+                               workers=1, tls_ca="ca.pem")
+        driver_factory.assert_called_once_with(endpoint, ("writer", "test"), tls_ca="ca.pem")
+        _, (job,) = executor.return_value.__enter__.return_value.map.call_args.args
+        job = pickle.loads(pickle.dumps(job))
+        with patch("neo4j.GraphDatabase.driver", return_value=contextlib.nullcontext(driver)) as driver_factory, \
+                patch.object(ducklake_sync, "lake", return_value=contextlib.nullcontext(None)), \
+                patch.object(ducklake_sync, "read_partition", return_value=()):
+            ducklake_sync.sync_partition(job)
+        self.assertEqual(driver_factory.call_args.args, (endpoint,))
+        self.assertEqual(driver_factory.call_args.kwargs["auth"], ("writer", "test"))
+        self.assertIs(driver_factory.call_args.kwargs["encrypted"], True)
+        ca = driver_factory.call_args.kwargs["trusted_certificates"]
+        self.assertIsInstance(ca, TrustCustomCAs)
+        self.assertEqual(ca.certs, ("ca.pem",))
+
     def test_full_run_uses_persisted_cursor_for_workers_and_prune(self):
         driver = Mock()
         driver.session.side_effect = lambda **kwargs: contextlib.nullcontext(None)
@@ -364,7 +433,7 @@ class PruneBatchTest(unittest.TestCase):
                 patch.object(ducklake_sync, "ProcessPoolExecutor") as executor, \
                 patch.object(ducklake_sync, "_prune", return_value=0) as prune, \
                 patch.object(ducklake_sync, "release") as release:
-            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://unused", database="demo",
+            ducklake_sync.sync(NODES, lake_target="lake", uri="bolt://127.0.0.1:7687", database="demo",
                                source_id="source", source_identity="catalog-v1", to_snapshot=8,
                                workers=2, full=True, prune=True)
         lease = ducklake_sync._Lease("source", claim.call_args.args[2], 7,

@@ -1,5 +1,11 @@
 # Sync a DuckDB table
 
+Remote Bolt connections require verified TLS. Use `bolt+s://` with a trusted
+system CA, or keep a `bolt://` URI and pass `--tls-ca /path/to/ca.pem` for a
+private CA. Loopback and SSH tunnels remain available without TLS. The journal
+identifies the destination by its original URI: to resume an existing journal,
+keep that URI and add `--tls-ca` instead of changing the URI scheme.
+
 The example `examples.python.duckdb_sync` imports one **base table from a local
 DuckDB file** into one standalone Brainwire graph. Its first run loads the
 snapshot; later runs compare a new snapshot with the last confirmed one and

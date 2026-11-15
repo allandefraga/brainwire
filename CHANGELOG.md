@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add a bounded Python example for named graph metrics and a separate typed
+  batch validator. These are client-side tools, not database constraints or a
+  complete semantic modeling engine.
+- Expose a read-only relationship merge-key check for clients that require
+  distinct events between the same endpoints.
+- Admit existing relationship payloads against the query budget before
+  decoding them during writes, and avoid copying endpoint properties that
+  relationship existence checks do not use.
+- Require verified TLS for remote connections in the agent examples; local
+  tunnels and loopback development remain available.
+
 ## 0.23.0-beta.2 — experimental candidate
 
 - Clarify the release history for the native TLS candidate.

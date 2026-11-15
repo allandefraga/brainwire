@@ -689,24 +689,9 @@ fn apply_props(row: &mut Row, columns: &[Column], props: &BTreeMap<String, Value
 /// another transaction cannot make the caller's commit conflict. Callers that
 /// only need the node to still exist *right now* to check a name or format a
 /// value, and are not relying on it staying that way until they commit,
-/// should use this. `merge_edge`'s existence check must not use this — see
-/// `read_node_for_update`.
+/// should use this. Relationship writes must track endpoint dependencies.
 fn read_node(txn: &Txn, id: NodeId) -> Result<Option<(String, Row)>, GraphError> {
     match txn.get(Cf::Node, &node_key(id))? {
-        Some(bytes) => Ok(Some(decode_node(&bytes)?)),
-        None => Ok(None),
-    }
-}
-
-/// Same read, but through `get_for_update`: the node key becomes a tracked
-/// dependency of the transaction, so if another transaction writes that key
-/// (a `detach_delete` of this same node, in particular) and commits first,
-/// the caller's own commit conflicts instead of proceeding as if the node
-/// were still there (spec 1.4, first committer wins; rule carried from the
-/// Task 7/8 reviews into this task's dispatch). `merge_edge` relies on this
-/// for both of its endpoints.
-fn read_node_for_update(txn: &mut Txn, id: NodeId) -> Result<Option<(String, Row)>, GraphError> {
-    match txn.get_for_update(Cf::Node, &node_key(id))? {
         Some(bytes) => Ok(Some(decode_node(&bytes)?)),
         None => Ok(None),
     }
@@ -1388,15 +1373,38 @@ pub fn merge_edge(
     dst: NodeId,
     props: &BTreeMap<String, Value>,
 ) -> Result<(), GraphError> {
+    merge_edge_with_control(txn, catalog, src, edge_type, dst, props, None)
+}
+
+type EdgeWriteControl<'a, E> = Option<&'a mut dyn FnMut(usize) -> Result<(), E>>;
+
+/// Merge an unkeyed relationship, allowing admission before decoding its old row.
+pub fn merge_edge_with_control<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    catalog: &Catalog,
+    src: NodeId,
+    edge_type: &str,
+    dst: NodeId,
+    props: &BTreeMap<String, Value>,
+    control: EdgeWriteControl<'_, E>,
+) -> Result<(), E> {
     let et = catalog
         .edge_type(edge_type)
         .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
     if !et.merge_key_fields.is_empty() {
-        return Err(GraphError::Catalog(
-            "keyed relationships require merge_keyed_edge".into(),
-        ));
+        return Err(
+            GraphError::Catalog("keyed relationships require merge_keyed_edge".into()).into(),
+        );
     }
-    write_edge(txn, catalog, src, edge_type, dst, EdgeId::MERGED, props)
+    write_edge(
+        txn,
+        catalog.version,
+        et,
+        (src, dst, EdgeId::MERGED),
+        props,
+        false,
+        control,
+    )
 }
 
 pub(crate) fn row_property<'a>(row: &'a Row, ty: &EdgeType, name: &str) -> Option<&'a Value> {
@@ -1513,11 +1521,6 @@ pub fn merge_keyed_edge<E: From<GraphError> + From<StoreError>>(
                     )
                     .into());
                 }
-                // write_edge decodes the matching row to preserve unrelated properties.
-                control(
-                    lookup_bytes
-                        .saturating_add(estimate_row_allocation(bytes).map_err(StoreError::from)?),
-                )?;
                 let (_, _, _, id) = decode_edge_key(key).map_err(GraphError::from)?;
                 found = Some((source, target, id));
             }
@@ -1545,7 +1548,15 @@ pub fn merge_keyed_edge<E: From<GraphError> + From<StoreError>>(
         Some(found) => found,
         None => (src, dst, txn.next_edge_id()?),
     };
-    write_edge(txn, catalog, source, edge_type, target, id, props)?;
+    write_edge(
+        txn,
+        catalog.version,
+        ty,
+        (source, target, id),
+        props,
+        !created,
+        Some(&mut control),
+    )?;
     Ok((source, target, id, created))
 }
 
@@ -1559,61 +1570,86 @@ pub fn update_edge_with_id(
     id: EdgeId,
     props: &BTreeMap<String, Value>,
 ) -> Result<(), GraphError> {
-    let et = catalog
-        .edge_type(edge_type)
-        .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
-    if txn
-        .get_for_update(Cf::Out, &edge_key(src, et.id, dst, id))?
-        .is_none()
-    {
-        return Err(GraphError::Catalog("relationship no longer exists".into()));
-    }
-    write_edge(txn, catalog, src, edge_type, dst, id, props)
+    update_edge_with_control(txn, catalog, edge_type, (src, dst, id), props, None)
 }
 
-fn write_edge(
+/// Update one physical relationship, allowing admission before decoding its old row.
+pub fn update_edge_with_control<E: From<GraphError> + From<StoreError>>(
     txn: &mut Txn,
     catalog: &Catalog,
-    src: NodeId,
     edge_type: &str,
-    dst: NodeId,
-    id: EdgeId,
+    edge: (NodeId, NodeId, EdgeId),
     props: &BTreeMap<String, Value>,
-) -> Result<(), GraphError> {
-    check_props(props)?;
+    control: EdgeWriteControl<'_, E>,
+) -> Result<(), E> {
     let et = catalog
         .edge_type(edge_type)
         .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
+    write_edge(txn, catalog.version, et, edge, props, true, control)
+}
+
+fn write_edge<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    schema_version: u32,
+    et: &EdgeType,
+    (src, dst, id): (NodeId, NodeId, EdgeId),
+    props: &BTreeMap<String, Value>,
+    must_exist: bool,
+    control: EdgeWriteControl<'_, E>,
+) -> Result<(), E> {
+    check_props(props)?;
     if !et.signatures.contains(&(src.type_id(), dst.type_id())) {
-        return Err(GraphError::BadSignature(edge_type.to_string()));
+        return Err(GraphError::BadSignature(et.name.clone()).into());
     }
-    // Rule carried from the Task 7/8 reviews (spec 1.4, first committer
-    // wins): both endpoints are read `for_update`, not with a plain `get`, so
-    // a concurrent `detach_delete` of either endpoint that commits before
-    // this transaction makes this commit conflict instead of leaving a
-    // dangling edge. See `read_node_for_update`.
-    for id in [src, dst] {
-        if read_node_for_update(txn, id)?.is_none() {
-            return Err(GraphError::NodeNotFound(id));
-        }
+    // Track both endpoint dependencies to conflict with concurrent deletion.
+    // Validate the pinned bytes without decoding unused properties.
+    for endpoint in [src, dst].into_iter().take(if src == dst { 1 } else { 2 }) {
+        let key = endpoint.0.to_be_bytes();
+        txn.depend(Cf::Node, &key);
+        txn.with_get(Cf::Node, &key, |bytes| {
+            let bytes = bytes.ok_or(GraphError::NodeNotFound(endpoint))?;
+            estimate_node_allocation(bytes)?;
+            Ok::<_, E>(())
+        })?;
     }
     let out = edge_key(src, et.id, dst, id);
-    let previous = txn.get_for_update(Cf::Out, &out)?;
-    let mut row = match &previous {
-        Some(bytes) => decode_row(bytes).map_err(StoreError::from)?,
-        None => Row::default(),
-    };
+    txn.depend(Cf::Out, &out);
+    let previous = txn.with_get(Cf::Out, &out, |bytes| {
+        let Some(bytes) = bytes else {
+            return if must_exist {
+                Err(GraphError::Catalog("relationship no longer exists".into()).into())
+            } else {
+                Ok(None)
+            };
+        };
+        if let Some(control) = control {
+            // Admit the stored bytes, owned decode and encoding buffer overlap.
+            // The caller separately budgets the incoming property values.
+            let decoded = estimate_row_allocation(bytes).map_err(StoreError::from)?;
+            let estimate = bytes
+                .len()
+                .checked_mul(4)
+                .and_then(|raw| raw.checked_add(decoded))
+                .ok_or_else(|| {
+                    StoreError::Corrupt("edge write allocation estimate overflow".into())
+                })?;
+            control(estimate)?;
+        }
+        Ok::<_, E>(Some(decode_row(bytes).map_err(StoreError::from)?))
+    })?;
+    let existed = previous.is_some();
+    let mut row = previous.unwrap_or_default();
     for field in &et.merge_key_fields {
         let current = row_property(&row, et, field);
         let supplied = props.get(field);
         let key = supplied.or(current);
         if !matches!(key, Some(Value::Str(value)) if !value.is_empty())
-            || (previous.is_some() && supplied.is_some() && supplied != current)
+            || (existed && supplied.is_some() && supplied != current)
         {
-            return Err(key_error(field));
+            return Err(key_error(field).into());
         }
     }
-    row.schema_version = catalog.version;
+    row.schema_version = schema_version;
     apply_props(&mut row, &et.columns, props);
     if txn.has_relationship_index_format() {
         crate::relationship_index::track_definition(txn, et)?;
@@ -1705,9 +1741,7 @@ pub fn in_edges(txn: &Txn, dst: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
 /// `merge_edge` that adds a *new* edge under this node — one this scan could
 /// not have seen — makes whichever of the two transactions commits second
 /// conflict, instead of the edge surviving with a since-deleted endpoint
-/// (fix round 1, reviewer Critical). `merge_edge`'s own `get_for_update` on
-/// the node key (see `read_node_for_update`) only protects the opposite
-/// commit order; this closes the other half.
+/// `merge_edge`'s endpoint dependency protects the opposite commit order.
 fn edges_for_update(txn: &mut Txn, cf: Cf, node: NodeId) -> Result<Vec<EdgeRef>, GraphError> {
     let mut found = Vec::new();
     txn.visit_prefix_for_update::<GraphError>(cf, &node.0.to_be_bytes(), |key, _| {
@@ -3719,6 +3753,23 @@ mod tests {
             Err(GraphError::NodeNotFound(id)) => assert_eq!(id, ghost),
             other => panic!("expected NodeNotFound, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn merge_edge_refuses_a_corrupt_endpoint_without_staging_the_edge() {
+        let (_d, _r, db, cat) = setup();
+        let (source, target) = seed_customer_and_company(&db, &cat);
+        let mut tx = db.begin();
+        let ty = cat.edge_type("WORKS_AT").unwrap().id;
+        // Valid empty entity-id header, followed by a truncated property row.
+        tx.put(Cf::Node, node_key(target), vec![0, 0, 0, 0, 0]);
+        assert!(matches!(
+            merge_edge(&mut tx, &cat, source, "WORKS_AT", target, &BTreeMap::new()),
+            Err(GraphError::Store(StoreError::Codec(
+                brainwire_core::codec::CodecError::Truncated
+            )))
+        ));
+        assert!(!edge_exists(&tx, (source, ty, target, EdgeId::MERGED)).unwrap());
     }
 
     #[test]

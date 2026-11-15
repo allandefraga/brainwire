@@ -9,7 +9,7 @@ import re
 import stat
 
 from brainwire import connect
-from examples.python.connection import auth_from_env
+from examples.python.connection import auth_from_env, bolt_connection_options
 
 
 MAX_ENTRIES = 2048
@@ -172,6 +172,7 @@ def main(argv=None):
     parser.add_argument("vault", type=Path)
     parser.add_argument("--database", help="write once to the named, dedicated empty graph")
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     args = parser.parse_args(argv)
     if args.database is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", args.database):
         parser.error("--database must be an explicit Brainwire graph name")
@@ -187,7 +188,8 @@ def main(argv=None):
         from neo4j.exceptions import DriverError, Neo4jError
 
         try:
-            with connect(args.uri, args.database, auth=auth_from_env(), connection_timeout=5) as graph:
+            uri, config = bolt_connection_options(args.uri, args.tls_ca)
+            with connect(uri, args.database, auth=auth_from_env(), connection_timeout=5, **config) as graph:
                 import_notes(graph, notes, links)
         except (DriverError, Neo4jError):
             parser.exit(2, "Bolt import failed. Inspect the destination graph before retrying.\n")

@@ -1,5 +1,11 @@
 # Memory defaults in containers
 
+Relationship writes account for the existing relationship payload before
+decoding it. If a write cannot reserve its estimated temporary memory, the
+transaction can be refused instead of materializing that payload. Endpoint
+existence checks avoid copying unused node properties. RocksDB allocations and
+other process memory remain outside this accounting; it is not an RSS ceiling.
+
 `brainwire config show` and every command that loads server configuration use
 host/container-aware defaults for unset memory fields. On Linux, Brainwire reads
 `/proc/self/cgroup` and `/proc/self/mountinfo`, checks the process's cgroup and

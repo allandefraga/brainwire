@@ -91,6 +91,18 @@ from the current graph. On a standalone server, an administrator may also
 declare a new keyed type online with
 `CALL db.createRelationshipType('HAD_EVENT', 'Person', 'Ticket', ['event_type'])`.
 The labels must exist first. Replicated catalog changes are not supported.
+Before enabling a writer, the Python helper can fail closed if the expected
+signature or keys are missing:
+
+```python
+from brainwire import require_relationship_keys
+
+version = require_relationship_keys(graph, "Person", "HAD_EVENT", "Ticket", ["event_type"])
+```
+
+The returned version belongs to the catalog snapshot that was checked. A later
+write uses its own transaction; this check does not fence other clients or
+make catalog validation and writing atomic.
 All writers and voters must support this feature before
 using it. Older versions can ignore its catalog metadata; do not run mixed
 versions or downgrade a keyed graph. Restore a compatible pre-feature backup

@@ -1,6 +1,9 @@
 # Parallel writes and DuckLake synchronization
 
 Python commands below use the environment from [Python setup](python-package.md).
+Remote Bolt connections require verified TLS: use `bolt+s://` with system
+trust or `--tls-ca /path/to/ca.pem` with a `bolt://` URI. DuckLake subprocesses
+use the same CA configuration. Loopback and SSH tunnels remain available.
 For DuckDB/DuckLake commands, install the optional reader in that environment:
 `.venv-brainwire/bin/python -m pip install duckdb==1.5.5`.
 

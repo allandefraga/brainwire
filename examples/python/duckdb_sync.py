@@ -22,7 +22,7 @@ import uuid
 from typing import Optional
 
 from brainwire.client import GraphClient, _acl_options, _entity, _properties, identifier
-from examples.python.connection import auth_from_env
+from examples.python.connection import auth_from_env, bolt_connection_options
 from examples.python.ducklake_sync import (
     Mapping, _contract_fingerprint, _driver, _name, _validate_edge_identity, _validate_source_id, plain,
 )
@@ -300,8 +300,8 @@ def _sync_graph(driver, database, source_id, contract, pending, journal, mapping
 
 def sync(mapping, *, source, journal, uri, database, source_id, source_identity,
          batch_size=250, exclusive=False, authoritative=False, allow_empty_authoritative=False,
-         max_rows=_MAX_ROWS, max_snapshot_bytes=_MAX_SNAPSHOT_BYTES):
-    """Apply changes from one DuckDB file, resuming frozen work before staging new data."""
+         max_rows=_MAX_ROWS, max_snapshot_bytes=_MAX_SNAPSHOT_BYTES, tls_ca=None):
+    """Apply changes from one DuckDB file. Remote Bolt requires verified TLS."""
     if exclusive is not True:
         raise ValueError('--exclusive must confirm this mapping owns all its target identities')
     _validate_source_id(source_id)
@@ -333,11 +333,13 @@ def sync(mapping, *, source, journal, uri, database, source_id, source_identity,
             if control_file == source_file or (control_file.exists() and source_file.exists()
                                                and control_file.samefile(source_file)):
                 raise ValueError('DuckDB source, its WAL and journal files must be separate')
+    bolt_connection_options(uri, tls_ca)
     auth = auth_from_env()
     base = _contract_fingerprint(mapping, source_identity, database, auth[0] if auth else None, True)
     contract = hashlib.sha256(_json(['duckdb-snapshot', _BATCH_PLAN_VERSION, base, source_id,
                                     str(source), uri, authoritative]).encode()).hexdigest()
-    with _journal(journal) as db, _driver(uri, auth) as driver:
+    # Keep the original URI in the journal contract so existing local runs can resume.
+    with _journal(journal) as db, _driver(uri, auth, tls_ca=tls_ca) as driver:
         state = _state(db)
         pending = _pending(db)
         if state and (state[0] != contract or (state[1] is not None and
@@ -370,6 +372,7 @@ def main(argv=None):
     parser.add_argument('--source-id', required=True, help='stable checkpoint name for this mapping')
     parser.add_argument('--source-identity', required=True, help='stable identifier for this source generation')
     parser.add_argument('--uri', default='bolt://127.0.0.1:7687')
+    parser.add_argument('--tls-ca', help='verify Bolt TLS using this PEM CA file')
     parser.add_argument('--batch-size', type=int, default=250)
     parser.add_argument('--max-rows', type=int, default=_MAX_ROWS, help='maximum rows per source snapshot')
     parser.add_argument('--max-snapshot-bytes', type=int, default=_MAX_SNAPSHOT_BYTES,
@@ -378,6 +381,10 @@ def main(argv=None):
     parser.add_argument('--authoritative', action='store_true', help='delete previously owned IDs absent from the table')
     parser.add_argument('--allow-empty-authoritative', action='store_true', help='allow an empty authoritative snapshot')
     args = parser.parse_args(argv)
+    try:
+        bolt_connection_options(args.uri, args.tls_ca)
+    except ValueError as error:
+        parser.error(str(error))
     mapping = Mapping.from_json(json.loads(args.mapping.read_text(encoding='utf-8')))
     options = vars(args)
     del options['mapping']

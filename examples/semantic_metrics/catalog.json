@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "metrics": {
+    "decisions": {
+      "label": "Decision",
+      "aggregation": "count",
+      "dimensions": {"title": "string"},
+      "description": "Number of decisions visible to the caller."
+    },
+    "projects": {
+      "label": "Project",
+      "aggregation": "count",
+      "dimensions": {"name": "string"},
+      "description": "Number of projects visible to the caller."
+    }
+  }
+}

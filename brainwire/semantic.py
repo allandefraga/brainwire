@@ -1,4 +1,4 @@
-"""Bounded exploration of declared ontology paths; no stored-record traversal."""
+"""Inspect declared ontology paths and relationship keys."""
 from collections import deque
 import json
 
@@ -89,6 +89,37 @@ def _catalog(value):
     for outgoing in adjacency.values():
         outgoing.sort(key=lambda relationship: (relationship["name"], relationship["target"]))
     return by_label, adjacency
+
+
+def require_relationship_keys(graph, source_label, relationship, target_label, key_fields):
+    """Return the observed catalog version if a directed signature uses these merge keys.
+
+    Key names and their order must match across every signature of the
+    relationship type. Raises ValueError for a missing signature or an
+    incompatible declaration. Reads one authorized catalog snapshot. A later
+    write uses the catalog available in its own transaction.
+    """
+    source_label, relationship, target_label = map(identifier, (source_label, relationship, target_label))
+    if not isinstance(key_fields, (list, tuple)) or not 1 <= len(key_fields) <= _MAX_ENTRIES:
+        raise ValueError("expected a nonempty list or tuple of relationship merge key names")
+    expected = [identifier(field) for field in key_fields]
+    if len(set(expected)) != len(expected):
+        raise ValueError("expected unique relationship merge key names")
+
+    snapshot = graph.schema()
+    _catalog(snapshot)
+    found = False
+    # The schema path view sorts key names, so compare against the original order.
+    for declaration in snapshot["relationships"]:
+        if declaration["name"] != relationship:
+            continue
+        if declaration.get("mergeKeyFields", []) != expected:
+            raise ValueError(f"relationship type {relationship} does not declare the expected merge keys in order")
+        if declaration["source"] == source_label and declaration["target"] == target_label:
+            found = True
+    if not found:
+        raise ValueError(f"relationship signature {source_label}-[{relationship}]->{target_label} is not declared")
+    return snapshot["version"]
 
 
 def _check_bytes(value, max_bytes):

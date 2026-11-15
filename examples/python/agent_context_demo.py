@@ -11,7 +11,7 @@ import argparse
 import json
 
 from brainwire import connect, schema_paths, search_context, trace_paths
-from examples.python.connection import auth_from_env
+from examples.python.connection import auth_from_env, bolt_connection_options
 
 
 def read_demo(graph):
@@ -47,10 +47,15 @@ def read_demo(graph):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--database", default="demo")
     args = parser.parse_args(argv)
-    with connect(args.uri, args.database, auth=auth_from_env(), connection_timeout=5) as graph:
-        result = read_demo(graph)
+    try:
+        uri, config = bolt_connection_options(args.uri, args.tls_ca)
+        with connect(uri, args.database, auth=auth_from_env(), connection_timeout=5, **config) as graph:
+            result = read_demo(graph)
+    except ValueError as error:
+        parser.exit(2, f"{error}\n")
     print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
     return 0 if result["status"] == "ok" else 1
 

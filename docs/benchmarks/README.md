@@ -5,6 +5,19 @@ raw receipts and reports so a result can be traced to its workload and binary.
 The dates matter: historical results describe those candidates, not the current
 working tree or latest release.
 
+A [three-run local diagnostic](2026-11-15-edge-admission-1.json) (also
+[run 2](2026-11-15-edge-admission-2.json) and
+[run 3](2026-11-15-edge-admission-3.json)) compared relationship write
+admission before and after the memory fix. Both were local debug builds based
+on v0.23.0-beta.2, distinguished by the binary hashes in each receipt. On a
+shared macOS arm64 host, each run used 100 serial loopback Bolt requests per
+case after 20 warmups, alternating binaries. For 256 KiB existing payloads,
+median p95 across the three runs was 1.377 ms before and 1.389 ms after for
+pair `MERGE`; keyed `MERGE` was 1.599 ms before and 1.544 ms after. These are
+small synthetic measurements, not evidence of a general speedup, sustained
+throughput or performance under concurrency. Reproduce with
+`scripts/bench_edge_admission.py` and the two exact binaries.
+
 A [60-minute mixed read/write and restart diagnostic](2026-11-14-mixed-recovery-022b3.json)
 passed against the published v0.22.0-beta.3 image in one local standalone
 2 GiB container. It used 500,000 synthetic nodes and 500,000 relationships,

@@ -21,8 +21,11 @@ def run(binary):
     from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
     from brainwire import connect
+    from examples.python.agent_memory import remember
 
     tokens, policy, health = fixture()
+    for principal in policy["principals"]:
+        principal["graphs"]["company_demo"] = principal["graphs"]["default"]
     with tempfile.TemporaryDirectory(prefix="bw-native-tls-") as directory:
         root = Path(directory)
         env = {key: value for key, value in os.environ.items() if not key.startswith("BRAINWIRE_")}
@@ -79,6 +82,9 @@ def run(binary):
                                 str(ROOT / "crates/core/tests/fixtures/graph_mapping.json")],
                                env=env, cwd=root, check=True, capture_output=True, timeout=10)
         assert start.returncode == 0
+        subprocess.run([binary, "db", "create", "company_demo", "--ontology",
+                        str(ROOT / "examples/company_brain/ontology.json")],
+                       env=env, cwd=root, check=True, capture_output=True, timeout=10)
         def command(settings, *arguments):
             return subprocess.run(
                 [binary, *arguments], env=env | settings, cwd=root, capture_output=True,
@@ -134,9 +140,9 @@ def run(binary):
             result = probe("ready", {"BRAINWIRE_BOLT_TLS_CA_FILE": str(root / "wrong-ca.crt")})
             assert result.returncode != 0 and "TLS" in result.stderr, result.stderr
 
-            def open_python(ca="ca.crt", principal="reader"):
+            def open_python(ca="ca.crt", principal="reader", database="default"):
                 return connect(
-                    f"bolt://{address}", "default", auth=(principal, tokens[principal]),
+                    f"bolt://{address}", database, auth=(principal, tokens[principal]),
                     encrypted=True, trusted_certificates=TrustCustomCAs(str(root / ca)),
                     connection_timeout=2, max_transaction_retry_time=0,
                 )
@@ -157,6 +163,29 @@ def run(binary):
                     assert "SSLCertVerificationError" in str(error), str(error)
 
             expect_python_certificate_error("wrong-ca.crt")
+            with open_python(principal="writer", database="company_demo") as graph:
+                graph.upsert_node("Project", "tls-project", {"name": "TLS project"})
+                remember(graph, "tls-project", "Keep backups", "Keep one daily backup", "Ops review",
+                         "https://example.com/synthetic-review")
+
+            def recall_cli(ca):
+                return subprocess.run(
+                    [sys.executable, "-m", "examples.python.agent_memory", "--uri", f"bolt://{address}",
+                     "--tls-ca", str(root / ca), "recall", "--project", "tls-project"],
+                    env=env | {"BRAINWIRE_BOLT_AUTH_FILE": str(root / "auth.json")},
+                    cwd=ROOT, capture_output=True, text=True, timeout=8,
+                )
+
+            recalled = recall_cli("ca.crt")
+            assert recalled.returncode == 0, recalled.stderr
+            records = json.loads(recalled.stdout)["records"]
+            assert len(records) == 1 and records[0]["title"] == "Keep backups", records
+            assert records[0]["source_url"] == "https://example.com/synthetic-review", records
+            rejected = recall_cli("wrong-ca.crt")
+            assert rejected.returncode != 0 and not rejected.stdout, rejected
+            assert "SSLCertVerificationError" in rejected.stderr, rejected.stderr
+            assert all(token not in rejected.stderr for token in tokens.values())
+
             with open_python(principal="writer") as graph:
                 with graph.driver.session(database="default") as session:
                     with session.begin_transaction() as transaction:
@@ -222,7 +251,7 @@ def run(binary):
             assert probe("handshake", client_tls).returncode != 0
         finally:
             stop_server(server)
-    print("PASS: TLS-only Bolt, Python/probe/TUI verification, auth, restart, connection cap and drain")
+    print("PASS: TLS-only Bolt, Python/agent CLI/probe/TUI verification, auth, restart, connection cap and drain")
 
 
 if __name__ == "__main__":

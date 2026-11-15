@@ -1,8 +1,42 @@
-"""Optional service-token credentials shared by Python and native Bolt clients."""
+"""Transport options and service-token credentials for Bolt examples."""
+from ipaddress import ip_address
 import json
 import os
 import re
 import stat
+from urllib.parse import urlsplit
+
+
+def bolt_connection_options(uri, tls_ca=None):
+    """Validate transport before loading credentials or opening a driver."""
+    message = "use a bolt:// or verified bolt+s:// URI without embedded credentials"
+    try:
+        address = urlsplit(uri)
+        port = address.port
+    except ValueError:
+        raise ValueError(message) from None
+    if (address.scheme not in ("bolt", "bolt+s") or address.hostname is None
+            or address.username is not None or address.path not in ("", "/")
+            or address.query or address.fragment or port == 0):
+        raise ValueError(message)
+    if tls_ca is not None:
+        if address.scheme != "bolt" or not tls_ca.strip():
+            raise ValueError("use bolt:// with a PEM CA file for --tls-ca")
+        from neo4j import TrustCustomCAs
+
+        return uri, {"encrypted": True, "trusted_certificates": TrustCustomCAs(tls_ca)}
+    if address.scheme == "bolt+s":
+        return uri, {}
+
+    host = "127.0.0.1" if address.hostname == "localhost" else address.hostname
+    try:
+        loopback = ip_address(host)
+    except ValueError:
+        raise ValueError("use verified TLS for non-loopback Bolt endpoints") from None
+    if not loopback.is_loopback:
+        raise ValueError("use verified TLS for non-loopback Bolt endpoints")
+    literal = f"[{loopback}]" if loopback.version == 6 else str(loopback)
+    return f"bolt://{literal}:{7687 if port is None else port}", {}
 
 
 def auth_from_env():

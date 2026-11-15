@@ -169,25 +169,30 @@ def ingest(driver, database, file, source_id, batch_size=250,
                 return offset
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file")
     parser.add_argument("--source-id", required=True)
     parser.add_argument("--database", default="customers")
     parser.add_argument("--uri", default="bolt://127.0.0.1:7687")
+    parser.add_argument("--tls-ca", help="verify Bolt TLS using this PEM CA file")
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--batch-bytes", type=int, default=1 << 20)
     parser.add_argument("--line-bytes", type=int, default=64 << 10)
     parser.add_argument("--max-batches", type=int,
                         help="pause after this many committed source batches; rerun to resume")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     from neo4j import GraphDatabase
 
     if __package__:
-        from .connection import auth_from_env
+        from .connection import auth_from_env, bolt_connection_options
     else:
-        from connection import auth_from_env
-    with GraphDatabase.driver(args.uri, auth=auth_from_env(), liveness_check_timeout=30) as driver:
+        from connection import auth_from_env, bolt_connection_options
+    try:
+        uri, options = bolt_connection_options(args.uri, args.tls_ca)
+    except ValueError as error:
+        parser.error(str(error))
+    with GraphDatabase.driver(uri, auth=auth_from_env(), liveness_check_timeout=30, **options) as driver:
         offset = ingest(driver, args.database, args.file, args.source_id,
                         args.batch_size, args.batch_bytes, args.line_bytes,
                         max_batches=args.max_batches)

@@ -1,10 +1,23 @@
+from contextlib import redirect_stderr
+import io
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from examples.python.timeline_demo import event_id, ontology, read_event_page, read_events, record_event
+from examples.python.timeline_demo import event_id, main, ontology, read_event_page, read_events, record_event
 
 
 class TimelineTest(unittest.TestCase):
+    def test_cli_refuses_remote_plaintext_before_authorization_or_connection(self):
+        with patch("examples.python.connection.auth_from_env") as auth, patch("neo4j.GraphDatabase.driver") as driver, \
+                redirect_stderr(io.StringIO()) as stderr, self.assertRaises(SystemExit) as failure:
+            main(["--database", "demo", "--subject-id", "ticket-1", "--event-key", "opened-1",
+                  "--kind", "opened", "--occurred-at", "2026-11-03T10:00:00+00:00",
+                  "--uri", "bolt://192.0.2.1:7687"])
+        self.assertEqual(failure.exception.code, 2)
+        self.assertIn("verified TLS", stderr.getvalue())
+        auth.assert_not_called()
+        driver.assert_not_called()
+
     def driver(self, existing=None):
         driver = MagicMock()
         tx = driver.session.return_value.__enter__.return_value.begin_transaction.return_value.__enter__.return_value

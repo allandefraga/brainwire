@@ -67,7 +67,7 @@ class AgentContextDemoTests(unittest.TestCase):
                 patch("examples.python.agent_context_demo.auth_from_env", return_value=("reader", "token")), \
                 redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--uri", "bolt://localhost:17687"]), 1)
-        connect.assert_called_once_with("bolt://localhost:17687", "demo",
+        connect.assert_called_once_with("bolt://127.0.0.1:17687", "demo",
                                         auth=("reader", "token"), connection_timeout=5)
         self.assertEqual(closed, [True])
         self.assertIn('"status": "demo_data_unavailable"', output.getvalue())

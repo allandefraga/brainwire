@@ -27,6 +27,12 @@ For a protected server, set `BRAINWIRE_BOLT_AUTH_FILE` as described in the
 [Python client guide](../../docs/python-client.md) and use an unrestricted
 writer for this graph.
 
+Remote endpoints require certificate verification. Use
+`--uri bolt+s://db.example:7687` for the system trust store or
+`--uri bolt://db.example:7687 --tls-ca /path/to/ca.pem` for a private CA.
+Use a numeric loopback URI for plaintext through a local SSH tunnel or port
+forward. Plaintext `localhost` connects directly to `127.0.0.1`.
+
 ```sh
 .venv-brainwire/bin/python -m examples.obsidian.import_vault \
   examples/obsidian/vault --database vault_demo --uri bolt://127.0.0.1:7687

@@ -24,6 +24,26 @@ impl Overlay {
     }
 }
 
+fn with_edge_write_budget<R>(
+    env: &Env<'_>,
+    props: &BTreeMap<String, Value>,
+    mutation: impl FnOnce(&mut dyn FnMut(usize) -> Result<(), ExecError>) -> Result<R, ExecError>,
+) -> Result<R, ExecError> {
+    let _scope = env.budget.scope();
+    if !props.is_empty() {
+        // The write clones this patch and encodes it while the row is live.
+        env.budget
+            .charge(budget::map_bytes(props).saturating_mul(4))?;
+    }
+    let mut peak = 0usize;
+    mutation(&mut |bytes| {
+        // Key lookups and the row decode run in sequence.
+        env.budget.charge(bytes.saturating_sub(peak))?;
+        peak = peak.max(bytes);
+        Ok(())
+    })
+}
+
 pub(super) fn apply(
     txn: &mut Txn<'_>,
     env: &Env<'_>,
@@ -281,26 +301,19 @@ fn write_pattern(
                     )));
                 }
             }
-            let (source, target, id, was_created) = {
-                let _scope = env.budget.scope();
-                let mut decode_peak = 0usize;
-                store::merge_keyed_edge::<ExecError>(
-                    txn,
-                    env.catalog,
-                    source,
-                    &rel.rel_type,
-                    target,
-                    rel.direction == Direction::Both,
-                    &values,
-                    |bytes| {
-                        env.budget.tick()?;
-                        let bytes = bytes.saturating_mul(2);
-                        env.budget.charge(bytes.saturating_sub(decode_peak))?;
-                        decode_peak = decode_peak.max(bytes);
-                        Ok(())
-                    },
-                )?
-            };
+            let (source, target, id, was_created) =
+                with_edge_write_budget(env, &values, |control| {
+                    store::merge_keyed_edge::<ExecError>(
+                        txn,
+                        env.catalog,
+                        source,
+                        &rel.rel_type,
+                        target,
+                        rel.direction == Direction::Both,
+                        &values,
+                        control,
+                    )
+                })?;
             created |= was_created;
             overlay.charge(txn, env)?;
             row[rel.slot] = Val::Rel(Relationship {
@@ -324,7 +337,17 @@ fn write_pattern(
             (target, source)
         };
         created |= !exists;
-        store::merge_edge(txn, env.catalog, source, &rel.rel_type, target, &values)?;
+        with_edge_write_budget(env, &values, |control| {
+            store::merge_edge_with_control(
+                txn,
+                env.catalog,
+                source,
+                &rel.rel_type,
+                target,
+                &values,
+                Some(control),
+            )
+        })?;
         overlay.charge(txn, env)?;
         row[rel.slot] = Val::Rel(Relationship {
             source,
@@ -471,19 +494,16 @@ fn set_items(
                 if !store::edge_exists(txn, (rel.source, rel.edge_type, rel.target, rel.id))? {
                     continue;
                 }
-                if keyed {
-                    store::update_edge_with_id(
+                with_edge_write_budget(env, &values, |control| {
+                    store::update_edge_with_control(
                         txn,
                         env.catalog,
-                        rel.source,
                         &name,
-                        rel.target,
-                        rel.id,
+                        (rel.source, rel.target, rel.id),
                         &values,
-                    )?;
-                } else {
-                    store::merge_edge(txn, env.catalog, rel.source, &name, rel.target, &values)?;
-                }
+                        Some(control),
+                    )
+                })?;
             }
         }
         overlay.charge(txn, env)?;

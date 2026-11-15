@@ -11,6 +11,37 @@ use brainwire_store::{
     },
 };
 
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    cell::Cell,
+};
+
+thread_local! {
+    static LARGEST_ALLOCATION: Cell<usize> = const { Cell::new(0) };
+}
+
+struct ObservedAllocator;
+
+#[global_allocator]
+static ALLOCATOR: ObservedAllocator = ObservedAllocator;
+
+unsafe impl GlobalAlloc for ObservedAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let _ =
+            LARGEST_ALLOCATION.try_with(|largest| largest.set(largest.get().max(layout.size())));
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(pointer, layout) }
+    }
+
+    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        let _ = LARGEST_ALLOCATION.try_with(|largest| largest.set(largest.get().max(size)));
+        unsafe { System.realloc(pointer, layout, size) }
+    }
+}
+
 fn setup() -> (tempfile::TempDir, Database, brainwire_core::ids::NodeId) {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open(dir.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
@@ -178,5 +209,161 @@ fn ordinary_delete_refuses_a_connected_hub_without_collecting_its_adjacency() {
         Err(ExecError::ConstraintViolation(_))
     ));
     assert_eq!(count(&db, "MATCH (n:Item) RETURN count(n)"), 2049);
+    check_invariants(&db).unwrap();
+}
+
+fn assert_large_edge_update_respects_budget(query: &str) {
+    let (_dir, db, _) = setup();
+    let payload = "x".repeat(256 * 1024);
+    execute(
+        &db,
+        "MATCH (a:Item {entity_id:'hub'})-[r]->(b:Item {entity_id:'item-0'}) SET r.payload = $payload",
+        &BTreeMap::from([("payload".into(), Value::Str(payload))]),
+    )
+    .unwrap();
+    let pool = Arc::new(QueryMemoryPool::new(128 * 1024));
+    let mut tx = QueryTransaction::begin_with_pool(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 128 * 1024,
+            timeout: None,
+        },
+        Arc::clone(&pool),
+    )
+    .unwrap();
+    tx.run("CREATE (:Item {entity_id:'pending'})", &BTreeMap::new())
+        .unwrap();
+    let result = tx.run(query, &BTreeMap::new());
+    assert!(
+        matches!(
+            result,
+            Err(ExecError::MemoryLimit { .. }) | Err(ExecError::MemoryPoolExhausted { .. })
+        ),
+        "large relationship update unexpectedly completed: {result:?}"
+    );
+    assert!(tx.commit().is_err());
+    drop(tx);
+    assert_eq!(pool.usage().reserved_bytes, 0);
+    assert_eq!(
+        count(&db, "MATCH (n:Item {entity_id:'pending'}) RETURN count(n)"),
+        0
+    );
+    assert_eq!(count(&db, "MATCH (a:Item {entity_id:'hub'})-[r]->(b:Item {entity_id:'item-0'}) WHERE size(r.payload) = 262144 RETURN count(r)"), 2);
+    check_invariants(&db).unwrap();
+
+    let mut admitted = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 4 * 1024 * 1024,
+            timeout: None,
+        },
+    )
+    .unwrap();
+    admitted.run(query, &BTreeMap::new()).unwrap();
+    admitted.commit().unwrap();
+    assert_eq!(count(&db, "MATCH (a:Item {entity_id:'hub'})-[r]->(b:Item {entity_id:'item-0'}) WHERE size(r.payload) = 262144 RETURN count(r)"), 1);
+    check_invariants(&db).unwrap();
+}
+
+#[test]
+fn pair_merge_accounts_for_the_existing_payload_before_replacing_it() {
+    assert_large_edge_update_respects_budget(
+        "MATCH (a:Item {entity_id:'hub'}), (b:Item {entity_id:'item-0'}) MERGE (a)-[:LINK {payload:'small'}]->(b)",
+    );
+}
+
+#[test]
+fn pair_set_accounts_for_the_existing_payload_before_removing_it() {
+    assert_large_edge_update_respects_budget(
+        "MATCH (a:Item {entity_id:'hub'})-[r:LINK]->(b:Item {entity_id:'item-0'}) SET r.payload = null",
+    );
+}
+
+#[test]
+fn keyed_set_accounts_for_the_existing_payload_before_removing_it() {
+    assert_large_edge_update_respects_budget(
+        "MATCH (a:Item {entity_id:'hub'})-[r:EVENT]->(b:Item {entity_id:'item-0'}) SET r.payload = null",
+    );
+}
+
+#[test]
+fn edge_mutation_does_not_charge_unused_endpoint_properties() {
+    let (_dir, db, _) = setup();
+    execute(
+        &db,
+        "MATCH (a:Item {entity_id:'hub'}) SET a.payload = $payload",
+        &BTreeMap::from([("payload".into(), Value::Str("x".repeat(256 * 1024)))]),
+    )
+    .unwrap();
+    let mut tx = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 128 * 1024,
+            timeout: None,
+        },
+    )
+    .unwrap();
+    LARGEST_ALLOCATION.set(0);
+    tx.run(
+        "MATCH (a:Item {entity_id:'hub'}), (b:Item {entity_id:'item-0'}) MERGE (a)-[:LINK {marker:true}]->(b)",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(
+        LARGEST_ALLOCATION.get() < 256 * 1024,
+        "edge update allocated an unused endpoint payload: {} bytes",
+        LARGEST_ALLOCATION.get()
+    );
+    tx.commit().unwrap();
+    assert_eq!(
+        count(&db, "MATCH (a:Item {entity_id:'hub'})-[r:LINK]->(b:Item {entity_id:'item-0'}) WHERE r.marker = true AND size(a.payload) = 262144 RETURN count(r)"),
+        1
+    );
+    check_invariants(&db).unwrap();
+}
+
+#[test]
+fn edge_mutation_reads_pending_properties_and_updates_the_index() {
+    let (_dir, mut db, _) = setup();
+    db.enable_relationship_index_format(&Resources::new(StoreConfig::for_tests()))
+        .unwrap();
+    execute(
+        &db,
+        "CREATE INDEX FOR ()-[r:EVENT]-() ON (r.marker)",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    db.build_pending_indexes().unwrap();
+    let mut tx = QueryTransaction::begin_with_limits(
+        &db,
+        ExecutionLimits {
+            memory_bytes: 4 * 1024 * 1024,
+            timeout: None,
+        },
+    )
+    .unwrap();
+    tx.run(
+        "MATCH (a:Item {entity_id:'hub'})-[r:EVENT]->(b:Item {entity_id:'item-0'}) SET r.payload = $payload, r.marker = 'old'",
+        &BTreeMap::from([("payload".into(), Value::Str("x".repeat(256 * 1024)))]),
+    )
+    .unwrap();
+    tx.run(
+        "MATCH (a:Item {entity_id:'hub'})-[r:EVENT]->(b:Item {entity_id:'item-0'}) SET r.marker = 'new'",
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    assert_eq!(
+        count(
+            &db,
+            "MATCH ()-[r:EVENT]->() WHERE r.marker = 'old' RETURN count(r)"
+        ),
+        0
+    );
+    assert_eq!(
+        count(&db, "MATCH ()-[r:EVENT]->() WHERE r.marker = 'new' AND size(r.payload) = 262144 RETURN count(r)"),
+        1
+    );
     check_invariants(&db).unwrap();
 }

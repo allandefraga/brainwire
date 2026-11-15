@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError
 
-from brainwire import ContextLimitError, GraphClient, schema_paths, search_context
+from brainwire import ContextLimitError, GraphClient, require_relationship_keys, schema_paths, search_context
 from examples.python.create_service_tokens import create
 
 
@@ -173,13 +173,23 @@ limit = "2GiB"
                             pass
                         else:
                             raise AssertionError("read-only principal could write")
+                with connect("writer") as writer_driver, connect("reader") as reader_driver:
+                    writer, reader = GraphClient(writer_driver, "workspace"), GraphClient(reader_driver, "workspace")
+                    writer.run_cypher("CALL db.createRelationshipType('EVENT', 'Person', 'Document', ['kind'])")
+                    assert require_relationship_keys(reader, "Person", "EVENT", "Document", ["kind"]) == reader.schema()["version"]
+                    try:
+                        require_relationship_keys(reader, "Person", "AUTHORED", "Document", ["kind"])
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError("unkeyed relationship passed key verification")
                 return {"result": "PASS", "synthetic": True,
                     "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                     "checks": ["one authorized schema read with catalog version", "descriptions and alternate routes",
                                "bounded self-loop walks and zero-hop route", "hop/path/output limits",
                                "catalog change after snapshot does not change returned paths",
                                "schema paths to provider search with sources and two record ACL identities",
-                               "read grants reject writes"],
+                               "read grants reject writes", "relationship merge-key verification"],
                     "limits": ["schema is graph-wide metadata, not instance ACL-filtered paths",
                                "no shared snapshot across separate API calls or providers",
                                "small synthetic fixture, not performance qualification"]}
