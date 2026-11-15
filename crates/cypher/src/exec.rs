@@ -164,6 +164,7 @@ impl From<GraphError> for ExecError {
             GraphError::UnknownLabel(s)
             | GraphError::UnknownEdgeType(s)
             | GraphError::Catalog(s) => Self::Semantic(s),
+            e @ GraphError::PropertyType { .. } => Self::ConstraintViolation(e.to_string()),
             // Caller mistakes, not storage failures: surface as client errors.
             e @ (GraphError::BadSignature(_)
             | GraphError::ReservedProperty(_)

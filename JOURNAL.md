@@ -32,7 +32,10 @@ Allan's current language.
 ## 2026-11-15: semantic examples and safer relationship writes
 
 - Added named read-only metric and typed-batch examples. Metric authorization
-  follows the reader's graph permissions; batch typing is client-side only.
+  follows the reader's graph permissions; batch validation is client-side.
+- Added optional scalar types enforced by the engine on new standalone graphs.
+  A Linux container diagnostic covered old-image refusal, restart and restore.
+  Existing graphs cannot be converted in place, and Raft is not supported.
 - Added a relationship merge-key inspection helper. Keyed types must be
   declared before writing; checking the catalog is not an atomic write guard.
 - Added admission before decoding existing edge payloads and avoided copying
@@ -42,8 +45,8 @@ Allan's current language.
   verified DuckLake subprocesses use the configured private CA.
 - A synthetic consumer pilot exposed a timeline type declared without its key;
   a separate client-side correction was tested outside this repository.
-- Next: qualify types enforced by the engine, larger representative pressure
-  workloads and multi-machine failover before making production claims.
+- Next: qualify larger representative pressure workloads, typed-schema
+  migration and multi-machine failover before making production claims.
 
 ## 2026-11-15: native Bolt TLS and mixed-load recovery
 

@@ -256,6 +256,7 @@ pub fn create_label(txn: &mut Txn, label: &str) -> Result<(), GraphError> {
         description: None,
         label: label.into(),
         properties: vec![],
+        property_types: BTreeMap::new(),
         er_fields: vec![],
         indexed_fields: vec![],
         identifier_columns: BTreeMap::new(),
@@ -316,6 +317,7 @@ pub fn create_relationship_type_with_keys(
     };
     let spec = EdgeSpec {
         properties: merge_key_fields.clone().unwrap_or_default(),
+        property_types: BTreeMap::new(),
         merge_key_fields,
         description: None,
         name: name.into(),
@@ -348,6 +350,11 @@ pub fn drop_property(txn: &mut Txn, label: &str, property: &str) -> Result<(), G
             "{label} has no declared property {property}"
         )));
     };
+    if ty.columns[position].property_type.is_some() {
+        return Err(rejected(format!(
+            "cannot drop typed property {label}.{property}"
+        )));
+    }
     let column = ty.columns.remove(position);
     ty.retired_columns.push(column.id);
     store_next(txn, &mut catalog)

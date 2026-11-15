@@ -125,6 +125,13 @@ jobs:
         timeout-minutes: 10
         run: python crates/server/tests/native_tls_compose_runtime.py "$CANDIDATE"
 
+      - name: Verify typed volume compatibility and recovery
+        timeout-minutes: 10
+        run: |
+          old_image='ghcr.io/allandefraga/brainwire:v0.23.0-beta.2@sha256:0cd65ecb4d5115b53a045b796bce29163872e715520189d917eaa70429abc9b2'
+          docker pull --platform "linux/$ARCH" "$old_image"
+          python crates/server/tests/typed_container.py --image "$CANDIDATE" --old-image "$old_image"
+
       - name: Publish only the verified candidate and record its digest
         env:
           ALREADY_EXISTS: ${{ steps.candidate.outputs.exists }}

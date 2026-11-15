@@ -49,6 +49,51 @@ impl Size {
     }
 }
 
+fn property_types_size(
+    ctx: &Context<'_, '_>,
+    size: &mut Size,
+    columns: &[brainwire_core::schema::Column],
+    node: bool,
+) -> Result<(), ExecError> {
+    let mut typed = false;
+    for column in columns {
+        ctx.budget.check_deadline()?;
+        if let Some(kind) = column
+            .property_type
+            .filter(|_| property(&column.name, node))
+        {
+            if !typed {
+                size.add(&["propertyTypes"], 1)?;
+                typed = true;
+            }
+            size.add(&[&column.name, kind.name()], 1)?;
+        }
+    }
+    Ok(())
+}
+
+fn add_property_types(
+    ctx: &Context<'_, '_>,
+    fields: &mut BTreeMap<String, Value>,
+    columns: &[brainwire_core::schema::Column],
+    node: bool,
+) -> Result<(), ExecError> {
+    let mut properties = BTreeMap::new();
+    for column in columns {
+        ctx.budget.check_deadline()?;
+        if let Some(kind) = column
+            .property_type
+            .filter(|_| property(&column.name, node))
+        {
+            properties.insert(column.name.clone(), Value::Str(kind.name().into()));
+        }
+    }
+    if !properties.is_empty() {
+        fields.insert("propertyTypes".into(), Value::Map(properties));
+    }
+    Ok(())
+}
+
 pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Binding>, ExecError> {
     ctx.budget.check_deadline()?;
     if ctx.catalog.node_types.len() > MAX_NODE_TYPES {
@@ -87,6 +132,7 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
         if let Some(description) = &ty.description {
             size.add(&["description", description], 1)?;
         }
+        property_types_size(ctx, &mut size, &ty.columns, true)?;
         for column in &ty.columns {
             ctx.budget.check_deadline()?;
             if property(&column.name, true) {
@@ -124,6 +170,7 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             if let Some(description) = &ty.description {
                 size.add(&["description", description], 1)?;
             }
+            property_types_size(ctx, &mut size, &ty.columns, false)?;
             if !ty.merge_key_fields.is_empty() {
                 size.add(&["mergeKeyFields"], 1)?;
                 for field in &ty.merge_key_fields {
@@ -171,6 +218,7 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
         if let Some(description) = &ty.description {
             fields.insert("description".into(), Value::Str(description.clone()));
         }
+        add_property_types(ctx, &mut fields, &ty.columns, true)?;
         nodes.push(Value::Map(fields));
     }
     let mut relationships = Vec::with_capacity(signatures);
@@ -200,6 +248,7 @@ pub(super) fn values(ctx: &Context<'_, '_>, yield_count: usize) -> Result<Vec<Bi
             if let Some(description) = &ty.description {
                 fields.insert("description".into(), Value::Str(description.clone()));
             }
+            add_property_types(ctx, &mut fields, &ty.columns, false)?;
             if !ty.merge_key_fields.is_empty() {
                 let mut keys = Vec::with_capacity(ty.merge_key_fields.len());
                 for field in &ty.merge_key_fields {

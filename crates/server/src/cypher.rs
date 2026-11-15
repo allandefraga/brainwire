@@ -64,8 +64,20 @@ pub fn run(
         id_block: 1024,
         conflict_history_keys: 1_000_000,
     });
+    let create_typed = ontology
+        .as_ref()
+        .is_some_and(GraphMapping::has_property_types)
+        && !database.join("CURRENT").is_file();
+    if create_typed {
+        Database::create_typed(
+            database,
+            &resources,
+            ontology.as_ref().expect("typed mapping"),
+        )
+        .map_err(|e| format!("storage: {e}"))?;
+    }
     let db = Database::open(database, &resources).map_err(|e| format!("storage: cannot open {}: {e}. This command needs exclusive local access; close any process using this database before retrying.", database.display()))?;
-    if let Some(mapping) = ontology {
+    if let Some(mapping) = ontology.filter(|_| !create_typed) {
         db.apply_ontology(&mapping)
             .map_err(|e| format!("ontology: {e}"))?;
     }

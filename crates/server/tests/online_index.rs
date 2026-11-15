@@ -108,6 +108,76 @@ impl Bolt {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn typed_rejection_over_bolt_rolls_back_prior_writes_and_indexes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        r#"{
+        "version":"1","nodes":[{"label":"Page","properties":["title"],
+        "property_types":{"title":"string"},"indexed_fields":["title"]}]
+    }"#,
+    )
+    .unwrap();
+    let created = command(dir.path())
+        .args(["db", "create", "tickets", "--ontology", "schema.json"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    let address = {
+        let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
+        reserved.local_addr().unwrap().to_string()
+    };
+    let mut server = Server(
+        command(dir.path())
+            .arg("serve")
+            .env("BRAINWIRE_SERVER_LISTEN", &address)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while TcpStream::connect(&address).is_err() {
+        assert!(server.0.try_wait().unwrap().is_none(), "server exited");
+        assert!(Instant::now() < deadline, "server not ready");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+
+    let mut bolt = Bolt::connect(&address);
+    bolt.query("CREATE (:Page {entity_id:'existing', title:'before'})");
+    bolt.send(0x10, vec![PackValue::String(
+        "MATCH (p:Page {entity_id:'existing'}) SET p.title='after' CREATE (:Page {entity_id:'new', title:'transient'}) CREATE (:Page {entity_id:'invalid', title:1})".into(),
+    ), PackValue::Map(vec![]), PackValue::Map(vec![])]);
+    let failure = bolt.receive();
+    let PackValue::Struct { tag: 0x7f, fields } = failure else {
+        panic!("{failure:?}")
+    };
+    assert_eq!(
+        fields[0].get("code"),
+        Some(&PackValue::String(
+            "Neo.ClientError.Schema.ConstraintValidationFailed".into()
+        ))
+    );
+    bolt.request(0x0f, vec![]);
+    assert_eq!(
+        bolt.query("MATCH (p:Page) RETURN p.entity_id, p.title"),
+        vec![vec![
+            PackValue::String("existing".into()),
+            PackValue::String("before".into())
+        ]]
+    );
+    assert_eq!(
+        bolt.query("MATCH (p:Page) WHERE p.title='after' OR p.title='transient' RETURN count(p)"),
+        vec![vec![PackValue::Int(0)]]
+    );
+    assert_eq!(
+        bolt.query("MATCH (p:Page) WHERE p.title='before' RETURN count(p)"),
+        vec![vec![PackValue::Int(1)]]
+    );
+}
+
 #[test]
 fn create_index_over_bolt_becomes_online_on_a_running_server() {
     let dir = tempfile::tempdir().unwrap();

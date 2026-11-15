@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.24.0-beta.1 — experimental candidate
+
+- Enforce optional scalar property types on newly created standalone graphs,
+  with a format guard against older binaries. Existing and replicated graphs
+  cannot be converted in place.
+- Show declared scalar types in the local and connected ontology inspector.
+
 - Add a bounded Python example for named graph metrics and a separate typed
   batch validator. These are client-side tools, not database constraints or a
   complete semantic modeling engine.

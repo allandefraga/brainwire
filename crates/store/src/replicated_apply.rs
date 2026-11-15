@@ -9,6 +9,7 @@
 use sha2::{Digest, Sha256};
 
 use crate::db::{Database, StoreError, COMMIT_SEQUENCE_KEY};
+use crate::graph::CATALOG_KEY;
 use crate::txn::{Cf, Txn, TxnError};
 
 const MAGIC: &[u8] = b"BWAP";
@@ -180,6 +181,21 @@ impl Batch {
             .any(|pair| pair[0].0.cf == pair[1].0.cf && pair[0].0.key == pair[1].0.key)
         {
             return Err(ApplyError::DuplicateMutation);
+        }
+        if let Some(value) = entries.iter().find_map(|(mutation, cf)| {
+            if *cf == Cf::Meta && mutation.key == CATALOG_KEY {
+                mutation.value.as_deref()
+            } else {
+                None
+            }
+        }) {
+            let catalog: brainwire_core::schema::Catalog = serde_json::from_slice(value)
+                .map_err(|_| ApplyError::Invalid("invalid graph catalog"))?;
+            if catalog.has_property_types() {
+                return Err(ApplyError::Invalid(
+                    "typed properties require standalone storage",
+                ));
+            }
         }
         Ok((entries, size))
     }
@@ -353,6 +369,11 @@ pub fn apply(
     batch: &Batch,
     limits: ApplyLimits,
 ) -> Result<ApplyReceipt, ApplyError> {
+    if database.has_typed_property_format() {
+        return Err(ApplyError::Invalid(
+            "typed properties require standalone storage",
+        ));
+    }
     if database.has_relationship_index_format() {
         return Err(ApplyError::Invalid(
             "relationship indexes require standalone storage",
@@ -421,6 +442,44 @@ pub fn apply(
 mod tests {
     use super::*;
     use crate::db::{Resources, StoreConfig, COLUMN_FAMILIES};
+
+    #[test]
+    fn a_batch_cannot_install_a_typed_catalog_in_an_ordinary_store() {
+        use brainwire_core::schema::{Catalog, GraphMapping};
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = Resources::new(StoreConfig::for_tests());
+        let db = Database::open(root.path(), &resources).unwrap();
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Page","properties":["title"],"property_types":{"title":"string"}}]}"#,
+        ).unwrap();
+        let typed = serde_json::to_vec(&Catalog::apply(&mapping, None).unwrap()).unwrap();
+        let batch = Batch {
+            version: VERSION,
+            index: 1,
+            mutations: vec![Mutation {
+                cf: "meta".into(),
+                key: CATALOG_KEY.to_vec(),
+                value: Some(typed),
+            }],
+        };
+        let limits = ApplyLimits {
+            max_bytes: 64,
+            ..ApplyLimits::default()
+        };
+        assert!(matches!(
+            apply(&db, &batch, limits),
+            Err(ApplyError::Bounds("max_bytes"))
+        ));
+        assert!(matches!(
+            apply(&db, &batch, ApplyLimits::default()),
+            Err(ApplyError::Invalid(
+                "typed properties require standalone storage"
+            ))
+        ));
+        assert!(db.catalog().unwrap().is_none());
+        assert!(applied_state(&db).unwrap().is_none());
+    }
     #[test]
     fn actual_failed_commit_does_not_persist_data_or_ledger() {
         let directory = tempfile::tempdir().unwrap();

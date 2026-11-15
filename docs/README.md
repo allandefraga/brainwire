@@ -22,6 +22,7 @@ and recovery steps your application needs.
 | Create, update or delete data | [Python operations and batches](python-client.md) |
 | Write a query | [Supported Cypher and CLI](local-cypher.md) |
 | Define allowed types and connections | [Ontology and online catalog](online-catalog.md) |
+| Enforce scalar types in a new graph | [Typed properties](typed-properties.md) |
 | Validate a typed input batch | [Client-side typed ingestion](../examples/typed_ingest/README.md) |
 | Define a named metric | [Semantic metrics example](semantic-metrics.md) |
 | Add an index | [Node indexes](indexes.md) · [Relationship property indexes](relationship-property-indexes.md) |

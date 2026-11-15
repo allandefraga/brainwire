@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{EdgeTypeId, TypeId};
+use crate::value::Value;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GraphMapping {
@@ -17,6 +18,18 @@ pub struct GraphMapping {
     pub timeline: Vec<TimelineSpec>,
 }
 
+impl GraphMapping {
+    pub fn has_property_types(&self) -> bool {
+        self.nodes
+            .iter()
+            .any(|spec| !spec.property_types.is_empty())
+            || self
+                .edges
+                .iter()
+                .any(|spec| !spec.property_types.is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct NodeSpec {
     #[serde(default)]
@@ -24,6 +37,8 @@ pub struct NodeSpec {
     pub label: String,
     #[serde(default)]
     pub properties: Vec<String>,
+    #[serde(default)]
+    pub property_types: BTreeMap<String, ScalarType>,
     #[serde(default)]
     pub er_fields: Vec<String>,
     #[serde(default)]
@@ -44,6 +59,8 @@ pub struct EdgeSpec {
     pub to: EndpointSpec,
     #[serde(default)]
     pub properties: Vec<String>,
+    #[serde(default)]
+    pub property_types: BTreeMap<String, ScalarType>,
     #[serde(default)]
     pub merge_key_fields: Option<Vec<String>>,
 }
@@ -66,6 +83,38 @@ pub struct TimelineSpec {
 pub struct Column {
     pub id: u16,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub property_type: Option<ScalarType>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScalarType {
+    Boolean,
+    Integer,
+    Float,
+    String,
+}
+
+impl ScalarType {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Boolean => "boolean",
+            Self::Integer => "integer",
+            Self::Float => "float",
+            Self::String => "string",
+        }
+    }
+
+    pub fn accepts(self, value: &Value) -> bool {
+        match (self, value) {
+            (Self::Boolean, Value::Bool(_))
+            | (Self::Integer, Value::Int(_))
+            | (Self::String, Value::Str(_)) => true,
+            (Self::Float, Value::Float(value)) => value.is_finite(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,6 +207,8 @@ pub struct Catalog {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SchemaError {
+    #[error("invalid or incompatible property type for {owner}.{field}: declare scalar types on supported properties when creating a new standalone graph")]
+    BadPropertyType { owner: String, field: String },
     #[error("invalid or incompatible merge key fields for {0}")]
     BadMergeKey(String),
     #[error("invalid description for {0}: maximum 4096 UTF-8 bytes, no NUL, and one consistent value per type")]
@@ -260,10 +311,44 @@ fn merge_columns(
             cols.push(Column {
                 id,
                 name: name.clone(),
+                property_type: None,
             });
         }
     }
     Ok(cols)
+}
+
+fn apply_property_types(
+    columns: &mut [Column],
+    declarations: &BTreeMap<String, ScalarType>,
+    owner: &str,
+    existing: bool,
+    merge_keys: &[String],
+) -> Result<(), SchemaError> {
+    for (field, kind) in declarations {
+        let invalid = || SchemaError::BadPropertyType {
+            owner: owner.into(),
+            field: field.clone(),
+        };
+        if is_reserved(field)
+            || field == "entity_id"
+            || field.is_empty()
+            || field.contains('\0')
+            || (merge_keys.contains(field) && *kind != ScalarType::String)
+        {
+            return Err(invalid());
+        }
+        let column = columns
+            .iter_mut()
+            .find(|column| &column.name == field)
+            .ok_or_else(invalid)?;
+        match column.property_type {
+            Some(prior) if prior == *kind => {}
+            None if !existing => column.property_type = Some(*kind),
+            _ => return Err(invalid()),
+        }
+    }
+    Ok(())
 }
 
 fn owner_label(entity_join: &str) -> Result<String, SchemaError> {
@@ -277,6 +362,14 @@ fn owner_label(entity_join: &str) -> Result<String, SchemaError> {
 }
 
 impl Catalog {
+    pub fn has_property_types(&self) -> bool {
+        self.node_types
+            .iter()
+            .map(|ty| &ty.columns)
+            .chain(self.edge_types.iter().map(|ty| &ty.columns))
+            .flatten()
+            .any(|column| column.property_type.is_some())
+    }
     pub fn node_type(&self, label: &str) -> Option<&NodeType> {
         self.node_types.iter().find(|t| t.label == label)
     }
@@ -342,6 +435,15 @@ impl Catalog {
             match node_types.iter_mut().find(|t| t.label == *label) {
                 Some(t) => {
                     t.columns = merge_columns(&t.columns, &t.retired_columns, &properties, label)?;
+                    for spec in &group {
+                        apply_property_types(
+                            &mut t.columns,
+                            &spec.property_types,
+                            label,
+                            previous.is_some(),
+                            &[],
+                        )?;
+                    }
                     // Indexes created online are not in the ontology file;
                     // re-applying it must not silently drop them.
                     for field in t.index_names.keys() {
@@ -362,11 +464,21 @@ impl Catalog {
                     if next > TypeId::MAX {
                         return Err(SchemaError::TooManyTypes);
                     }
+                    let mut columns = merge_columns(&[], &[], &properties, label)?;
+                    for spec in &group {
+                        apply_property_types(
+                            &mut columns,
+                            &spec.property_types,
+                            label,
+                            previous.is_some(),
+                            &[],
+                        )?;
+                    }
                     node_types.push(NodeType {
                         description,
                         id: TypeId(next),
                         label: label.clone(),
-                        columns: merge_columns(&[], &[], &properties, label)?,
+                        columns,
                         indexed,
                         identifiers,
                         display_color,
@@ -407,6 +519,13 @@ impl Catalog {
                         t.signatures.push(sig);
                     }
                     t.columns = merge_columns(&t.columns, &[], &spec.properties, &spec.name)?;
+                    apply_property_types(
+                        &mut t.columns,
+                        &spec.property_types,
+                        &spec.name,
+                        previous.is_some(),
+                        &t.merge_key_fields,
+                    )?;
                 }
                 None => {
                     let next = match edge_types.iter().map(|t| t.id.0).max() {
@@ -415,12 +534,20 @@ impl Catalog {
                             .ok_or_else(|| SchemaError::IdSpaceExhausted("edge types".into()))?,
                         None => 1,
                     };
+                    let mut columns = merge_columns(&[], &[], &spec.properties, &spec.name)?;
+                    apply_property_types(
+                        &mut columns,
+                        &spec.property_types,
+                        &spec.name,
+                        previous.is_some(),
+                        &merge_key_fields,
+                    )?;
                     edge_types.push(EdgeType {
                         description,
                         id: EdgeTypeId(next),
                         name: spec.name.clone(),
                         signatures: vec![sig],
-                        columns: merge_columns(&[], &[], &spec.properties, &spec.name)?,
+                        columns,
                         merge_key_fields,
                         property_indexes: vec![],
                     });
@@ -543,6 +670,20 @@ mod tests {
         assert_eq!(back, cat);
     }
 
+    #[test]
+    fn untyped_catalog_serialization_remains_byte_compatible() {
+        let mapping: GraphMapping = serde_json::from_str(r#"{
+            "version":"1","nodes":[{"label":"Page","properties":["title"]}],
+            "edges":[{"type":"LINK","from":{"label":"Page"},"to":{"label":"Page"},"properties":["weight"]}]
+        }"#).unwrap();
+        let catalog = Catalog::apply(&mapping, None).unwrap();
+        let expected = concat!(
+            r#"{"version":1,"node_types":[{"id":1,"label":"Page","columns":[{"id":0,"name":"title"}],"indexed":[],"identifiers":[],"display_color":null}],"#,
+            r#""edge_types":[{"id":1,"name":"LINK","signatures":[[1,1]],"columns":[{"id":0,"name":"weight"}]}],"streams":[]}"#,
+        );
+        assert_eq!(serde_json::to_vec(&catalog).unwrap(), expected.as_bytes());
+    }
+
     // --- Added beyond the brief: the ontology is external input, and the
     // task rules require every SchemaError variant to be exercised. The
     // brief's own tests cover UnknownLabel and BadEntityJoin but not
@@ -557,6 +698,7 @@ mod tests {
                 description: None,
                 label: format!("Type{i}"),
                 properties: vec![],
+                property_types: BTreeMap::new(),
                 er_fields: vec![],
                 indexed_fields: vec![],
                 identifier_columns: BTreeMap::new(),
@@ -606,6 +748,7 @@ mod tests {
                 columns: vec![Column {
                     id: u16::MAX,
                     name: "old".into(),
+                    property_type: None,
                 }],
                 indexed: vec![],
                 identifiers: vec![],
@@ -623,6 +766,7 @@ mod tests {
                 description: None,
                 label: "Customer".into(),
                 properties: vec!["old".into(), "new_prop".into()],
+                property_types: BTreeMap::new(),
                 er_fields: vec![],
                 indexed_fields: vec![],
                 identifier_columns: BTreeMap::new(),
@@ -685,6 +829,7 @@ mod tests {
                     description: None,
                     label: "Customer".into(),
                     properties: vec![],
+                    property_types: BTreeMap::new(),
                     er_fields: vec![],
                     indexed_fields: vec![],
                     identifier_columns: BTreeMap::new(),
@@ -694,6 +839,7 @@ mod tests {
                     description: None,
                     label: "Company".into(),
                     properties: vec![],
+                    property_types: BTreeMap::new(),
                     er_fields: vec![],
                     indexed_fields: vec![],
                     identifier_columns: BTreeMap::new(),
@@ -711,6 +857,7 @@ mod tests {
                     label: "Company".into(),
                 },
                 properties: vec![],
+                property_types: BTreeMap::new(),
             }],
             timeline: vec![],
         };
@@ -730,6 +877,7 @@ mod tests {
             description: None,
             label: label.into(),
             properties: properties.iter().map(|s| s.to_string()).collect(),
+            property_types: BTreeMap::new(),
             er_fields: vec![],
             indexed_fields: vec![],
             identifier_columns: BTreeMap::new(),
@@ -829,6 +977,7 @@ mod tests {
                     label: "Company".into(),
                 },
                 properties: vec![],
+                property_types: BTreeMap::new(),
             }],
             timeline: vec![],
         };

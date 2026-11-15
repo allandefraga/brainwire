@@ -6,6 +6,7 @@ use std::path::Path;
 
 use brainwire_core::codec::CodecError;
 use brainwire_core::keys::KeyError;
+use brainwire_core::schema::GraphMapping;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType, Options,
     WriteBufferManager, DB,
@@ -35,6 +36,7 @@ pub(crate) fn load_commit_sequence(db: &DB) -> Result<Option<u64>, StoreError> {
 }
 
 pub(crate) const RELATIONSHIP_INDEX_FAMILY: &str = "relationship_index_v1";
+const TYPED_PROPERTY_FAMILY: &str = "typed_properties_v1";
 
 pub const COLUMN_FAMILIES: [&str; 11] = [
     "meta", "node", "pk", "out", "in", "lbl", "idx", "ident", "event", "acl", "note",
@@ -148,7 +150,7 @@ impl Database {
         {
             return Err(StoreError::Catalog("experimental request-ledger format requires explicit authenticated server opt-in; ordinary offline check/backup/restore commands refuse it".into()));
         }
-        Self::open_config(path, res, false, true)
+        Self::open_config(path, res, false, true, false)
     }
 
     fn open_config(
@@ -156,6 +158,7 @@ impl Database {
         res: &Resources,
         ledger: bool,
         create: bool,
+        create_typed: bool,
     ) -> Result<Database, StoreError> {
         let mut opts = Options::default();
         opts.create_if_missing(create);
@@ -166,25 +169,121 @@ impl Database {
         opts.increase_parallelism(cpus.max(2));
         opts.set_max_background_jobs(cpus.clamp(4, 16));
         opts.set_max_subcompactions(4);
-        let relationship_indexes = path.join("CURRENT").is_file()
-            && DB::list_cf(&opts, path)?
+        let existing_families = if path.join("CURRENT").is_file() {
+            DB::list_cf(&opts, path)?
+        } else {
+            Vec::new()
+        };
+        let relationship_indexes = existing_families
+            .iter()
+            .any(|name| name == RELATIONSHIP_INDEX_FAMILY);
+        let typed = create_typed
+            || existing_families
                 .iter()
-                .any(|name| name == RELATIONSHIP_INDEX_FAMILY);
+                .any(|name| name == TYPED_PROPERTY_FAMILY);
         let families = COLUMN_FAMILIES
             .iter()
             .copied()
             .chain(ledger.then_some(request_ledger::FAMILY))
             .chain(relationship_indexes.then_some(RELATIONSHIP_INDEX_FAMILY))
+            .chain(typed.then_some(TYPED_PROPERTY_FAMILY))
             .map(|name| ColumnFamilyDescriptor::new(name, family_options(res)));
         let db = DB::open_cf_descriptors(&opts, path, families)?;
         let sequence = load_commit_sequence(&db)?;
-        Ok(Database {
+        let database = Database {
             db,
             committer: crate::txn::Committer::new(res.config.conflict_history_keys, sequence),
             alloc: crate::alloc::IdAllocator::default(),
             id_block: res.config.id_block,
             request_ledger: None,
-        })
+        };
+        if !create_typed
+            && database
+                .catalog()?
+                .is_some_and(|catalog| catalog.has_property_types())
+                != typed
+        {
+            return Err(StoreError::Corrupt(
+                "typed properties catalog and storage format disagree".into(),
+            ));
+        }
+        Ok(database)
+    }
+
+    /// Build a fresh typed standalone store out of sight, then publish without replacing any path.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub fn create_typed(
+        path: &Path,
+        res: &Resources,
+        mapping: &GraphMapping,
+    ) -> Result<(), StoreError> {
+        use brainwire_core::schema::Catalog;
+        use rustix::fs::{renameat_with, RenameFlags, CWD};
+        use std::{fs, io};
+
+        let reject = |message: &dyn std::fmt::Display| StoreError::Catalog(message.to_string());
+        if !mapping.has_property_types() || path.file_name().is_none() {
+            return Err(reject(&"a fresh path and a typed ontology are required"));
+        }
+        Catalog::apply(mapping, None).map_err(|error| reject(&error))?;
+        match fs::symlink_metadata(path) {
+            Ok(_) => return Err(reject(&"typed properties require a new database path")),
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(reject(&error)),
+            Err(_) => {}
+        }
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| reject(&error))?;
+        let staging = tempfile::Builder::new()
+            .prefix(".brainwire-typed-")
+            .tempdir_in(parent)
+            .map_err(|error| reject(&error))?;
+        let database = Self::open_config(staging.path(), res, false, true, true)?;
+        database
+            .apply_ontology(mapping)
+            .map_err(|error| reject(&error))?;
+        drop(database);
+        fs::File::open(staging.path())
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| reject(&error))?;
+        renameat_with(CWD, staging.path(), CWD, path, RenameFlags::NOREPLACE).map_err(|error| {
+            reject(&format!(
+                "cannot publish typed database at new path: {error}"
+            ))
+        })?;
+        let _ = staging.keep();
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                reject(&format!(
+                    "typed database was published but parent directory sync failed: {error}"
+                ))
+            })?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub fn create_typed(
+        _path: &Path,
+        _res: &Resources,
+        _mapping: &GraphMapping,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Catalog(
+            "typed database creation requires Linux or macOS".into(),
+        ))
+    }
+
+    pub fn directory_has_typed_property_format(path: &Path) -> Result<bool, StoreError> {
+        Ok(path.join("CURRENT").is_file()
+            && DB::list_cf(&Options::default(), path)?
+                .iter()
+                .any(|name| name == TYPED_PROPERTY_FAMILY))
+    }
+
+    pub fn has_typed_property_format(&self) -> bool {
+        self.db.cf_handle(TYPED_PROPERTY_FAMILY).is_some()
     }
 
     /// Enable the relationship index format before sharing this database.
@@ -318,6 +417,36 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_requires_both_typed_catalog_and_storage_marker() {
+        use crate::graph::CATALOG_KEY;
+        use crate::txn::Cf;
+        use brainwire_core::schema::Catalog;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = Resources::new(StoreConfig::for_tests());
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Page","properties":["title"],"property_types":{"title":"string"}}]}"#,
+        ).unwrap();
+        let regular = root.path().join("regular");
+        let db = Database::open(&regular, &resources).unwrap();
+        let mut transaction = db.begin();
+        transaction.put(
+            Cf::Meta,
+            CATALOG_KEY.to_vec(),
+            serde_json::to_vec(&Catalog::apply(&mapping, None).unwrap()).unwrap(),
+        );
+        transaction.commit().unwrap();
+        drop(db);
+        let error = Database::open(&regular, &resources).err().unwrap();
+        assert!(matches!(error, StoreError::Corrupt(_)), "{error}");
+
+        let partial = root.path().join("partial");
+        drop(Database::open_config(&partial, &resources, false, true, true).unwrap());
+        let error = Database::open(&partial, &resources).err().unwrap();
+        assert!(matches!(error, StoreError::Corrupt(_)), "{error}");
+    }
 
     #[test]
     fn checkpoint_reopens_committed_schema_indexes_and_counter_without_pending_writes() {

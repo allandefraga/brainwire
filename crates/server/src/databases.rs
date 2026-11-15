@@ -52,6 +52,17 @@ fn spawn_index_worker(name: &str, db: &Arc<Database>) {
     }
 }
 
+fn resources(config: &Config) -> Result<Resources, String> {
+    Ok(Resources::new(StoreConfig {
+        cache_bytes: usize::try_from(config.memory.cache.0)
+            .map_err(|_| "memory.cache exceeds platform address size")?,
+        memtable_bytes: usize::try_from(config.memory.memtables.0)
+            .map_err(|_| "memory.memtables exceeds platform address size")?,
+        id_block: 1024,
+        conflict_history_keys: 1_000_000,
+    }))
+}
+
 pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
@@ -88,21 +99,53 @@ impl Databases {
         if config.server.request_ledger {
             return Err("experimental request ledger cannot serve a replica".into());
         }
+        if config.server.data_dir.exists() {
+            for entry in fs::read_dir(&config.server.data_dir).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                if valid_name(&entry.file_name().to_string_lossy())
+                    && entry.file_type().map_err(|e| e.to_string())?.is_dir()
+                    && Database::directory_has_typed_property_format(&entry.path())
+                        .map_err(|e| format!("cannot inspect replica format: {e}"))?
+                {
+                    return Err("typed properties require standalone storage".into());
+                }
+            }
+        }
         Self::open(config, false)
+    }
+
+    pub(crate) fn create_typed(
+        config: &Config,
+        name: &str,
+        mapping: &brainwire_core::schema::GraphMapping,
+    ) -> Result<(), String> {
+        if !valid_name(name) {
+            return Err(format!("invalid database name {name:?}"));
+        }
+        if config.server.request_ledger
+            || config
+                .server
+                .data_dir
+                .join(".brainwire-cluster.json")
+                .exists()
+        {
+            return Err(
+                "typed properties require standalone storage without request ledger".into(),
+            );
+        }
+        Database::create_typed(
+            &config.server.data_dir.join(name),
+            &resources(config)?,
+            mapping,
+        )
+        .map_err(|error| format!("cannot create typed database {name}: {error}"))
     }
 
     fn open(config: &Config, discover: bool) -> Result<Self, String> {
         let data_dir = config.server.data_dir.clone();
         fs::create_dir_all(&data_dir)
             .map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
-        let resources = Resources::new(StoreConfig {
-            cache_bytes: usize::try_from(config.memory.cache.0)
-                .map_err(|_| "memory.cache exceeds platform address size")?,
-            memtable_bytes: usize::try_from(config.memory.memtables.0)
-                .map_err(|_| "memory.memtables exceeds platform address size")?,
-            id_block: 1024,
-            conflict_history_keys: 1_000_000,
-        });
+        let resources = resources(config)?;
         let registry = Self {
             data_dir,
             databases: Mutex::new(BTreeMap::new()),
@@ -208,6 +251,12 @@ impl Databases {
                 return Err(format!("cannot inspect {}: {error}", path.display()));
             }
             _ => {}
+        }
+        if !self.standalone
+            && Database::directory_has_typed_property_format(&path)
+                .map_err(|error| format!("cannot inspect replica format: {error}"))?
+        {
+            return Err("typed properties require standalone storage".into());
         }
         let mut db = if self.request_ledger {
             let result = if path.exists() {

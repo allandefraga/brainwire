@@ -140,6 +140,13 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 | Python code | Extract local Python structure and trace source links. [Code graph example](docs/code-graph.md) |
 | Typed batches | Validate a small JSON batch before writing it. [Typed ingestion example](examples/typed_ingest/README.md) |
 
+For a new standalone graph, the engine can also enforce optional scalar
+property types declared in the ontology. [Typed properties](docs/typed-properties.md)
+
+```json
+{"label": "Project", "properties": ["priority"], "property_types": {"priority": "integer"}}
+```
+
 ## How it works
 
 Applications write and query over Bolt. The Rust engine checks access, executes
@@ -203,7 +210,7 @@ Brainwire is an experimental beta. Plan a controlled trial:
 
 - **Memory:** budgets and sampled RSS/cgroup admission can refuse growing queries under pressure. They are partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
 - **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
-- **Types and metrics:** typed ingestion is client-side validation, not a database constraint. Named metrics are a limited Python example, not full semantic-model compatibility.
+- **Types and metrics:** native scalar property types require a new standalone graph; required fields, vector types and Raft are not supported. Typed batch validation is separate and client-side. Named metrics are a limited Python example, not full semantic-model compatibility.
 - **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
 - **Ingestion:** DuckDB snapshot sync needs a private persistent journal and exclusive ownership of mapped IDs. DuckLake fencing covers cooperating standalone writers; neither sync provides a graph-wide atomic cutover.
 - **Security:** shared deployments need a service-token policy and verified encryption. Optional native Bolt TLS requires a server certificate, a matching private key and client trust configuration. Rotate the server certificate by restarting. [Protected transport](docs/protected-transport.md)

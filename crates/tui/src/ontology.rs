@@ -1,5 +1,7 @@
 //! Read-only schema connections, independent of stored instance counts.
 
+use std::collections::BTreeMap;
+
 use crate::overview::{panel, terminal_text, text_style};
 use crate::{selection_style, Language, ACCENT, CYAN, PALE};
 use ratatui::{
@@ -20,6 +22,7 @@ pub struct OntologySummary {
 pub struct OntologyNode {
     pub label: String,
     pub properties: Vec<String>,
+    pub property_types: BTreeMap<String, String>,
     pub indexed_fields: Vec<String>,
 }
 
@@ -29,6 +32,7 @@ pub struct OntologyEdge {
     pub source: String,
     pub target: String,
     pub properties: Vec<String>,
+    pub property_types: BTreeMap<String, String>,
 }
 
 // Truncate by terminal cells, preserving Unicode boundaries and escaped controls.
@@ -60,27 +64,37 @@ fn signature(edge: &OntologyEdge) -> String {
     )
 }
 
+fn property_text(name: &str, types: &BTreeMap<String, String>) -> String {
+    let label = terminal_text(name);
+    match types.get(name) {
+        Some(kind) => format!("{label}: {}", terminal_text(kind)),
+        None => label,
+    }
+}
+
 fn inspector(node: &OntologyNode, ontology: &OntologySummary, lang: Language) -> String {
     let mut text = format!(
         "{}\n\n{}\n",
         terminal_text(&node.label),
         lang.choose("PROPRIEDADES", "PROPERTIES")
     );
-    let mut fields = |title: &str, values: &[String]| {
-        text.push_str(title);
+    for (values, show_types) in [(&node.properties, true), (&node.indexed_fields, false)] {
+        if !show_types {
+            text.push_str(lang.choose("\nÍNDICES DECLARADOS\n", "\nDECLARED INDEXES\n"));
+        }
         if values.is_empty() {
             text.push_str(lang.choose("  Nenhuma declaração.\n", "  No declarations.\n"));
         } else {
             for value in values {
-                text.push_str(&format!("  {}\n", terminal_text(value)));
+                let label = if show_types {
+                    property_text(value, &node.property_types)
+                } else {
+                    terminal_text(value)
+                };
+                text.push_str(&format!("  {label}\n"));
             }
         }
-    };
-    fields("", &node.properties);
-    fields(
-        lang.choose("\nÍNDICES DECLARADOS\n", "\nDECLARED INDEXES\n"),
-        &node.indexed_fields,
-    );
+    }
     for (heading, outgoing) in [
         (lang.choose("SAÍDA", "OUTGOING"), true),
         (lang.choose("ENTRADA", "INCOMING"), false),
@@ -99,16 +113,11 @@ fn inspector(node: &OntologyNode, ontology: &OntologySummary, lang: Language) ->
                     ));
                 }
                 if !edge.properties.is_empty() {
-                    text.push_str(lang.choose("  Propriedades: ", "  Properties: "));
-                    text.push_str(
-                        &edge
-                            .properties
-                            .iter()
-                            .map(|p| terminal_text(p))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    );
-                    text.push('\n');
+                    text.push_str(lang.choose("  Propriedades:\n", "  Properties:\n"));
+                    for property in &edge.properties {
+                        let label = property_text(property, &edge.property_types);
+                        text.push_str(&format!("    {label}\n"));
+                    }
                 }
             }
         }
@@ -240,7 +249,7 @@ fn connection_catalog(ontology: &OntologySummary, lang: Language) -> Vec<Line<'s
                 "  [{}]",
                 edge.properties
                     .iter()
-                    .map(|value| terminal_text(value))
+                    .map(|value| property_text(value, &edge.property_types))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
@@ -423,6 +432,7 @@ mod tests {
                     label: "Customer".into(),
                     properties: vec!["email: String".into()],
                     indexed_fields: vec!["email".into()],
+                    ..Default::default()
                 },
                 OntologyNode {
                     label: "Company".into(),
@@ -439,6 +449,7 @@ mod tests {
                     source: "Customer".into(),
                     target: "Company".into(),
                     properties: vec!["since: DateTime".into()],
+                    ..Default::default()
                 },
                 OntologyEdge {
                     name: "KNOWS".into(),
@@ -605,6 +616,7 @@ mod tests {
                 label: format!("Entity{index:02}"),
                 properties: vec!["entity_id: String".into(), "name: String".into()],
                 indexed_fields: vec!["entity_id".into()],
+                ..Default::default()
             })
             .collect();
         let edges = (0..20)
@@ -618,6 +630,7 @@ mod tests {
                     } else {
                         Vec::new()
                     },
+                    ..Default::default()
                 })
             })
             .collect();

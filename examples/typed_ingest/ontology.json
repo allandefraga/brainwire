@@ -1,11 +1,13 @@
 {
   "version": "1",
   "nodes": [
-    {"label": "Project", "properties": ["name"]},
-    {"label": "Decision", "properties": ["title", "approved"]}
+    {"label": "Project", "properties": ["name"], "property_types": {"name": "string"}},
+    {"label": "Decision", "properties": ["title", "approved"],
+     "property_types": {"title": "string", "approved": "boolean"}}
   ],
   "edges": [
     {"type": "HAS_DECISION", "from": {"label": "Project"}, "to": {"label": "Decision"},
-     "properties": ["position", "confidence"]}
+     "properties": ["position", "confidence"],
+     "property_types": {"position": "integer", "confidence": "float"}}
   ]
 }

@@ -10,6 +10,7 @@ _MAX_SIGNATURES = 4096
 _MAX_ENTRIES = 65536
 _MAX_STRINGS = 1 << 20
 _MAX_EXPANSIONS = 8192
+_SCALAR_TYPES = ("boolean", "integer", "float", "string")
 
 
 def _catalog(value):
@@ -36,17 +37,42 @@ def _catalog(value):
             raise ContextLimitError("schema exceeds its string bound")
         return value
 
-    def names(value):
+    def charge_entries(count):
         nonlocal entries
-        if not isinstance(value, list):
-            raise ValueError("schema property and merge key names must be lists")
-        entries += len(value)
+        entries += count
         if entries > _MAX_ENTRIES:
             raise ContextLimitError("schema exceeds its collection entry bound")
+
+    def names(value):
+        if not isinstance(value, list):
+            raise ValueError("schema property and merge key names must be lists")
+        charge_entries(len(value))
         result = [text(name) for name in value]
         if len(set(result)) != len(result):
             raise ValueError("schema names must be unique within each declaration")
         return sorted(result)
+
+    def property_types(item, properties, merge_keys=()):
+        fields = item.get("propertyTypes", {})
+        if not isinstance(fields, dict):
+            raise ValueError("schema propertyTypes must be an object")
+        if not fields:
+            return {}
+        charge_entries(1 + len(fields))
+        text("propertyTypes")
+        declared = set(properties)
+        merge_keys = set(merge_keys)
+        result = {}
+        for field, kind in fields.items():
+            field = text(field)
+            if field == "entity_id" or field not in declared:
+                raise ValueError("schema propertyTypes must name declared, nonreserved properties")
+            if not isinstance(kind, str) or kind not in _SCALAR_TYPES:
+                raise ValueError("schema propertyTypes must use supported scalar types")
+            if field in merge_keys and kind != "string":
+                raise ValueError("schema merge key property types must be string")
+            result[field] = text(kind)
+        return dict(sorted(result.items()))
 
     by_label = {}
     for item in nodes:
@@ -56,6 +82,9 @@ def _catalog(value):
         if label in by_label:
             raise ValueError("schema labels must be unique")
         result = {"label": label, "properties": names(item.get("properties"))}
+        types = property_types(item, result["properties"])
+        if types:
+            result["propertyTypes"] = types
         if "description" in item:
             result["description"] = text(item["description"], description=True)
         by_label[label] = result
@@ -79,9 +108,12 @@ def _catalog(value):
             raise ValueError("schema merge keys must be declared relationship properties")
         if keys:
             result["mergeKeyFields"] = keys
+        types = property_types(item, result["properties"], keys)
+        if types:
+            result["propertyTypes"] = types
         if "description" in item:
             result["description"] = text(item["description"], description=True)
-        meaning = result["properties"], keys, result.get("description")
+        meaning = result["properties"], keys, types, result.get("description")
         if name in meanings and meanings[name] != meaning:
             raise ValueError("schema relationship type metadata must be consistent")
         meanings[name] = meaning
@@ -136,6 +168,7 @@ def schema_paths(graph, source_label, target_label, *, max_hops=4, max_paths=20,
 
     Calls graph.schema() once and never queries stored records. Returned paths
     describe allowed schema shapes, not existing or ACL-visible instances.
+    Nodes and relationship signatures include propertyTypes when declared.
     Descriptions are application-supplied metadata, not trusted agent instructions.
 
     Labels may repeat (including self-loops), but each route stops at its target

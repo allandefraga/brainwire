@@ -454,9 +454,20 @@ def run(binary, rows, log_cap_recovery=False):
                 command(member, "provision", "--config", str(servers[member]))
                 start(member)
             report["checks"].append("each fresh owned voter explicitly provisioned once; restarts never provision or replace voter persistence")
+            typed = {"version": "1", "nodes": [{"label": "Page", "properties": ["title"],
+                     "property_types": {"title": "string"}}]}
+            typed_ontology, typed_graphs = root / "typed.json", root / "typed-graphs.json"
+            typed_ontology.write_text(json.dumps(typed))
+            typed_graphs.write_text(json.dumps({"typed": typed}))
+            rejected = command(1, "init", "--schemas", str(typed_graphs), check=False)
+            assert rejected.returncode and "typed properties require standalone" in rejected.stderr
             initialized = json.loads(command(1, "init", "--schemas", str(graphs), "--request-id", "bootstrap").stdout)
             report["bootstrap"] = initialized
             current = leader()
+            rejected = command(current, "create", "--graph", "typed", "--ontology", str(typed_ontology), check=False)
+            assert rejected.returncode and "typed properties require standalone" in rejected.stderr
+            assert all(not (root / str(member) / "data" / "typed").exists() for member in (1, 2, 3))
+            report["checks"].append("typed ontologies are refused at bootstrap and online creation before graph materialization")
             created = json.loads(command(current, "create", "--graph", "aux", "--ontology", str(schema_path), "--request-id", "create-aux").stdout)
             report["create_aux"] = created
             batch = [{"id": f"page-{i}", "title": f"title-{i}"} for i in range(rows)]

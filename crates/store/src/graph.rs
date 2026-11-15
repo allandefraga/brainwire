@@ -36,6 +36,12 @@ pub enum GraphError {
     BadSignature(String),
     #[error("property {0} is reserved")]
     ReservedProperty(String),
+    #[error("property {owner}.{field} requires {expected}")]
+    PropertyType {
+        owner: String,
+        field: String,
+        expected: &'static str,
+    },
     #[error(transparent)]
     Acl(#[from] AclError),
     #[error("node {0:?} not found")]
@@ -411,6 +417,11 @@ impl Database {
             None => None,
         };
         let mut next = Catalog::apply(mapping, previous.as_ref()).map_err(catalog_error)?;
+        if next.has_property_types() != self.has_typed_property_format() {
+            return Err(GraphError::Catalog(
+                "typed properties require a fresh standalone graph".into(),
+            ));
+        }
         let relationship_names: HashSet<_> = next
             .edge_types
             .iter()
@@ -685,6 +696,26 @@ fn apply_props(row: &mut Row, columns: &[Column], props: &BTreeMap<String, Value
     }
 }
 
+fn check_property_types(row: &Row, columns: &[Column], owner: &str) -> Result<(), GraphError> {
+    for column in columns {
+        if let Some(kind) = column.property_type {
+            let mut values = row
+                .columns
+                .get(&column.id)
+                .into_iter()
+                .chain(row.extra.get(&column.name));
+            if values.any(|value| !kind.accepts(value)) {
+                return Err(GraphError::PropertyType {
+                    owner: owner.into(),
+                    field: column.name.clone(),
+                    expected: kind.name(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Plain read: no dependency is recorded, so a later write to this node by
 /// another transaction cannot make the caller's commit conflict. Callers that
 /// only need the node to still exist *right now* to check a name or format a
@@ -713,19 +744,26 @@ pub fn merge_node(
         Some(bytes) => {
             let id = node_id_value(&bytes)?;
             let (_, row) = read_node(txn, id)?.ok_or(GraphError::NodeNotFound(id))?;
-            (id, row)
+            (Some(id), row)
         }
-        None => {
-            let id = txn.next_node_id(ty.id)?;
-            txn.put(Cf::Pk, pk, id.0.to_be_bytes().to_vec());
-            (id, Row::default())
-        }
+        None => (None, Row::default()),
     };
     let old = row.clone();
     row.schema_version = catalog.version;
     // Values of dropped properties are purged whenever their node is written.
     row.columns.retain(|id, _| !ty.retired_columns.contains(id));
     apply_props(&mut row, &ty.columns, props);
+    if txn.has_typed_property_format() {
+        check_property_types(&row, &ty.columns, label)?;
+    }
+    let id = match id {
+        Some(id) => id,
+        None => {
+            let id = txn.next_node_id(ty.id)?;
+            txn.put(Cf::Pk, pk, id.0.to_be_bytes().to_vec());
+            id
+        }
+    };
     update_node_indexes(txn, ty, id, &old, &row);
     txn.put(Cf::Node, node_key(id), encode_node(entity_id, &row));
     Ok(id)
@@ -1651,6 +1689,9 @@ fn write_edge<E: From<GraphError> + From<StoreError>>(
     }
     row.schema_version = schema_version;
     apply_props(&mut row, &et.columns, props);
+    if txn.has_typed_property_format() {
+        check_property_types(&row, &et.columns, &et.name)?;
+    }
     if txn.has_relationship_index_format() {
         crate::relationship_index::track_definition(txn, et)?;
         crate::relationship_index::update(txn, et, &out, &row)?;
@@ -1999,6 +2040,10 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
         .map(|bytes| serde_json::from_slice(&bytes))
         .transpose()
         .map_err(|e| err(&e))?;
+    let typed = db.has_typed_property_format();
+    if typed != catalog.as_ref().is_some_and(Catalog::has_property_types) {
+        return Err("typed properties catalog and storage format disagree".into());
+    }
     if let Some(catalog) = &catalog {
         crate::relationship_index::check(&txn, catalog).map_err(|e| err(&e))?;
     }
@@ -2023,11 +2068,20 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
     for (key, value) in txn.scan_prefix(Cf::Node, &[]).map_err(|e| err(&e))? {
         let id = node_id_value(&key).map_err(|e| err(&e))?;
         let (entity_id, row) = decode_node(&value).map_err(|e| err(&e))?;
-        if ready {
-            if let Some(ty) = catalog
-                .as_ref()
-                .and_then(|c| c.node_types.iter().find(|ty| ty.id == id.type_id()))
-            {
+        let ty = catalog
+            .as_ref()
+            .and_then(|c| c.node_types.iter().find(|ty| ty.id == id.type_id()));
+        if typed && ty.is_none() {
+            return Err(format!(
+                "node {id:?} has no catalog type {:?}",
+                id.type_id()
+            ));
+        }
+        if let Some(ty) = ty {
+            if typed {
+                check_property_types(&row, &ty.columns, &ty.label).map_err(|e| err(&e))?;
+            }
+            if ready {
                 for field in ty.indexed.iter().filter(|f| ty.index_online(f)) {
                     if let Some(key) = property_value(&row, ty, field)
                         .and_then(|v| index_key(&index_field_prefix(ty.id, field), v, id))
@@ -2102,8 +2156,17 @@ pub fn check_invariants(db: &Database) -> Result<(), String> {
     })
     .map_err(|e| err(&e))?;
     for (cf, mirror) in [(Cf::Out, Cf::In), (Cf::In, Cf::Out)] {
-        for (key, _) in txn.scan_prefix(cf, &[]).map_err(|e| err(&e))? {
+        for (key, value) in txn.scan_prefix(cf, &[]).map_err(|e| err(&e))? {
             let (a, ty, b, id) = decode_edge_key(&key).map_err(|e| err(&e))?;
+            if cf == Cf::Out && typed {
+                let definition = catalog
+                    .as_ref()
+                    .and_then(|c| c.edge_types.iter().find(|edge| edge.id == ty))
+                    .ok_or_else(|| format!("edge {id:?} has no catalog type {ty:?}"))?;
+                let row = decode_row(&value).map_err(|e| err(&e))?;
+                check_property_types(&row, &definition.columns, &definition.name)
+                    .map_err(|e| err(&e))?;
+            }
             // `a` is this key's own side (source in Out, target in In): across
             // both directions of this outer loop, every logical edge's two
             // endpoints each get checked here once (fix round 1, reviewer
@@ -4023,6 +4086,7 @@ mod tests {
                 description: None,
                 label: "Customer".into(),
                 properties: properties.iter().map(|s| s.to_string()).collect(),
+                property_types: BTreeMap::new(),
                 er_fields: vec![],
                 indexed_fields: vec![],
                 identifier_columns: BTreeMap::new(),
@@ -4160,6 +4224,29 @@ mod tests {
     // written by corrupting state directly through a Txn with raw keys
     // (never through the public graph API, which cannot produce these
     // states on its own).
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn typed_invariant_check_rejects_nodes_without_a_catalog_type() {
+        let root = tempfile::tempdir().unwrap();
+        let resources = Resources::new(StoreConfig::for_tests());
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Page","properties":["title"],"property_types":{"title":"string"}}]}"#,
+        ).unwrap();
+        let path = root.path().join("typed");
+        Database::create_typed(&path, &resources, &mapping).unwrap();
+        let db = Database::open(&path, &resources).unwrap();
+        let mut tx = db.begin();
+        let id = tx.next_node_id(TypeId(2)).unwrap();
+        tx.put(
+            Cf::Node,
+            node_key(id),
+            encode_node("corrupt", &Row::default()),
+        );
+        tx.commit().unwrap();
+        let error = check_invariants(&db).unwrap_err();
+        assert!(error.contains("has no catalog type"), "{error}");
+    }
 
     #[test]
     fn check_invariants_catches_a_pk_pointing_to_a_missing_node() {

@@ -15,7 +15,7 @@ import time
 
 from neo4j.exceptions import Neo4jError
 
-from brainwire import connect
+from brainwire import connect, schema_paths
 from examples.typed_ingest.ingest import read_json, write_batch
 
 
@@ -37,6 +37,9 @@ def verify_writes(uri, env, scoped_credentials):
     auth = read_json(Path(env["BRAINWIRE_BOLT_AUTH_FILE"]))
     credentials = (auth["principal"], auth["credentials"])
     with connect(uri, DATABASE, auth=credentials, connection_timeout=5) as graph:
+        path = schema_paths(graph, "Project", "Decision")["paths"][0]
+        assert path["nodes"][0]["propertyTypes"] == {"name": "string"}
+        assert path["relationships"][0]["propertyTypes"] == {"confidence": "float", "position": "integer"}
         assert graph.run_cypher("MATCH (n) RETURN count(n) AS count") == [{"count": 0}]
         loaded = subprocess.run(
             [*cli, "--database", DATABASE, "--uri", uri],

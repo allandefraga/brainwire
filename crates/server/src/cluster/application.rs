@@ -58,6 +58,9 @@ pub(crate) fn validate_graphs(graphs: &BTreeMap<String, Vec<u8>>) -> Result<(), 
         }
         let mapping: GraphMapping =
             serde_json::from_slice(bytes).map_err(|_| "invalid ontology JSON")?;
+        if mapping.has_property_types() {
+            return Err("typed properties require standalone storage".into());
+        }
         Catalog::apply(&mapping, None).map_err(|_| "invalid initial ontology")?;
     }
     Ok(())
@@ -255,6 +258,74 @@ mod tests {
     }
     fn schema() -> Vec<u8> {
         br#"{"version":"1","nodes":[{"label":"Page","properties":["title"],"indexed_fields":["title"]}],"edges":[]}"#.to_vec()
+    }
+    fn typed_schema() -> Vec<u8> {
+        br#"{"version":"1","nodes":[{"label":"Page","properties":["title"],"property_types":{"title":"string"}}]}"#.to_vec()
+    }
+
+    #[test]
+    fn typed_bootstrap_and_online_create_refuse_before_materializing() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = config(temp.path());
+        let databases = Arc::new(Databases::open_replica(&config).unwrap());
+        let app = GraphApplication::open(databases.clone(), temp.path()).unwrap();
+        let typed = BTreeMap::from([("typed".into(), typed_schema())]);
+        assert!(validate_graphs(&typed).unwrap_err().contains("standalone"));
+        assert_eq!(
+            app.apply(&Command::Bootstrap {
+                request_id: "typed".into(),
+                graphs: typed
+            })
+            .unwrap(),
+            Reply::Conflict
+        );
+        assert!(!temp.path().join("typed").exists());
+        assert!(!app.registry_path.exists());
+
+        assert_eq!(
+            app.apply(&Command::Bootstrap {
+                request_id: "ordinary".into(),
+                graphs: BTreeMap::from([("ordinary".into(), schema())])
+            })
+            .unwrap(),
+            Reply::Initialized
+        );
+        assert_eq!(
+            app.apply(&Command::CreateGraph {
+                request_id: "typed".into(),
+                graph: "typed".into(),
+                schema: typed_schema()
+            })
+            .unwrap(),
+            Reply::Conflict
+        );
+        assert!(!temp.path().join("typed").exists());
+        assert_eq!(databases.names(), vec!["ordinary"]);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn replica_open_refuses_a_typed_volume_left_in_its_data_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = config(temp.path());
+        let typed: GraphMapping = serde_json::from_slice(&typed_schema()).unwrap();
+        Databases::create_typed(&config, "typed", &typed).unwrap();
+        let error = Databases::open_replica(&config).err().unwrap();
+        assert!(error.contains("standalone"), "{error}");
+        let standalone = Databases::open_all(&config).unwrap();
+        let database = standalone.get("typed").unwrap();
+        let mut tx = QueryTransaction::begin(&database)
+            .unwrap()
+            .with_replicated_ids();
+        tx.run(
+            "CREATE (:Page {entity_id:'uncommitted', title:'valid'})",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let result = tx.prepare_replication();
+        assert!(result.err().unwrap().to_string().contains("standalone"));
+        drop(tx);
+        assert_eq!(database.stats().unwrap().nodes, 0);
     }
     fn write(databases: &Databases, graph: &str, request: &str) -> Command {
         let database = databases.get(graph).unwrap();

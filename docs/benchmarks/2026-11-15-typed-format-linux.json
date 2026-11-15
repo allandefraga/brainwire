@@ -1,0 +1,38 @@
+{
+  "candidate": {
+    "Id": "sha256:cca58bb8847e9c474f969f5b87dd9f3922383d7f4483c4e14d85f86b54ab2f1d",
+    "Os": "linux",
+    "Architecture": "arm64"
+  },
+  "previous": {
+    "Id": "sha256:0cd65ecb4d5115b53a045b796bce29163872e715520189d917eaa70429abc9b2",
+    "Os": "linux",
+    "Architecture": "arm64"
+  },
+  "restart": {
+    "before": "2026-11-15T08:40:57.449827449Z",
+    "after": "2026-11-15T08:40:57.589467876Z"
+  },
+  "typed_rows_after_restart_and_restore": [
+    [
+      "p",
+      0.75,
+      true
+    ]
+  ],
+  "old_image_untyped_read": [
+    [
+      "free-form"
+    ]
+  ],
+  "candidate_read_after_old_image_write": [
+    [
+      "old-image-write"
+    ]
+  ],
+  "old_image_refused": {
+    "typed": "error: storage: cannot open /data/typed: Invalid argument: Column families not opened: typed_properties_v1. This command needs exclusive local access; close any process using this database before retrying.",
+    ".snapshot": "error: storage: cannot open /data/.snapshot: Invalid argument: Column families not opened: typed_properties_v1. This command needs exclusive local access; close any process using this database before retrying.",
+    "restored": "error: storage: cannot open /data/restored: Invalid argument: Column families not opened: typed_properties_v1. This command needs exclusive local access; close any process using this database before retrying."
+  }
+}

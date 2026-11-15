@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use brainwire_core::schema::{Catalog, GraphMapping};
+use brainwire_core::schema::{Catalog, Column, GraphMapping};
 use brainwire_tui::{
     GraphSummary, OntologyEdge, OntologyNode, OntologySummary, StorageFileSummary,
 };
@@ -262,6 +262,20 @@ pub fn graph_summaries(
     Ok(graphs)
 }
 
+fn property_types(columns: &[Column]) -> impl Iterator<Item = (&str, &'static str)> {
+    columns.iter().filter_map(|column| {
+        column
+            .property_type
+            .map(|kind| (column.name.as_str(), kind.name()))
+    })
+}
+
+fn display_property_types(columns: &[Column]) -> BTreeMap<String, String> {
+    property_types(columns)
+        .map(|(name, kind)| (name.to_owned(), kind.to_owned()))
+        .collect()
+}
+
 fn ontology_summary(catalog: &Catalog) -> Result<OntologySummary, String> {
     let nodes = catalog
         .node_types
@@ -277,6 +291,7 @@ fn ontology_summary(catalog: &Catalog) -> Result<OntologySummary, String> {
                 )
                 .collect(),
             indexed_fields: ty.indexed.clone(),
+            property_types: display_property_types(&ty.columns),
         })
         .collect();
     let mut edges = Vec::new();
@@ -300,6 +315,7 @@ fn ontology_summary(catalog: &Catalog) -> Result<OntologySummary, String> {
                 source: label(*from)?,
                 target: label(*to)?,
                 properties: ty.columns.iter().map(|c| c.name.clone()).collect(),
+                property_types: display_property_types(&ty.columns),
             });
         }
     }
@@ -431,9 +447,15 @@ pub fn schema(name: &str, json: bool, config: Option<&Path>) -> Result<(), Strin
         println!("database={name} catalog_version={}", catalog.version);
         for node in &catalog.node_types {
             println!("node {} indexed_declared={:?}", node.label, node.indexed);
+            for (name, kind) in property_types(&node.columns) {
+                println!("  property {name:?}: {kind}");
+            }
         }
         for edge in &catalog.edge_types {
             println!("edge {}", edge.name);
+            for (name, kind) in property_types(&edge.columns) {
+                println!("  property {name:?}: {kind}");
+            }
         }
         for stream in &catalog.streams {
             println!(
@@ -477,6 +499,14 @@ pub fn metrics(name: &str, json: bool, config: Option<&Path>) -> Result<(), Stri
 
 pub fn create(name: &str, ontology: Option<&Path>, config: Option<&Path>) -> Result<(), String> {
     let mapping = ontology.map(read_ontology).transpose()?;
+    if let Some(typed) = mapping
+        .as_ref()
+        .filter(|mapping| mapping.has_property_types())
+    {
+        Databases::create_typed(&load_config(config)?, name, typed)?;
+        println!("database {name} ready");
+        return Ok(());
+    }
     let registry = open_registry(config)?;
     let db = registry.create(name)?;
     if let Some(mapping) = mapping {

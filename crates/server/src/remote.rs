@@ -1,6 +1,6 @@
 //! Bounded, read-only schema acquisition over Bolt.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use brainwire_bolt::packstream::PackValue;
 use brainwire_tui::{OntologyEdge, OntologyNode, OntologySnapshot, OntologySummary};
@@ -64,14 +64,19 @@ struct Limits {
 }
 
 impl Limits {
+    fn add_entries(&mut self, count: usize) -> Result<(), String> {
+        self.entries = self.entries.saturating_add(count);
+        if self.entries > MAX_ENTRIES {
+            return Err("schema exceeds collection entry limit".into());
+        }
+        Ok(())
+    }
+
     fn list<'a>(&mut self, value: &'a PackValue) -> Result<&'a [PackValue], String> {
         let PackValue::List(items) = value else {
             return Err("expected schema list".into());
         };
-        self.entries += items.len();
-        if self.entries > MAX_ENTRIES {
-            return Err("schema exceeds list entry limit".into());
-        }
+        self.add_entries(items.len())?;
         Ok(items)
     }
 
@@ -79,6 +84,11 @@ impl Limits {
         let PackValue::String(text) = value else {
             return Err("expected schema string".into());
         };
+        self.add_text(text)?;
+        Ok(text.clone())
+    }
+
+    fn add_text(&mut self, text: &str) -> Result<(), String> {
         self.text += text
             .chars()
             .map(|c| {
@@ -92,7 +102,7 @@ impl Limits {
         if self.text > MAX_TEXT {
             return Err("schema exceeds expanded text limit".into());
         }
-        Ok(text.clone())
+        Ok(())
     }
 
     fn strings(&mut self, value: &PackValue) -> Result<Vec<String>, String> {
@@ -163,6 +173,42 @@ fn description(limits: &mut Limits, value: &PackValue) -> Result<(), String> {
     Ok(())
 }
 
+fn property_types(
+    limits: &mut Limits,
+    declaration: &PackValue,
+    properties: &[String],
+) -> Result<BTreeMap<String, String>, String> {
+    let mut types = BTreeMap::new();
+    let Some(value) = optional(declaration, "propertyTypes") else {
+        return Ok(types);
+    };
+    let PackValue::Map(entries) = value else {
+        return Err("expected schema property types map".into());
+    };
+    limits.add_entries(entries.len())?;
+    let properties: HashSet<&str> = properties.iter().map(String::as_str).collect();
+    for (name, value) in entries {
+        limits.add_text(name)?;
+        let kind = limits.text(value)?;
+        if name.is_empty()
+            || name == "entity_id"
+            || name.contains('\0')
+            || name
+                .as_bytes()
+                .get(..4)
+                .is_some_and(|p| p.eq_ignore_ascii_case(b"acl_"))
+            || !properties.contains(name.as_str())
+            || !matches!(kind.as_str(), "boolean" | "integer" | "float" | "string")
+        {
+            return Err("invalid schema property type declaration".into());
+        }
+        if types.insert(name.clone(), kind).is_some() {
+            return Err("duplicate schema property type declaration".into());
+        }
+    }
+    Ok(types)
+}
+
 fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
     let PackValue::Struct { tag: 0x71, fields } = value else {
         return Err("expected one schema RECORD".into());
@@ -194,7 +240,7 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
         let fields = map(
             value,
             &["label", "properties", "indexedFields"],
-            &["description"],
+            &["description", "propertyTypes"],
         )?;
         description(&mut limits, value)?;
         let label = limits.text(fields[0])?;
@@ -205,6 +251,7 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
         let indexed_fields = limits.strings(fields[2])?;
         nodes.push(OntologyNode {
             label,
+            property_types: property_types(&mut limits, value, &properties)?,
             properties,
             indexed_fields,
         });
@@ -214,12 +261,13 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
         return Err("schema exceeds relationship signature limit".into());
     }
     let mut signatures = HashSet::new();
-    let mut edges = Vec::new();
+    let mut declarations: HashMap<String, (usize, Vec<String>)> = HashMap::new();
+    let mut edges: Vec<OntologyEdge> = Vec::new();
     for value in edge_values {
         let fields = map(
             value,
             &["name", "source", "target", "properties"],
-            &["description", "mergeKeyFields"],
+            &["description", "mergeKeyFields", "propertyTypes"],
         )?;
         description(&mut limits, value)?;
         let name = limits.text(fields[0])?;
@@ -232,13 +280,15 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
             return Err("schema relationship references an unknown endpoint".into());
         }
         let properties = limits.strings(fields[3])?;
-        if let Some(value) = optional(value, "mergeKeyFields") {
+        let property_types = property_types(&mut limits, value, &properties)?;
+        let keys = if let Some(value) = optional(value, "mergeKeyFields") {
             let keys = limits.strings(value)?;
             if keys.is_empty()
                 || keys.iter().any(|key| {
                     key.is_empty()
                         || key.len() > 128
                         || !properties.contains(key)
+                        || property_types.get(key).is_some_and(|kind| kind != "string")
                         || key.to_ascii_lowercase().starts_with("acl_")
                         || !key.bytes().enumerate().all(|(i, b)| {
                             b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())
@@ -247,12 +297,27 @@ fn decode_record(value: PackValue) -> Result<OntologySnapshot, String> {
             {
                 return Err("invalid schema relationship merge keys".into());
             }
+            keys
+        } else {
+            Vec::new()
+        };
+        if let Some((index, first_keys)) = declarations.get(&name) {
+            let first = &edges[*index];
+            if first.properties != properties
+                || first.property_types != property_types
+                || *first_keys != keys
+            {
+                return Err("inconsistent metadata across schema relationship signatures".into());
+            }
+        } else {
+            declarations.insert(name.clone(), (edges.len(), keys));
         }
         edges.push(OntologyEdge {
             name,
             source,
             target,
             properties,
+            property_types,
         });
     }
     Ok(OntologySnapshot {
@@ -518,9 +583,16 @@ mod tests {
         };
         let node = PackValue::Map(vec![
             ("label".into(), PackValue::String("Ticket".into())),
-            ("properties".into(), strings(&["entity_id"])),
+            ("properties".into(), strings(&["entity_id", "priority"])),
             ("indexedFields".into(), strings(&[])),
             ("description".into(), PackValue::String("A ticket".into())),
+            (
+                "propertyTypes".into(),
+                PackValue::Map(vec![(
+                    "priority".into(),
+                    PackValue::String("integer".into()),
+                )]),
+            ),
         ]);
         let edge = PackValue::Map(vec![
             ("name".into(), PackValue::String("EVENT".into())),
@@ -532,19 +604,72 @@ mod tests {
                 PackValue::String("A milestone".into()),
             ),
             ("mergeKeyFields".into(), strings(&["event_key"])),
+            (
+                "propertyTypes".into(),
+                PackValue::Map(vec![(
+                    "event_key".into(),
+                    PackValue::String("string".into()),
+                )]),
+            ),
         ]);
-        let decode = |node, edge| {
+        let mut second_label = node.clone();
+        let PackValue::Map(fields) = &mut second_label else {
+            unreachable!()
+        };
+        fields[0].1 = PackValue::String("Incident".into());
+        let decode_edges = |node, edges| {
             decode_record(message_value(PackValue::List(vec![
                 PackValue::Int(1),
-                PackValue::List(vec![node]),
-                PackValue::List(vec![edge]),
+                PackValue::List(vec![node, second_label.clone()]),
+                PackValue::List(edges),
                 PackValue::Bool(true),
             ])))
         };
+        let decode = |node, edge| decode_edges(node, vec![edge]);
         let snapshot = decode(node.clone(), edge.clone()).unwrap();
+        assert_eq!(
+            snapshot.ontology.nodes[0].property_types["priority"],
+            "integer"
+        );
+        assert_eq!(
+            snapshot.ontology.edges[0].property_types["event_key"],
+            "string"
+        );
         assert_eq!(
             snapshot.ontology.edges[0].properties,
             ["event_key", "summary"]
+        );
+        let mut second_signature = edge.clone();
+        let PackValue::Map(fields) = &mut second_signature else {
+            unreachable!()
+        };
+        fields[2].1 = PackValue::String("Incident".into());
+        assert_eq!(
+            decode_edges(node.clone(), vec![edge.clone(), second_signature.clone()])
+                .unwrap()
+                .ontology
+                .edges
+                .len(),
+            2
+        );
+        for field in ["mergeKeyFields", "propertyTypes"] {
+            let mut inconsistent = second_signature.clone();
+            let PackValue::Map(fields) = &mut inconsistent else {
+                unreachable!()
+            };
+            fields.retain(|(key, _)| key != field);
+            assert!(decode_edges(node.clone(), vec![edge.clone(), inconsistent])
+                .unwrap_err()
+                .contains("inconsistent metadata"));
+        }
+        let PackValue::Map(fields) = &mut second_signature else {
+            unreachable!()
+        };
+        fields[3].1 = strings(&["event_key", "different_property"]);
+        assert!(
+            decode_edges(node.clone(), vec![edge.clone(), second_signature])
+                .unwrap_err()
+                .contains("inconsistent metadata")
         );
         for (name, value) in [
             ("mergeKeyFields", PackValue::Bool(true)),
@@ -553,6 +678,13 @@ mod tests {
             ("mergeKeyFields", strings(&["missing"])),
             ("description", PackValue::Int(1)),
             ("description", PackValue::String("x".repeat(4097))),
+            (
+                "propertyTypes",
+                PackValue::Map(vec![(
+                    "event_key".into(),
+                    PackValue::String("integer".into()),
+                )]),
+            ),
         ] {
             let mut bad = edge.clone();
             let PackValue::Map(fields) = &mut bad else {
@@ -572,6 +704,41 @@ mod tests {
             fields.push((name.into(), value));
             assert!(decode(node.clone(), bad).is_err());
         }
+    }
+
+    #[test]
+    fn schema_property_types_reject_invalid_metadata_and_share_collection_limits() {
+        let string = |value: &str| PackValue::String(value.to_owned());
+        let declaration = |value| PackValue::Map(vec![("propertyTypes".into(), value)]);
+        let properties = ["priority", "acl_visible", "entity_id"].map(str::to_owned);
+        for value in [
+            PackValue::Bool(false),
+            PackValue::Map(vec![("priority".into(), PackValue::Bool(false))]),
+            PackValue::Map(vec![("priority".into(), string("decimal"))]),
+            PackValue::Map(vec![("missing".into(), string("integer"))]),
+            PackValue::Map(vec![("acl_visible".into(), string("boolean"))]),
+            PackValue::Map(vec![("entity_id".into(), string("string"))]),
+            PackValue::Map(vec![("priority".into(), string("integer")); 2]),
+        ] {
+            assert!(
+                property_types(&mut Limits::default(), &declaration(value), &properties).is_err()
+            );
+        }
+        let valid = declaration(PackValue::Map(vec![("priority".into(), string("integer"))]));
+        let mut entries_full = Limits {
+            entries: MAX_ENTRIES,
+            ..Default::default()
+        };
+        assert!(property_types(&mut entries_full, &valid, &properties)
+            .unwrap_err()
+            .contains("entry limit"));
+        let mut text_full = Limits {
+            text: MAX_TEXT - "priority".len(),
+            ..Default::default()
+        };
+        assert!(property_types(&mut text_full, &valid, &properties)
+            .unwrap_err()
+            .contains("text limit"));
     }
 
     #[test]

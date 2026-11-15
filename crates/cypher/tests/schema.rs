@@ -1,6 +1,6 @@
 use brainwire_core::{
     ids::{EdgeTypeId, TypeId},
-    schema::{Catalog, Column, EdgeType, GraphMapping, NodeType},
+    schema::{Catalog, Column, EdgeType, GraphMapping, NodeType, ScalarType},
     value::Value,
 };
 use brainwire_cypher::{
@@ -87,6 +87,41 @@ fn empty_catalog_returns_one_row() {
             Out::Value(Value::Bool(false))
         ]
     );
+}
+
+#[test]
+fn schema_filters_reserved_columns_from_type_metadata() {
+    let (_dir, db) = open();
+    let mapping: GraphMapping = serde_json::from_str(
+        r#"{
+        "version":"1","nodes":[{"label":"Page"}],"edges":[
+            {"type":"LINK","from":{"label":"Page"},"to":{"label":"Page"}}
+        ]}"#,
+    )
+    .unwrap();
+    let mut catalog = db.apply_ontology(&mapping).unwrap();
+    for columns in [
+        &mut catalog.node_types[0].columns,
+        &mut catalog.edge_types[0].columns,
+    ] {
+        columns.push(Column {
+            id: 0,
+            name: "AcL_Reserved".into(),
+            property_type: Some(ScalarType::String),
+        });
+    }
+    store_catalog(&db, &catalog);
+    let values = run(&db);
+    for value in &values[1..=2] {
+        let Out::Value(Value::List(entries)) = value else {
+            panic!("{value:?}")
+        };
+        let Value::Map(fields) = &entries[0] else {
+            panic!("{entries:?}")
+        };
+        assert!(!fields.contains_key("propertyTypes"), "{fields:?}");
+        assert!(!format!("{fields:?}").contains("AcL_Reserved"));
+    }
 }
 
 #[test]
@@ -279,6 +314,7 @@ fn rejects_oversized_schema_and_dangling_endpoints() {
         .map(|i| Column {
             id: i,
             name: String::new(),
+            property_type: None,
         })
         .collect();
     store_catalog(&db, &c);
@@ -377,6 +413,7 @@ fn caps_count_repeated_endpoints_and_relationship_properties() {
         .map(|i| Column {
             id: i,
             name: String::new(),
+            property_type: None,
         })
         .collect();
     store_catalog(&db, &c);
@@ -385,6 +422,7 @@ fn caps_count_repeated_endpoints_and_relationship_properties() {
     c.edge_types[0].columns = vec![Column {
         id: 0,
         name: "p".repeat(200_000),
+        property_type: None,
     }];
     store_catalog(&db, &c);
     let error = execute(&db, QUERY, &BTreeMap::new()).unwrap_err();

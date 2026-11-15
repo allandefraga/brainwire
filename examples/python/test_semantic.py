@@ -2,6 +2,7 @@ import copy
 import json
 import itertools
 import unittest
+from unittest.mock import patch
 
 from brainwire.context import ContextLimitError
 from brainwire.semantic import schema_paths
@@ -33,6 +34,54 @@ class Graph:
 
 
 class SchemaPathsTests(unittest.TestCase):
+    def test_preserves_typed_properties_and_omits_empty_metadata(self):
+        graph = Graph([node("A", properties=["title", "active", "priority"],
+                            propertyTypes={"title": "string", "priority": "integer", "active": "boolean"}),
+                       node("B", propertyTypes={})],
+                      [edge("LINK", "A", "B", propertyTypes={"at": "float"})])
+        before = copy.deepcopy(graph.value)
+        path = schema_paths(graph, "A", "B")["paths"][0]
+        self.assertEqual(path["nodes"][0]["propertyTypes"],
+                         {"active": "boolean", "priority": "integer", "title": "string"})
+        self.assertEqual(list(path["nodes"][0]["propertyTypes"]), ["active", "priority", "title"])
+        self.assertEqual(path["relationships"][0]["propertyTypes"], {"at": "float"})
+        self.assertEqual(path["nodes"][1], node("B"))
+        self.assertEqual(graph.value, before)
+
+    def test_rejects_malformed_typed_properties_and_inconsistent_signatures(self):
+        for fields in (None, [], {"title": ["string"]}, {"title": "date"},
+                       {"missing": "integer"}, {"entity_id": "string"},
+                       {"Acl_allow": "string"}, {"invalid name": "string"}, {1: "string"}):
+            with self.subTest(fields=fields):
+                graph = Graph([node("A", propertyTypes=fields), node("B")], [edge("LINK", "A", "B")])
+                with self.assertRaises(ValueError):
+                    schema_paths(graph, "A", "B")
+        graph = Graph([node(label) for label in "ABC"],
+                      [edge("LINK", "A", "B", propertyTypes={"at": "integer"}),
+                       edge("LINK", "B", "C", propertyTypes={"at": "float"})])
+        with self.assertRaisesRegex(ValueError, "consistent"):
+            schema_paths(graph, "A", "C")
+        graph.value["relationships"][0]["mergeKeyFields"] = ["at"]
+        with self.assertRaisesRegex(ValueError, "merge key property types must be string"):
+            schema_paths(graph, "A", "C")
+
+    def test_typed_properties_count_toward_catalog_and_output_limits(self):
+        graph = Graph([node("A", properties=["title"]), node("B", properties=[])], [edge("LINK", "A", "B")])
+        untyped = schema_paths(graph, "A", "B")
+        output_limit = len(json.dumps(untyped, ensure_ascii=False).encode("utf-8"))
+        self.assertNotIn("propertyTypes", untyped["paths"][0]["nodes"][0])
+        self.assertNotIn("propertyTypes", untyped["paths"][0]["relationships"][0])
+        for parameter, limit, message in (("_MAX_ENTRIES", 3, "collection"), ("_MAX_STRINGS", 38, "string")):
+            with self.subTest(parameter=parameter), patch(f"brainwire.semantic.{parameter}", limit):
+                self.assertEqual(schema_paths(graph, "A", "B"), untyped)
+                graph.value["nodes"][0]["propertyTypes"] = {"title": "string"}
+                with self.assertRaisesRegex(ContextLimitError, message):
+                    schema_paths(graph, "A", "B")
+                del graph.value["nodes"][0]["propertyTypes"]
+        graph.value["nodes"][0]["propertyTypes"] = {"title": "string"}
+        with self.assertRaisesRegex(ContextLimitError, "output"):
+            schema_paths(graph, "A", "B", max_bytes=output_limit)
+
     def test_direct_paths_preserve_meaning_and_read_schema_once(self):
         graph = Graph([node("Ticket", description="An issue"), node("Project")],
                       [edge("BLOCKS", "Ticket", "Project", description="Prevents delivery",

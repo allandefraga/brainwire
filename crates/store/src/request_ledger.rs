@@ -127,7 +127,7 @@ impl Database {
             ));
         }
         std::fs::create_dir(path)?;
-        let mut db = Self::open_config(path, resources, true, true)?;
+        let mut db = Self::open_config(path, resources, true, true, false)?;
         let state = LedgerState {
             incarnation: *uuid::Uuid::new_v4().as_bytes(),
             limits,
@@ -148,7 +148,7 @@ impl Database {
         path: &Path,
         resources: &Resources,
     ) -> Result<Self, LedgerError> {
-        let mut db = Self::open_config(path, resources, true, false)?;
+        let mut db = Self::open_config(path, resources, true, false, false)?;
         let cf = db.cf(FAMILY)?;
         let bytes = db
             .db

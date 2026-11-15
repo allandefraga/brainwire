@@ -381,6 +381,10 @@ impl<'db> Txn<'db> {
         self.db.has_relationship_index_format()
     }
 
+    pub(crate) fn has_typed_property_format(&self) -> bool {
+        self.db.has_typed_property_format()
+    }
+
     /// Conservative O(1) overlay/dependency estimate, excluding RocksDB internals.
     pub fn estimated_memory_bytes(&self) -> usize {
         self.estimated_bytes
@@ -690,6 +694,11 @@ impl<'db> Txn<'db> {
         limits: crate::replicated_apply::ApplyLimits,
     ) -> Result<Option<crate::replicated_apply::Batch>, crate::replicated_apply::ApplyError> {
         use crate::replicated_apply::{ApplyError, Batch, Mutation};
+        if self.db.has_typed_property_format() {
+            return Err(ApplyError::Invalid(
+                "typed properties require standalone storage",
+            ));
+        }
         if self.db.has_relationship_index_format() {
             return Err(ApplyError::Invalid(
                 "relationship indexes require standalone storage",

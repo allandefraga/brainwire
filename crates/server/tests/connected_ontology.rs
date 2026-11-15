@@ -34,6 +34,13 @@ fn connected_schema_selects_named_graphs_while_server_owns_storage() {
             "knowledge",
             include_str!("../../../examples/knowledge/schema.json"),
         ),
+        (
+            "typed",
+            r#"{"version":"1","nodes":[{"label":"Project","properties":["priority"],
+                "property_types":{"priority":"integer"}}],"edges":[{"type":"DEPENDS_ON",
+                "from":{"label":"Project"},"to":{"label":"Project"},
+                "properties":["confidence"],"property_types":{"confidence":"float"}}]}"#,
+        ),
     ] {
         std::fs::write(dir.path().join("schema.json"), schema).unwrap();
         let created = command(dir.path())
@@ -80,6 +87,7 @@ fn connected_schema_selects_named_graphs_while_server_owns_storage() {
     for (graph, lang, expected, excluded) in [
         ("tickets", "en", "Customer", "KnowledgeSource"),
         ("knowledge", "pt-BR", "KnowledgeSource", "Customer"),
+        ("typed", "en", "priority: integer", "Customer"),
         ("default", "en", "No ontology declared", "Customer"),
     ] {
         let output = command(dir.path())
@@ -108,6 +116,9 @@ fn connected_schema_selects_named_graphs_while_server_owns_storage() {
         assert!(output.status.success(), "{output:?}");
         let text = String::from_utf8(output.stdout).unwrap();
         assert!(text.contains(expected), "{text}");
+        if graph == "typed" {
+            assert!(text.contains("confidence: float"), "{text}");
+        }
         assert!(!text.contains(excluded), "{text}");
         assert!(
             text.contains(if lang == "en" {
@@ -137,6 +148,24 @@ fn connected_schema_selects_named_graphs_while_server_owns_storage() {
     );
     server.0.kill().unwrap();
     server.0.wait().unwrap();
+    for args in [
+        vec!["db", "schema", "typed"],
+        vec![
+            "shell",
+            "--overview",
+            "--graph",
+            "typed",
+            "--view",
+            "ontology",
+            "--snapshot",
+        ],
+    ] {
+        let output = command(dir.path()).args(args).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let rendered = String::from_utf8(output.stdout).unwrap().replace('"', "");
+        assert!(rendered.contains("priority: integer"), "{rendered}");
+        assert!(rendered.contains("confidence: float"), "{rendered}");
+    }
     let stopped = command(dir.path()).args(args).output().unwrap();
     assert!(!stopped.status.success());
     assert!(stopped.stdout.is_empty());
