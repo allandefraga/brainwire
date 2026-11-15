@@ -29,6 +29,14 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: Agent-memory demo assets
+
+- Added a synthetic agent-memory GIF to the README and a muted video loop,
+  poster and fallback image to the Pages hero. Retained the existing assets.
+- Documentation links and the built site passed; the local browser played the
+  WebM loop muted. The poster file loaded and is configured as the video poster.
+- Next: review the PR; do not create a release or tag as part of this change.
+
 ## 2026-11-15: Connected data and local release candidate
 
 - Aligned the README, site and documentation around connected data; agents are
