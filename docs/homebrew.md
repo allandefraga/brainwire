@@ -5,34 +5,30 @@ RocksDB directory and run Cypher without starting a server or a container.
 Use [Docker Compose](container.md) when multiple processes need a Bolt
 endpoint or you want a pinned Linux image with a persistent volume.
 
-## Install from the local tap
+## Install with Homebrew
 
-The repository contains a [Homebrew formula](../packaging/homebrew/Formula/brainwire.rb)
-for the experimental `v0.24.0-beta.1` release. This source formula builds
-the CLI and installs a sample company ontology. It needs Apple Command Line
-Tools or Xcode and may take several minutes to compile. A public tap and
-prebuilt Homebrew bottles are not yet published.
-
-Run this from a checkout containing the formula. Keep the local tap directory
-for as long as you want to use it with Homebrew.
+The public [Homebrew tap](https://github.com/allandefraga/homebrew-brainwire)
+currently installs the experimental `v0.24.0-beta.1` CLI from source, along
+with a sample ontology. It needs Apple Command Line Tools or Xcode and may
+take several minutes to compile. There are no prebuilt bottles yet.
 
 ```sh
-tap_dir="$(mktemp -d "$HOME/brainwire-homebrew.XXXXXXXX")"
-mkdir "$tap_dir/Formula"
-cp packaging/homebrew/Formula/brainwire.rb "$tap_dir/Formula/"
-git -C "$tap_dir" init
-git -C "$tap_dir" add Formula/brainwire.rb
-git -C "$tap_dir" -c user.name=Brainwire -c user.email=build@example.invalid \
-  commit -m 'Add Brainwire formula'
-brew tap brainwire-local/tap "$tap_dir"
-brew install brainwire-local/tap/brainwire
-brew test brainwire-local/tap/brainwire
+brew install allandefraga/brainwire/brainwire
+brew test allandefraga/brainwire/brainwire
 brainwire --version
 ```
 
-Homebrew may install or update build dependencies. The fully qualified
-formula name selects this local tap. To use `brew install brainwire` by its
-short name, first run `brew trust --formula brainwire-local/tap/brainwire`.
+Homebrew may install or update build dependencies. The formula compiled and
+passed `brew test` on Apple Silicon in an isolated Homebrew prefix using an
+existing Rust toolchain; automatic dependency installation and Intel Macs have
+not been tested. The fully qualified name selects the public tap. To use
+`brew install brainwire` by its short name, tap and trust it first:
+
+```sh
+brew tap allandefraga/brainwire
+brew trust --formula allandefraga/brainwire/brainwire
+brew install brainwire
+```
 
 ## Create a graph and query it
 
