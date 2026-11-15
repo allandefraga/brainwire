@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.24.0-beta.2 — experimental candidate
+
+- Avoid redundant relationship existence reads during unkeyed Cypher writes
+  while preserving transaction conflict checks and direction semantics.
+- Add an experimental helper to upload verified local checkpoints to MinIO
+  and restore them with checksums; active data remains on local disk.
+- Add a source Homebrew formula, a Portuguese getting-started guide and a
+  simpler bilingual documentation entry point.
+- Record a reproducible VHS demo using the published v0.24.0-beta.1 image.
+
 ## 0.24.0-beta.1 — experimental candidate
 
 - Enforce optional scalar property types on newly created standalone graphs,

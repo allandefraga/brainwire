@@ -4,6 +4,7 @@
 <p align="center">Connect projects, decisions and their evidence. Query the graph with Cypher and give agents the relevant records.</p>
 <p align="center">
   <a href="https://allandefraga.github.io/brainwire/">Documentation</a> ·
+  <a href="docs/getting-started.pt-BR.md">Português</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#try-agent-context">Agent memory</a> ·
   <a href="#bring-your-data">Ingestion</a> ·
@@ -23,15 +24,20 @@ the meeting that supports it. [Try the decision memory demo](docs/agent-context-
 
 > **v0.24.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
 
-The [backup guide](docs/checkpoints.md) covers private checkpoint copies and
-restore permissions. Protect backup storage and test the restore procedure.
+The [backup guide](docs/checkpoints.md) covers checkpoint copies and restore
+permissions. The [experimental object storage helper](docs/object-storage-backup.md)
+can copy a verified checkpoint to MinIO; active data stays on local disk.
 
-<p align="center"><img src="assets/launch/brainwire-live.gif" alt="Brainwire records and recalls a project decision with its source, then shows the graph and memory in its connected terminal." width="960"></p>
+<p align="center"><img src="assets/launch/typed-vhs/brainwire-demo.gif" alt="Brainwire creates and queries a typed graph, then rejects an invalid property value." width="960"></p>
 
-The demo uses a live Brainwire v0.21.0-beta.2 server and synthetic company data.
-[Watch the video](assets/launch/brainwire-live.mp4)
+This [VHS recording](assets/launch/typed-vhs/demo.tape) uses the published
+v0.24.0-beta.1 CLI and synthetic data. [Watch the video](assets/launch/typed-vhs/brainwire-demo.mp4)
 
 ## Quickstart
+
+For a local CLI without Docker, see [Brainwire on macOS](docs/homebrew.md).
+The experimental source formula currently targets v0.24.0-beta.1; a public
+Homebrew tap and prebuilt bottles are not yet available.
 
 Use Git and Docker with Compose. On macOS, Colima can run the Docker engine.
 With Colima running, run `export DOCKER_CONTEXT=colima` first.

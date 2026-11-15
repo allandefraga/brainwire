@@ -7,12 +7,15 @@ and recovery steps your application needs.
 
 ## Start here
 
-1. [Run your first graph](getting-started.md): start Docker, write from Python,
-   query the graph and open the terminal workspace.
-2. [Understand the architecture](architecture.md): how clients, queries,
-   transactions, memory and persistent files fit together.
-3. [Choose a deployment](protected-containers.md): credentials, volumes and
-   protected access for an application trial.
+1. Run a first graph with Docker, Python and the terminal workspace.
+   [English](getting-started.md) · [Português (Brasil)](getting-started.pt-BR.md)
+2. Learn how queries, transactions, memory and storage fit together.
+   [Architecture](architecture.md)
+3. Set up credentials, volumes and encrypted connections.
+   [Protected deployment](protected-containers.md)
+
+O guia de primeiros passos está em português. Os demais guias técnicos deste
+índice estão em inglês.
 
 ## Build an application
 
@@ -22,7 +25,7 @@ and recovery steps your application needs.
 | Create, update or delete data | [Python operations and batches](python-client.md) |
 | Write a query | [Supported Cypher and CLI](local-cypher.md) |
 | Define allowed types and connections | [Ontology and online catalog](online-catalog.md) |
-| Enforce scalar types in a new graph | [Typed properties](typed-properties.md) |
+| Enforce scalar types in a new standalone graph | [Typed properties](typed-properties.md) |
 | Validate a typed input batch | [Client-side typed ingestion](../examples/typed_ingest/README.md) |
 | Define a named metric | [Semantic metrics example](semantic-metrics.md) |
 | Add an index | [Node indexes](indexes.md) · [Relationship property indexes](relationship-property-indexes.md) |
@@ -36,11 +39,12 @@ and recovery steps your application needs.
 
 | I need… | Guide |
 | --- | --- |
+| A native CLI on macOS | [Homebrew source formula](homebrew.md) |
 | Docker commands and volumes | [Containers](container.md) |
 | Configuration and memory controls | [Server](serve.md) · [Memory budgets](memory-defaults.md) |
 | Authentication and permissions | [Bolt authentication](bolt-auth.md) |
 | An encrypted connection boundary | [Protected transport](protected-transport.md) |
-| Backups and recovery | [Checkpoints](checkpoints.md) · [Termination and recovery](termination-recovery.md) |
+| Backups and recovery | [Checkpoints](checkpoints.md) · [Object storage backup](object-storage-backup.md) · [Termination and recovery](termination-recovery.md) |
 | Transaction and retry behavior | [Transactions](transactions.md) · [Identified request outcomes](standalone-requests.md) |
 | Kubernetes or Swarm | [Orchestrator templates](orchestrators.md) |
 | Experimental replication | [Three-voter quorum](quorum-replication.md) |
@@ -57,12 +61,15 @@ separate experimental setup.
 [Current limits](../README.md#current-limits) summarize the boundaries of the
 current release. Benchmark reports apply to their recorded binary and workload.
 
-## Contribute and maintain
+## Contribute
 
 - [Build and preview GitHub Pages](github-pages.md).
+
+## Plans and past results
+
 - [Production-readiness work](production-readiness-roadmap.md).
 - [Longer-term roadmap](../ROADMAP-v2.md).
+- [Archived October 2026 beta plan](2026-10-pilot-roadmap.md).
 
-Files in `design/`, `superpowers/`, dated plans and benchmark receipts preserve
-decisions or historical evidence. They can describe an earlier version or an
-unimplemented proposal; use the guides above for current behavior.
+The guides above describe current behavior. Files in `design/`, `superpowers/`,
+dated plans and benchmark receipts record proposals, decisions and past results.

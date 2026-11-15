@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Escolha como rodar o Brainwire e comece a usar o grafo em português.">
+  <meta name="theme-color" content="#f8f9fb">
+  <title>Brainwire · Guia inicial em português</title>
+  <link rel="icon" href="assets/brainwire-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="alternate" hreflang="en" href="index.html">
+</head>
+<body>
+<a class="skip" href="#main">Pular para o conteúdo</a>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <a class="brand" href="#overview" aria-label="Início do guia Brainwire"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="500" height="128"></a>
+    <div class="edition"><span class="edition-label">Guia inicial em português</span></div>
+    <nav class="section-nav" aria-label="Seções do guia">
+      <a href="#start">Como rodar</a>
+      <a href="#examples">Exemplos</a>
+      <a href="#benchmark">Benchmark</a>
+    </nav>
+    <div class="sidebar-footer"><span>Apache 2.0 · Rust · RocksDB</span><a href="https://github.com/allandefraga/brainwire">Repositório no GitHub ↗</a></div>
+  </aside>
+  <main id="main">
+    <header class="topbar"><span>Documentação</span><div><a href="index.html" lang="en" hreflang="en">English</a><a href="https://github.com/allandefraga/brainwire/releases">Versões ↗</a></div></header>
+    <section id="overview" class="intro">
+      <h1>Memória de agentes em um grafo</h1>
+      <p class="intro-copy">Conecte projetos, decisões e fontes. Consulte o grafo com Cypher e recupere os registros que explicam como uma decisão foi tomada.</p>
+      <div class="actions"><a class="button primary" href="#start">Criar um grafo →</a><a class="button secondary" href="#examples">Ver exemplos</a></div>
+      <p>Este guia e os <a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.pt-BR.md">primeiros passos</a> estão em português. A documentação de referência continua em inglês.</p>
+    </section>
+
+    <section id="start" class="doc-section">
+      <div class="section-head"><h2>Escolha como rodar</h2><p>Use dados de exemplo no primeiro teste. O Brainwire está em beta experimental.</p></div>
+      <div class="two-column">
+        <article><h3>Docker para o servidor</h3><p>Use Git, Docker e Compose para iniciar o servidor Bolt e acessar o grafo com Python ou com a interface de terminal. O volume do Docker preserva os dados entre reinícios. A imagem pública pode ser baixada sem login.</p><a href="index.html#docker" hreflang="en">Ver comandos do Docker →</a></article>
+        <article><h3>CLI local no macOS ou Linux</h3><p>Compile o binário e rode Cypher diretamente em um diretório do RocksDB. Essa opção dispensa Docker e servidor. Cada diretório pode ser aberto por um processo por vez.</p><a href="index.html#cli" hreflang="en">Compilar e consultar um grafo →</a></article>
+      </div>
+      <p class="next-link"><a href="index.html#limits" hreflang="en">Limites do beta →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md" hreflang="en">Proteger um servidor compartilhado →</a></p>
+    </section>
+
+    <section id="examples" class="doc-section">
+      <div class="section-head"><h2>Experimente com um exemplo</h2></div>
+      <div class="guide-row">
+        <a href="index.html#agent-memory" hreflang="en"><strong>Memória de agentes</strong><span>Grave uma decisão e consulte a fonte ligada a ela.</span></a>
+        <a href="index.html#ingestion" hreflang="en"><strong>Importar dados</strong><span>Carregue dados do DuckDB ou DuckLake e aplique atualizações em lotes.</span></a>
+        <a href="index.html#terminal" hreflang="en"><strong>Interface de terminal</strong><span>Veja o esquema, os índices e uma amostra das conexões. Use <code>--lang pt-BR</code> para a interface em português.</span></a>
+      </div>
+    </section>
+
+    <section id="benchmark" class="doc-section">
+      <div class="section-head"><h2>Como ler o benchmark</h2><p>A comparação histórica usa três execuções por banco, com 1 milhão de nós e 2 milhões de arestas por execução. Os contêineres tinham limite de 2 CPUs e 3 GiB cada. O gráfico mede uma compilação local da v0.20.0-beta.2.</p></div>
+      <p>Compare criação de nós, criação de arestas e tempo de recuperação como etapas distintas. Os bancos usaram protocolos e configurações de durabilidade diferentes. O teste não mediu o pico de memória.</p>
+      <p class="next-link"><a href="index.html#benchmark" hreflang="en">Ver gráfico e metodologia →</a></p>
+    </section>
+    <footer><span>Brainwire · Guia inicial</span><a href="index.html" lang="en" hreflang="en">English documentation →</a></footer>
+  </main>
+</div>
+</body>
+</html>

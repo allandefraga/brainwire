@@ -1,0 +1,1 @@
+{"version":"1","nodes":[{"label":"Project","properties":["name","priority"],"property_types":{"name":"string","priority":"integer"}},{"label":"Decision","properties":["title"],"property_types":{"title":"string"}}],"edges":[{"type":"HAS_DECISION","from":{"label":"Project"},"to":{"label":"Decision"}}]}

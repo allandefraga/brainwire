@@ -29,6 +29,23 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: portable operations and relationship writes
+
+- Added an experimental S3-compatible checkpoint copy and restore helper.
+  A disposable MinIO test restored a typed graph and index, rejected corruption
+  and overwrites, and passed `db check`. AWS S3, remote TLS and graph ACL after
+  restore remain untested; active data still lives on local disk.
+- Prepared a macOS source Homebrew formula for v0.24.0-beta.1. An isolated
+  Homebrew build and `brew test` passed with a supplied Rust toolchain and
+  dependency resolution bypassed; no public tap or bottle is available yet.
+- Removed redundant reads when writing unkeyed relationships, retaining
+  conflict tracking and write validation. Compare performance on a dedicated
+  machine before generalizing shared-host diagnostic measurements.
+- Simplified the site entry points, added a Portuguese getting-started guide,
+  and recorded a real CLI demo with VHS and synthetic data.
+- Next: validate a public Homebrew tap and production backups, qualify
+  distribution and test the complete application ingestion pipeline.
+
 ## 2026-11-15: semantic examples and safer relationship writes
 
 - Added named read-only metric and typed-batch examples. Metric authorization

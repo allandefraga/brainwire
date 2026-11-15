@@ -1,5 +1,8 @@
 # Brainwire October 31, 2026 beta roadmap
 
+> **Archived plan.** This page records the October 2026 schedule and assumptions.
+> See the [documentation index](README.md) for current usage and deployment guidance.
+
 Revised October 13 during Allan's requested two-hour beta qualification session.
 Retain October 31 as the beta target, with **20 minutes of active development per
 day**. After today's session, October 14–31 provides 18 sessions, **360 minutes

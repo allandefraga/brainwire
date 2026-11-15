@@ -324,21 +324,18 @@ fn write_pattern(
             });
             continue;
         }
-        let key = (source, ty.id, target, brainwire_core::ids::EdgeId::MERGED);
-        let exists = store::edge_exists(txn, key)?
-            || (rel.direction == Direction::Both
-                && store::edge_exists(
-                    txn,
-                    (target, ty.id, source, brainwire_core::ids::EdgeId::MERGED),
-                )?);
-        let (source, target) = if !exists || store::edge_exists(txn, key)? {
-            (source, target)
-        } else {
+        let id = brainwire_core::ids::EdgeId::MERGED;
+        let (source, target) = if rel.direction == Direction::Both
+            && source != target
+            && !store::edge_exists(txn, (source, ty.id, target, id))?
+            && store::edge_exists(txn, (target, ty.id, source, id))?
+        {
             (target, source)
+        } else {
+            (source, target)
         };
-        created |= !exists;
-        with_edge_write_budget(env, &values, |control| {
-            store::merge_edge_with_control(
+        created |= with_edge_write_budget(env, &values, |control| {
+            store::merge_edge_with_outcome(
                 txn,
                 env.catalog,
                 source,
@@ -353,7 +350,7 @@ fn write_pattern(
             source,
             target,
             edge_type: ty.id,
-            id: brainwire_core::ids::EdgeId::MERGED,
+            id,
         });
     }
     if let Some(slot) = pattern.path {

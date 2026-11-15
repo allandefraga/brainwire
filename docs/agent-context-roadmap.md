@@ -6,7 +6,7 @@ this today. It is an experimental starting point, not a complete agent platform.
 
 | Capability | Available now | Next engineering work |
 | --- | --- | --- |
-| Ontology | Declared node and relationship types, properties and keys | Stronger property types, relationship cardinality and migration checks |
+| Ontology | Declared node and relationship types, properties and keys. New standalone graphs can enforce optional [scalar property types](typed-properties.md). | Required fields, richer types, relationship cardinality and migration checks |
 | Retrieval | Explicit IDs, visible graph paths, caller-provided ranked candidates and RRF | Native text/vector indexes, graph-filtered retrieval in one execution plan and recall testing |
 | Evidence | Selected properties, reported source fields and bounded paths | Verify source references and support consistent evidence snapshots |
 | Agent changes | Authenticated writes, grants and per-node visibility | Isolated graph branches, reviewable diffs, conflict handling and audited merge |

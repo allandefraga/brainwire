@@ -1426,6 +1426,19 @@ pub fn merge_edge_with_control<E: From<GraphError> + From<StoreError>>(
     props: &BTreeMap<String, Value>,
     control: EdgeWriteControl<'_, E>,
 ) -> Result<(), E> {
+    merge_edge_with_outcome(txn, catalog, src, edge_type, dst, props, control).map(|_| ())
+}
+
+/// Merge an unkeyed relationship and return whether it was created.
+pub fn merge_edge_with_outcome<E: From<GraphError> + From<StoreError>>(
+    txn: &mut Txn,
+    catalog: &Catalog,
+    src: NodeId,
+    edge_type: &str,
+    dst: NodeId,
+    props: &BTreeMap<String, Value>,
+    control: EdgeWriteControl<'_, E>,
+) -> Result<bool, E> {
     let et = catalog
         .edge_type(edge_type)
         .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
@@ -1623,7 +1636,7 @@ pub fn update_edge_with_control<E: From<GraphError> + From<StoreError>>(
     let et = catalog
         .edge_type(edge_type)
         .ok_or_else(|| GraphError::UnknownEdgeType(edge_type.to_string()))?;
-    write_edge(txn, catalog.version, et, edge, props, true, control)
+    write_edge(txn, catalog.version, et, edge, props, true, control).map(|_| ())
 }
 
 fn write_edge<E: From<GraphError> + From<StoreError>>(
@@ -1634,7 +1647,7 @@ fn write_edge<E: From<GraphError> + From<StoreError>>(
     props: &BTreeMap<String, Value>,
     must_exist: bool,
     control: EdgeWriteControl<'_, E>,
-) -> Result<(), E> {
+) -> Result<bool, E> {
     check_props(props)?;
     if !et.signatures.contains(&(src.type_id(), dst.type_id())) {
         return Err(GraphError::BadSignature(et.name.clone()).into());
@@ -1698,7 +1711,7 @@ fn write_edge<E: From<GraphError> + From<StoreError>>(
     }
     txn.put(Cf::Out, out, encode_row(&row));
     txn.put(Cf::In, edge_key(dst, et.id, src, id), Vec::new());
-    Ok(())
+    Ok(!existed)
 }
 
 /// Read one directed relationship's stored property row, if it exists.
