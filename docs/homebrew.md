@@ -8,14 +8,14 @@ endpoint or you want a pinned Linux image with a persistent volume.
 ## Install with Homebrew
 
 The public [Homebrew tap](https://github.com/allandefraga/homebrew-brainwire)
-currently installs the experimental `v0.24.0-beta.1` CLI from source, along
+currently installs the experimental `v0.24.0-beta.2` CLI from source, along
 with a sample ontology. It needs Apple Command Line Tools or Xcode and may
 take several minutes to compile. There are no prebuilt bottles yet.
 
 ```sh
 brew install allandefraga/brainwire/brainwire
 brew test allandefraga/brainwire/brainwire
-brainwire --version
+"$(brew --prefix allandefraga/brainwire/brainwire)/bin/brainwire" --version
 ```
 
 Homebrew may install or update build dependencies. The formula compiled and
@@ -34,11 +34,12 @@ brew install brainwire
 
 ```sh
 demo_dir="$(mktemp -d)"
-ontology="$(brew --prefix brainwire)/share/brainwire/company-ontology.json"
+brainwire_prefix="$(brew --prefix allandefraga/brainwire/brainwire)"
+ontology="$brainwire_prefix/share/brainwire/company-ontology.json"
 export BRAINWIRE_MEMORY_CACHE=64MiB BRAINWIRE_MEMORY_MEMTABLES=8MiB
-brainwire cypher --database "$demo_dir/graph" --ontology "$ontology" \
+"$brainwire_prefix/bin/brainwire" cypher --database "$demo_dir/graph" --ontology "$ontology" \
   --query "CREATE (:Project {entity_id: 'p1', name: 'Release'})"
-brainwire cypher --database "$demo_dir/graph" \
+"$brainwire_prefix/bin/brainwire" cypher --database "$demo_dir/graph" \
   --query "MATCH (p:Project {entity_id: 'p1'}) RETURN p.name"
 ```
 

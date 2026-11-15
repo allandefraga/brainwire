@@ -41,7 +41,7 @@ For a local CLI without Docker, install the experimental macOS source formula:
 brew install allandefraga/brainwire/brainwire
 ```
 
-The tap currently installs v0.24.0-beta.1 and compiles from source; there are
+The tap currently installs v0.24.0-beta.2 and compiles from source; there are
 no prebuilt bottles yet. See [Brainwire on macOS](docs/homebrew.md).
 
 Use Git and Docker with Compose. On macOS, Colima can run the Docker engine.
@@ -191,15 +191,19 @@ space, so keep the persistent volume and leave room for storage to grow.
 Three local runs loaded **1 million nodes and 2 million relationships** into
 each engine, checked indexed reads, then restarted after a process kill. The
 engines ran sequentially, each with a 3 GiB container limit and two CPUs.
-Brainwire was a locally built **v0.20.0-beta.2 candidate**, not the published image.
+Brainwire used the published **v0.24.0-beta.2** image; the measurements are
+from November 15, 2026.
 
-![Median node and relationship load times across three synthetic runs](benchmarks/comparison/ingest-1m-020b2-repeated.svg)
+![Median node and relationship load times across three synthetic runs](benchmarks/comparison/ingest-1m-024b2.svg)
 
 | Metric | Brainwire | FalkorDB | Neo4j |
 | --- | ---: | ---: | ---: |
-| Indexed point read, median p95 | 0.898 ms | 0.361 ms | 0.724 ms |
-| One-hop read, median p95 | 0.905 ms | 0.367 ms | 0.702 ms |
-| Ready after process kill, median | 0.862 s | 3.175 s | 9.286 s |
+| Create 1 million nodes | 9.823 s | 4.447 s | 10.267 s |
+| Create 2 million relationships | 24.694 s | 15.920 s | 21.222 s |
+| Update 10,000 rows | 0.114 s | 0.038 s | 0.150 s |
+| Indexed point read, median p95 | 0.715 ms | 0.365 ms | 0.603 ms |
+| One-hop read, median p95 | 0.726 ms | 0.372 ms | 0.636 ms |
+| Ready after process kill, median | 0.808 s | 3.438 s | 8.388 s |
 
 Each p95 summarizes 1,000 warm, serial queries per run; the table shows the
 median of those three p95 values, not a pooled p95. Each sampled node had two
@@ -208,10 +212,6 @@ used different protocols, internal memory settings,
 authentication and durability settings; peak memory was not measured. Read the
 [workload, exact versions, raw result and limitations](benchmarks/comparison/README.md)
 before comparing or reproducing them.
-
-A [newer single-run diagnostic](benchmarks/comparison/README.md#latest-local-candidate-one-run)
-also tests the local v0.21.0-beta.1 candidate with the same graph size. It is
-reported separately because one run is not comparable to the median above.
 
 [See the memory and recovery test results](BENCHMARKS.md).
 

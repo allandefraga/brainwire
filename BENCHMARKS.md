@@ -10,6 +10,11 @@ qualification attempts stopped during loading or reading and did not complete th
 of OOM. Start with the [v0.9 report](PRODUCTION-v0.9.md) and
 [production readiness roadmap](docs/production-readiness-roadmap.md).
 
+The published v0.24.0-beta.2 image passed a [short 2 GiB pressure and recovery
+smoke](docs/benchmarks/2026-11-15-cgroup-024b2-2g.json) on Linux arm64. It
+injected synthetic tmpfs pressure and checked admission and recovery in one
+container; it is not sustained qualification or a process-wide RSS ceiling.
+
 A local v0.22.0-beta.1 candidate completed a [30-minute mixed read/write
 and restart diagnostic](docs/benchmarks/2026-11-14-mixed-recovery-022b1.json)
 with 100,000 synthetic nodes and relationships in a 2 GiB container. Exact
@@ -70,7 +75,7 @@ build, and this does not qualify behavior near the container limit.
 
 | Question | Test and results |
 | --- | --- |
-| How did three engines handle one synthetic million-node fixture? | [Indexed graph comparison](benchmarks/comparison/README.md): one run per engine, with different durability and client settings; includes raw receipts and restart checks. |
+| How did three engines handle one synthetic million-node fixture? | [Indexed graph comparison](benchmarks/comparison/README.md): three runs per engine, with different durability and client settings; includes raw receipts and restart checks. |
 | Does a change affect large Bolt responses? | [Response encoding diagnostic](benchmarks/archive/2026-10-29-bolt-response/README.md): compares two local binaries, checks every result and records timings and sampled RSS. |
 | Does pressure admission reject new queries safely? | [Linux cgroup smoke](docs/benchmarks/2026-10-29-cgroup-pressure/README.md): 512 MiB synthetic rollback and recovery, not a production memory qualification. |
 | How does the Raft peer transport behave locally? | [Linux peer diagnostic](docs/benchmarks/2026-11-04-raft-peer.md): two local runs before and after the accepted-socket change, not a multi-machine benchmark. |

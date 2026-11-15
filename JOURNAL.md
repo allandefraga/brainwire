@@ -29,13 +29,24 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: release benchmark
+
+- Ran three synthetic 1M-node/2M-relationship comparisons with the published
+  v0.24.0-beta.2 image. The README and site show all engines, raw receipts and
+  limitations. Protocols and durability settings differ; the host was shared.
+- The application adapter was also exercised privately with the published
+  image and synthetic incremental writes. Its schema fix remains a separate
+  integration task and is not part of this repository.
+- Next: run a representative workload and sustained memory tests before
+  making production or general performance claims.
+
 ## 2026-11-15: portable operations and relationship writes
 
 - Added an experimental S3-compatible checkpoint copy and restore helper.
   A disposable MinIO test restored a typed graph and index, rejected corruption
   and overwrites, and passed `db check`. AWS S3, remote TLS and graph ACL after
   restore remain untested; active data still lives on local disk.
-- Published a macOS source Homebrew tap for v0.24.0-beta.1. An isolated
+- Published a macOS source Homebrew tap for v0.24.0-beta.2. An isolated
   Homebrew build and `brew test` passed with a supplied Rust toolchain and
   dependency resolution bypassed; normal dependency resolution and bottles
   remain unverified.

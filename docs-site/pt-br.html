@@ -51,8 +51,13 @@
     </section>
 
     <section id="benchmark" class="doc-section">
-      <div class="section-head"><h2>Como ler o benchmark</h2><p>A comparação histórica usa três execuções por banco, com 1 milhão de nós e 2 milhões de arestas por execução. Os contêineres tinham limite de 2 CPUs e 3 GiB cada. O gráfico mede uma compilação local da v0.20.0-beta.2.</p></div>
-      <p>Compare criação de nós, criação de arestas e tempo de recuperação como etapas distintas. Os bancos usaram protocolos e configurações de durabilidade diferentes. O teste não mediu o pico de memória.</p>
+      <div class="section-head"><h2>Como ler o benchmark</h2><p>Mediana de três execuções com 1 milhão de nós e 2 milhões de arestas por banco. O teste usou a imagem publicada do Brainwire v0.24.0-beta.2, com limite de 2 CPUs e 3 GiB por contêiner.</p></div>
+      <dl class="connection-details">
+        <div><dt>Brainwire</dt><dd>Nós 9,82 s · Arestas 24,69 s</dd></div>
+        <div><dt>FalkorDB</dt><dd>Nós 4,45 s · Arestas 15,92 s</dd></div>
+        <div><dt>Neo4j</dt><dd>Nós 10,27 s · Arestas 21,22 s</dd></div>
+      </dl>
+      <p>Os três passaram nas verificações após reiniciar. Os bancos usaram protocolos de cliente e configurações de autenticação, durabilidade e memória diferentes. O teste não mediu o pico de memória.</p>
       <p class="next-link"><a href="index.html#benchmark" hreflang="en">Ver gráfico e metodologia →</a></p>
     </section>
     <footer><span>Brainwire · Guia inicial</span><a href="index.html" lang="en" hreflang="en">English documentation →</a></footer>

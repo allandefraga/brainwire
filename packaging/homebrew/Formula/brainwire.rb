@@ -4,8 +4,8 @@ require "shellwords"
 class Brainwire < Formula
   desc "Graph database for connected context and agent memory"
   homepage "https://github.com/allandefraga/brainwire"
-  url "https://github.com/allandefraga/brainwire/archive/refs/tags/v0.24.0-beta.1.tar.gz"
-  sha256 "ca2501f3b5f80bc6e500c133a70d78173d7e3bc0bcaf7dab3a25da1e93f8a629"
+  url "https://github.com/allandefraga/brainwire/archive/refs/tags/v0.24.0-beta.2.tar.gz"
+  sha256 "1c7bb8490f0d74f76f3a9cce9d1da0a0e8a81e10b00af9f95f748a85fc150157"
   license "Apache-2.0"
 
   depends_on "pkgconf" => :build

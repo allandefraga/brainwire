@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.24.0-beta.3 — experimental candidate
+
+- Publish three reproducible synthetic comparison receipts for the
+  v0.24.0-beta.2 image, with the workload and limitations.
+- Record a short 2 GiB pressure-admission smoke on the published beta.2 image.
+- Update the macOS source formula to v0.24.0-beta.2.
+
 ## 0.24.0-beta.2 — experimental candidate
 
 - Avoid redundant relationship existence reads during unkeyed Cypher writes

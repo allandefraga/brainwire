@@ -191,19 +191,19 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down</code></pre></
     </section>
 
     <section id="benchmark" class="doc-section">
-      <div class="section-head"><p class="eyebrow">HISTORICAL BENCHMARK · NOVEMBER 14, 2026</p><h2>Loading 1 million nodes and 2 million edges</h2><p>This chart captures three runs of a local Brainwire v0.20.0-beta.2 build. Use it as a historical baseline. The timing of the release shown at the top of this page has not been measured by these runs.</p></div>
+      <div class="section-head"><p class="eyebrow">BENCHMARK · NOVEMBER 15, 2026</p><h2>Loading 1 million nodes and 2 million edges</h2><p>Median times from three synthetic runs of the published Brainwire v0.24.0-beta.2 image, FalkorDB 6.0.0 and Neo4j 2026.09.0.</p></div>
       <dl class="connection-details"><div><dt>Fixture</dt><dd>1 label, 1 edge type, 500 rows per batch</dd></div><div><dt>Container limits</dt><dd>2 CPUs and 3 GiB per engine</dd></div><div><dt>Platform</dt><dd>Colima on Apple silicon, three runs per engine</dd></div></dl>
-      <figure class="hero-graph"><img src="assets/benchmark-1m.svg" width="860" height="310" alt="Bar chart comparing median node and edge creation times. Values are provided below."><figcaption>Median wall time per phase, including batch construction, the client round trip and write acknowledgement. Index setup is outside the reported times.</figcaption></figure>
+      <figure class="hero-graph"><img src="assets/benchmark-1m-beta2.svg" width="860" height="310" alt="Bar chart comparing median node and edge creation times. Values are provided below."><figcaption>Wall time per phase includes batch construction, the client round trip and write acknowledgement. Index setup occurs before timing.</figcaption></figure>
       <details class="pages-note">
         <summary>Read the chart values</summary>
         <dl class="connection-details">
-          <div><dt>Brainwire</dt><dd>Nodes 11.05 s · Edges 27.94 s</dd></div>
-          <div><dt>FalkorDB</dt><dd>Nodes 4.51 s · Edges 17.41 s</dd></div>
-          <div><dt>Neo4j</dt><dd>Nodes 11.49 s · Edges 23.47 s</dd></div>
+          <div><dt>Brainwire</dt><dd>Nodes 9.82 s · Edges 24.69 s</dd></div>
+          <div><dt>FalkorDB</dt><dd>Nodes 4.45 s · Edges 15.92 s</dd></div>
+          <div><dt>Neo4j</dt><dd>Nodes 10.27 s · Edges 21.22 s</dd></div>
         </dl>
       </details>
-      <p>FalkorDB completed both phases first. Brainwire and Neo4j were close on node creation, while Neo4j loaded relationships faster. All three passed post-restart checks. The benchmark used different client protocols, engine settings and durability controls. It did not measure peak memory.</p>
-      <p>The comparison report includes reads, updates and restart timings for all engines, as well as a later single-run diagnostic of the local v0.21.0-beta.1 candidate.</p>
+      <p>FalkorDB completed both phases first. Brainwire loaded nodes slightly faster than Neo4j, and Neo4j loaded edges faster than Brainwire. All three passed the post-restart checks. Client protocols, authentication, engine settings and durability controls differed. Peak memory was not measured.</p>
+      <p>The comparison report includes reads, updates, restart timings and the receipts for all three runs.</p>
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/benchmarks/comparison/README.md">Full comparison and raw results →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/benchmarks/comparison/README.md#run-it">Reproduce the workload →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/README.md">Other performance tests →</a></p>
     </section>
 

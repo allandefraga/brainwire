@@ -6,7 +6,51 @@ and `2N` directed edges and keeps only one batch of fixture rows in the client.
 It checks the number accepted per batch, graph counts, every measured read,
 and a sample of graph records and committed updates after a process `SIGKILL`.
 
-## Latest local candidate: one run
+## Published v0.24.0-beta.2
+
+On November 15, 2026, three runs loaded 1 million nodes and 2 million edges
+per engine using 500 rows per transaction. The benchmark used the published
+Brainwire v0.24.0-beta.2 image (revision `33ffd65`), FalkorDB 6.0.0 and
+Neo4j 2026.09.0. The containers ran sequentially on Apple silicon with Colima
+and had limits of 2 CPUs and 3 GiB each.
+
+![Median node and edge creation times for the v0.24.0-beta.2 comparison](ingest-1m-024b2.svg)
+
+| Engine | Create nodes | Create edges | Update 10k rows | Point p95 | One-hop p95 | Ready after SIGKILL |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Brainwire | 9.823 s | 24.694 s | 0.114 s | 0.715 ms | 0.726 ms | 0.808 s |
+| FalkorDB | 4.447 s | 15.920 s | 0.038 s | 0.365 ms | 0.372 ms | 3.438 s |
+| Neo4j | 10.267 s | 21.222 s | 0.150 s | 0.603 ms | 0.636 ms | 8.388 s |
+
+Each value is the median of three runs. Each read p95 covers 1,000 serial
+requests per run. The point read warms the same key before the one-hop read.
+Write timings include the client and acknowledgement. Index setup happens
+before timing. All three engines passed the graph count and sample checks
+after `SIGKILL` and volume reuse. Readiness includes container startup and
+reconnection.
+
+Brainwire used its RocksDB WAL synced on commit, FalkorDB used Redis AOF with
+`appendfsync always`, and Neo4j used its default single-node transaction log.
+Client protocols, authentication and engine settings differed. Runs used a
+fixed engine order on a shared host. Peak memory was not measured. These
+results apply to the recorded images and this synthetic workload.
+
+The receipts include image digests, settings, workload counts and individual
+timings. [Run 1](results/2026-11-15-beta2-1m-r1.json) ·
+[Run 2](results/2026-11-15-beta2-1m-r2.json) ·
+[Run 3](results/2026-11-15-beta2-1m-r3.json)
+
+Regenerate the chart and table with:
+
+```sh
+python3 benchmarks/comparison/summarize.py \
+  benchmarks/comparison/results/2026-11-15-beta2-1m-r1.json \
+  benchmarks/comparison/results/2026-11-15-beta2-1m-r2.json \
+  benchmarks/comparison/results/2026-11-15-beta2-1m-r3.json \
+  --svg /tmp/brainwire-comparison.svg
+```
+
+## Earlier local candidate: one run
 
 On November 14, a local v0.21.0-beta.1 image completed the same synthetic
 1-million-node, 2-million-edge workload on Apple silicon with Colima, two
@@ -159,18 +203,19 @@ when other containers on the host are untrusted.
 python3 -m venv /tmp/brainwire-comparison-venv
 /tmp/brainwire-comparison-venv/bin/pip install -r benchmarks/comparison/requirements.txt
 
-docker --context colima pull ghcr.io/allandefraga/brainwire:v0.19.0-beta.1
+docker --context colima pull ghcr.io/allandefraga/brainwire:v0.24.0-beta.2
 docker --context colima pull falkordb/falkordb-server:6.0.0
 docker --context colima pull neo4j:2026.09.0
 
 /tmp/brainwire-comparison-venv/bin/python benchmarks/comparison/run.py \
-  --context colima --brainwire-image ghcr.io/allandefraga/brainwire:v0.19.0-beta.1 \
+  --context colima --brainwire-image ghcr.io/allandefraga/brainwire:v0.24.0-beta.2 \
   --nodes 100 --batch 40 --reads 30 --update-batches 2 \
   --out /tmp/brainwire-comparison-smoke.json
 ```
 
 For a 1M-node, 2M-edge workload, rerun with `--nodes 1000000 --batch 500
---reads 1000 --update-batches 20` and a new `--out` path. Set `--memory-mib`
+--reads 1000 --update-batches 20` and a new `--out` path. Use the image digests
+in the receipts when reproducing an archived run. Set `--memory-mib`
 and `--cpus` for your test machine so the same limits apply to all three
 engines. Leave RAM and disk space for the Docker host. The smoke checks the
 harness only. Run the full fixture in isolation and repeat before using its
