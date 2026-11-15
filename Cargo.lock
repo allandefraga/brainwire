@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-bolt"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "brainwire-core",
  "brainwire-cypher",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-core"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "proptest",
  "serde",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-cypher"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "brainwire-core",
  "brainwire-store",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-replication"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "openraft",
  "rocksdb",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-server"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "brainwire-bolt",
  "brainwire-core",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-store"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "brainwire-core",
  "rocksdb",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "brainwire-tui"
-version = "0.24.0-beta.3"
+version = "0.24.0-beta.4"
 dependencies = [
  "crossterm",
  "ratatui",
