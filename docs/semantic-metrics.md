@@ -30,8 +30,10 @@ Use `--catalog` before `query` to load another JSON catalog, and `--tls-ca` afte
 Results include the catalog version observed during validation. Schema
 validation and the aggregate are separate reads, so this is not a guarantee
 that both used the same snapshot. File `version: 1` identifies the catalog
-format, not a versioned history of metric definitions. Dimension types check
-returned group values; the server does not enforce these types on writes.
+format, not a versioned history of metric definitions. Dimension types in the
+metric catalog check returned group values; they do not themselves constrain
+writes. A new standalone graph may separately declare and enforce scalar types
+in its [ontology](typed-properties.md).
 Numeric averages and mixed numeric sums use floating-point arithmetic.
 
 At most 50 groups are returned; exceeding the configured group limit raises an
