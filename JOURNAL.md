@@ -29,6 +29,15 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: Homebrew discovery
+
+- Linked the public Homebrew tap and its install command directly from the
+  README and English and Portuguese documentation entry points.
+- The project remains an experimental beta. Homebrew/core requires a stable
+  release and independent public interest; do not claim official inclusion.
+- Next: qualify a stable release and the supported Homebrew build matrix before
+  proposing the formula to Homebrew/core.
+
 ## 2026-11-15: release benchmark
 
 - Ran three synthetic 1M-node/2M-relationship comparisons with the published

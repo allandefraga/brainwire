@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.24.0-beta.4 — experimental candidate
+
+- Make the Homebrew tap and its macOS install command easier to find.
+
 ## 0.24.0-beta.3 — experimental candidate
 
 - Publish three reproducible synthetic comparison receipts for the

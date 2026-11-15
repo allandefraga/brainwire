@@ -4,6 +4,7 @@
 <p align="center">Connect projects, decisions and their evidence. Query the graph with Cypher and give agents the relevant records.</p>
 <p align="center">
   <a href="https://allandefraga.github.io/brainwire/">Documentation</a> ·
+  <a href="https://github.com/allandefraga/homebrew-brainwire">Homebrew tap</a> ·
   <a href="docs/getting-started.pt-BR.md">Português</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#try-agent-context">Agent memory</a> ·
