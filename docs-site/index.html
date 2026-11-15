@@ -50,8 +50,14 @@
       <div class="actions"><a class="button primary" href="#start">Create a graph <span aria-hidden="true">→</span></a><a class="button secondary" href="#terminal">Explore the graph</a></div>
       <p class="release-line"><span class="badge">Experimental beta</span> v0.24.0-beta.3 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
       <figure class="hero-graph">
-        <a href="assets/tui-graph.png"><img src="assets/tui-graph.png" width="1280" height="800" alt="Brainwire's connected Graph pane shows the Release project and four outgoing HAS_DECISION relationships, with the selected relationship in the inspector."></a>
-        <figcaption>Connected terminal capture from Brainwire v0.21.0-beta.2, using synthetic company data over Bolt. <a href="assets/typed-cli-vhs.gif">Watch the typed CLI demo (GIF)</a> recorded with v0.24.0-beta.1.</figcaption>
+        <video class="hero-video" autoplay loop muted playsinline controls preload="metadata"
+               poster="assets/brainwire-poster.png" width="1280" height="720"
+               aria-label="An agent recalls a decision with its source, then the terminal workspace shows query memory reservations, indexes and the project's connected decisions.">
+          <source src="assets/brainwire-loop.webm" type="video/webm">
+          <source src="assets/brainwire-loop.mp4" type="video/mp4">
+          <a href="assets/tui-graph.png"><img src="assets/tui-graph.png" width="1280" height="800" alt="Brainwire's connected Graph pane with synthetic project and decision data."></a>
+        </video>
+        <figcaption>An agent recalls a decision with its source, then the connected terminal shows query memory, indexes and the graph. Synthetic data on a disposable local graph. <a href="assets/typed-cli-vhs.gif">Watch the typed CLI demo (GIF)</a>.</figcaption>
       </figure>
       <div class="entry-grid"><a href="#start"><span class="entry-number" aria-hidden="true">↳</span><strong>Start a graph</strong><span>Local CLI or Docker server</span></a><a href="#use-cases"><span class="entry-number" aria-hidden="true">↳</span><strong>See use cases</strong><span>Knowledge graphs, dependencies and agents</span></a><a href="#ingestion"><span class="entry-number" aria-hidden="true">↳</span><strong>Bring your data</strong><span>Import from DuckDB, DuckLake or Obsidian</span></a></div>
     </section>

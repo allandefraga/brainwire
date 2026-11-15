@@ -24,10 +24,13 @@ Run Cypher against a local graph or connect an application over Bolt.
 
 > **v0.24.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
 
-<p align="center"><img src="assets/launch/typed-vhs/brainwire-demo.gif" alt="Brainwire creates and queries a typed graph, then rejects an invalid property value." width="960"></p>
+<p align="center"><img src="assets/launch/brainwire-agent-memory.gif" alt="An agent recalls the decision Retry failed requests together with its source, the Release meeting. Brainwire's terminal workspace then shows the query memory reservations and the project's HAS_DECISION relationships." width="960"></p>
 
-This [VHS recording](assets/launch/typed-vhs/demo.tape) uses the published
-v0.24.0-beta.1 CLI and synthetic data. [Watch the video](assets/launch/typed-vhs/brainwire-demo.mp4)
+The agent-memory example saves a decision with its source and recalls both
+from a disposable graph with synthetic data. The terminal workspace then
+shows the server's query memory reservations and the project's real
+`HAS_DECISION` relationships.
+[See the typed graph demo](assets/launch/typed-vhs/brainwire-demo.gif).
 
 ## Quickstart
 
