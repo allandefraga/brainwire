@@ -42,10 +42,17 @@ Look for `title`, `body`, `source_title`, and `source_url` in `records`. Each
 row follows the actual `Project → HAS_DECISION → Decision → SUPPORTED_BY → Source`
 path in a single read. The graph applies visibility to all three nodes. An
 unavailable project or source yields no matching record. `truncated` means
-more visible decision/source pairs matched than the requested limit. Results
-are ordered by their stable IDs and return at most ten pairs. The CLI also
-bounds field sizes. Server query budgets still control traversal work and
-driver memory depends on what the server returns.
+recall hit the requested row or byte limit before returning every visible
+pair. Results are ordered by their stable IDs and return at most ten pairs.
+The CLI also bounds field sizes. Server query budgets still control traversal
+work and driver memory depends on what the server returns.
+
+Pass `--max-bytes 4096` to cap the UTF-8 JSON response, including indentation
+and the final newline. Recall keeps each decision and its source together. If
+the next pair does not fit, the response returns the pairs already collected
+and sets `truncated: true`. Allow enough bytes for the empty response, which
+includes the project ID. This caps the result handed to the agent. The server
+still uses its own query limits.
 
 The URL is a reported reference. Your application decides what to pass to a
 model and verifies source access before fetching or citing it. Treat returned

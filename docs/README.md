@@ -1,46 +1,55 @@
 # Brainwire documentation
 
-Brainwire is a Rust graph database with durable RocksDB storage, Cypher over
-Bolt, a Python helper and a terminal workspace. It is an experimental beta.
-Start with a local graph you can rebuild, then test the queries, permissions
-and recovery steps your application needs.
+**Start with the [Brainwire documentation site](https://allandefraga.github.io/brainwire/).**
+Use the site to [run your first query](https://allandefraga.github.io/brainwire/#start),
+[explore the terminal workspace](https://allandefraga.github.io/brainwire/#terminal),
+or [browse the guides](https://allandefraga.github.io/brainwire/#guides).
+[Introdução em português](https://allandefraga.github.io/brainwire/pt-br.html).
+
+This directory contains the Markdown sources for the site and historical
+engineering records. The source index below helps maintainers find and edit the
+guides.
 
 ## Start here
 
-1. Run a first graph with Docker, Python and the terminal workspace.
-   [English](getting-started.md) · [Português (Brasil)](getting-started.pt-BR.md)
-2. Learn how queries, transactions, memory and storage fit together.
-   [Architecture](architecture.md)
-3. Set up credentials, volumes and encrypted connections.
-   [Protected deployment](protected-containers.md)
+| Choose | Use it to | Guide |
+| --- | --- | --- |
+| Docker | Try a Cypher query against a disposable graph. | [Run one query](../README.md#try-a-connection-with-docker) |
+| Homebrew on macOS | Open a local graph and run Cypher with `brainwire`. No server, Docker or Python environment is required. | [Native CLI on macOS](homebrew.md) |
+| Docker Compose | Run a Bolt server for applications and connected clients, with data in a persistent volume. | [English](getting-started.md) · [Português (Brasil)](getting-started.pt-BR.md) |
+| Python client | Connect a Python application or run the Python examples against a running Bolt server. | [Installation](python-package.md) · [Client guide](python-client.md) |
 
-O guia de primeiros passos está em português. Os demais guias técnicos deste
-índice estão em inglês.
+[Architecture](architecture.md) explains how queries, transactions, memory and
+storage fit together.
 
-## Build an application
+## Model, query and explore
 
 | I want to… | Guide |
 | --- | --- |
-| Connect from Python | [Install the helper](python-package.md) |
-| Create, update or delete data | [Python operations and batches](python-client.md) |
-| Write a query | [Supported Cypher and CLI](local-cypher.md) |
-| Define allowed types and connections | [Ontology and online catalog](online-catalog.md) |
+| Define node types and relationships | [Ontology and online catalog](online-catalog.md) |
 | Enforce scalar types in a new standalone graph | [Typed properties](typed-properties.md) |
-| Validate a typed input batch | [Client-side typed ingestion](../examples/typed_ingest/README.md) |
-| Define a named metric | [Semantic metrics example](semantic-metrics.md) |
-| Add an index | [Node indexes](indexes.md) · [Relationship property indexes](relationship-property-indexes.md) |
-| Retrieve context for an agent | [Agent quickstart](agent-quickstart.md) · [Context and reranking](context-api.md) |
-| Keep explicit events and timelines | [Temporal data](temporal-data.md) |
-| Import a source | [DuckDB table sync](duckdb-sync.md) · [DuckLake table sync](parallel-ingestion.md#ducklake-full-load-then-incremental) · [DuckLake snapshots](ducklake-incremental.md) · [Source ingestion](source-ingestion.md) |
-| Explore source code as a graph | [Code graph](code-graph.md) |
+| Query relationships | [Supported Cypher and CLI](local-cypher.md) |
 | Inspect a running graph | [Connected terminal workspace](connected-status.md) |
+| Add an index | [Node indexes](indexes.md) · [Relationship property indexes](relationship-property-indexes.md) |
+| Import and update data | [DuckDB table sync](duckdb-sync.md) · [DuckLake table sync](parallel-ingestion.md#ducklake-full-load-then-incremental) · [DuckLake snapshots](ducklake-incremental.md) · [Source ingestion](source-ingestion.md) |
+| Validate a typed input batch | [Client-side typed ingestion](../examples/typed_ingest/README.md) |
+
+## Use cases
+
+| Use case | Example |
+| --- | --- |
+| Knowledge graph | Connect projects to decisions and supporting records in the [company graph](../examples/company_brain/README.md). |
+| Event timeline | Model events and query their connections in order. [Temporal data](temporal-data.md) |
+| Semantic metrics | Define a named, read-only calculation over a node type. [Semantic metrics example](semantic-metrics.md) |
+| Code exploration | Explore links across code symbols and files. [Code graph](code-graph.md) |
+| Agent context | Retrieve connected records and their sources for an agent. [Agent quickstart](agent-quickstart.md) · [Context and reranking](context-api.md) |
 
 ## Operate and evaluate
 
 | I need… | Guide |
 | --- | --- |
-| A native CLI on macOS | [Homebrew source formula](homebrew.md) |
 | Docker commands and volumes | [Containers](container.md) |
+| Run a shared server | [Protected deployment](protected-containers.md) |
 | Configuration and memory controls | [Server](serve.md) · [Memory budgets](memory-defaults.md) |
 | Authentication and permissions | [Bolt authentication](bolt-auth.md) |
 | An encrypted connection boundary | [Protected transport](protected-transport.md) |
@@ -49,6 +58,7 @@ O guia de primeiros passos está em português. Os demais guias técnicos deste
 | Kubernetes or Swarm | [Orchestrator templates](orchestrators.md) |
 | Experimental replication | [Three-voter quorum](quorum-replication.md) |
 | Performance evidence | [Benchmark methods and results](../BENCHMARKS.md) |
+| Explore the managed pilot plan | [Scope and readiness checks](managed-pilot.md) |
 
 ## Evaluate the beta
 
@@ -64,6 +74,7 @@ current release. Benchmark reports apply to their recorded binary and workload.
 ## Contribute
 
 - [Build and preview GitHub Pages](github-pages.md).
+- [Apache 2.0 license](../LICENSE).
 
 ## Plans and past results
 
@@ -71,5 +82,5 @@ current release. Benchmark reports apply to their recorded binary and workload.
 - [Longer-term roadmap](../ROADMAP-v2.md).
 - [Archived October 2026 beta plan](2026-10-pilot-roadmap.md).
 
-The guides above describe current behavior. Files in `design/`, `superpowers/`,
-dated plans and benchmark receipts record proposals, decisions and past results.
+`design/` and `superpowers/` hold engineering proposals and decisions. Dated
+benchmark reports describe their recorded workloads, settings, and builds.

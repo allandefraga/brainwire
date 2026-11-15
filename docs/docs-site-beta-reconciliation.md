@@ -1,10 +1,9 @@
 # Documentation-site beta reconciliation
 
-> **Historical note (October 13):** this records a review of an earlier draft,
-> not the current site's feature status. Several statements below are now
-> outdated, including the claim that online `CREATE INDEX` is unsupported. For
-> current instructions, see the [documentation site](../docs-site/index.html),
-> [index guide](indexes.md), and [Cypher guide](local-cypher.md).
+> **Archived October 13 review.** The table records what an earlier draft got
+> wrong. The [documentation site](https://allandefraga.github.io/brainwire/),
+> [index guide](indexes.md), and [Cypher guide](local-cypher.md) describe current
+> behavior, including supported online `CREATE INDEX` syntax.
 
 The pre-existing untracked `docs-site/` draft was inspected on October 13 without
 editing or publishing it. Its visual concept can be retained, but the following

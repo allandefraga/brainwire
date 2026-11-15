@@ -16,10 +16,13 @@ Python commands below use the environment from [Python setup](python-package.md)
    as soon as it returns to an idle state.
 4. After `server.shutdown_grace_ms` (`BRAINWIRE_SERVER_SHUTDOWN_GRACE_MS`,
    default 8,000 ms, range 0–3,600,000), sessions still open are abandoned.
-   Their pending work is not committed. The process exits with code 1 and says
-   how many sessions it abandoned. A complete drain exits with code 0.
-5. Before exiting, the process waits up to 5 seconds for per-connection engine
-   threads to release their stores and closes RocksDB on the main thread. If a
+   Open transactions that never reach commit are dropped. A write that already
+   reached commit can have an unknown outcome for the client. The process exits
+   with code 1 and reports how many sessions were abandoned. A complete drain
+   exits with code 0.
+5. After the drain, the process gives the async runtime up to one second to stop
+   and waits up to five more seconds for store handles to be released before
+   closing RocksDB on the main thread. If a
    running engine call still holds them, it exits immediately with code 1
    without running destructors. Acknowledged commits are already synced to the
    WAL in both cases (graph commits and consensus metadata write with RocksDB
@@ -29,7 +32,8 @@ The handlers are installed once the stores are open. A signal while RocksDB or
 consensus state is still opening stops the process immediately, as before; that
 path is covered by crash recovery.
 
-The default grace is below Docker's 10-second stop timeout. The shipped Compose,
+Allow the drain time plus the runtime and store shutdown time in your
+supervisor stop budget. The shipped Compose,
 Swarm and Kubernetes profiles allow 60 seconds, and the image starts the binary
 in exec form, so the signal reaches it directly (Compose also adds an init
 process). The Compose fixture `crates/server/tests/compose_restart.py` checks it
@@ -86,10 +90,11 @@ The quorum fixture (`crates/server/tests/quorum_replication.py`) now ends with
 SIGTERM to each voter in turn, requires exit code 0, then compares offline
 audits and logical digests across voters.
 
-Evidence for the current candidate is in
-[2026-10-15 graceful drain](benchmarks/2026-10-15-graceful-drain.md). The
-[October 13 receipt](../benchmarks/archive/2026-10-13-beta/termination.json) records the
-earlier abrupt-termination binary and stays as historical evidence.
+The [October 15 graceful-drain report](benchmarks/2026-10-15-graceful-drain.md)
+and the [October 13 abrupt-termination receipt](../benchmarks/archive/2026-10-13-beta/termination.json)
+record earlier binaries. The [uncertain-commit report](benchmarks/2026-11-14-uncertain-commit.md)
+records later process kills with unacknowledged writes. Re-run the fixture against
+the exact candidate you plan to operate.
 
 ## Application and supervisor boundary
 

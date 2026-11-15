@@ -1,9 +1,8 @@
 # Protected Bolt transport
 
-Use a service-token policy and verify the server certificate for shared
-connections. Brainwire can terminate TLS on its Bolt listener. The Compose
-HAProxy overlay is another option for a single-host pilot. Both use the
-[Python setup](python-package.md) for the client examples below.
+For a shared connection, use a service-token policy and verify the server
+certificate. Start with native Bolt TLS. Use the Compose HAProxy overlay
+when you need a separate TLS endpoint on a single host.
 
 ## Enable native Bolt TLS
 
@@ -59,15 +58,13 @@ service tokens.
 
 ## Run native Bolt TLS with Compose
 
-Use a pinned Brainwire image that includes native Bolt TLS. To build one from a
-checkout that includes this feature, use `docker build -t brainwire:native-tls .`
-from the repository root. The overlay requires an explicit image in
-`BRAINWIRE_NATIVE_TLS_IMAGE`. Keep the existing Compose project name to reuse
-its volume. Use a certificate with `IP:127.0.0.1` for the inherited readiness
-probe and a SAN for any separate address your application uses.
+Set `BRAINWIRE_IMAGE` from the [release image guide](container.md#start-from-a-release-image)
+or point it to your own build with native Bolt TLS. Keep the Compose project
+name to reuse its volume. Include `IP:127.0.0.1` in the certificate for the
+readiness probe and a SAN for the address your application uses.
 
 ```sh
-export BRAINWIRE_NATIVE_TLS_IMAGE=brainwire:native-tls
+export BRAINWIRE_NATIVE_TLS_IMAGE="${BRAINWIRE_IMAGE:?Set the Brainwire image first}"
 export BRAINWIRE_PILOT_PROJECT=brainwire-pilot-YOUR_UNIQUE_SUFFIX
 export BRAINWIRE_AUTH_POLICY_FILE=/absolute/private/policy.json
 export BRAINWIRE_HEALTH_AUTH_FILE=/absolute/private/health.json
@@ -127,7 +124,7 @@ network boundary.
 
 ## Start with certificates and file credentials
 
-Use Docker Compose 2.24.4 or newer; this profile was qualified with 5.4.0.
+Use Docker Compose 2.24.4 or newer.
 The [`!reset` merge tag](https://docs.docker.com/reference/compose-file/merge/)
 removes the base host port.
 Use a server certificate with a SAN matching the address clients connect to.
@@ -137,7 +134,7 @@ The pinned proxy image runs as its `haproxy` user; on a Linux host, arrange
 private file ownership/read access for UID/GID 99 as well. The PEM and
 configuration are mounted read-only. There are no credentials in YAML.
 
-Build the selected local image first using the [container guide](container.md).
+Select or build the image using the [container guide](container.md).
 Prepare a server auth policy and health client JSON using the
 [auth profile](bolt-auth.md), with grants for the Compose default graph
 `default`. The native quickstart's temporary data directory is separate
@@ -146,7 +143,7 @@ secrets retain host permissions; arrange ownership/read access for Brainwire
 UID 10001 without making real credentials world-readable.
 
 ```sh
-export BRAINWIRE_IMAGE=brainwire:local
+: "${BRAINWIRE_IMAGE:?Set the Brainwire image first}"
 export BRAINWIRE_PILOT_PROJECT=brainwire-pilot-YOUR_UNIQUE_SUFFIX
 export BRAINWIRE_AUTH_POLICY_FILE=/absolute/private/policy.json
 export BRAINWIRE_HEALTH_AUTH_FILE=/absolute/private/health.json
@@ -180,6 +177,10 @@ Docker DNS resolves the single backend; this does not distribute writes across
 multiple database owners. See the [HAProxy 3.2 configuration manual](https://docs.haproxy.org/3.2/configuration.html).
 
 ## Python with strict certificate checks
+
+Use the environment from [Python setup](python-package.md). The examples
+connect to HAProxy on port 7688. Use the native listener's port and matching
+certificate name when connecting directly.
 
 Use `bolt+s`, which requires certificate validation. A public certificate
 trusted by Python's normal trust store needs no extra CA configuration. For a
@@ -215,9 +216,13 @@ with encryption enabled and `TrustCustomCAs`. The driver checks both the CA
 chain and hostname; the hostname must appear in the server certificate.
 
 ```python
+import json
+from pathlib import Path
+
 from neo4j import TrustCustomCAs
 from brainwire import connect
 
+credentials = json.loads(Path('/absolute/private/writer.json').read_text())
 with connect(
     'bolt://localhost:7688', 'default',
     auth=(credentials['principal'], credentials['credentials']),
@@ -274,18 +279,10 @@ anonymous/wrong-token rejection; reader write denial;
 1,000 indexed writes; explicit rollback; backend SIGKILL/start with committed
 data/index recovery; and an offline graph audit. JSON receipts identify both
 actual image IDs, the pinned proxy digest, driver version and cleanup result.
-Receipts also record the Python and SSL-library versions. In one local beta.2
-run, Python 3.14 with OpenSSL 3.5 passed these checks, while Python 3.9.6 with
-LibreSSL 2.8.3 could not complete TLS readiness; the cause remains unverified.
-The readiness timeout preserves the last connection error for diagnosis.
-
-The final candidate [driver 5 receipt](../benchmarks/archive/2026-10-13-beta/tls-driver5.json)
-and [driver 6 receipt](../benchmarks/archive/2026-10-13-beta/tls-driver6.json) passed these
-checks on image `brainwire:beta-20261013`
-(`sha256:d08c2e5af98ea237b568b86bf58af99af7d80ae5425ad7aaecdc37f620d821d3`).
-Their idle-pool pauses were 65.807 and 65.811 seconds; both observed a different
-TLS frontend peer and passed their first reuse with liveness set to 30 seconds.
-Both receipts also record successful graph/index audits and owned-resource cleanup.
+Archived results for this proxy profile are available for
+[driver 5](../benchmarks/archive/2026-10-13-beta/tls-driver5.json) and
+[driver 6](../benchmarks/archive/2026-10-13-beta/tls-driver6.json).
+Use the receipt for the image, driver and TLS library you actually test.
 
 The proxy harness uses synthetic data. Its coverage is limited to the
 single-host client-to-proxy setup described above. Remote ingress,

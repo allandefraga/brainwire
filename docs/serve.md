@@ -36,6 +36,7 @@ directory or port, set the environment before both initialization and serving:
 ```sh
 export BRAINWIRE_SERVER_DATA_DIR=/path/to/brainwire-data
 export BRAINWIRE_SERVER_LISTEN=127.0.0.1:17687
+export BRAINWIRE_SERVER_DEFAULT_DATABASE=demo
 brainwire db create demo --ontology /path/to/ontology.json
 brainwire serve
 ```
@@ -59,9 +60,7 @@ from brainwire import connect
 with connect("bolt://127.0.0.1:7687", "default", auth=None,
                           liveness_check_timeout=30,
                           max_transaction_retry_time=0) as graph:
-    driver = graph.driver
-    with driver.session(database="default") as session:
-        print(session.run("RETURN 1 AS n").single()["n"])
+    print(graph.run_cypher("RETURN 1 AS n"))
 PYTHON
 ```
 
@@ -158,8 +157,10 @@ writes. An autocommit write completes when its result is consumed.
 If a client loses the connection after submitting COMMIT, the outcome can be
 unknown: the write may already be durable. Do not automatically repeat a mutation
 without reconciling stable identities or a durable source checkpoint. Explicit
-request IDs have a separate experimental quorum contract; see
-[commit state](commit-state.md) and [quorum replication](quorum-replication.md).
+request IDs have separate experimental contracts for
+[standalone servers](standalone-requests.md) and
+[quorum replication](quorum-replication.md). See
+[commit state](commit-state.md) before designing retries.
 
 `CALL db.commitState()` returns the local durable sequence captured by the
 transaction. It is not a causal bookmark, source cursor, transaction-status API

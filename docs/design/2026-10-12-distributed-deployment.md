@@ -143,9 +143,11 @@ contract. Peers retain internal named addresses separately; do not expose their
 replication listener just to make public client routing easier.
 
 TLS termination, token authentication and peer identity must also be explicit.
-Native TLS is currently pending. A future edge terminator would protect only
-the segments it actually encrypts; it does not make a plaintext backend hop
-encrypted. Client service tokens are not membership credentials.
+Native TLS is available on the Bolt client listener; that does not establish
+encrypted or authenticated Raft peer transport. An edge terminator protects
+only the segments it actually encrypts. Client service tokens are not membership
+credentials. See [protected transport](../protected-transport.md) for current
+client options.
 
 ### Availability of the entry path
 

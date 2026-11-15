@@ -224,7 +224,7 @@ guarantee. Large-volume benchmarks follow measured smaller gates.
 
 ## Sources and existing contracts
 
-- [Existing cluster and operations design](../superpowers/specs/2026-09-24-brainwire-design.md#51-cluster).
+- [Original Brainwire design](../superpowers/specs/2026-09-24-brainwire-design.md).
 - [Implemented transaction boundary](../transactions.md).
 - [Qdrant vector concepts](https://qdrant.tech/documentation/manage-data/vectors/): dense, sparse, named and multivector representations.
 - [Qdrant payload concepts](https://qdrant.tech/documentation/manage-data/payload/): metadata and nested payload filtering.

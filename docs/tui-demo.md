@@ -111,28 +111,7 @@ is `workspace`. Its snapshot captures the initial Ontology pane. Snapshot sizes
 are 80–240 columns and 24–80 rows. Connected Graph snapshots need the four graph
 selection flags described in the connected guide.
 
-## Actual terminal preview
-
-These are dated captures of the executable **synthetic demo**, taken at 160×48
-on 2026-09-27. They illustrate that version's layout, not current server data or
-a complete picture of the present connected workspace. Font rendering varies
-between terminals.
-
-![Graph demo capture](design/assets/brainwire-tui-demo-graph.png)
-
-![Memory demo capture](design/assets/brainwire-tui-demo-memory.png)
-
-![Disk and files demo capture](design/assets/brainwire-tui-demo-disk.png)
-
-The [connected workspace guide](connected-status.md) shows the newer bounded
-Graph renderer and documents its actual fetch and navigation limits. Demo RAM
-numbers and file rows are illustrative. Connected Memory reports query
-reservations; neither is a measurement of total process RSS.
-
-## Toward the connected MVP
-
-Current connected panels provide schema, query-pool counters, index state and a
-bounded outgoing relationship sample. Interactive graph expansion, arbitrary
-queries, editing, live file browsing and import-job controls remain future work.
-Check [current capabilities and limits](../README.md#current-limits) before
-using a screenshot as a feature reference.
+The [terminal walkthrough](https://allandefraga.github.io/brainwire/#terminal)
+uses the connected workspace. The synthetic demo illustrates RAM and file
+layouts. Connected Memory reports query reservations. For process memory, use
+your operating system or container runtime's metrics.

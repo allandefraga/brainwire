@@ -15,7 +15,7 @@ palette and logo (then preferred a stronger green with restrained cyan), an
 understandable memory panel, and a backoffice for files
 and storage. Numerical budgets below are initial design targets to validate.
 
-This refines [approved design section 4.3](../superpowers/specs/2026-09-24-brainwire-design.md#43-cli-and-tui).
+This refines [the original design](../superpowers/specs/2026-09-24-brainwire-design.md).
 After the demo, the [engine MVP](../superpowers/plans/2026-09-26-brainwire-mvp.md)
 continues with real Bolt transactions and `serve`. The atomic executor and
 separate embedded [`brainwire cypher` command](../local-cypher.md) are implemented.

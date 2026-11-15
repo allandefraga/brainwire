@@ -1,15 +1,22 @@
 # Run your first graph
 
-This guide uses a local synthetic graph called `demo`. You need Docker with
-Compose and a checkout of the Brainwire release you want to run. Choose a
-published version from [GitHub Releases](https://github.com/allandefraga/brainwire/releases),
-then use the matching source tag and image. The [README quickstart](../README.md#quickstart)
-contains the current release commands.
+Start with a connection between a customer and a segment. Choose how you
+want to run it:
 
-The local demo disables authentication and publishes Bolt only on host
-loopback. Use [protected containers](protected-containers.md) and an
-[encrypted connection boundary](protected-transport.md) before connecting
-shared or real data.
+- [Try a Cypher query in one disposable Docker container](container.md#start-a-local-demo-with-one-command).
+- [Use the native CLI on macOS with Homebrew](homebrew.md).
+- Follow the steps below to run a local Bolt server with Docker Compose,
+  write from Python and inspect the relationship in the TUI.
+
+For Compose, choose a published version from
+[GitHub Releases](https://github.com/allandefraga/brainwire/releases) and use
+the matching source tag and image. Copy the clone and image commands from the
+[Docker quickstart](../README.md#start-the-docker-server).
+
+The Compose demo publishes Bolt to host loopback and permits unauthenticated
+connections from its Docker network. Use synthetic data there. For shared
+deployments, configure [authentication](protected-containers.md) and
+[verified TLS](protected-transport.md).
 
 ## 1. Start the database
 

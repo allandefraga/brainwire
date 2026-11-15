@@ -6,8 +6,8 @@ private CA. Loopback and SSH tunnels remain available without TLS. The journal
 identifies the destination by its original URI: to resume an existing journal,
 keep that URI and add `--tls-ca` instead of changing the URI scheme.
 
-The example `examples.python.duckdb_sync` imports one **base table from a local
-DuckDB file** into one standalone Brainwire graph. Its first run loads the
+The example `examples.python.duckdb_sync` maps one **base table from a local
+DuckDB file** to one node label or relationship type in a standalone Brainwire graph. Its first run loads the
 snapshot; later runs compare a new snapshot with the last confirmed one and
 write only differences. This is a snapshot comparison, not a native change
 feed: it reads the complete table each time.
@@ -73,10 +73,16 @@ snapshot copies at the same stable path.
 
 ## 3. Sync again
 
+Use a separate source ID and journal for each mapping. For relationship
+mappings, use the [same mapping shape as DuckLake](parallel-ingestion.md#ducklake-full-load-then-incremental).
+The endpoint pair identifies an edge. The sync refuses keyed relationship
+types, which can contain several edges between the same endpoints.
+
 Run the same command after the DuckDB table changes. The journal freezes a
 pending snapshot before graph writes and records batch progress in the graph.
 After an interrupted run, rerun the same command to finish the frozen snapshot
-before reading newer source data. Do not delete or replace the journal to reset
+before reading newer source data. Keep the same `--batch-size` when resuming.
+Do not delete or replace the journal to reset
 an existing source. A lost or mismatched journal needs reconciliation; changing
 the source path, Bolt URI, mapping or source generation also requires an
 intentional new contract or reconciliation.

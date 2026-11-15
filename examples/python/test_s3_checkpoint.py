@@ -78,6 +78,18 @@ class S3CheckpointTests(unittest.TestCase):
             s3_checkpoint.publish(self.remote, self.copy, URI)
         self.assertNotIn(PREFIX + checkpoint_backup.MANIFEST, self.remote.objects)
 
+    def test_restore_refuses_corrupted_reservation_marker(self):
+        s3_checkpoint.publish(self.remote, self.copy, URI)
+        key = PREFIX + s3_checkpoint.CLAIM
+        correct = self.remote.objects[key]
+        for damaged in (b"x" * len(correct), correct[:-1], correct + b"extra"):
+            with self.subTest(damaged=damaged):
+                self.remote.objects[key] = damaged
+                with self.assertRaisesRegex(ValueError, "reservation marker"):
+                    s3_checkpoint.restore(self.remote, URI, self.destination)
+                self.assertFalse(self.destination.exists())
+                self.assertFalse(self.destination.with_suffix(".partial").exists())
+
     def test_extra_objects_and_corrupted_objects_are_refused(self):
         s3_checkpoint.publish(self.remote, self.copy, URI)
         self.remote.objects[PREFIX + "not-in-manifest"] = b"extra"

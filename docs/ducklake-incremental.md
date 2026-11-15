@@ -1,16 +1,16 @@
-# Incremental graph updates from pinned DuckLake snapshots
+# Export a DuckLake snapshot diff as JSONL
 
 Python commands below use the environment from [Python setup](python-package.md).
 For DuckDB/DuckLake commands, install the optional reader in that environment:
 `.venv-brainwire/bin/python -m pip install duckdb==1.5.5`.
 
-`examples/source_ingestion/ducklake_incremental.py` compares two explicit versions of a
-local SQLite-backed DuckLake source. It emits authoritative upserts and physical
-deletions using the existing external application ticket/comment mapping and stable scoped
-entity IDs. It reads both complete snapshots; this is a snapshot-difference
-bridge, not native DuckLake CDC or a live source subscription.
-For a generic table-to-label/edge mirror that reads `ducklake_table_changes`
-directly with parallel workers, use [DuckLake sync](parallel-ingestion.md).
+`examples/source_ingestion/ducklake_incremental.py` compares two complete
+versions of a local SQLite-backed DuckLake source and writes a resumable JSONL
+artifact. It uses the example ticket and comment mapping to emit upserts and
+physical deletions with stable scoped entity IDs.
+For a generic table-to-label or table-to-edge mirror that reads
+`ducklake_table_changes` directly, use the
+[direct DuckLake sync](parallel-ingestion.md#ducklake-full-load-then-incremental).
 
 The source must retain both catalog versions and their managed data files until
 export finishes. Only cached DuckLake/SQLite extensions are loaded; the example
@@ -55,6 +55,9 @@ a private temporary file. The JSON receipt records artifact bytes/SHA-256,
 source versions/digests, counts and DuckDB/DuckLake versions.
 
 ## Register a verified baseline, then ingest
+
+The commands below connect to a local Bolt listener. For a server on another
+host, use a local SSH tunnel and keep the Bolt endpoint on loopback.
 
 First export the old pinned version using the existing snapshot bridge and
 import it completely through `ingest_snapshot`. Registration requires the actual

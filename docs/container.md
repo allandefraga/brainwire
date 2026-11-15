@@ -1,10 +1,10 @@
 # Run Brainwire in Docker
 
-Use Docker Compose for the first local trial. It creates a synthetic graph
-named `demo` and keeps its files in a named Docker volume. You can use a
-published image without compiling Rust, or build from source. You need Docker
-Engine and Docker Compose. Run these commands from a checkout of the matching
-Brainwire release.
+To run Cypher without starting a server, use the
+[one-command example](#start-a-local-demo-with-one-command). For a Bolt
+server with a persistent graph, use Docker Compose. Run Compose commands
+from a checkout of the matching Brainwire release. Use Docker Engine 28 or
+newer for the demo's loopback port binding.
 
 On macOS, Colima can supply the engine instead of Docker Desktop. Start
 Colima and run `export DOCKER_CONTEXT=colima` in the shell where you use these
@@ -12,11 +12,11 @@ commands; the Docker CLI and Compose plugin are still required. Bind-mounted
 files must be in a directory shared with the Colima VM. For example, an
 unshared `/private/tmp` path can fail even when it exists on the Mac.
 
-This guide uses an unauthenticated demo on host loopback. For shared or real
-data, use the [protected container setup](protected-containers.md) and a
-[verified encrypted connection](protected-transport.md). The native Bolt server
-has no TLS. The normal Docker profiles run one database instance;
-[experimental quorum replication](quorum-replication.md) has a separate setup.
+The single-instance demo publishes Bolt on host loopback and permits anonymous
+connections on its Docker network. For shared deployments, configure
+[service-token authentication](protected-containers.md) and
+[native Bolt TLS or a verified encrypted connection](protected-transport.md).
+[Experimental quorum replication](quorum-replication.md) has a separate setup.
 
 ## Start from a release image
 
@@ -160,18 +160,18 @@ back to an older image is not a safe rollback plan after a volume-format change.
 
 ## Start a local demo with one command
 
-After building `brainwire:local` with `docker build -t brainwire:local .`, you
-can start the synthetic demo with one command. This exposes an unauthenticated
-server on host loopback only and is intended for local experiments:
+Use the release image set above to create two synthetic nodes and return
+their relationship in one query:
 
 ```sh
-docker run -d --name brainwire-local -p 127.0.0.1:7687:7687 -v brainwire-local-data:/data -e BRAINWIRE_SERVER_DEFAULT_DATABASE=demo --entrypoint /bin/sh brainwire:local -ec 'if [ ! -f /data/demo/CURRENT ]; then brainwire db create demo --ontology /opt/brainwire/example-schema.json; fi; exec brainwire serve --allow-unauthenticated-remote'
+docker run --rm --network none "$BRAINWIRE_IMAGE" cypher \
+  --database /data/demo --ontology /opt/brainwire/example-schema.json \
+  --query "CREATE (c:Customer {entity_id:'customer-1', name:'Ada'})-[r:IN_SEGMENT]->(s:Segment {entity_id:'segment-1', name:'beta'}) RETURN c.name AS customer, type(r) AS relationship, s.name AS segment"
 ```
 
-The named volume keeps the graph when the container stops. For shared or real
-data, follow the [protected container guide](protected-containers.md).
-Validate this bootstrap with the exact image and environment you use. A demo
-startup alone does not qualify production operation or recovery.
+The JSON contains `[["Ada", "IN_SEGMENT", "beta"]]` in `rows`. The
+container exits and Docker removes the graph. Use [Compose](#start-from-a-release-image)
+if you need a persistent graph or a connection for another application.
 
 ## Use your own ontology and a single container
 

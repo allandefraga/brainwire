@@ -1,10 +1,8 @@
 # Memory defaults in containers
 
-Relationship writes account for the existing relationship payload before
-decoding it. If a write cannot reserve its estimated temporary memory, the
-transaction can be refused instead of materializing that payload. Endpoint
-existence checks avoid copying unused node properties. RocksDB allocations and
-other process memory remain outside this accounting; it is not an RSS ceiling.
+Start with the detected budgets, then measure query reservations, process RSS,
+and container memory under your own workload. Those are separate measurements.
+The operating system enforces the container memory limit.
 
 `brainwire config show` and every command that loads server configuration use
 host/container-aware defaults for unset memory fields. On Linux, Brainwire reads
@@ -70,10 +68,8 @@ The sampler attempts a reading every 100 ms and limits growth by the smallest av
 margin across visible ancestors. A stale or unreadable known limit closes
 query growth until a fresh sample is available. Existing reservations can still
 be reused, and Bolt ingress and other allocations do not share this cgroup
-margin. These checks cannot guarantee a process-wide ceiling or explain an
-earlier untraced decision.
-For accounted query growth, `reason=process_limit` can now reflect this
-cgroup margin as well as sampled RSS; the reason alone does not identify which
+margin. For accounted query growth, `reason=process_limit` can reflect this cgroup
+margin as well as sampled RSS; the reason alone does not identify which
 measurement caused the refusal.
 On a cgroup v2 ancestor with an active or previously observed memory controller,
 query-growth sampling treats a missing, unreadable or malformed `memory.high`
@@ -209,87 +205,15 @@ and checking the cgroup limit.
 
 ## Admission under Linux cgroup pressure
 
-Cypher list quantifiers, comprehensions and `reduce` account for temporary
-binding copies before evaluating each item. Temporary accounting resets per
-iteration while retained results remain charged; the shared reservation can
-remain at its high-water mark until the query or transaction finishes.
-Quantifiers also check deadlines during iteration. These measures do not create
-a process-wide RSS ceiling.
-
-`replace()` accounts for the actual UTF-8 output size before constructing it;
-an absent pattern no longer reserves a hypothetical expanded string. A large
-real expansion can still be refused. Timeout checks remain cooperative.
-`split()` also accounts for each output segment before allocating its result;
-it scans the input twice and may refuse large output under the query budget.
-`size()`, `isEmpty()` and `exists()` inspect already-evaluated arguments
-without an additional deep copy. Argument evaluation itself can still copy data.
-Projection and aggregate `DISTINCT` admit retained key payloads before cloning
-them; grouped projections account for both retained key copies, and `UNION`
-accounts for the copies used to deduplicate branches. These are conservative
-query-accounting checks, not a complete allocator or RSS limit. Output list
-conversion now reserves exact result capacity before allocation. For scalar
-lists this can temporarily hold a second buffer rather than reusing the input
-buffer; that overlap is charged to the query budget. `UNION ALL`
-does not create that deduplication set.
-
-A fresh RUN RSS reading that exceeds the current sample also reduces the
-shared reservation headroom until a later sampler reading confirms relief. A
-sampler read already in progress cannot replace an intervening higher reading.
-This narrows one sampling window; it is not a process-wide memory ceiling.
-
-The synthetic admission smoke supports 512 MiB, 2 GiB and 3 GiB limits. It compares the same working-set estimate
-as the server and records raw usage separately for the injection safety limit.
-It only accepts a structured cgroup refusal as a confirmed cgroup rejection;
-missing or different evidence is inconclusive. The previous failed run remains
-unexplained, and this test does not qualify sustained memory use or an RSS cap.
-The [v0.14.0-beta.4 local candidate receipt](benchmarks/2026-11-03-cgroup-014b4.json)
-records two cgroup refusals with rollback and a successful offline graph audit on
-Linux arm64. It identifies the local image, not the published image digest.
-The [v0.15.0-beta.5 local candidate receipt](benchmarks/2026-11-04-cgroup-015b5.json)
-records a repeat of this synthetic smoke on a locally built image; it does not
-establish sustained-load behavior or explain the earlier failure.
-The [beta.9 candidate receipt](benchmarks/2026-11-04-cgroup-015b9.json) records
-another passing run with the same scope and limitations.
-The [beta.11 candidate summary](benchmarks/2026-11-04-cgroup-015b11.json)
-records a fresh synthetic pressure rejection, rollback and recovery.
-The [beta.12 investigation](benchmarks/2026-11-05-pressure-investigation.md)
-records a failed smoke, controlled repeats and the optional decision trace;
-the original failure remains unexplained.
-On 2026-11-12, short synthetic pressure tests of the v0.18.0-beta.6 local
-candidate passed at [512 MiB](benchmarks/2026-11-12-pressure-512m-018b6.json)
-[2 GiB](benchmarks/2026-11-12-pressure-2g-018b6.json), and
-[3 GiB](benchmarks/2026-11-12-pressure-3g-018b6.json). All recorded
-controlled refusals, rollback, recovery and a successful offline audit.
-The pressure was artificial and brief; these results do not qualify a
-sustained workload or establish a process-wide RSS ceiling.
-A separate [10-minute local run](benchmarks/2026-11-12-10min-load-2g-018b6.json)
-used a 2 GiB container and 100,002 synthetic customer nodes. It performed
-579 batches of 100 updates and read back one updated node per batch. After
-SIGKILL and restart, the last update, node count and offline audit passed.
-The workload did not sustain memory saturation; Docker memory samples are
-not process RSS.
-A [five-minute mixed run](benchmarks/2026-11-12-mixed-4g-018b6.json) in a
-4 GiB, two-CPU container used 10,000 synthetic nodes and 10,000 edges.
-It completed 13,769 update batches and 11,134 read iterations. Exact rows
-matched before and after SIGKILL, and the offline audit passed. The test
-did not saturate memory and does not qualify multi-machine operation or
-establish a global RSS cap.
-A [one-hour local run](benchmarks/2026-11-12-1h-load-1g-018b6.json) in a
-1 GiB container used 10,002 synthetic customer nodes. It completed 3,464
-batches of 100 updates and point readbacks, then checked the last value and
-node count after SIGKILL, and passed an offline audit. Docker memory samples
-went from 182.3 MiB to 231.7 MiB; they are not process RSS, and this small
-workload did not saturate memory or establish whether a leak exists.
-A [15-minute mixed run](benchmarks/2026-11-13-mixed-2g-019b1.json) of the
-v0.19.0-beta.1 local candidate used a 2 GiB container, 10,000 synthetic nodes
-and 10,000 edges. It completed 41,080 update batches and 32,582 read
-iterations. Exact records matched before and after SIGKILL and the offline audit
-passed. The workload did not saturate memory and does not establish an RSS cap
-or qualify distributed failover.
-In a separate [small 30-minute read soak](benchmarks/2026-11-04-soak-015b9.json),
-the median process RSS rose by about 53 MiB between the first and last
-five-minute windows. This observation needs investigation; it does not prove
-a leak or qualify sustained production memory use.
+The [pressure smoke receipts](benchmarks/README.md#recent-pressure-admission-smoke)
+record refusals, rollbacks and recovery after brief synthetic pressure. The
+[pressure investigation](benchmarks/2026-11-05-pressure-investigation.md)
+preserves an unexplained failed run. Separately, a
+[one-hour mixed workload and restart diagnostic](benchmarks/2026-11-14-mixed-recovery-022b3.json)
+checked a 500,000-node, 500,000-relationship graph in a 2 GiB container.
+It used the published v0.22.0-beta.3 image, stayed below the memory limit
+and stopped writes before SIGKILL. These are workload-specific results.
+They do not qualify sustained 2/4/8 GiB production use.
 
 Decision logs include the selected cgroup's raw usage, inactive file cache,
 effective working-set estimate and limit when the cgroup check refuses a RUN. If any examined cgroup has raw usage
@@ -353,15 +277,16 @@ power-of-two counter values to avoid one log per rejected request. A startup
 probe counts as one sample; reading the counter snapshot does not sample again.
 These counters are not an HTTP or Prometheus endpoint. Raw controller usage
 includes reclaimable file cache: conservative admission can keep rejecting RUNs
-until usage falls, even when some pages could be reclaimed. Unknown monitoring
-fails open for admission while existing query/input reservations remain active.
+until usage falls, even when some pages could be reclaimed. Missing cgroup data can skip the RUN pressure check. The shared budgets,
+RSS admission, and the stricter query-growth checks described above still apply.
 
 ## Cypher temporary values
 
-The `reverse`, `head`, `last`, `tail` and `valueType` functions avoid an
-extra deep copy of their already-evaluated argument. Some inputs and results
-still need to be materialized, and normal query reservations continue to
-apply. This improvement is not a process-wide RSS ceiling.
+The query budget covers tracked temporary values and retained results. For
+example, string expansion, list comprehensions and `DISTINCT` can require
+additional reservations even when a query returns few rows. Relationship writes
+also account for the temporary allocation before decoding an existing
+relationship payload. See [supported Cypher](local-cypher.md) for query syntax.
 
 ## Staged writes at commit
 

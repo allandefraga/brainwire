@@ -1,13 +1,10 @@
 # Protected single-instance container profiles
 
-Python commands below use the environment from [Python setup](python-package.md).
-
-The base manifests omit credentials and now fail closed on their non-loopback
-listeners. These overlays mount a server verifier policy and a separate
-read-only health credential. Generate these
-with [service-token setup](bolt-auth.md), granting the health principal the
-configured **default database**. Policy/token updates require a server restart;
-secret-file projection alone does not reload Brainwire's in-memory policy.
+For a shared graph, configure the server policy and a separate read-only
+health credential with [service-token setup](bolt-auth.md). Grant the health
+principal read access to the configured default database. The base manifests
+bind to non-loopback addresses inside the container and require a policy.
+Restart Brainwire after changing the policy.
 
 The auth overlays configure service tokens for one standalone instance. Bolt
 uses plaintext unless you configure native TLS and give clients and health probes
@@ -21,6 +18,11 @@ unencrypted by default, and NetworkPolicy filters traffic rather than encrypting
 it. [Kubernetes multi-tenancy documentation](https://kubernetes.io/docs/concepts/security/multi-tenancy/).
 
 ## Docker Compose
+
+Select a published image or build `brainwire:local` from source using the
+[container guide](container.md). The commands below assume an existing
+`default` graph. For a fresh Linux deployment, use the initialization steps
+in the next section.
 
 ```sh
 export BRAINWIRE_IMAGE=brainwire:local
@@ -46,10 +48,8 @@ mode for real credentials. [Docker Compose secrets](https://docs.docker.com/comp
 
 This recipe is for a **rootful Linux Docker daemon without user-namespace
 remapping**, in a dedicated root shell, from a checkout of the desired release.
-It is a reviewed setup recipe, not a record that these exact commands were
-executed on your host. First copy the versioned `BRAINWIRE_IMAGE` export from the
-[README](../README.md); log in to GHCR if the image is private. Keep the same
-shell for the following steps.
+Set `BRAINWIRE_IMAGE` from the [container guide](container.md#start-from-a-release-image)
+and keep the same shell for the following steps.
 
 Use fresh paths and a new Compose project. Do not reuse another deployment's
 credentials or data volume. `/root` and `/var/lib` below must be trusted,
@@ -59,7 +59,7 @@ credentials.
 
 ```sh
 set -eu
-: "${BRAINWIRE_IMAGE:?Copy the exact versioned image export from the README first}"
+: "${BRAINWIRE_IMAGE:?Set the published Brainwire image first}"
 export BRAINWIRE_AUTH_SOURCE=/root/brainwire-auth-01
 export BRAINWIRE_AUTH_RUNTIME=/var/lib/brainwire-auth-01
 export BRAINWIRE_AUTH_POLICY_FILE="$BRAINWIRE_AUTH_RUNTIME/policy.json"
@@ -213,10 +213,12 @@ requires retained storage and a single active owner.
 
 ## Local verification
 
+Use [the Python environment](python-package.md) and select an available image.
+
 ```sh
 python3 deploy/check_auth_profiles.py
 .venv-brainwire/bin/python crates/server/tests/compose_auth.py \
-  --image brainwire:auth-20261012
+  --image "$BRAINWIRE_IMAGE"
 ```
 
 The render checker invokes Compose/stack config and kustomize without contacting a

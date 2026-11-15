@@ -1,4 +1,6 @@
-# Real offline TUI: 100K-node capture
+# Archived offline TUI: 100K-node capture
+
+> Historical capture from October 2026. It does not describe the current connected workspace. See the [current TUI guide](connected-status.md).
 
 October 7 captures of the actual terminal, using a disposable synthetic graph:
 100,000 Customers, zero instance edges, commit sequence 121. The ontology declares

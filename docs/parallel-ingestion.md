@@ -7,9 +7,11 @@ use the same CA configuration. Loopback and SSH tunnels remain available.
 For DuckDB/DuckLake commands, install the optional reader in that environment:
 `.venv-brainwire/bin/python -m pip install duckdb==1.5.5`.
 
-This guide is for a writer that has to load a lot of data and keep it current:
-how to write, how many processes to run, what happens when they collide, and
-how to read a DuckLake table directly, first in full and then incrementally.
+Use this guide to batch graph writes or synchronize a DuckLake table. The
+[direct sync](#ducklake-full-load-then-incremental) loads a pinned snapshot
+first and reads the DuckLake change table on later runs. For a local DuckDB
+file, use [DuckDB sync](duckdb-sync.md). For a ticket and comment mapping
+that emits a resumable file, use the [DuckLake JSONL export](ducklake-incremental.md).
 
 ## How to write
 
@@ -306,8 +308,8 @@ a synchronous commit per row; see the measurement below.
   credentials only in environment variables); other object stores and
   managed Postgres services were not.
 
-This is a bridge for keeping a graph current from DuckLake, not native CDC:
-readers can see partial progress between committed batches during a run.
+Each scheduled or manual run synchronizes through a specific target snapshot.
+Readers can see partial progress between committed batches during a run.
 
 ## Measured
 

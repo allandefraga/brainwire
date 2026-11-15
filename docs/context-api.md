@@ -97,7 +97,7 @@ sources each have different meanings; none is a guarantee that an agent's
 answer is correct. Let the application decide how to use this untrusted context.
 
 To try the workflow against the local demo, first write the records in the
-[quickstart](../README.md#write-and-query-from-python), then run:
+[quickstart](../README.md#connect-a-python-application-optional), then run:
 
 ```sh
 .venv-brainwire/bin/python -m examples.python.agent_context_demo

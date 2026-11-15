@@ -1,3 +1,4 @@
+import json
 from contextlib import contextmanager
 from unittest import TestCase
 from unittest.mock import Mock
@@ -23,6 +24,37 @@ class AgentMemoryTests(TestCase):
         for limit in (False, 0, 11, 1.5):
             with self.subTest(limit=limit), self.assertRaisesRegex(ValueError, "limit"):
                 recall(graph, "project", limit)
+        graph.stream_cypher.assert_not_called()
+
+    def test_read_budget_returns_only_complete_pairs(self):
+        graph = Mock()
+        row = {"decision_id": "d", "title": "title", "body": "é" * 20 + ' "quoted"',
+               "source_id": "s", "source_title": "review", "source_url": "https://example.invalid"}
+        second = {**row, "decision_id": "d2"}
+        expected = {"project": "project", "records": [row], "truncated": False}
+        budget = len((json.dumps(expected, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+        opened = []
+
+        @contextmanager
+        def rows(*args, **kwargs):
+            opened.append(True)
+            try:
+                yield iter([row, second])
+            finally:
+                opened.pop()
+
+        graph.stream_cypher.side_effect = rows
+        self.assertEqual(recall(graph, "project", max_bytes=budget),
+                         {**expected, "truncated": True})
+        self.assertEqual(recall(graph, "project", max_bytes=budget - 1),
+                         {**expected, "records": [], "truncated": True})
+        self.assertEqual(opened, [])
+
+    def test_small_budget_fails_before_query(self):
+        graph = Mock()
+        for max_bytes in (False, 0, 1, 1.5):
+            with self.subTest(max_bytes=max_bytes), self.assertRaisesRegex(ValueError, "max_bytes"):
+                recall(graph, "project", max_bytes=max_bytes)
         graph.stream_cypher.assert_not_called()
 
     def test_out_of_contract_record_fails_and_closes_read(self):

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Escolha como rodar o Brainwire e comece a usar o grafo em português.">
+  <meta name="description" content="Brainwire é um banco de grafos de código aberto para dados conectados. Modele relações, consulte com Cypher e explore o grafo no terminal.">
   <meta name="theme-color" content="#f8f9fb">
   <title>Brainwire · Guia inicial em português</title>
   <link rel="icon" href="assets/brainwire-icon.svg" type="image/svg+xml">
@@ -18,16 +18,18 @@
     <div class="edition"><span class="edition-label">Guia inicial em português</span></div>
     <nav class="section-nav" aria-label="Seções do guia">
       <a href="#start">Como rodar</a>
+      <a href="#homebrew">Homebrew</a>
       <a href="#examples">Exemplos</a>
       <a href="#benchmark">Benchmark</a>
+      <a href="index.html#guides" hreflang="en">Guias de referência</a>
     </nav>
-    <div class="sidebar-footer"><span>Apache 2.0 · Rust · RocksDB</span><a href="https://github.com/allandefraga/brainwire">Repositório no GitHub ↗</a></div>
+    <div class="sidebar-footer"><span><a href="https://github.com/allandefraga/brainwire/blob/main/LICENSE">Apache 2.0</a> · Rust · RocksDB</span><a href="https://github.com/allandefraga/brainwire">Repositório no GitHub ↗</a></div>
   </aside>
   <main id="main">
     <header class="topbar"><span>Documentação</span><div><a href="index.html" lang="en" hreflang="en">English</a><a href="https://github.com/allandefraga/brainwire/releases">Versões ↗</a></div></header>
     <section id="overview" class="intro">
-      <h1>Memória de agentes em um grafo</h1>
-      <p class="intro-copy">Conecte projetos, decisões e fontes. Consulte o grafo com Cypher e recupere os registros que explicam como uma decisão foi tomada.</p>
+      <h1>Um banco de grafos open source para dados conectados</h1>
+      <p class="intro-copy">Crie grafos de conhecimento, conecte dados da sua empresa e forneça contexto para agentes de IA. Percorra relações com Cypher e explore o grafo no terminal.</p>
       <div class="actions"><a class="button primary" href="#start">Criar um grafo →</a><a class="button secondary" href="#examples">Ver exemplos</a></div>
       <p>Este guia e os <a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.pt-BR.md">primeiros passos</a> estão em português. A documentação de referência continua em inglês. <a href="assets/typed-cli-vhs.gif">Veja uma demonstração do terminal (GIF)</a>.</p>
     </section>
@@ -35,19 +37,36 @@
     <section id="start" class="doc-section">
       <div class="section-head"><h2>Escolha como rodar</h2><p>Use dados de exemplo no primeiro teste. O Brainwire está em beta experimental.</p></div>
       <div class="two-column">
-        <article><h3>Docker para o servidor</h3><p>Use Git, Docker e Compose para iniciar o servidor Bolt e acessar o grafo com Python ou com a interface de terminal. O volume do Docker preserva os dados entre reinícios. A imagem pública pode ser baixada sem login.</p><a href="index.html#docker" hreflang="en">Ver comandos do Docker →</a></article>
-        <article><h3>CLI local no macOS ou Linux</h3><p>Rode Cypher diretamente em um diretório do RocksDB, sem Docker ou servidor. No macOS, instale pelo <a href="https://github.com/allandefraga/homebrew-brainwire">tap Homebrew do Brainwire</a>:</p><p><code>brew install allandefraga/brainwire/brainwire</code></p><p>O tap compila a beta.2 a partir do código-fonte; ainda não estamos no catálogo oficial do Homebrew. Cada diretório pode ser aberto por um processo por vez.</p><a href="index.html#cli" hreflang="en">Compilar e consultar um grafo →</a></article>
+        <article><h3>CLI local no macOS</h3><p>Instale pelo Homebrew, crie um grafo no disco e rode Cypher no terminal.</p><a href="#homebrew">Instalar e consultar →</a></article>
+        <article><h3>Servidor Docker no Linux ou macOS</h3><p>Inicie um servidor Bolt para aplicações e outros clientes. O Docker Compose preserva os dados em um volume entre reinícios.</p><a href="index.html#docker" hreflang="en">Ver comandos do Docker →</a></article>
       </div>
-      <p class="next-link"><a href="index.html#limits" hreflang="en">Limites do beta →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md" hreflang="en">Proteger um servidor compartilhado →</a></p>
+      <p class="next-link"><a href="index.html#cli" hreflang="en">Compilar a CLI →</a><a href="index.html#limits" hreflang="en">Limites do beta →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md" hreflang="en">Proteger um servidor compartilhado →</a></p>
+    </section>
+
+    <section id="homebrew" class="doc-section">
+      <div class="section-head"><h2>Abra um grafo local no Mac</h2><p>O tap do Brainwire compila a versão v0.24.0-beta.2 a partir do código-fonte. Instale a CLI, ligue um projeto a uma decisão e consulte essa relação em um grafo descartável.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal · macOS</span></div><pre><code>brew install allandefraga/brainwire/brainwire
+brainwire_prefix="$(brew --prefix allandefraga/brainwire/brainwire)"
+export PATH="$brainwire_prefix/bin:$PATH"
+graph_dir="$(mktemp -d)"
+brainwire cypher --database "$graph_dir/graph" \
+  --ontology "$brainwire_prefix/share/brainwire/company-ontology.json" \
+  --query "CREATE (:Project {entity_id:'release', name:'Release'})-[:HAS_DECISION]->(:Decision {entity_id:'retry', title:'Retry failed requests'})"
+brainwire cypher --database "$graph_dir/graph" \
+  --query "MATCH (p:Project)-[:HAS_DECISION]->(d:Decision) RETURN p.name AS project, d.title AS decision"</code></pre></div>
+      <div class="result"><span>Resultado</span><code>{"fields":["project","decision"],"rows":[["Release","Retry failed requests"]]}</code></div>
+      <p>Cada diretório do RocksDB pode ser aberto por um processo por vez. Para atender vários clientes, use <code>brainwire serve</code> ou Docker Compose e conecte via Bolt.</p>
+      <p class="next-link"><a href="https://github.com/allandefraga/homebrew-brainwire">Tap do Homebrew →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.pt-BR.md">Primeiros passos em português →</a><a href="index.html#cli" hreflang="en">Compilar a CLI →</a></p>
     </section>
 
     <section id="examples" class="doc-section">
-      <div class="section-head"><h2>Experimente com um exemplo</h2></div>
+      <div class="section-head"><h2>Explore o grafo e veja o que dá para criar</h2></div>
       <div class="guide-row">
-        <a href="index.html#agent-memory" hreflang="en"><strong>Memória de agentes</strong><span>Grave uma decisão e consulte a fonte ligada a ela.</span></a>
         <a href="index.html#ingestion" hreflang="en"><strong>Importar dados</strong><span>Carregue dados do DuckDB ou DuckLake e aplique atualizações em lotes.</span></a>
-        <a href="index.html#terminal" hreflang="en"><strong>Interface de terminal</strong><span>Veja o esquema, os índices e uma amostra das conexões. Use <code>--lang pt-BR</code> para a interface em português.</span></a>
+        <a href="index.html#terminal" hreflang="en"><strong>Explore as conexões no terminal</strong><span>Veja o esquema, os índices e uma amostra das relações. Use <code>--lang pt-BR</code> para a interface em português.</span></a>
+        <a href="index.html#use-cases" hreflang="en"><strong>Veja outros usos</strong><span>Conecte a informação da empresa, modele dependências e crie grafos de conhecimento.</span></a>
       </div>
+      <p class="next-link"><a href="index.html#agent-memory" hreflang="en">Contexto para agentes →</a> Grave uma decisão e consulte a fonte ligada a ela.</p>
     </section>
 
     <section id="benchmark" class="doc-section">

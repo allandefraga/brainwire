@@ -1,9 +1,9 @@
 # Brainwire agent platform: initial product slice
 
-**Status: proposal only.** This document scopes an initial Python-facing agent
-layer over Brainwire. It does not claim that an agent runtime, durable memory,
-temporal history, or identity-bound multi-user ACL is implemented. It keeps
-model/provider code outside the database engine.
+> **Historical proposal.** This design sketch records a Python-facing agent
+> layer and illustrates possible APIs. For supported features and runnable
+> examples, see the [agent quickstart](agent-quickstart.md),
+> [context API](context-api.md), and [node ACL guide](node-acl.md).
 
 ## Product goal
 

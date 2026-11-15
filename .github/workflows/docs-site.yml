@@ -15,6 +15,9 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
     steps:
       - uses: actions/checkout@v6
 
@@ -25,47 +28,34 @@ jobs:
       - name: Validate Markdown link targets
         run: python scripts/check_docs_links.py
 
-      - name: Validate local links and assets
-        run: python scripts/check_docs_site.py
-
-  private-preview:
-    if: github.repository_visibility == 'private'
-    needs: validate
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
+      - name: Build and validate the documentation site
+        run: |
+          python -m pip install -r scripts/docs-site-requirements.txt
+          python scripts/build_docs_site.py _site
+          python scripts/check_docs_site.py _site
 
       - name: Package documentation preview
+        if: github.repository_visibility == 'private'
         uses: actions/upload-artifact@v4
         with:
           name: brainwire-docs-preview-${{ github.sha }}
-          path: docs-site/
+          path: _site/
           if-no-files-found: error
           retention-days: 7
 
-  build:
-    if: github.repository_visibility == 'public'
-    needs: validate
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      pages: write
-    steps:
-      - uses: actions/checkout@v6
-
       - name: Configure GitHub Pages
+        if: github.repository_visibility == 'public'
         uses: actions/configure-pages@v5
 
       - name: Upload site
+        if: github.repository_visibility == 'public'
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs-site/
+          path: _site/
 
   deploy:
     if: github.repository_visibility == 'public'
-    needs: build
+    needs: validate
     runs-on: ubuntu-24.04
     permissions:
       pages: write

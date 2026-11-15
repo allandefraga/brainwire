@@ -3,7 +3,7 @@
 Install the helper from this checkout using the [Python package guide](python-package.md).
 `GraphClient` uses the Python Bolt driver to send Cypher to one named Brainwire
 graph. `connect` owns the connection; the application chooses credentials.
-For a runnable synthetic demo, use the [README example](../README.md#write-and-query-from-python).
+For a runnable synthetic demo, use the [README example](../README.md#connect-a-python-application-optional).
 
 ## Choose the operation
 

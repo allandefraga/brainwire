@@ -91,7 +91,9 @@ RETURN count(r)
 A ready index can provide candidates for string, numeric and Boolean
 equality, or string and numeric ranges with literal or parameter bounds.
 Brainwire evaluates the full predicate and checks visibility of both
-endpoints before returning a match.
+endpoints before returning a match. Large integers and strings with a long
+common prefix can share candidate keys. They are still compared using their
+original values.
 
 The index preserves each stored relationship, even when several share the
 same endpoints and indexed value. To store multiple events between the same

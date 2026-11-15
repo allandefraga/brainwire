@@ -1,33 +1,28 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/brainwire-logo.svg"><img src="assets/brainwire-logo-light.svg" alt="Brainwire" width="360"></picture></p>
 
-<h1 align="center">A graph database for agent memory</h1>
-<p align="center">Connect projects, decisions and their evidence. Query the graph with Cypher and give agents the relevant records.</p>
+<h1 align="center">An open-source graph database for connected data</h1>
+<p align="center">Build knowledge graphs, connect company data, and give AI agents context.</p>
 <p align="center">
   <a href="https://allandefraga.github.io/brainwire/">Documentation</a> ·
   <a href="https://github.com/allandefraga/homebrew-brainwire">Homebrew tap</a> ·
-  <a href="docs/getting-started.pt-BR.md">Português</a> ·
+  <a href="https://allandefraga.github.io/brainwire/guides/getting-started.pt-BR.html">Português</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="#try-agent-context">Agent memory</a> ·
+  <a href="#use-cases">Use cases</a> ·
   <a href="#bring-your-data">Ingestion</a> ·
   <a href="BENCHMARKS.md">Benchmarks</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml"><img src="https://github.com/allandefraga/brainwire/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2255e6?style=flat-square" alt="Apache-2.0 license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2255e6?style=flat-square" alt="Apache 2.0 license"></a>
   <img src="https://img.shields.io/badge/status-experimental_beta-2255e6?style=flat-square" alt="Experimental beta">
 </p>
 
-Brainwire is an open source graph database built in Rust on RocksDB. Define
-your ontology, write over Bolt and inspect the live graph in your terminal.
-In the company example, an agent can recall a decision and follow it to
-the meeting that supports it. [Try the decision memory demo](docs/agent-context-quickstart.md)
+Brainwire is an open source graph database built in Rust on RocksDB. Model
+relationships between records, such as a project and the decisions behind it.
+Run Cypher against a local graph or connect an application over Bolt.
 
 > **v0.24.0-beta.3 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
-
-The [backup guide](docs/checkpoints.md) covers checkpoint copies and restore
-permissions. The [experimental object storage helper](docs/object-storage-backup.md)
-can copy a verified checkpoint to MinIO; active data stays on local disk.
 
 <p align="center"><img src="assets/launch/typed-vhs/brainwire-demo.gif" alt="Brainwire creates and queries a typed graph, then rejects an invalid property value." width="960"></p>
 
@@ -36,14 +31,47 @@ v0.24.0-beta.1 CLI and synthetic data. [Watch the video](assets/launch/typed-vhs
 
 ## Quickstart
 
-For a local CLI without Docker, install the experimental macOS source formula:
+Try a query with [Docker](#try-a-connection-with-docker) or use the
+[native CLI on macOS](#open-a-local-graph-with-homebrew). To connect a client or
+keep your graph across restarts, [start the Docker server](#start-the-docker-server).
+
+### Try a connection with Docker
+
+The public image includes a small example schema. Run a Cypher query that
+creates two nodes and returns the relationship it created between them.
+
+```sh
+BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.3 # brainwire-release-version
+docker run --rm --network none "$BRAINWIRE_IMAGE" cypher \
+  --database /data/demo --ontology /opt/brainwire/example-schema.json \
+  --query "CREATE (c:Customer {entity_id:'customer-1', name:'Ada'})-[r:IN_SEGMENT]->(s:Segment {entity_id:'segment-1', name:'beta'}) RETURN c.name AS customer, type(r) AS relationship, s.name AS segment"
+```
+
+The container prints JSON and Docker removes the disposable graph when the
+command exits. The `rows` array shows `[["Ada", "IN_SEGMENT", "beta"]]`.
+
+### Open a local graph with Homebrew
+
+Use the native CLI to create a project, link a decision to it, and read back
+that connection from a disposable graph.
 
 ```sh
 brew install allandefraga/brainwire/brainwire
+brainwire_prefix="$(brew --prefix allandefraga/brainwire/brainwire)"
+export PATH="$brainwire_prefix/bin:$PATH"
+graph_dir="$(mktemp -d)"
+brainwire cypher --database "$graph_dir/graph" \
+  --ontology "$brainwire_prefix/share/brainwire/company-ontology.json" \
+  --query "CREATE (:Project {entity_id:'release', name:'Release'})-[:HAS_DECISION]->(:Decision {entity_id:'retry', title:'Retry failed requests'})"
+brainwire cypher --database "$graph_dir/graph" \
+  --query "MATCH (p:Project)-[:HAS_DECISION]->(d:Decision) RETURN p.name AS project, d.title AS decision"
 ```
 
-The tap currently installs v0.24.0-beta.2 and compiles from source; there are
-no prebuilt bottles yet. See [Brainwire on macOS](docs/homebrew.md).
+The query follows `HAS_DECISION` and returns `[["Release", "Retry failed requests"]]`
+in the `rows` array. The tap currently builds v0.24.0-beta.2 from source.
+[Use Brainwire on macOS](https://allandefraga.github.io/brainwire/guides/homebrew.html)
+
+### Start the Docker server
 
 Use Git and Docker with Compose. On macOS, Colima can run the Docker engine.
 With Colima running, run `export DOCKER_CONTEXT=colima` first.
@@ -66,9 +94,12 @@ Use synthetic data on a trusted host and container network. The demo disables
 authentication, and other containers on the demo network can reach it. Use
 Docker Engine 28 or newer because earlier versions can expose loopback ports
 to the local network. [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/)
-· [Protected deployment](docs/protected-containers.md)
+· [Protected deployment](https://allandefraga.github.io/brainwire/guides/protected-containers.html)
 
-### Write and query from Python
+### Connect a Python application (optional)
+
+Use the Python helper when writing a Python app or running the Python examples.
+It connects to a running Bolt server, such as the Docker demo above.
 
 ```sh
 python3 scripts/setup_python.py
@@ -92,28 +123,11 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
 ```
 
 The demo includes these types. For your own graph, define an ontology first.
-See [Python](docs/python-client.md) and [protected deployment](docs/protected-containers.md).
-
-### Try agent context
-
-The company demo saves a decision and its source in one transaction. In a
-fresh process, recall the project decisions and supporting records the reader
-can see. Repeating the same write returns the same IDs.
-[Set up the company graph with Docker](docs/agent-context-quickstart.md)
-
-After saving the example decision, run the read command in the same shell with
-`BW_PORT` set.
-
-```sh
-.venv-brainwire/bin/python -m examples.python.agent_memory --uri "bolt://$BW_PORT" \
-  recall --project project-release --limit 5
-```
-
-If you are using the Customer and Segment records from the quickstart above,
-run `.venv-brainwire/bin/python -m examples.python.agent_context_demo` to read
-those records and their connection. [Context API and provider configuration](docs/context-api.md)
+See [Python](https://allandefraga.github.io/brainwire/guides/python-client.html) and [protected deployment](https://allandefraga.github.io/brainwire/guides/protected-containers.html).
 
 ### Explore in the terminal
+
+After writing the Customer and Segment records above, open the connected TUI.
 
 ```sh
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire \
@@ -125,15 +139,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire \
 Use **Tab** to change views, **r** to refresh, **?** for help and **q** to quit.
 The connected TUI is read-only; it shows schema, indexes, memory diagnostics
 and a bounded relationship sample. Add `--lang pt-BR` for Portuguese.
-[Explore the TUI](docs/connected-status.md).
-
-### Define a metric
-
-Give an agent a named, read-only question such as “how many decisions can I
-see?” The [semantic metrics example](docs/semantic-metrics.md) defines
-`count`, `sum` and `avg` over one node type and can group by a declared field.
-It uses the caller's graph permissions. This is a bounded Python example, not
-a complete MetricFlow implementation.
+[Explore the TUI](https://allandefraga.github.io/brainwire/guides/connected-status.html).
 
 To stop the demo while keeping its volume:
 
@@ -141,19 +147,34 @@ To stop the demo while keeping its volume:
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml down
 ```
 
+## Use cases
+
+| Use case | What to build |
+| --- | --- |
+| Knowledge graph | Connect notes and their references, then follow the links between them. [Obsidian example](examples/obsidian/README.md) |
+| Company brain | Link teams, projects, decisions and sources so readers can trace where a decision came from. [Company graph](examples/company_brain/README.md) |
+| Semantic layer | Reuse named counts, sums and averages over a declared node type with the reader's graph permissions. [Python metrics example](https://allandefraga.github.io/brainwire/guides/semantic-metrics.html) |
+| Agent context | Save a decision with its source, then retrieve the connected records the reader can see. [Agent memory demo](https://allandefraga.github.io/brainwire/guides/agent-context-quickstart.html) |
+
+### Try agent context
+
+The company graph is also available to agents through the Python examples.
+An application can retrieve a project's decisions alongside their sources,
+or request a bounded view of connected records. [Context API](https://allandefraga.github.io/brainwire/guides/context-api.html)
+
 ## Bring your data
 
 | Source | Start here |
 | --- | --- |
-| Application writes | Upsert nodes and relationships in batches from [Python](docs/python-client.md). |
-| DuckDB | Load a local table, then compare snapshots with a resumable journal. [DuckDB sync](docs/duckdb-sync.md) |
-| DuckLake | Load a mapped table and apply changes between pinned versions. [DuckLake sync](docs/parallel-ingestion.md#ducklake-full-load-then-incremental) |
+| Application writes | Upsert nodes and relationships in batches from [Python](https://allandefraga.github.io/brainwire/guides/python-client.html). |
+| DuckDB | Load a local table, then compare snapshots with a resumable journal. [DuckDB sync](https://allandefraga.github.io/brainwire/guides/duckdb-sync.html) |
+| DuckLake | Load a mapped table and apply changes between pinned versions. [DuckLake sync](https://allandefraga.github.io/brainwire/guides/parallel-ingestion.html#ducklake-full-load-then-incremental) |
 | Obsidian | Preview a small Markdown vault and import notes and wikilinks once into an empty graph. [Obsidian example](examples/obsidian/README.md) |
-| Python code | Extract local Python structure and trace source links. [Code graph example](docs/code-graph.md) |
+| Python code | Extract local Python structure and trace source links. [Code graph example](https://allandefraga.github.io/brainwire/guides/code-graph.html) |
 | Typed batches | Validate a small JSON batch before writing it. [Typed ingestion example](examples/typed_ingest/README.md) |
 
 For a new standalone graph, the engine can also enforce optional scalar
-property types declared in the ontology. [Typed properties](docs/typed-properties.md)
+property types declared in the ontology. [Typed properties](https://allandefraga.github.io/brainwire/guides/typed-properties.html)
 
 ```json
 {"label": "Project", "properties": ["priority"], "property_types": {"priority": "integer"}}
@@ -161,14 +182,18 @@ property types declared in the ontology. [Typed properties](docs/typed-propertie
 
 ## How it works
 
-Applications write and query over Bolt. The Rust engine checks access, executes
-transactions and stores graph records in RocksDB. Keep its files on a persistent
-volume so restarting the container reopens the same graph. A terminal workspace
-provides read-only inspection.
+The CLI can open a local graph directly. Applications connect to a running server
+over Bolt. The Rust engine executes transactions and stores graph records in
+RocksDB. Keep the files on a persistent volume so restarting the container reopens
+the same graph. The terminal workspace provides read-only inspection.
 
 The standard deployment runs one instance. The separate
-[three-voter Raft setup](docs/quorum-replication.md) is experimental. Read the
-[architecture guide](docs/architecture.md) for memory, storage and recovery.
+[three-voter Raft setup](https://allandefraga.github.io/brainwire/guides/quorum-replication.html) is experimental. Read the
+[architecture guide](https://allandefraga.github.io/brainwire/guides/architecture.html) for memory, storage and recovery.
+
+The [backup guide](https://allandefraga.github.io/brainwire/guides/checkpoints.html) covers checkpoint copies and restore
+permissions. The [experimental object storage helper](https://allandefraga.github.io/brainwire/guides/object-storage-backup.html)
+can copy a verified checkpoint to MinIO; active data stays on local disk.
 
 ### How RocksDB stores the graph
 
@@ -185,7 +210,7 @@ writes the memtable into sorted, immutable **SST files**.
 Reads combine memory and the relevant SST files. A shared block cache can
 avoid disk reads. Compaction uses CPU, disk bandwidth and temporary disk
 space, so keep the persistent volume and leave room for storage to grow.
-[Storage details](docs/architecture.md#rocksdb-files-levels-and-compaction)
+[Storage details](https://allandefraga.github.io/brainwire/guides/architecture.html#rocksdb-files-levels-and-compaction)
 
 ## A synthetic benchmark
 
@@ -221,22 +246,25 @@ before comparing or reproducing them.
 Brainwire is an experimental beta. Plan a controlled trial:
 
 - **Memory:** budgets and sampled RSS/cgroup admission can refuse growing queries under pressure. They are partial protection, not a guaranteed process-wide RSS ceiling. Sustained capacity testing is incomplete.
-- **Search and Cypher:** [Cypher support](docs/local-cypher.md) is a subset; native ANN and BM25 indexes are not available.
+- **Search and Cypher:** [Cypher support](https://allandefraga.github.io/brainwire/guides/local-cypher.html) is a subset; native ANN and BM25 indexes are not available.
 - **Types and metrics:** native scalar property types require a new standalone graph; required fields, vector types and Raft are not supported. Typed batch validation is separate and client-side. Named metrics are a limited Python example, not full semantic-model compatibility.
 - **History:** explicit events are supported; automatic revisions and `AS OF` reads are not.
 - **Ingestion:** DuckDB snapshot sync needs a private persistent journal and exclusive ownership of mapped IDs. DuckLake fencing covers cooperating standalone writers; neither sync provides a graph-wide atomic cutover.
-- **Security:** shared deployments need a service-token policy and verified encryption. Optional native Bolt TLS requires a server certificate, a matching private key and client trust configuration. Rotate the server certificate by restarting. [Protected transport](docs/protected-transport.md)
+- **Security:** shared deployments need a service-token policy and verified encryption. Optional native Bolt TLS requires a server certificate, a matching private key and client trust configuration. Rotate the server certificate by restarting. [Protected transport](https://allandefraga.github.io/brainwire/guides/protected-transport.html)
 - **Distribution:** three-voter quorum is experimental. Standard Docker, Kubernetes and Swarm configurations run one instance; multi-machine failover is not qualified.
 
-See [memory](docs/memory-defaults.md), [security](docs/protected-containers.md),
-[recovery](docs/checkpoints.md), [replication](docs/quorum-replication.md) and
+See [memory](https://allandefraga.github.io/brainwire/guides/memory-defaults.html), [security](https://allandefraga.github.io/brainwire/guides/protected-containers.html),
+[recovery](https://allandefraga.github.io/brainwire/guides/checkpoints.html), [replication](https://allandefraga.github.io/brainwire/guides/quorum-replication.html) and
 [benchmark conditions](BENCHMARKS.md). Synthetic tests are not production SLOs.
 
 ## Learn more
 
-[Getting started](docs/getting-started.md) · [Architecture](docs/architecture.md) ·
-[Python](docs/python-client.md) · [Cypher](docs/local-cypher.md) ·
-[TUI](docs/connected-status.md) · [Operations](docs/README.md#operate-and-evaluate)
+[Getting started](https://allandefraga.github.io/brainwire/guides/getting-started.html) · [Architecture](https://allandefraga.github.io/brainwire/guides/architecture.html) ·
+[Python](https://allandefraga.github.io/brainwire/guides/python-client.html) · [Cypher](https://allandefraga.github.io/brainwire/guides/local-cypher.html) ·
+[TUI](https://allandefraga.github.io/brainwire/guides/connected-status.html) · [Operations](https://allandefraga.github.io/brainwire/guides/README.html#operate-and-evaluate)
 
-Brainwire is [Apache-2.0](LICENSE). Please report bugs with a small synthetic
-reproduction via [GitHub Issues](https://github.com/allandefraga/brainwire/issues).
+See the [managed pilot plan](https://allandefraga.github.io/brainwire/guides/managed-pilot.html) for the proposed hosted
+pilot and its readiness checks.
+
+Brainwire is licensed under [Apache 2.0](LICENSE). Report bugs with a small
+synthetic reproduction in [GitHub Issues](https://github.com/allandefraga/brainwire/issues).

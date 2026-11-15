@@ -54,11 +54,20 @@ def remember(graph, project, title, body, source_title, source_url):
     return rows[0]
 
 
-def recall(graph, project, limit=5):
+def _output_json(result):
+    return json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+
+
+def recall(graph, project, limit=5, *, max_bytes=None):
     """Read visible decisions with visible sources in one graph snapshot."""
     project = bounded_text(project, "project", PROJECT_BYTES)
     if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
         raise ValueError(f"limit must be an integer from 1 to {MAX_RESULTS}")
+    result = {"project": project, "records": [], "truncated": False}
+    if max_bytes is not None and (type(max_bytes) is not int
+                                  or max_bytes < len(_output_json(result).encode("utf-8"))):
+        raise ValueError("max_bytes must be an integer large enough for an empty recall response")
+    records = result["records"]
     with graph.stream_cypher(
         "MATCH (p:Project {entity_id: $project})-[:HAS_DECISION]->(d:Decision)"
         "-[:SUPPORTED_BY]->(s:Source) "
@@ -68,16 +77,20 @@ def recall(graph, project, limit=5):
         "ORDER BY decision_id, source_id LIMIT $limit",
         {"project": project, "prefix": PREFIX, "limit": limit + 1}, fetch_size=limit + 1,
     ) as rows:
-        records = []
         fields = {"decision_id": KEY_BYTES, "title": TITLE_BYTES, "body": BODY_BYTES,
                   "source_id": KEY_BYTES, "source_title": TITLE_BYTES, "source_url": URL_BYTES}
         for row in rows:
             if len(records) == limit:
-                return {"project": project, "records": records, "truncated": True}
+                result["truncated"] = True
+                break
             for field, maximum in fields.items():
                 bounded_text(row[field], field, maximum)
             records.append(row)
-    return {"project": project, "records": records, "truncated": False}
+            if max_bytes is not None and len(_output_json(result).encode("utf-8")) > max_bytes:
+                records.pop()
+                result["truncated"] = True
+                break
+    return result
 
 
 def main(argv=None):
@@ -92,6 +105,7 @@ def main(argv=None):
     read = subparsers.add_parser("recall", help="read visible decisions and sources for a project")
     read.add_argument("--project", required=True)
     read.add_argument("--limit", type=int, default=5)
+    read.add_argument("--max-bytes", type=int, help="cap the UTF-8 JSON response size")
     args = parser.parse_args(argv)
     try:
         uri, config = bolt_connection_options(args.uri, args.tls_ca)
@@ -99,10 +113,10 @@ def main(argv=None):
             if args.command == "remember":
                 result = remember(graph, args.project, args.title, args.body, args.source_title, args.source_url)
             else:
-                result = recall(graph, args.project, args.limit)
+                result = recall(graph, args.project, args.limit, max_bytes=args.max_bytes)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
-    print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
+    print(_output_json(result), end="")
     return 0
 
 

@@ -1,7 +1,7 @@
 # Native graph checkpoints
 
 A checkpoint copies one committed RocksDB graph, including its ontology,
-primary/scalar indexes and allocator high-water marks, into a new directory.
+stored indexes and allocator high-water marks, into a new directory.
 It uses RocksDB's native checkpoint API rather than copying a running directory
 with ordinary filesystem tools. Stop the server before using the offline CLI.
 
@@ -30,16 +30,17 @@ until capture completes. A reopened checkpoint starts from the captured counter;
 source and copy can subsequently produce the same numbers independently.
 See [durable commit state](commit-state.md) for scope and upgrade constraints.
 
-This is a local single-graph snapshot, not multi-graph atomicity, off-machine
-backup or object-storage durability. It has no scheduled retention, upload or
-restore manager. Protect and validate a copy on independent storage before
-relying on it against machine/disk loss. Tests reopen a checkpoint, audit it,
+The native checkpoint captures one graph at a time. For machine or disk loss,
+protect and validate a copy on independent storage. Use the
+[S3-compatible backup helper](object-storage-backup.md) to upload a verified
+checkpoint or download it for offline restoration. Schedule backups and manage
+retention outside the server. Tests reopen a checkpoint, audit it,
 read its indexes and write new nodes without reusing an existing identity.
 
 ## Online checkpoints over Bolt
 
 A running server can create the same native checkpoint without stopping,
-when the operator configures a checkpoint root outside `server.data_dir`:
+when the operator configures a checkpoint root disjoint from `server.data_dir`:
 
 ```toml
 [server]
@@ -61,7 +62,8 @@ meaning as the offline receipt.
 
 Rules and limits:
 
-- Unset `checkpoint_dir` (the default) disables the procedure.
+- Unset `checkpoint_dir` (the default) disables the procedure. Online checkpoints
+  require the experimental standalone request ledger to be disabled.
 - It requires an `instance_admin` principal; graph writers are refused.
 - It must be the first clause, with no writes or other procedures in the same
   transaction. It is a side effect, not transactional: rolling back afterwards
@@ -70,8 +72,9 @@ Rules and limits:
   checkpoint is created; reads continue.
 - It is refused in replicated serving and for principals with node visibility
   restrictions. One replica's copy is not a cluster backup.
-- The startup check that `checkpoint_dir` is outside `data_dir` compares paths
-  lexically; it does not resolve symlinks.
+- The startup check compares paths lexically and rejects either directory
+  containing the other. Use separate, operator-controlled directories and
+  avoid symlink aliases.
 
 Restore is offline: stop the server, copy or move the checkpoint directory into
 `server.data_dir` under an unused graph name (or point `--database` at it), run

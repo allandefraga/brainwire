@@ -1,17 +1,19 @@
 # Create and use scalar indexes
 
-An index can avoid a full label scan for supported predicates. Start by declaring
+An index can avoid a full label scan for supported node predicates. Start by declaring
 an indexed field in the ontology or creating an index on a running standalone
 server. See [online catalog changes](online-catalog.md) for permissions and
-transaction rules.
+transaction rules. For edge predicates, see
+[relationship property indexes](relationship-property-indexes.md).
 
 ## Create and inspect an online index
 
-For an existing `Customer` label with an `email` property:
+For an existing `Customer` label with an unindexed `name` property:
 
 ```cypher
-CREATE INDEX customer_email IF NOT EXISTS FOR (c:Customer) ON (c.email)
-CALL db.indexes() YIELD label, property, state, name
+CREATE INDEX customer_name IF NOT EXISTS FOR (c:Customer) ON (c.name)
+CALL db.indexes() YIELD label, property, state, name, entityType
+WHERE entityType = 'node'
 RETURN label, property, state, name
 ```
 
@@ -66,7 +68,8 @@ index plans or cost-based optimization yet.
 Inspect actual snapshot/catalog readiness over Bolt or embedded Cypher:
 
 ```cypher
-CALL db.indexes() YIELD label, property, state
+CALL db.indexes() YIELD label, property, state, entityType
+WHERE entityType = 'node'
 RETURN label, property, state
 ```
 

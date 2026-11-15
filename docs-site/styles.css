@@ -147,6 +147,16 @@ kbd { display: inline-block; padding: 1px 5px; border: 1px solid #405b48; border
 .guide-columns h3 { color: var(--text); font-size: 13px; margin-bottom: 6px; }
 .guide-columns a { color: var(--muted); text-decoration: none; font-size: 12px; }
 .guide-columns a:hover { color: var(--accent); }
+.guide-content { padding: 42px 0; overflow-wrap: anywhere; }
+.guide-content h1 { font-size: clamp(32px, 4vw, 52px); }
+.guide-content h2 { margin-top: 40px; }
+.guide-content h3 { margin-top: 28px; }
+.guide-content pre, .guide-content table { margin: 0 0 20px; border: 1px solid var(--line); border-radius: 6px; }
+.guide-content pre { background: var(--surface); }
+.guide-content img { max-width: 100%; height: auto; }
+.guide-content table { display: block; overflow-x: auto; border-collapse: collapse; }
+.guide-content th, .guide-content td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.guide-content blockquote { margin-inline: 0; padding-left: 18px; border-left: 2px solid var(--accent); }
 .pages-note { margin-top: 35px; border-top: 1px solid var(--line); padding-top: 20px; }
 .pages-note summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .pages-note p { margin-top: 14px; color: var(--muted); font-size: 12px; }

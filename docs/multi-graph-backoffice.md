@@ -7,29 +7,9 @@ graph. The Bolt server opens existing names and clients choose a database in
 their session. Cache and memtable budgets are shared by the process, so the
 number of graphs and their active working sets still matter.
 
-## What was on this checkout on 2026-10-01
-
-The following values came from `brainwire db overview --json` in this local
-checkout. They are exact graph counts from a full scan, not forecasts:
-
-| Named graph | Nodes | Relationships | Ontology | Labels | Edge types |
-| --- | ---: | ---: | --- | --- | --- |
-| `analytics-demo` | 3 | 2 | v1 | `Page` | `LINK` |
-| `staging-100k` | 100,000 | 1,000,000 | v1 | `Page` | `LINK` |
-| `default` | 0 | 0 | none | none | none |
-
-The `staging-100k` directory occupied about 9.5 MiB on this host when
-measured with `du -sh`; this synthetic fixture is highly compressible and
-cannot predict production storage size. RocksDB's `node` and `pk` families
-each estimated 100,000 keys; `out` and `in` each estimated 1,000,000; `idx`
-and `ident` were empty. These key counts and bytes are estimates, not process
-RAM usage. The [query/ontology audit](benchmarks/2026-10-01-query-ontology-audit.md)
-records the pre-index baseline. New string/Boolean equality indexes populate
-`idx` on indexed graph types; `staging-100k` declares no indexed fields.
-
 ## Run and inspect
 
-From `/Users/fraga/Documents/brainwire`, after building the binary:
+From the repository root, build the binary and run the offline commands. Replace `demo` below with an existing graph name. Stop the server before opening its RocksDB directory offline:
 
 ```sh
 cargo build --locked --offline -p brainwire-server --bin brainwire
@@ -39,9 +19,9 @@ cargo build --locked --offline -p brainwire-server --bin brainwire
 ./target/debug/brainwire db overview --estimated --json
 ./target/debug/brainwire shell --overview --lang pt-BR
 ./target/debug/brainwire shell --overview --estimated --lang pt-BR
-./target/debug/brainwire shell --overview --snapshot --graph staging-100k --lang pt-BR --width 120 --height 30
-./target/debug/brainwire db schema staging-100k --json
-./target/debug/brainwire db metrics staging-100k --json
+./target/debug/brainwire shell --overview --snapshot --graph demo --lang pt-BR --width 120 --height 30
+./target/debug/brainwire db schema demo --json
+./target/debug/brainwire db metrics demo --json
 ```
 
 `shell --overview` is a **real, read-only, offline** TUI. Up/Down chooses a
@@ -50,7 +30,7 @@ node labels and edge types. Tab changes to the write pipeline, Memory,
 Disk and Ontology panels; Shift-Tab moves backward. The page strip highlights
 the active panel, and `?` opens an explanation of its terms and available
 controls. PgUp/PgDn scroll long explanations. `--view query|memory|disk|ontology`
-chooses the initial panel; `q` or Esc exits. See the
+chooses the initial panel. Press `q` to exit. See the
 [Python ingestion guide](python-ingestion.md) for memory semantics and the
 new offline `db check` consistency audit. `--graph` sets the initial
 selection, including in `--snapshot` mode. It opens the RocksDB directories
@@ -80,8 +60,8 @@ by localization.
 
 Up/Down selects a type; Left/Right switches named graphs and resets selection.
 At 100 columns or wider, connections and inspector are side by side. On smaller
-terminals, Enter or F1 switches between connections and the inspector; Esc closes
-the inspector before exiting. PgUp/PgDn scroll long content; `q` exits.
+terminals, Enter or F1 switches between connections and the inspector. Esc closes
+the inspector, PgUp/PgDn scrolls long content, and `q` exits.
 The header reports the selected graph and scalar-index readiness separately from
 the inspector's declarations. Schema identifiers with terminal controls are escaped.
 
@@ -132,7 +112,7 @@ for configuration and transaction behavior.
 
 | Surface | Operations now | Data source |
 | --- | --- | --- |
-| `shell --connect IP:PORT --graph NAME --view ontology` | Inspect schema and refresh; retain stale snapshot on failure | Real server catalog over Bolt |
+| `shell --connect IP:PORT --graph NAME` | Inspect ontology, query memory, indexes and a bounded outgoing graph sample | Read-only samples over Bolt |
 | `shell --overview` | Select named graph/files/types; inspect ontology connections, properties, counts, index readiness, shared offline memory and native SST metadata | Real local RocksDB, read only |
 | `shell --demo` | Explore Graph, Query, Memory, Disk & Files; select nodes/files; run two guided queries; read F1 explanations | Synthetic fixture, no real writes |
 | `db files/checkpoint` | Inspect real file metadata; create a native committed graph checkpoint | Real local RocksDB, offline |
@@ -148,30 +128,8 @@ files, and symlinks are not followed. Left/Right selects a graph, Up/Down a file
 F1 opens the explanation on narrow terminals. Contents are never decoded.
 `db files NAME --json --limit 256` exposes the same inspection.
 
-The current TUI does not run arbitrary Cypher, edit ontologies, delete graph
-data or perform maintenance jobs. The connected Ontology slice is available; the next
-backoffice slice should expose a bounded per-graph neighborhood and read-only
-query results through the server, then live storage and memory telemetry. Any
-mutation from the TUI needs explicit scope to the selected graph and an
-auditable operation; ontology changes must never implicitly delete old data.
-
-## Captured offline panels
-
-These are actual terminal captures against an isolated synthetic 10K-node graph
-with 20K scalar index entries. The [capture notes](design/assets/2026-10-01-ingestion/README.md)
-record dimensions, provenance and the memory scope.
-
-![Graph overview](design/assets/2026-10-01-ingestion/graph-120x30.png)
-![Python write pipeline](design/assets/2026-10-01-ingestion/pipeline-120x30.png)
-![Offline memory accounting](design/assets/2026-10-01-ingestion/memory-120x30.png)
-![RocksDB column families](design/assets/2026-10-01-ingestion/disk-120x30.png)
-
-Current terminal captures: [2026-10-03 session](design/assets/2026-10-03-session/README.md).
-
-The latest Memory panel explains the shared server reservation pool, transaction
-lifetime and cooperative `server.query_timeout_ms` deadline in English and
-Portuguese. Its live-server Cypher example is `CALL db.memory()`; offline pool
-usage remains explicitly unobserved. The pipeline panel distinguishes streaming
-simple reads from eager writes, grouped counts and CALL.
-
-Latest 100K-node captures: [second October 3 session](design/assets/2026-10-03-session2/README.md).
+Use the [connected workspace](https://allandefraga.github.io/brainwire/#terminal)
+to inspect a running server and the CLI or a Bolt client to execute Cypher.
+The offline Memory panel explains the shared server reservation pool and the
+query deadline. To observe query reservations on a running server, use the
+connected Memory pane or `CALL db.memory()` with the required permissions.

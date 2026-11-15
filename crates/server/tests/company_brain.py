@@ -134,14 +134,18 @@ limit = "2GiB"
                     check=True, capture_output=True, text=True,
                 )
                 assert json.loads(cli.stdout)["context"]["records"][0]["entity_id"] == "decision-retry"
-                cli = subprocess.run(
-                    [sys.executable, "-m", "examples.python.agent_memory", "--uri", uri,
-                     "recall", "--project", "project-release", "--limit", "1"],
-                    cwd=ROOT, env={**env, "BRAINWIRE_BOLT_AUTH_FILE": str(auth / "reader.json")},
-                    check=True, capture_output=True, text=True,
-                )
+                recall_command = [sys.executable, "-m", "examples.python.agent_memory",
+                                  "--uri", uri, "recall", "--project", "project-release"]
+                reader_env = {**env, "BRAINWIRE_BOLT_AUTH_FILE": str(auth / "reader.json")}
+                cli = subprocess.run([*recall_command, "--limit", "1"],
+                                     cwd=ROOT, env=reader_env, check=True, capture_output=True)
                 result = json.loads(cli.stdout)
                 assert result["truncated"] and len(result["records"]) == 1
+                # The byte budget reserves enough room for either truncation flag.
+                budget = len(cli.stdout) + 1
+                budgeted = subprocess.run([*recall_command, "--max-bytes", str(budget)],
+                                          cwd=ROOT, env=reader_env, check=True, capture_output=True)
+                assert budgeted.stdout == cli.stdout and len(budgeted.stdout) <= budget
                 print("PASS: company context and memory replay, project scope, source ACL and read-only CLI")
             finally:
                 process.terminate()

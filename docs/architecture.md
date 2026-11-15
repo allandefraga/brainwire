@@ -52,8 +52,10 @@ is in flight may leave the client uncertain whether a write committed. Use the
 when designing reconciliation; the client does not blindly replay writes.
 
 The offline `brainwire cypher` command opens a local database directory.
-Stop a server that owns that store before using offline commands. A connected
-client or TUI talks to the server over Bolt instead of opening its files.
+Stop its server or use a separate checkpoint before opening the store offline.
+A connected client or TUI uses Bolt. The connected workspace can show ontology,
+query memory, indexes and a bounded relationship sample. See the
+[terminal workspace guide](connected-status.md).
 
 ## RocksDB files, levels and compaction
 
@@ -155,14 +157,18 @@ and [transport](protected-transport.md) before connecting an application.
 ## Persistence, backup and recovery
 
 Container data belongs in a persistent mounted volume. Restarting with the same
-volume reopens the existing graph; starting on an empty volume creates a new
-store. RocksDB recovery handles its committed local state, while checkpoints
-create a consistent local graph copy. Keep a tested copy on independent storage
+volume reopens the existing graph. On an empty volume, standalone serving
+creates the default graph. To open with a predefined ontology or create a
+separate named graph ahead of time, run `brainwire db create` before starting
+the server. RocksDB recovers committed local state, and checkpoints create a
+consistent local graph copy. Keep a tested copy on independent storage
 to protect against loss of the machine or disk.
 
 Online checkpoints require an operator-configured destination and administrator
 permission. A local checkpoint is not a cluster-wide backup or automatic backup
 retention. Follow [checkpoints](checkpoints.md) and [recovery](termination-recovery.md).
+The [S3-compatible backup helper](object-storage-backup.md) copies a verified
+checkpoint off the database machine for later restoration to local disk.
 
 ## Standalone and experimental quorum
 

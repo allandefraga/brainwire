@@ -35,8 +35,8 @@ PY
 
 Configure credentials with a standard boto3 profile, role, or environment
 variables. Use a private bucket and a fresh prefix for every
-backup. The helper targets the S3 API; this version has been tested with
-MinIO, not AWS S3. Supply the HTTPS endpoint of your S3-compatible service.
+backup. Prior acceptance used MinIO. AWS S3 and remote TLS have not been exercised
+by this fixture. Supply the HTTPS endpoint of your S3-compatible service.
 Use `--ca-bundle` for a private CA. Plain HTTP is available only on numeric
 loopback addresses for disposable local tests.
 
@@ -47,9 +47,10 @@ python -m examples.python.s3_checkpoint --endpoint https://minio.example.test \
 
 The helper reserves a `_brainwire/` subprefix using a conditional PUT, then uploads
 one object per file with a SHA-256 checksum. It writes the manifest last.
-Readers require the manifest, its listed objects, and the reservation object.
-A failed upload may leave a reserved, incomplete
-prefix. Use a new prefix for a retry. If the last PUT timed out, first check
+Readers require the manifest, its listed objects, and an intact reservation
+marker. They reject a damaged marker before creating the local staging directory.
+A failed upload may leave a reserved, incomplete prefix. Use a new prefix
+for an upload retry. If the last PUT timed out, first check
 whether it succeeded by downloading and verifying the copy in scratch storage,
 then compare its manifest with the intended local copy.
 
@@ -72,7 +73,9 @@ appropriate ownership. Retain a separate immutable copy of important backups.
 
 The helper supports flat native checkpoint filenames, up to 20,000 files,
 5 GB per file and 64 GiB total. It scans up to 100 listing pages and uses
-ordinary PUT requests. Interrupted transfers must start again in a fresh prefix.
+ordinary PUT requests. Retry interrupted uploads with a fresh prefix. Retry
+downloads into an unused destination after checking whether the earlier run
+left a completed directory or a staging directory.
 The service must support S3 conditional PUT, SHA-256 checksums and listing by
 prefix. The caller needs scoped list, get and put
 rights for the operations they perform. Configure encryption, retention and

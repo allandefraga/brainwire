@@ -1,16 +1,21 @@
 # Preview and publish the documentation
 
-GitHub Pages turns the static `docs-site/` folder into a website. It does not
-run the Brainwire server or store graph data. The Markdown guides in `docs/`
-remain repository files; the site links to them.
+GitHub Pages hosts the public Brainwire documentation. The build combines the
+landing pages in `docs-site/` with HTML generated from the Markdown sources in
+`docs/`. The site does not run the Brainwire server or store graph data.
+Historical implementation plans are kept in the repository source and excluded
+from the Pages build.
 
 ## Preview on your computer
 
-From the repository root:
+Use Python 3.12 from the repository root. Build into a new or empty directory.
 
 ```sh
-python3 scripts/check_docs_site.py
-python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1
+python3.12 -m venv .venv-docs
+.venv-docs/bin/python -m pip install -r scripts/docs-site-requirements.txt
+.venv-docs/bin/python scripts/build_docs_site.py /tmp/brainwire-docs-preview
+.venv-docs/bin/python scripts/check_docs_site.py /tmp/brainwire-docs-preview
+.venv-docs/bin/python -m http.server 8000 --directory /tmp/brainwire-docs-preview --bind 127.0.0.1
 ```
 
 Open `http://127.0.0.1:8000`. Stop the preview with `Ctrl+C`. This serves the
@@ -19,13 +24,11 @@ site only on your computer's loopback address.
 ## Download a preview from a private repository
 
 The **Documentation site** workflow runs on pushes to `main` and can also be
-started from **Actions → Documentation site → Run workflow**. It first checks
-local site links and assets.
+started from **Actions → Documentation site → Run workflow**. It generates the
+site and checks its local links, assets, and heading anchors.
 
-For a private repository, a successful validation is followed by the
-`private-preview` job. It uploads the static site as an Actions artifact named
-`brainwire-docs-preview-<commit>`, retained for seven days. It does not create a
-Pages deployment or change repository access.
+For a private repository, the workflow uploads the generated site as an Actions
+artifact named `brainwire-docs-preview-<commit>`, retained for seven days.
 
 To inspect it:
 
@@ -35,17 +38,14 @@ To inspect it:
 4. Run `python3 -m http.server 8000 --directory /path/to/extracted-site --bind 127.0.0.1`
    and open `http://127.0.0.1:8000`.
 
-Artifact download requires access to the repository and its workflow run.
-Repository access also controls the linked Markdown guides. If an artifact has
-expired, run the workflow again. An artifact preview is a downloadable build,
-not a hosted documentation URL.
+Artifact download requires access to the repository and its workflow run. If an
+artifact has expired, run the workflow again.
 
 ## Publish with GitHub Pages
 
-The current workflow publishes only when the repository is public. In that
-case, its `build` and `deploy` jobs use GitHub's Pages actions after validation.
-The private-preview job is skipped. A passing validation job alone does not
-mean that a site was published.
+The current workflow publishes only when the repository is public. After the
+checks pass, GitHub uploads the generated site and the `deploy` job publishes
+it. Check the reported URL in the deploy job to confirm publication.
 
 Before enabling a hosted site, check its intended audience. GitHub Pages sites
 can be public even when their source repository is private. GitHub Free supports
@@ -64,8 +64,7 @@ When publication is intended and supported:
 
 Publishing from private source would require an explicit workflow and access
 policy change; the artifact path above remains available without that change.
-A Pages site also does not make a private repository or its linked guides
-readable to every site visitor. Review the content and links before publishing.
+Review the generated content and links before publishing.
 
 See GitHub's [Pages quickstart](https://docs.github.com/en/pages/quickstart),
 [publishing-source setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site),

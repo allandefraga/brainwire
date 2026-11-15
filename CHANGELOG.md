@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Proposed 0.25.0 — unreleased
+
+- Present the database around connected data, with agent context as one use case.
+- Add an optional UTF-8 JSON response budget to the agent-memory example.
+- Reject missing or malformed reservation markers during object-storage restore.
+- Refresh terminal guides and build the Markdown guides as Pages content.
+- Keep the project available under Apache-2.0. Release checks and deployment
+  qualification remain necessary before publication.
+
 ## 0.24.0-beta.4 — experimental candidate
 
 - Make the Homebrew tap and its macOS install command easier to find.

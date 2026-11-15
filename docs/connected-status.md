@@ -1,8 +1,8 @@
 # Inspect a running graph in the connected workspace
 
-The connected TUI reads a running Brainwire server over Bolt. It has four panes:
-**Ontology, Memory, Indexes and Graph**. It never opens the server's RocksDB files.
-The workspace is read-only; use Python or the CLI to write data.
+The [terminal walkthrough](https://allandefraga.github.io/brainwire/#terminal)
+shows how to inspect a running graph. The read-only workspace fetches data over
+Bolt and leaves the server's RocksDB files under the server's control.
 
 ## Open the workspace
 
@@ -22,11 +22,13 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
 
 | Key | Action |
 | --- | --- |
-| `Tab` / `Shift+Tab`, `←` / `→`, or `1`–`4` | Switch panes |
-| Up/Down, `PgUp` / `PgDn` | Move/scroll the current selection |
+| `Tab` / `Shift+Tab` or `←` / `→` | Switch panes |
+| `1`, `2`, `3`, `4` | Open Ontology, Memory, Indexes, or Graph, respectively |
+| Up/Down, `PgUp` / `PgDn` | Select or scroll in Ontology, Indexes, and Graph |
 | `Home` / `End` | Select the first/last relationship in Graph |
 | `r` | Refresh the active pane |
-| `?` or `F1` | Open help (`F1` opens the selected type details in Ontology) |
+| `?` | Open workspace help |
+| `Enter` or `F1` in Ontology | Toggle type details. `F1` opens help in the other panes |
 | `s` | Inspect one standalone identified request |
 | `q` | Exit |
 
@@ -51,8 +53,9 @@ lookups can be denied by server permissions or configuration. See
 
 ## Select a graph neighborhood
 
-Populate the demo using the [README Python example](../README.md#write-and-query-from-python),
-then select one source and one outgoing relationship signature:
+Use the [Python example](https://allandefraga.github.io/brainwire/#python) to
+add the Customer and Segment records and their `IN_SEGMENT` relationship.
+Select one source and one outgoing relationship signature when opening the TUI.
 
 ```sh
 ./target/release/brainwire shell --connect 127.0.0.1:7687 --graph demo \
@@ -63,12 +66,6 @@ then select one source and one outgoing relationship signature:
 The Graph pane uses those four flags for the whole terminal session. Omitting
 them leaves the other panes usable; Graph shows an explanation of the missing
 selection. Selecting a row does not expand it or change the source.
-
-![Connected Graph renderer using synthetic node and relationship data](design/assets/connected-graph-constellation-preview.png)
-
-This preview uses synthetic data rendered by the real TUI widgets. It is not a
-capture from a live database. In a connected session, every displayed link comes
-from the completed server sample.
 
 The server ontology is checked first. The source existence and outgoing targets
 are then read in one transaction. At most **20 relationship rows** are kept; a
@@ -189,7 +186,7 @@ partial IO and completion. Local scheduling/rendering are not hard realtime.
 | Fetch | Bound |
 | --- | --- |
 | Memory | One row, four nonnegative counters or four nulls, 64 KiB aggregate response |
-| Indexes | At most 200 unique label/property rows, 128 KiB aggregate response |
+| Indexes | At most 200 declarations keyed by entity type, label or relationship type, and property. The aggregate response is limited to 128 KiB. |
 | Graph | At most 20 displayed relationship rows, 128 KiB for existence/neighborhood transaction plus a separate bounded schema precheck |
 
 Malformed, oversized, duplicate or incomplete responses fail instead of being

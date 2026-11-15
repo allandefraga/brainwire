@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Run Brainwire, an open source graph database for company knowledge and agent memory. Follow decisions to their recorded sources with Cypher.">
+  <meta name="description" content="Brainwire is an open source graph database for connected data. Model relationships, query them with Cypher and explore the graph from your terminal.">
   <meta name="theme-color" content="#f8f9fb">
   <title>Brainwire documentation · Start, build, operate</title>
   <link rel="icon" href="assets/brainwire-icon.svg" type="image/svg+xml">
@@ -20,47 +20,75 @@
       <span class="nav-label">GET STARTED</span>
       <a href="#overview">Introduction</a>
       <a href="#start">Choose how to run</a>
+      <a href="#homebrew">Install with Homebrew</a>
       <a href="#docker">Run with Docker</a>
-      <a href="#cli">Run on macOS or Linux</a>
-      <a href="#python">Write and query</a>
-      <a href="#agent-memory">Agent memory</a>
+      <a href="#cli">Build from source</a>
+      <a href="#python">Python client</a>
       <span class="nav-label">UNDERSTAND</span>
       <a href="#architecture">Architecture</a>
       <a href="#features">Capabilities</a>
       <a href="#ingestion">Bring your data</a>
-      <a href="#use-cases">Use cases</a>
       <a href="#terminal">Terminal workspace</a>
+      <a href="#use-cases">Use cases</a>
+      <a href="#agent-memory">Agent context example</a>
       <span class="nav-label">GO FURTHER</span>
       <a href="#operate">Operate a graph</a>
       <a href="#benchmark">Benchmark</a>
       <a href="#limits">Beta boundaries</a>
       <a href="#guides">All guides</a>
     </nav>
-    <div class="sidebar-footer"><span>Apache 2.0 · Rust · RocksDB</span><a href="https://github.com/allandefraga/brainwire">View repository <span aria-hidden="true">↗</span></a></div>
+    <div class="sidebar-footer"><span><a href="https://github.com/allandefraga/brainwire/blob/main/LICENSE">Apache 2.0</a> · Rust · RocksDB</span><a href="https://github.com/allandefraga/brainwire">View repository <span aria-hidden="true">↗</span></a></div>
   </aside>
 
   <main id="main">
     <header class="topbar"><span>Docs <span class="crumb" aria-hidden="true">/</span> Overview</span><div><a href="pt-br.html" lang="pt-BR" hreflang="pt-BR">Português</a><a href="https://github.com/allandefraga/brainwire/releases">Releases <span aria-hidden="true">↗</span></a></div></header>
 
     <section id="overview" class="intro">
-      <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> OPEN SOURCE GRAPH DATABASE</p>
-      <h1>A graph database for agent memory</h1>
-      <p class="intro-copy">Connect projects, decisions and their evidence. Query the graph with Cypher and give agents the relevant records.</p>
-      <div class="actions"><a class="button primary" href="#start">Get started <span aria-hidden="true">→</span></a><a class="button secondary" href="#agent-memory">Try agent memory</a></div>
+      <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> OPEN SOURCE · APACHE 2.0</p>
+      <h1>An open-source graph database for connected data</h1>
+      <p class="intro-copy">Build knowledge graphs, connect company data, and give AI agents context. Follow relationships with Cypher and explore the graph in your terminal.</p>
+      <div class="actions"><a class="button primary" href="#start">Create a graph <span aria-hidden="true">→</span></a><a class="button secondary" href="#terminal">Explore the graph</a></div>
       <p class="release-line"><span class="badge">Experimental beta</span> v0.24.0-beta.3 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
       <figure class="hero-graph">
         <a href="assets/tui-graph.png"><img src="assets/tui-graph.png" width="1280" height="800" alt="Brainwire's connected Graph pane shows the Release project and four outgoing HAS_DECISION relationships, with the selected relationship in the inspector."></a>
         <figcaption>Connected terminal capture from Brainwire v0.21.0-beta.2, using synthetic company data over Bolt. <a href="assets/typed-cli-vhs.gif">Watch the typed CLI demo (GIF)</a> recorded with v0.24.0-beta.1.</figcaption>
       </figure>
-      <div class="entry-grid"><a href="#start"><span class="entry-number" aria-hidden="true">↳</span><strong>Start a graph</strong><span>Local CLI or Docker server</span></a><a href="#agent-memory"><span class="entry-number" aria-hidden="true">↳</span><strong>Recall a decision</strong><span>A project, a decision and its source</span></a><a href="#terminal"><span class="entry-number" aria-hidden="true">↳</span><strong>Open the terminal</strong><span>Schema, indexes and graph connections</span></a></div>
+      <div class="entry-grid"><a href="#start"><span class="entry-number" aria-hidden="true">↳</span><strong>Start a graph</strong><span>Local CLI or Docker server</span></a><a href="#use-cases"><span class="entry-number" aria-hidden="true">↳</span><strong>See use cases</strong><span>Knowledge graphs, dependencies and agents</span></a><a href="#ingestion"><span class="entry-number" aria-hidden="true">↳</span><strong>Bring your data</strong><span>Import from DuckDB, DuckLake or Obsidian</span></a></div>
     </section>
 
     <section id="start" class="doc-section">
       <div class="section-head"><p class="eyebrow">QUICKSTART</p><h2>Choose how to run Brainwire</h2></div>
       <div class="two-column">
-        <article><h3>Docker server</h3><p>Use the published image to try the Bolt server, Python client or connected terminal workspace. The demo keeps the graph in a named volume.</p><a href="#docker">Start the Docker demo →</a></article>
-        <article><h3>Native CLI</h3><p>Run Cypher directly against a graph directory on macOS or Linux. This mode needs no server, Docker or listening port. On macOS, install from the <a href="https://github.com/allandefraga/homebrew-brainwire">Brainwire Homebrew tap</a>:</p><p><code>brew install allandefraga/brainwire/brainwire</code></p><p>The tap currently builds beta.2 from source; this is not a homebrew/core package.</p><a href="#cli">Run a query locally →</a></article>
+        <article><h3>Local CLI on macOS</h3><p>Install with Homebrew, create a graph on disk and run Cypher in your terminal.</p><a href="#homebrew">Install and run a query →</a></article>
+        <article><h3>Docker server on Linux or macOS</h3><p>Start a Bolt server for applications and connected clients. Docker Compose keeps the demo graph in a named volume across container restarts.</p><a href="#docker">Start the Docker demo →</a></article>
       </div>
+      <p class="next-link"><a href="#docker-quickstart">Try one query in Docker →</a> <a href="#cli">Build the native CLI from source →</a></p>
+    </section>
+
+    <section id="docker-quickstart" class="doc-section">
+      <div class="section-head"><h2>Try one query in Docker</h2><p>The public image includes a small example schema. Create two nodes and see the relationship in the result.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="docker-query" aria-label="Copy Docker query">Copy</button></div><pre><code id="docker-query">BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.3 # brainwire-release-version
+docker run --rm --network none "$BRAINWIRE_IMAGE" cypher \
+  --database /data/demo --ontology /opt/brainwire/example-schema.json \
+  --query "CREATE (c:Customer {entity_id:'customer-1', name:'Ada'})-[r:IN_SEGMENT]-&gt;(s:Segment {entity_id:'segment-1', name:'beta'}) RETURN c.name AS customer, type(r) AS relationship, s.name AS segment"</code></pre></div>
+      <div class="result"><span>Rows</span><code>[["Ada", "IN_SEGMENT", "beta"]]</code></div>
+      <p>Docker removes this disposable graph when the command exits. <a href="#docker">Start the server with a persistent volume →</a></p>
+    </section>
+
+    <section id="homebrew" class="doc-section">
+      <div class="section-head"><h2>Open a local graph on macOS</h2><p>The Brainwire tap currently builds v0.24.0-beta.2 from source. Install it, link a project to a decision and query that relationship with <code>brainwire</code>.</p></div>
+      <div class="code-block"><div class="code-header"><span>Terminal · macOS</span><button type="button" data-copy="brew-code" aria-label="Copy Homebrew quickstart">Copy</button></div><pre><code id="brew-code">brew install allandefraga/brainwire/brainwire
+brainwire_prefix="$(brew --prefix allandefraga/brainwire/brainwire)"
+export PATH="$brainwire_prefix/bin:$PATH"
+graph_dir="$(mktemp -d)"
+brainwire cypher --database "$graph_dir/graph" \
+  --ontology "$brainwire_prefix/share/brainwire/company-ontology.json" \
+  --query "CREATE (:Project {entity_id:'release', name:'Release'})-[:HAS_DECISION]->(:Decision {entity_id:'retry', title:'Retry failed requests'})"
+brainwire cypher --database "$graph_dir/graph" \
+  --query "MATCH (p:Project)-[:HAS_DECISION]->(d:Decision) RETURN p.name AS project, d.title AS decision"</code></pre></div>
+      <div class="result"><span>Result</span><code>{"fields":["project","decision"],"rows":[["Release","Retry failed requests"]]}</code></div>
+      <p>One process can open a RocksDB graph directory at a time. For concurrent clients, use <code>brainwire serve</code> or Docker Compose and connect over Bolt.</p>
+      <p class="next-link"><a href="https://github.com/allandefraga/homebrew-brainwire">Homebrew tap →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/homebrew.md">macOS guide →</a> <a href="#cli">Build the native CLI →</a></p>
     </section>
 
     <section id="docker" class="doc-section">
@@ -73,27 +101,27 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --pull always --wait --wait-timeout 900</code></pre></div>
       <dl class="connection-details"><div><dt>Connection</dt><dd><code>bolt://127.0.0.1:7687</code></dd></div><div><dt>Graph</dt><dd><code>demo</code></dd></div><div><dt>Data</dt><dd>Persistent Docker volume</dd></div></dl>
       <aside class="callout"><span class="callout-icon" aria-hidden="true">i</span><div><strong>A local demo, with synthetic data.</strong><p>Authentication is disabled. Use a trusted host and container network: other containers on the same network can reach the service. Use Docker Engine 28 or newer; <a href="https://docs.docker.com/engine/network/port-publishing/">older engines can expose localhost ports to the local network</a>. For shared access, use an <a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-containers.md">auth policy</a> and a <a href="https://github.com/allandefraga/brainwire/blob/main/docs/protected-transport.md">verified encrypted boundary</a>. If port 7687 is busy, set <code>BRAINWIRE_BIND_PORT=17687</code> before starting.</p></div></aside>
-      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker guide: ports, images, volumes and troubleshooting <span aria-hidden="true">→</span></a></p>
+      <p class="next-link"><a href="#python">Write and query your first relationship →</a> <a href="#operate">Check readiness and stop the demo →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker guide →</a></p>
     </section>
 
     <section id="cli" class="doc-section">
-      <div class="section-head"><p class="eyebrow">NATIVE CLI</p><h2>Query a graph without starting a server</h2><p>From a source checkout, use the repository's pinned Rust toolchain, a C++ compiler, libclang, CMake and pkg-config.</p></div>
+      <div class="section-head"><p class="eyebrow">NATIVE CLI</p><h2>Query a graph without starting a server</h2><p>Build from a source checkout with the repository's pinned Rust toolchain, a C++ compiler, libclang, CMake and pkg-config. Then create and query the project-to-decision relationship.</p></div>
       <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="build-code" aria-label="Copy native build commands">Copy</button></div><pre><code id="build-code">cargo fetch --locked
 cargo build --locked --offline -p brainwire-server --bin brainwire
 ./target/debug/brainwire --version</code></pre></div>
       <div class="code-block"><div class="code-header"><span>Terminal · disposable graph</span><button type="button" data-copy="local-query" aria-label="Copy local graph commands">Copy</button></div><pre><code id="local-query">graph_dir=$(mktemp -d)
 ./target/debug/brainwire cypher --database "$graph_dir/graph" \
   --ontology examples/company_brain/ontology.json \
-  --query "CREATE (:Project {entity_id:'release', name:'Release'})"
+  --query "CREATE (:Project {entity_id:'release', name:'Release'})-[:HAS_DECISION]->(:Decision {entity_id:'retry', title:'Retry failed requests'})"
 ./target/debug/brainwire cypher --database "$graph_dir/graph" \
-  --query "MATCH (p:Project {entity_id:'release'}) RETURN p.name AS name"</code></pre></div>
-      <div class="result"><span>Result</span><code>{"fields":["name"],"rows":[["Release"]]}</code></div>
+  --query "MATCH (p:Project)-[:HAS_DECISION]->(d:Decision) RETURN p.name AS project, d.title AS decision"</code></pre></div>
+      <div class="result"><span>Result</span><code>{"fields":["project","decision"],"rows":[["Release","Retry failed requests"]]}</code></div>
       <p>One process can open a RocksDB graph directory at a time. For concurrent clients, start <code>brainwire serve</code> and connect over Bolt. The command <code>brainwire config show</code> displays the server configuration.</p>
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">CLI and Cypher reference →</a></p>
     </section>
 
     <section id="python" class="doc-section">
-      <div class="section-head"><p class="eyebrow">WRITE AND QUERY</p><h2>Connect from Python.</h2><p>Install this checkout's helper in a new environment. It connects to Brainwire over Bolt; a public PyPI package is not available yet.</p></div>
+      <div class="section-head"><p class="eyebrow">OPTIONAL CLIENT</p><h2>Connect from Python</h2><p>Use this path for a Python application or the Python examples. Install the helper from the checkout and connect to a running Brainwire server over Bolt.</p></div>
       <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="python-install" aria-label="Copy Python setup">Copy</button></div><pre><code id="python-install">python3 scripts/setup_python.py</code></pre></div>
       <p>Run the example with <code>.venv-brainwire/bin/python</code> while the Docker demo is running. If you chose a different host port, replace <code>7687</code> in the connection URL with that port.</p>
       <div class="code-block"><div class="code-header"><span>Python</span><button type="button" data-copy="python-code" aria-label="Copy Python graph example">Copy</button></div><pre><code id="python-code">from brainwire import connect
@@ -113,20 +141,10 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
       <div class="inline-links"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python and batches →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Supported Cypher →</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/online-catalog.md">Declare your schema →</a></div>
     </section>
 
-    <section id="agent-memory" class="doc-section">
-      <div class="section-head"><p class="eyebrow">AGENT MEMORY</p><h2>Follow a decision to its source</h2><p>Save a decision and its source in one transaction. Recall the project's decisions and supporting records from a fresh process. Graph grants and node visibility apply to the read.</p></div>
-      <p>Follow the Docker demo to start the company graph and save a decision. Then run this command from the same shell with <code>BW_PORT</code> set.</p>
-      <div class="code-block"><div class="code-header"><span>Terminal · company example</span><button type="button" data-copy="recall-code" aria-label="Copy project recall command">Copy</button></div><pre><code id="recall-code">.venv-brainwire/bin/python -m examples.python.agent_memory --uri "bolt://$BW_PORT" \
-  recall --project project-release --limit 5</code></pre></div>
-      <div class="result"><span>EXAMPLE CONNECTION</span><code>Release → Keep a rollback window → Release review</code></div>
-      <p>The output includes the source URL recorded in the graph. Verify the source before citing it.</p>
-      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-context-quickstart.md">Run the Docker demo and save a decision →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context API and provider configuration →</a></p>
-    </section>
-
     <section id="architecture" class="doc-section">
       <div class="section-head"><p class="eyebrow">ARCHITECTURE</p><h2>One engine, clear layers.</h2><p>Your application connects over Bolt. The Rust engine executes the supported Cypher subset and stores graph records in RocksDB on persistent disk.</p></div>
       <figure class="architecture" aria-labelledby="architecture-caption">
-        <div class="architecture-top"><div class="architecture-node"><span class="layer">YOUR APPLICATION</span><strong>Python or a Bolt client</strong><span>Writes · queries · agent context</span></div><div class="architecture-node"><span class="layer">TERMINAL WORKSPACE</span><strong>Inspect the running graph</strong><span>Schema · indexes · memory · sample</span></div></div>
+        <div class="architecture-top"><div class="architecture-node"><span class="layer">YOUR APPLICATION</span><strong>Python or a Bolt client</strong><span>Writes · queries · ingestion</span></div><div class="architecture-node"><span class="layer">TERMINAL WORKSPACE</span><strong>Inspect the running graph</strong><span>Schema · indexes · memory · sample</span></div></div>
         <div class="architecture-link"><span>Bolt connection</span><span aria-hidden="true">↓</span></div>
         <div class="architecture-engine"><span class="layer">BRAINWIRE · RUST</span><strong>Graph engine</strong><ul class="architecture-steps"><li><strong>Permissions</strong><span>Identity · graph grants · node visibility</span></li><li><strong>Queries</strong><span>Cypher · ontology · indexes · transactions</span></li><li><strong>Memory controls</strong><span>Query reservations · pressure admission</span></li></ul></div>
         <div class="architecture-link"><span>Durable storage</span><span aria-hidden="true">↓</span></div>
@@ -139,12 +157,11 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
     </section>
 
     <section id="features" class="doc-section">
-      <div class="section-head"><p class="eyebrow">CAPABILITIES</p><h2>Build with relationships.</h2><p>Use the graph as a durable data layer. Your application supplies the data, the access model and any AI provider.</p></div>
+      <div class="section-head"><p class="eyebrow">CAPABILITIES</p><h2>Build with relationships.</h2><p>Use the graph as a durable data layer. Define what can connect and query the resulting nodes and relationships.</p></div>
       <div class="feature-grid">
         <article><span class="feature-symbol" aria-hidden="true">↗</span><h3>Graph + Cypher</h3><p>Nodes, typed relationships and properties. Read, create, merge, update and delete through the documented Cypher subset.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Query guide →</a></article>
         <article><span class="feature-symbol" aria-hidden="true">◇</span><h3>Explicit ontology</h3><p>Declare labels, relationships and descriptions. New standalone graphs can enforce optional scalar property types.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/typed-properties.md">Typed properties →</a></article>
         <article><span class="feature-symbol" aria-hidden="true">≋</span><h3>Application timelines</h3><p>Store explicit event nodes or keyed relationships. The Python example reads event pages by time and identity.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Timeline model →</a></article>
-        <article><span class="feature-symbol" aria-hidden="true">⌕</span><h3>Agent context</h3><p>Explore ontology paths, narrow provider candidates to explicit IDs, and read visible records and sources. Graph reads use the caller's access controls.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context API →</a></article>
         <article><span class="feature-symbol" aria-hidden="true">∑</span><h3>Named metrics</h3><p>Define count, sum and average questions for one node type. The Python example uses the caller's permissions and rejects excess groups.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/semantic-metrics.md">Metric example →</a></article>
         <article><span class="feature-symbol" aria-hidden="true">⇄</span><h3>Incremental writes</h3><p>Apply updates to a graph in bounded batches. The standalone ingestion examples include checkpoint and recovery workflows.</p><a href="#ingestion">DuckDB and DuckLake →</a></article>
         <article><span class="feature-symbol" aria-hidden="true">▤</span><h3>Visible operations</h3><p>Inspect indexes, query-memory counters, persistent files and recovery. Keep a tested checkpoint outside the running volume.</p><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore →</a></article>
@@ -160,15 +177,8 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
       <p>For Obsidian, preview a small Markdown vault and import its notes and wikilinks once into a dedicated empty graph. Choose graph permissions before copying notes. <a href="https://github.com/allandefraga/brainwire/blob/main/examples/obsidian/README.md">Obsidian example →</a></p>
     </section>
 
-    <section id="use-cases" class="doc-section">
-      <div class="section-head"><p class="eyebrow">USE CASES</p><h2>Where a graph helps.</h2></div>
-      <div class="use-case-list"><article><span>01</span><div><h3>Company brain</h3><p>Link documents, projects, people and tickets. Give an application the relationships behind a record, with sources it can reference.</p></div><code>Document → Project → Owner</code></article><article><span>02</span><div><h3>Agent memory</h3><p>Store decisions, facts and events using stable identities. Retrieve relevant context and keep access checks in the data path.</p></div><code>Agent → Decision → Evidence</code></article><article><span>03</span><div><h3>Dependencies and timelines</h3><p>Follow what depends on a service, what changed on a ticket or how a repository connects. Model the events your application needs.</p></div><code>Service → Deployment → Event</code></article></div>
-      <p>Use your pipeline, a connector or a model to map source data into the graph.</p>
-      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-quickstart.md">Agent quickstart and reusable prompt →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-context-quickstart.md">Record and recall a decision →</a></p>
-    </section>
-
     <section id="terminal" class="doc-section">
-      <div class="section-head"><p class="eyebrow">TERMINAL WORKSPACE</p><h2>See what is connected.</h2><p>Open a read-only workspace against the Docker demo. The example below inspects the Customer and Segment written earlier.</p></div>
+      <div class="section-head"><p class="eyebrow">TERMINAL WORKSPACE</p><h2>See what is connected.</h2><p>Run the <a href="#python">Python example</a> to add a Customer and Segment to the Docker demo, then inspect their relationship in the read-only terminal workspace.</p></div>
       <div class="code-block"><div class="code-header"><span>Terminal · repository root</span><button type="button" data-copy="tui-code" aria-label="Copy terminal workspace command">Copy</button></div><pre><code id="tui-code">docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec brainwire \
   brainwire shell --connect 127.0.0.1:7687 --graph demo \
   --node-label Customer --entity-id customer-1 \
@@ -176,6 +186,27 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
       <div class="workspace-summary"><div><span>01</span><strong>Schema</strong><p>Allowed types and relationships</p></div><div><span>02</span><strong>Memory</strong><p>Query reservations and refusals</p></div><div><span>03</span><strong>Indexes</strong><p>Declarations and readiness</p></div><div><span>04</span><strong>Graph sample</strong><p>Bounded outgoing relationships</p></div></div>
       <p><kbd>Tab</kbd> changes panes, <kbd>r</kbd> refreshes, <kbd>?</kbd> opens help and <kbd>q</kbd> exits. Add <code>--lang pt-BR</code> for Portuguese. Protected servers require credentials and grants; memory telemetry requires instance-admin access.</p>
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/connected-status.md">Connected workspace →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/tui-demo.md">Demo and offline modes →</a></p>
+    </section>
+
+    <section id="use-cases" class="doc-section">
+      <div class="section-head"><p class="eyebrow">USE CASES</p><h2>What you can build with Brainwire</h2></div>
+      <div class="use-case-list">
+        <article><span>01</span><div><h3>Knowledge graphs</h3><p>Connect records from different sources and follow their relationships without piecing together separate lookups.</p></div><code>Document → Topic → Related document</code></article>
+        <article><span>02</span><div><h3>Company knowledge</h3><p>Find who owns a project and follow its decisions to their recorded sources.</p></div><code>Team → Project → Decision</code></article>
+        <article><span>03</span><div><h3>Dependencies and timelines</h3><p>Follow what depends on a service or model the events that changed a ticket.</p></div><code>Service → Deployment → Event</code></article>
+        <article><span>04</span><div><h3>Agent context and memory</h3><p>Let an agent retrieve connected facts, decisions and sources that its identity can read.</p><a href="#agent-memory">Try the decision example →</a></div><code>Project → Decision → Source</code></article>
+      </div>
+      <p>Use your pipeline, a connector or a model to map source data into the graph.</p>
+    </section>
+
+    <section id="agent-memory" class="doc-section">
+      <div class="section-head"><p class="eyebrow">EXAMPLE · AGENT CONTEXT</p><h2>Follow a decision to its source</h2><p>Save a decision and its source in one transaction. Recall the project's decisions and supporting records from a fresh process. Graph grants and node visibility apply to the read.</p></div>
+      <p>Follow the Docker demo to start the company graph and save a decision. Then run this command from the same shell with <code>BW_PORT</code> set.</p>
+      <div class="code-block"><div class="code-header"><span>Terminal · company example</span><button type="button" data-copy="recall-code" aria-label="Copy project recall command">Copy</button></div><pre><code id="recall-code">.venv-brainwire/bin/python -m examples.python.agent_memory --uri "bolt://$BW_PORT" \
+  recall --project project-release --limit 5</code></pre></div>
+      <div class="result"><span>EXAMPLE CONNECTION</span><code>Release → Keep a rollback window → Release review</code></div>
+      <p>The output includes the source URL recorded in the graph. Verify the source before citing it.</p>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-context-quickstart.md">Run the Docker demo and save a decision →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context API and provider configuration →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-quickstart.md">Agent quickstart and reusable prompt →</a></p>
     </section>
 
     <section id="operate" class="doc-section">
@@ -216,7 +247,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down</code></pre></
     <section id="guides" class="doc-section">
       <div class="section-head"><p class="eyebrow">DOCUMENTATION</p><h2>Go deeper when you need to.</h2></div>
       <div class="guide-columns"><div><h3>Get started</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.md">Getting started</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker and images</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md">Python installation</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot</a></div><div><h3>Build</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python writes and batches</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Cypher reference</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context for agents</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Events and timelines</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md">Graph algorithms</a></div><div><h3>Operate</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md">Deployments</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/README.md">Performance evidence</a></div></div>
-      <details class="pages-note"><summary>What does GitHub Pages host?</summary><p>This static documentation website. It does not run Brainwire or host your graph. Preview it locally with <code>python3 -m http.server 8000 --directory docs-site --bind 127.0.0.1</code>, then open <code>http://127.0.0.1:8000</code>.</p></details>
+      <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/README.md">Browse the full documentation index →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/github-pages.md">Build the documentation locally →</a></p>
     </section>
     <footer><span>Brainwire · v0.24.0-beta.3 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
   </main>

@@ -1,7 +1,8 @@
 # Brainwire October 31, 2026 beta roadmap
 
 > **Archived plan.** This page records the October 2026 schedule and assumptions.
-> See the [documentation index](README.md) for current usage and deployment guidance.
+> For current usage see the [Brainwire documentation site](https://allandefraga.github.io/brainwire/).
+> For current deployment guidance start with the [operator checklist](beta-operator-checklist.md).
 
 Revised October 13 during Allan's requested two-hour beta qualification session.
 Retain October 31 as the beta target, with **20 minutes of active development per

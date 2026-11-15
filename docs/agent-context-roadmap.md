@@ -1,10 +1,11 @@
-# Agent context: current capabilities and next steps
+# Agent context roadmap
 
-Brainwire can store related records and retrieve bounded context for an agent.
-The [company context example](../examples/company_brain/README.md) demonstrates
-this today. It is an experimental starting point, not a complete agent platform.
+> **Planning snapshot.** The table records the feature baseline when this
+> roadmap was drafted and proposed next steps. For supported behavior, start
+> with the [agent quickstart](agent-quickstart.md) or run the
+> [company graph example](../examples/company_brain/README.md).
 
-| Capability | Available now | Next engineering work |
+| Capability | Baseline when drafted | Proposed work |
 | --- | --- | --- |
 | Ontology | Declared node and relationship types, properties and keys. New standalone graphs can enforce optional [scalar property types](typed-properties.md). | Required fields, richer types, relationship cardinality and migration checks |
 | Retrieval | Explicit IDs, visible graph paths, caller-provided ranked candidates and RRF | Native text/vector indexes, graph-filtered retrieval in one execution plan and recall testing |

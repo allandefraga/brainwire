@@ -18,6 +18,7 @@ from examples.python import checkpoint_backup as local
 
 
 CLAIM = "_brainwire-upload"
+CLAIM_CONTENT = b"brainwire-checkpoint-upload/1\n"
 MAX_MANIFEST = 4 << 20
 MAX_FILES = 20_000
 MAX_LIST_PAGES = 100
@@ -103,8 +104,8 @@ def publish(client, source, uri):
     bucket, prefix = s3_location(uri)
     if next(object_keys(client, bucket, prefix), None) is not None:
         raise FileExistsError("backup prefix already contains objects")
-    claim = b"brainwire-checkpoint-upload/1\n"
-    put_new(client, bucket, prefix + CLAIM, claim, len(claim), hashlib.sha256(claim).hexdigest())
+    put_new(client, bucket, prefix + CLAIM, CLAIM_CONTENT, len(CLAIM_CONTENT),
+            hashlib.sha256(CLAIM_CONTENT).hexdigest())
     for name, (size, digest) in files.items():
         with open(source / name, "rb", opener=local._open_source) as handle:
             put_new(client, bucket, prefix + name, handle, size, digest)
@@ -178,6 +179,11 @@ def restore(client, uri, destination):
             raise ValueError("checkpoint manifest is incomplete")
     files, total = inventory(raw)
     verify_keys(client, bucket, prefix, files)
+    response = client.get_object(Bucket=bucket, Key=prefix + CLAIM)
+    with closing(response["Body"]) as body:
+        if (response["ContentLength"] != len(CLAIM_CONTENT)
+                or body.read(len(CLAIM_CONTENT) + 1) != CLAIM_CONTENT):
+            raise ValueError("invalid backup reservation marker")
     if shutil.disk_usage(destination.parent).free < total + len(raw):
         raise ValueError("insufficient free space to restore checkpoint")
     partial.mkdir(mode=0o700)

@@ -29,6 +29,28 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-15: Connected data and local release candidate
+
+- Aligned the README, site and documentation around connected data; agents are
+  one use case. The native Cypher example was checked with a published binary.
+- Reviewed public guides for current TUI controls, Bolt TLS, the default graph,
+  memory and recovery limits, Cypher and ingestion. Historical proposals and
+  captures are marked as such. Pages publication must be verified after push.
+- Added a byte budget to the agent-memory Python example; it bounds serialized
+  output, not server memory or token usage. Unit and Bolt checks passed.
+- Tested the published Docker image's one-command Cypher example and an isolated
+  Compose startup and restart; no existing volumes were touched. Updated the TUI
+  guides and prepared a static Pages build from Markdown sources.
+- Reject malformed checkpoint reservation markers before staging an S3 restore;
+  unit tests passed. Marker validation does not authenticate the backup, and no
+  object-store integration test was run for this change.
+- Proposed version 0.25.0 while retaining Apache-2.0 for broad adoption.
+  Standalone production qualification, packaging and release checks remain
+  open; no release or image was published for this candidate.
+- Next: qualify the exact candidate before creating a release or representing
+  it as production-ready. Plan a managed pilot around isolated deployments,
+  tested backups, observability, upgrades and clearly stated service limits.
+
 ## 2026-11-15: Homebrew discovery
 
 - Linked the public Homebrew tap and its install command directly from the

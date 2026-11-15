@@ -1,6 +1,6 @@
 # Inspect ontology through the running server
 
-The Ontology TUI can now fetch a read-only schema snapshot over Bolt. The client
+The Ontology TUI fetches a read-only schema snapshot over Bolt. The client
 never opens RocksDB or loads local database configuration in this mode. It can
 run while the server owns its data directory and serves Python ingestion.
 
@@ -21,8 +21,8 @@ The graph must already exist on the server. Use its numeric IP and port (IPv6
 uses `[address]:port`), not a `bolt://` URL or DNS name. The graph is required;
 unknown names fail rather than switching to the default database. `--connect`
 cannot be combined with `--overview`, `--demo`, `--config` or `--estimated`.
-Connected mode also supports [Memory and Indexes](connected-status.md). Other real
-overview panels remain offline; this does not provide a live query editor or disk browser.
+The [connected workspace](connected-status.md) also has Memory, Indexes and
+Graph panes. Use the offline overview to inspect RocksDB files.
 For a protected server, configure service-token credentials. To use TLS,
 provide the client CA bundle and use an IP covered by the certificate.
 [Connected workspace setup](connected-status.md#connect-to-a-protected-server)
@@ -30,10 +30,9 @@ provide the client CA bundle and use an IP covered by the certificate.
 ## Snapshot and refresh
 
 Up/Down selects a type, Enter/F1 toggles the compact inspector, PgUp/PgDn scrolls,
-`?` opens the contextual page guide, and `q` exits. In wide terminals connections
-and details appear side by side. The guide explains schema signatures versus
-stored relationship records and calls out that the connected pane is scoped to
-one selected type.
+and `q` exits. In wide terminals connections and details appear side by side.
+Open the workspace without `--view ontology` to use `?` for help and switch
+between panes.
 The header identifies the graph and server; the status shows catalog version,
 sample age and scalar-index readiness. Connections are allowed type signatures,
 not individual stored edges. Changing the target graph requires reopening with
@@ -54,10 +53,10 @@ handling waits for that bounded fetch. Default network deadline is 3,000 ms;
 reads/writes, including result completion. Local decoding/rendering and OS
 scheduling are not a hard real-time guarantee. There is no background polling.
 
-Failed refresh retains the old schema and its original sample age and displays
-**STALE / DESATUALIZADO**, even on narrow terminals. A later successful refresh
-clears the warning. Initial fetch failure exits with an error and no fabricated
-snapshot. A terminal still showing an old snapshot does not imply server health.
+Failed refresh keeps the previous schema, preserves its original sample age and
+marks it **STALE / DESATUALIZADO**. A successful refresh clears the warning. An
+initial fetch failure exits the standalone view or a snapshot with an error.
+The interactive workspace shows a pane error and lets you try again with `r`.
 
 ## Cypher and Python contract
 
@@ -129,13 +128,12 @@ The shared renderer has a 65,535-line scroll ceiling. Exceptionally large proper
 lists may exceed it after wrapping; inspect those lists through Cypher/Python
 instead. Pagination and an asynchronous refresh loop are follow-up work.
 
-[Actual terminal captures and integration checks](../benchmarks/archive/design-assets/2026-10-05-connected/README.md)
-include a server failure, restart with a changed schema, and concurrent Python writes.
+See the [connected workspace guide](connected-status.md) for current controls and Graph, Memory and Indexes panes.
 
 ## Protected service sessions
 
 Set `BRAINWIRE_BOLT_AUTH_FILE` to a private `{principal,credentials}` JSON file
 for a principal with read access to the selected graph. The shared native client
 authenticates before acquiring schema; denied login/graph access fails the fetch.
-See [protected Bolt connections](bolt-auth.md). No token argument or new panel
-is added. Native clients still require a trusted loopback/encrypted tunnel boundary.
+See the [protected connection setup](connected-status.md#connect-to-a-protected-server)
+for credentials and TLS configuration.

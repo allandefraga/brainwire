@@ -3,13 +3,11 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
-
-
-ROOT = Path("docs-site").resolve()
 
 
 class References(HTMLParser):
@@ -29,43 +27,53 @@ class References(HTMLParser):
 
 
 def main() -> None:
-    html_files = sorted(ROOT.rglob("*.html"))
+    args = argparse.ArgumentParser(description=__doc__)
+    args.add_argument("directory", type=Path, nargs="?", default=Path("docs-site"))
+    root = args.parse_args().directory.resolve()
+    html_files = sorted(root.rglob("*.html"))
     if not html_files:
         raise SystemExit("docs-site has no HTML files")
 
     errors: list[str] = []
     checked = 0
+    pages = {}
     for html_file in html_files:
         parser = References()
         parser.feed(html_file.read_text(encoding="utf-8"))
+        pages[html_file] = parser
+
+    for html_file, parser in pages.items():
+        relative_file = html_file.relative_to(root)
         for reference in parser.local:
             parsed = urlsplit(reference)
             if parsed.scheme or parsed.netloc:
                 continue
             if not parsed.path:
                 if parsed.fragment and unquote(parsed.fragment) not in parser.ids:
-                    errors.append(f"{html_file.relative_to(ROOT)}: missing #{parsed.fragment}")
+                    errors.append(f"{relative_file}: missing #{parsed.fragment}")
                 continue
 
             target = (html_file.parent / unquote(parsed.path)).resolve()
-            if target != ROOT and ROOT not in target.parents:
-                errors.append(f"{html_file.relative_to(ROOT)}: path escapes docs-site: {reference}")
+            if not target.is_relative_to(root):
+                errors.append(f"{relative_file}: path escapes site: {reference}")
                 continue
             if target.is_dir():
                 target /= "index.html"
             checked += 1
             if not target.is_file():
-                errors.append(f"{html_file.relative_to(ROOT)}: missing {reference}")
+                errors.append(f"{relative_file}: missing {reference}")
+            elif parsed.fragment and target in pages and unquote(parsed.fragment) not in pages[target].ids:
+                errors.append(f"{relative_file}: missing anchor in {reference}")
 
         for css_file in re.findall(r"url\((['\"]?)(.*?)\1\)", html_file.read_text(encoding="utf-8")):
             value = css_file[1].strip()
             if not value or value.startswith(("data:", "http:", "https:", "#")):
                 continue
             target = (html_file.parent / unquote(value)).resolve()
-            if target != ROOT and ROOT not in target.parents:
-                errors.append(f"{html_file.relative_to(ROOT)}: CSS path escapes docs-site: {value}")
+            if not target.is_relative_to(root):
+                errors.append(f"{relative_file}: CSS path escapes site: {value}")
             elif not target.is_file():
-                errors.append(f"{html_file.relative_to(ROOT)}: missing CSS asset {value}")
+                errors.append(f"{relative_file}: missing CSS asset {value}")
             else:
                 checked += 1
 

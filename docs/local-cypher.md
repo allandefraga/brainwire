@@ -1,7 +1,5 @@
 # Run Cypher queries
 
-Python commands below use the environment from [Python setup](python-package.md).
-
 Choose how to connect before running a query:
 
 | Your task | Use |
@@ -21,7 +19,8 @@ atomically; an execution error discards that query's staged graph changes.
 Separate command invocations reopen the same directory and see committed data.
 This command is separate from the synthetic `shell --demo` interface.
 
-From the repository root, fetch dependencies once and build the CLI:
+If you already have the CLI installed, use `brainwire` in place of
+`./target/debug/brainwire` below. To build from the repository root:
 
 ```sh
 cargo fetch --locked
@@ -87,10 +86,8 @@ values in `idx`, with a bounded atomic backfill on ontology application.
 List and map predicates still scan the label. `entity_id` has its
 separate primary-key lookup. `db schema --json` reports whether a legacy
 database's scalar index is ready.
-Catalog versions are schema revisions, not a history of each node. Timeline
-declarations do not yet record ticket revisions or support as-of queries.
-Retention and ontology-driven cleanup are specified in the
-[temporal graph and maintenance design](design/2026-10-01-temporal-graph-and-maintenance.md).
+Catalog versions track schema revisions. To record events and their time in a
+graph, use the [timeline modeling guide](temporal-data.md).
 
 ## Bulk parameters from a file
 
@@ -206,7 +203,8 @@ equal; otherwise it returns `a`. Comparisons that evaluate to unknown, such as
 **Procedures.** `db.labels`, `db.relationshipTypes`, `db.propertyKeys`,
 `dbms.components`, `db.schema`, `db.indexes`, `db.commitState`,
 `db.checkpoint`, `db.memory`, `db.setNodeAcl(s)`, `db.nodeAcls`, `db.assertNodeState`,
-`graph.project`, `graph.degree`, `graph.pagerank` and `knowledge.rank`. See
+`graph.project`, `graph.degree`, `graph.pagerank`, `graph.wcc`, `graph.scc`,
+`graph.reachable`, `graph.shortestPath` and `knowledge.rank`. See
 [sparse analytics](sparse-analytics.md) and
 [explainable knowledge ranking](knowledge-ranking.md).
 
@@ -236,12 +234,16 @@ returned as Bolt Node, Relationship and Path structures (JSON envelopes with
 **Not supported.** `CALL { }` subqueries, `EXISTS { }` subquery syntax (use
 `exists(pattern)` or a pattern predicate), pattern comprehensions,
 `FOREACH`, `LOAD CSV`, temporal and spatial types, and aggregates
-inside `size()`. Full Cypher, range/vector search and ANN remain separate
-work.
+inside `size()`. For shortest paths, use `CALL graph.shortestPath(...)`;
+the `shortestPath()` and `allShortestPaths()` pattern forms are unsupported.
+For indexed ranges, see [node indexes](indexes.md) and
+[relationship indexes](relationship-property-indexes.md).
 
-Whole relationship `SET` is not available; create or update edge properties
-with `MERGE (a)-[:TYPE {prop: value}]->(b)`. `DELETE r` removes the matched
-relationship, preserves endpoint nodes and respects graph write authorization.
+Update a matched relationship with `SET r.property = value`, merge properties
+with `SET r += map`, or replace properties with `SET r = map`. A replacement
+for a keyed relationship must preserve its immutable key fields. `DELETE r`
+removes the matched relationship, preserves endpoint nodes and respects graph
+write authorization.
 An ontology can opt a new relationship type into immutable merge keys; see
 [keyed relationships](temporal-data.md#keyed-relationships) for the supported
 semantics, migration and mixed-version restrictions.
@@ -252,8 +254,8 @@ relationships or paths keeps them as handles and materializes their properties
 one PULL page at a time ([design](design/bolt-result-streaming.md)); the row set
 itself is still computed before RUN answers. This is not demand-driven Bolt
 execution for every query. `memory.query` enforces conservative accounting rather than a
-hard RSS ceiling. Optional graph-scoped authorization and connected
-ontology/memory/index inspection are implemented. The durable Bolt server
+hard RSS ceiling. The [connected TUI](connected-status.md) shows ontology,
+query memory, indexes and a bounded neighborhood. The Bolt server
 uses the same executor and store.
 
 The CLI uses configured `memory.query` as a [conservative allocation guard](query-allocation-guards.md).

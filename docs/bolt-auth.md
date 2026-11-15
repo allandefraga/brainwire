@@ -2,13 +2,11 @@
 
 Python commands below use the environment from [Python setup](python-package.md).
 
-The beta can require random service tokens and graph-scoped read/write grants.
-This is not the planned human-password/Argon2 or JWT/JWKS authentication, field
-ACLs or online user management. TLS is configured separately. The credentials
-generated here have graph-wide visibility, including every stored tenant; they
-do not configure node ACL filtering. Existing trusted policies can restrict
-[node visibility](node-acl.md). Source-qualified IDs alone do not isolate tenants
-within a graph.
+Brainwire supports random service tokens and graph-scoped read/write grants.
+Configure [TLS](protected-transport.md) separately for shared connections.
+The generated credentials here can see every record in their granted graph.
+Use a policy with [node visibility rules](node-acl.md) if readers need
+separate access to records in that graph.
 
 ## Initialize an admin without a default password
 
@@ -140,9 +138,11 @@ online graph administration.
 
 ## Connection API contract
 
-Use a direct `bolt://host:port` Python connection. The server does not implement
-automatic routing discovery, TLS schemes, a Redis protocol or an HTTP
-query endpoint. Graph selection belongs to `driver.session(database="name")`;
+Use a direct Bolt connection. Use `bolt+s://host:port` with a certificate
+trusted by the client, or configure explicit private CA trust as shown in the
+[TLS guide](protected-transport.md#python-with-strict-certificate-checks).
+The server does not support automatic routing discovery. Graph selection belongs
+to `driver.session(database="name")`;
 Cypher statements do not choose another graph inside an active transaction.
 A transaction spans one named graph and is not a cross-graph atomic transaction.
 
@@ -158,7 +158,7 @@ arbitrary increments and external side effects are not automatically safe.
 | --- | --- | --- |
 | Python driver | `auth_from_env()`, explicit session database | Supported Cypher reads/writes/procedures and transactions |
 | Public import scripts | Same environment/file, `--database` | Bounded Customer or external application snapshot import/resume |
-| Native connected TUI | Same environment/file, `--graph` | Real ontology/index inspection; Memory also requires instance administration |
+| Native connected TUI | Same environment/file, `--graph` | Ontology, Indexes and a bounded Graph sample. Memory also requires instance administration. |
 | Native probe `live` | Same environment/file | Negotiation and login only |
 | Native probe `ready` | Same environment/file, configured default graph grant | Login plus a read query |
 | Offline CLI | Filesystem authority, local path/named store | Local administration/query/checkpoint; separate from network grants |
