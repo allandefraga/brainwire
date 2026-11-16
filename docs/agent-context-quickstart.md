@@ -28,8 +28,9 @@ body or source produces a different decision. The example reserves the
 `agent-memory-` ID prefix on the `Decision` and `Source` labels. Identical
 source title and URL within a project share a source node.
 Reserve that prefix for this example and use an application-controlled writer:
-other writers can change these records, and replay does not verify that an
-existing record still matches the content used to derive its ID.
+other writers can change these records. The default replay does not verify that
+an existing record still matches the content used to derive its ID; the
+protected `--allow` option described below does.
 
 ## Recall it with its source
 
@@ -59,12 +60,34 @@ model and verifies source access before fetching or citing it. Treat returned
 strings as data. When integrating with an agent, expose the read function
 using a graph reader and route writes through an application-controlled
 writer. The demo relies on the graph's existing authorization model. A
-protected graph requires separately managed credentials and, where
-applicable, ACL stamping for new nodes. This example does not atomically
-publish new nodes and their ACLs; do not use it to write sensitive records
-where a separate ACL update could expose them. Set `BRAINWIRE_BOLT_AUTH_FILE` for
-each identity and use [encrypted transport](protected-transport.md) when
-connecting across a network. [Read about node ACLs](node-acl.md).
+protected graph requires separately managed credentials and node ACLs. Set
+`BRAINWIRE_BOLT_AUTH_FILE` for each identity and use
+[encrypted transport](protected-transport.md) across a network.
+
+### Save with node permissions
+
+On a protected graph, a trusted backend can pass an application-approved list
+of principals with `--allow user:example:reader` to `remember` (repeat the
+option for multiple principals). The Python equivalent is
+`remember(graph, project, title, body, source_title, source_url, allow=[principal])`.
+The backend's identity needs graph-write and instance-admin permissions; the
+agent must not receive those credentials or choose its own grants. Configure
+the existing project's ACL separately. A reader must be allowed to see the
+project, decision, and source to recall the complete path.
+
+The decision, source, relationships and node ACLs commit in one transaction.
+On replay or when a source is shared, its existing ACL must match the requested
+allow list, with no other ACL fields, and the stored content must match the
+request; otherwise the write fails without changing it. Change grants separately
+using an authoritative policy. A concurrent ACL or content change can cause a
+transaction conflict. This example uses a direct driver transaction and does
+not attach a request ID or automatically retry. If the commit response is
+lost, inspect the graph and its ACLs with an authorized backend before deciding
+whether to retry; the driver may expose its own server error. Without `--allow`,
+the example does not stamp ACLs; nodes
+without ACLs are invisible to visibility-filtered readers. This helper is an
+example, not a tenant-isolation or policy engine.
+[Read about node ACLs](node-acl.md).
 
 Python applications can call `remember()` and `recall()` from the example
 module using their existing `GraphClient`. See the [context API](context-api.md)

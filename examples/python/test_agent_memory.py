@@ -19,6 +19,14 @@ class AgentMemoryTests(TestCase):
                     remember(graph, *values)
         graph.run_cypher.assert_not_called()
 
+    def test_invalid_allow_list_fails_before_opening_transaction(self):
+        graph = Mock()
+        for allow in ([], "reader", [None], [" "], ["á" * 129], ["reader"] * 5001):
+            with self.assertRaises(ValueError):
+                remember(graph, "project", "Title", "Body", "Source", "https://example.com", allow=allow)
+        graph.driver.session.assert_not_called()
+        graph.run_cypher.assert_not_called()
+
     def test_invalid_read_limits_fail_before_query(self):
         graph = Mock()
         for limit in (False, 0, 11, 1.5):

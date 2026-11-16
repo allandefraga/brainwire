@@ -29,6 +29,17 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-16: Protected agent memory
+
+- Added an opt-in example that saves a decision, source, relationships and
+  node ACLs atomically. Existing records require matching content and ACLs;
+  concurrent revocation or edits cause a transaction conflict.
+- Verified synthetic reads, replay, unauthorized writers, failed transactions,
+  conflicting changes, command-line use and recovery on a local beta.3 build.
+  Documented the trust boundary and the example's limitations.
+- Next: qualify production memory, recovery and multi-machine behavior before
+  making a stable-release claim.
+
 ## 2026-11-15: Agent-memory demo assets
 
 - Added a synthetic agent-memory GIF to the README and a muted video loop,

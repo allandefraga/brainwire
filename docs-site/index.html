@@ -15,7 +15,7 @@
 <div class="docs-layout">
   <aside class="sidebar">
     <a class="brand" href="#overview" aria-label="Brainwire documentation home"><img src="assets/brainwire-logo.svg" alt="Brainwire" width="500" height="128"></a>
-    <div class="edition"><span class="edition-label">Documentation</span><span>v0.24.0-beta.3 <!-- brainwire-release-version --></span></div>
+    <div class="edition"><span class="edition-label">Documentation</span><span>v0.24.0-beta.5 <!-- brainwire-release-version --></span></div>
     <nav class="section-nav" aria-label="Documentation sections">
       <span class="nav-label">GET STARTED</span>
       <a href="#overview">Introduction</a>
@@ -48,7 +48,7 @@
       <h1>An open-source graph database for connected data</h1>
       <p class="intro-copy">Build knowledge graphs, connect company data, and give AI agents context. Follow relationships with Cypher and explore the graph in your terminal.</p>
       <div class="actions"><a class="button primary" href="#start">Create a graph <span aria-hidden="true">→</span></a><a class="button secondary" href="#terminal">Explore the graph</a></div>
-      <p class="release-line"><span class="badge">Experimental beta</span> v0.24.0-beta.3 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
+      <p class="release-line"><span class="badge">Experimental beta</span> v0.24.0-beta.5 <!-- brainwire-release-version --> <span class="dot-separator" aria-hidden="true">·</span> <a href="#limits">Check the boundaries before a shared deployment</a></p>
       <figure class="hero-graph">
         <video class="hero-video" autoplay loop muted playsinline controls preload="metadata"
                poster="assets/brainwire-poster.png" width="1280" height="720"
@@ -73,7 +73,7 @@
 
     <section id="docker-quickstart" class="doc-section">
       <div class="section-head"><h2>Try one query in Docker</h2><p>The public image includes a small example schema. Create two nodes and see the relationship in the result.</p></div>
-      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="docker-query" aria-label="Copy Docker query">Copy</button></div><pre><code id="docker-query">BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.3 # brainwire-release-version
+      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="docker-query" aria-label="Copy Docker query">Copy</button></div><pre><code id="docker-query">BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.5 # brainwire-release-version
 docker run --rm --network none "$BRAINWIRE_IMAGE" cypher \
   --database /data/demo --ontology /opt/brainwire/example-schema.json \
   --query "CREATE (c:Customer {entity_id:'customer-1', name:'Ada'})-[r:IN_SEGMENT]-&gt;(s:Segment {entity_id:'segment-1', name:'beta'}) RETURN c.name AS customer, type(r) AS relationship, s.name AS segment"</code></pre></div>
@@ -100,9 +100,9 @@ brainwire cypher --database "$graph_dir/graph" \
     <section id="docker" class="doc-section">
       <h2>Start the Docker demo</h2>
       <p>You need Git and Docker with Compose. Public Brainwire images require no registry login. On macOS with Colima running, run <code>export DOCKER_CONTEXT=colima</code> before the Docker commands.</p>
-      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.24.0-beta.3 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+      <div class="code-block"><div class="code-header"><span>Terminal</span><button type="button" data-copy="start-code" aria-label="Copy Docker quickstart">Copy</button></div><pre><code id="start-code">git clone --branch v0.24.0-beta.5 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.3 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.5 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml \
   up --no-build --pull always --wait --wait-timeout 900</code></pre></div>
       <dl class="connection-details"><div><dt>Connection</dt><dd><code>bolt://127.0.0.1:7687</code></dd></div><div><dt>Graph</dt><dd><code>demo</code></dd></div><div><dt>Data</dt><dd>Persistent Docker volume</dd></div></dl>
@@ -212,6 +212,7 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
   recall --project project-release --limit 5</code></pre></div>
       <div class="result"><span>EXAMPLE CONNECTION</span><code>Release → Keep a rollback window → Release review</code></div>
       <p>The output includes the source URL recorded in the graph. Verify the source before citing it.</p>
+      <p>For protected graphs, a trusted backend can save the example's decision, source and node permissions in one transaction. Keep administrative credentials out of the agent.</p>
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-context-quickstart.md">Run the Docker demo and save a decision →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context API and provider configuration →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/agent-quickstart.md">Agent quickstart and reusable prompt →</a></p>
     </section>
 
@@ -255,7 +256,7 @@ docker compose -p brainwire-demo -f deploy/compose.demo.yaml down</code></pre></
       <div class="guide-columns"><div><h3>Get started</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/getting-started.md">Getting started</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/container.md">Docker and images</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-package.md">Python installation</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/application-pilot.md">Application pilot</a></div><div><h3>Build</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/python-client.md">Python writes and batches</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/local-cypher.md">Cypher reference</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/context-api.md">Context for agents</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/temporal-data.md">Events and timelines</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/sparse-analytics.md">Graph algorithms</a></div><div><h3>Operate</h3><a href="https://github.com/allandefraga/brainwire/blob/main/docs/serve.md">Server configuration</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/checkpoints.md">Backup and restore</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/orchestrators.md">Deployments</a><a href="https://github.com/allandefraga/brainwire/blob/main/docs/benchmarks/README.md">Performance evidence</a></div></div>
       <p class="next-link"><a href="https://github.com/allandefraga/brainwire/blob/main/docs/README.md">Browse the full documentation index →</a> <a href="https://github.com/allandefraga/brainwire/blob/main/docs/github-pages.md">Build the documentation locally →</a></p>
     </section>
-    <footer><span>Brainwire · v0.24.0-beta.3 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
+    <footer><span>Brainwire · v0.24.0-beta.5 documentation <!-- brainwire-release-version --></span><a href="https://github.com/allandefraga/brainwire/releases">Release notes <span aria-hidden="true">↗</span></a></footer>
   </main>
 </div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>

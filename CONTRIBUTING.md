@@ -44,7 +44,16 @@ For Python changes, install the [local client](docs/python-package.md) and run:
 ```sh
 python -m unittest discover -s examples/python -p 'test_*.py'
 python scripts/check_docs_links.py
-python scripts/check_docs_site.py
+```
+
+To validate the full documentation site, use Python 3.10 or newer and build
+the guides before checking their links:
+
+```sh
+python3 -m venv /tmp/brainwire-docs-env
+/tmp/brainwire-docs-env/bin/python -m pip install -r scripts/docs-site-requirements.txt
+/tmp/brainwire-docs-env/bin/python scripts/build_docs_site.py /tmp/brainwire-site
+/tmp/brainwire-docs-env/bin/python scripts/check_docs_site.py /tmp/brainwire-site
 ```
 
 Report skipped or unavailable checks. Benchmark results need a reproducible

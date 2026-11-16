@@ -28,8 +28,13 @@ def memory_key(*values):
     return PREFIX + hashlib.sha256(data).hexdigest()
 
 
-def remember(graph, project, title, body, source_title, source_url):
-    """Record immutable example content and its connections in one statement."""
+def remember(graph, project, title, body, source_title, source_url, *, allow=None):
+    """Record an example decision and its source.
+
+    A trusted graph writer with instance administration can pass a nonempty
+    allow list to publish both nodes and their ACLs atomically. Shared sources
+    and replays require matching content and ACLs; change grants separately.
+    """
     project = bounded_text(project, "project", PROJECT_BYTES)
     title = bounded_text(title, "title", TITLE_BYTES)
     body = bounded_text(body, "body", BODY_BYTES)
@@ -37,7 +42,7 @@ def remember(graph, project, title, body, source_title, source_url):
     source_url = bounded_text(source_url, "source URL", URL_BYTES)
     source = memory_key(project, source_title, source_url)
     decision = memory_key(project, title, body, source)
-    rows = graph.run_cypher(
+    query = (
         "MATCH (p:Project {entity_id: $project}) "
         "MERGE (d:Decision {entity_id: $decision}) "
         "ON CREATE SET d.title = $title, d.body = $body "
@@ -45,13 +50,53 @@ def remember(graph, project, title, body, source_title, source_url):
         "ON CREATE SET s.title = $source_title, s.url = $source_url "
         "MERGE (p)-[:HAS_DECISION]->(d) "
         "MERGE (d)-[:SUPPORTED_BY]->(s) "
-        "RETURN d.entity_id AS decision_id, s.entity_id AS source_id",
-        {"project": project, "decision": decision, "source": source, "title": title,
-         "body": body, "source_title": source_title, "source_url": source_url},
+        "RETURN d.entity_id AS decision_id, s.entity_id AS source_id"
     )
-    if not rows:
-        raise ValueError("project is unavailable; create it before recording a memory")
-    return rows[0]
+    params = {"project": project, "decision": decision, "source": source, "title": title,
+              "body": body, "source_title": source_title, "source_url": source_url}
+    missing_project = "project is unavailable; create it before recording a memory"
+    if allow is None:
+        rows = graph.run_cypher(query, params)
+        if not rows:
+            raise ValueError(missing_project)
+        return rows[0]
+
+    if not isinstance(allow, (list, tuple)) or not 1 <= len(allow) <= 5000:
+        raise ValueError("allow must contain 1 to 5000 principals")
+    principals = {bounded_text(principal, "principal", 256) for principal in allow}
+    refs = [{"label": "Decision", "entityId": decision}, {"label": "Source", "entityId": source}]
+    with graph.driver.session(database=graph.database) as session, session.begin_transaction() as tx:
+        existing = {}
+        for row in tx.run(
+            "CALL db.nodeAcls($refs) YIELD label, entityId, allow, deny, connectorIds, sourceTable, sources "
+            "RETURN label, entityId, allow, deny, connectorIds, sourceTable, sources",
+            refs=refs,
+        ).data():
+            if (set(row["allow"]) != principals or row["deny"] or row["connectorIds"]
+                    or row["sourceTable"] is not None or row["sources"]):
+                raise ValueError("existing decision or source has a different ACL")
+            existing[(row["label"], row["entityId"])] = row
+        rows = tx.run(
+            query + ", d.title = $title AND d.body = $body AND s.title = $source_title "
+            "AND s.url = $source_url AS content_matches",
+            params,
+        ).data()
+        if not rows:
+            raise ValueError(missing_project)
+        record = rows[0]
+        if record.pop("content_matches") is not True:
+            raise ValueError("existing decision or source has different content")
+        # Restamp the observed ACL to register conflicts with concurrent revocations.
+        grants = sorted(principals)
+        entries = [existing.get((ref["label"], ref["entityId"]), {**ref, "allow": grants})
+                   for ref in refs]
+        updated = tx.run(
+            "CALL db.setNodeAcls($rows) YIELD updated RETURN updated", rows=entries,
+        ).single(strict=True)["updated"]
+        if updated != len(refs):
+            raise ValueError("decision and source ACLs were not acknowledged")
+        tx.commit()
+        return record
 
 
 def _output_json(result):
@@ -102,6 +147,8 @@ def main(argv=None):
     write = subparsers.add_parser("remember", help="record a decision and source in an existing project")
     for argument in ("project", "title", "body", "source-title", "source-url"):
         write.add_argument(f"--{argument}", required=True)
+    write.add_argument("--allow", action="append", metavar="PRINCIPAL",
+                       help="stamp an ACL atomically (repeat for each principal; requires instance admin)")
     read = subparsers.add_parser("recall", help="read visible decisions and sources for a project")
     read.add_argument("--project", required=True)
     read.add_argument("--limit", type=int, default=5)
@@ -111,7 +158,8 @@ def main(argv=None):
         uri, config = bolt_connection_options(args.uri, args.tls_ca)
         with connect(uri, args.database, auth=auth_from_env(), connection_timeout=5, **config) as graph:
             if args.command == "remember":
-                result = remember(graph, args.project, args.title, args.body, args.source_title, args.source_url)
+                result = remember(graph, args.project, args.title, args.body, args.source_title, args.source_url,
+                                  allow=args.allow)
             else:
                 result = recall(graph, args.project, args.limit, max_bytes=args.max_bytes)
     except ValueError as error:
