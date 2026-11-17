@@ -1354,7 +1354,8 @@ fn node_ok_with_value(
             return Ok(false);
         }
     }
-    if !node.bound && ctx.visibility.is_some() && !graph::visible(ctx, id)? {
+    let visibility_checked = !node.bound && ctx.visibility.is_some();
+    if visibility_checked && !graph::visible(ctx, id)? {
         return Ok(false);
     }
     if let (Some(value), Some(cache)) = (value, ctx.cache) {
@@ -1363,7 +1364,11 @@ fn node_ok_with_value(
     for (name, expected) in &node.props {
         let _scope = ctx.budget.scope();
         let expected = eval(expected, row, ctx)?;
-        let actual = Val::from(graph::node_property(ctx, id, name)?);
+        let actual = Val::from(if visibility_checked {
+            graph::node_property_after_visibility(ctx, id, name)?
+        } else {
+            graph::node_property(ctx, id, name)?
+        });
         if val::equals(&actual, &expected) != Some(true) {
             return Ok(false);
         }
@@ -2467,6 +2472,78 @@ mod merge_budget_tests {
         cache_node_value(&cache, &budget, NodeId(2), &[9; 2048]).unwrap();
         assert!(cache.0.borrow().is_none());
         assert_eq!(budget.remaining(), remaining);
+    }
+
+    #[test]
+    fn property_predicates_recheck_acl_overlay_even_with_cached_node_bytes() {
+        use brainwire_core::{
+            acl::{NodeAcl, ReadVisibility},
+            schema::GraphMapping,
+        };
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Doc","properties":["title"]}],"edges":[]}"#,
+        )
+        .unwrap();
+        db.apply_ontology(&mapping).unwrap();
+        crate::execute(
+            &db,
+            "CREATE (:Doc {entity_id:'a',title:'A'})",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut txn = db.begin();
+        let catalog = db.catalog().unwrap().unwrap();
+        let id = store::find_by_entity_id(&txn, "a", None).unwrap()[0];
+        let raw = txn.get(Cf::Node, &id.0.to_be_bytes()).unwrap().unwrap();
+        let params = BTreeMap::new();
+        let vars = Vars::default();
+        let cache = NodeCache::default();
+        let budget = Budget::new(ExecutionLimits::default(), None);
+        let visibility = ReadVisibility {
+            principals: vec!["alice".into()],
+            ..Default::default()
+        };
+        let check = |txn: &Txn<'_>, bound| {
+            let context = Context {
+                txn,
+                catalog: &catalog,
+                params: &params,
+                budget: &budget,
+                visibility: Some(&visibility),
+                checkpoint_dir: None,
+                vars: &vars,
+                cache: Some(&cache),
+                param_vals: None,
+                partition: None,
+            };
+            let step = NodeStep {
+                slot: 0,
+                bound,
+                labels: vec!["Doc".into()],
+                props: vec![("title".into(), Expr::Literal(Value::Str("A".into())))],
+                access: Access::Scan,
+            };
+            node_ok_with_value(&context, &step, id, &[], Some(&raw))
+        };
+        store::set_node_acl(
+            &mut txn,
+            id,
+            &NodeAcl {
+                allow: vec!["alice".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(check(&txn, false).unwrap());
+        assert!(cache.0.borrow().is_some());
+        store::set_node_acl(&mut txn, id, &NodeAcl::default()).unwrap();
+        assert!(!check(&txn, false).unwrap());
+        assert!(matches!(check(&txn, true), Err(ExecError::Forbidden(_))));
     }
 
     #[test]

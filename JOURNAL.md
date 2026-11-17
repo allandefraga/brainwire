@@ -29,6 +29,20 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-17: Safer request-ledger creation
+
+- Initialize new request-ledger stores in a same-parent staging directory, then
+  publish without replacing an existing path. Preserve a published store if
+  reopening or the parent-directory sync fails. Linux and macOS only.
+- Avoid duplicate visibility checks while evaluating properties of an unbound
+  candidate already checked in the same query context. Covered ACL revocation,
+  bound variables, indexed lookups and unindexed scans with synthetic data.
+- Tested process termination across five creation boundaries, concurrent
+  creators, destination preservation, reopen and server graph discovery.
+  These tests do not establish power-loss guarantees.
+- Next: qualify recovery on Linux, investigate sustained memory pressure and
+  test distributed failover before making production-readiness claims.
+
 ## 2026-11-16: Protected agent memory
 
 - Added an opt-in example that saves a decision, source, relationships and

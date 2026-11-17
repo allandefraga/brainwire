@@ -201,6 +201,66 @@ fn acl_filters_scans_primary_keys_indexes_bound_variables_counts_and_both_edge_d
 }
 
 #[test]
+fn pattern_properties_keep_acl_checks_for_keys_indexes_scans_bound_nodes_and_neighbors() {
+    let (_dir, db) = setup();
+    for query in [
+        "MATCH (n:Doc {entity_id:'a',title:'A',term:'needle'}) RETURN n.entity_id,n.acl_allow",
+        "MATCH (n:Doc {title:'A',term:'needle'}) RETURN n.entity_id,n.ACL_Secret",
+        "MATCH (n:Doc {authority:0.2,term:'needle'}) RETURN n.entity_id,n.acl_allow",
+        "MATCH (n:Doc {authority:0.2}) RETURN n.entity_id,n.acl_allow",
+        "MATCH (n:Doc {entity_id:'a'}) MATCH (n:Doc {title:'A',term:'needle'}) RETURN n.entity_id,n.acl_allow",
+    ] {
+        assert_eq!(
+            restricted(&db, query).unwrap().rows,
+            vec![vec![string("a"), Out::Value(Value::Null)]],
+            "{query}",
+        );
+    }
+    for query in [
+        "MATCH (n:Doc {entity_id:'hidden',title:'Hidden'}) RETURN n.entity_id",
+        "MATCH (n:Doc {title:'Hidden',term:'needle'}) RETURN n.entity_id",
+        "MATCH (n:Doc {authority:99,term:'needle'}) RETURN n.entity_id",
+        "MATCH (n:Doc {authority:99}) RETURN n.entity_id",
+        "MATCH (n:Doc {entity_id:'missing',title:'Missing'}) RETURN n.entity_id",
+        "MATCH (n:Doc {title:'Denied'}) RETURN n.entity_id",
+        "MATCH (a:Doc {entity_id:'a'})-[:LINK]->(n:Doc {title:'Hidden'}) RETURN n.entity_id",
+        "MATCH (n:Doc {entity_id:'a',title:'wrong'}) RETURN n.entity_id",
+    ] {
+        assert!(restricted(&db, query).unwrap().rows.is_empty(), "{query}");
+    }
+}
+
+#[test]
+fn property_predicate_authorization_follows_each_transaction_snapshot() {
+    let (_dir, db) = setup();
+    let mut old = QueryTransaction::begin(&db)
+        .unwrap()
+        .with_read_visibility(policy())
+        .unwrap();
+    stamp(&db, "a", vec![], vec![]);
+    stamp(&db, "hidden", vec!["alice"], vec![]);
+    let visible_before = "MATCH (n:Doc {entity_id:'a',title:'A',term:'needle'}) RETURN n.entity_id";
+    let hidden_before =
+        "MATCH (n:Doc {entity_id:'hidden',title:'Hidden',term:'needle'}) RETURN n.entity_id";
+    for _ in 0..2 {
+        assert_eq!(
+            old.run(visible_before, &BTreeMap::new()).unwrap().rows,
+            vec![vec![string("a")]]
+        );
+        assert!(old
+            .run(hidden_before, &BTreeMap::new())
+            .unwrap()
+            .rows
+            .is_empty());
+    }
+    assert!(restricted(&db, visible_before).unwrap().rows.is_empty());
+    assert_eq!(
+        restricted(&db, hidden_before).unwrap().rows,
+        vec![vec![string("hidden")]]
+    );
+}
+
+#[test]
 fn private_acl_properties_are_stripped_from_scalar_and_whole_node_outputs_even_legacy() {
     let (_dir, db) = setup();
     // Simulate a pre-reservation legacy row without using today's rejected property writes.
@@ -262,6 +322,12 @@ fn private_acl_properties_are_stripped_from_scalar_and_whole_node_outputs_even_l
     .unwrap()
     .rows
     .is_empty());
+    for query in [
+        "MATCH (n:Doc {entity_id:'a',ACL_Secret:'secret-a'}) RETURN n.entity_id",
+        "MATCH (n:Doc {entity_id:'a'}) MATCH (n:Doc {acl_allow:['private-alice']}) RETURN n.entity_id",
+    ] {
+        assert!(restricted(&db, query).unwrap().rows.is_empty(), "{query}");
+    }
 }
 
 #[test]
@@ -447,6 +513,14 @@ fn authoritative_document_grants_override_allow_all_when_actual_document_id_is_p
         .run(
             "MATCH (n:Doc {entity_id:'document'}) RETURN n.entity_id",
             &BTreeMap::new()
+        )
+        .unwrap()
+        .rows
+        .is_empty());
+    assert!(tx
+        .run(
+            "MATCH (n:Doc {entity_id:'document',title:'Document',document_id:'source-document'}) RETURN n.title",
+            &BTreeMap::new(),
         )
         .unwrap()
         .rows

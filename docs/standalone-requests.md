@@ -24,6 +24,19 @@ activated or migrated by setting this flag. Reopening an experimental graph
 requires the flag again. Disabling it fails clearly instead of opening the
 volume as an ordinary graph.
 
+For new graphs on Linux and macOS, Brainwire initializes the request ledger in a hidden staging
+directory and publishes the graph only after the initial ledger metadata has
+been written. An interruption before publication can leave an unused
+`.brainwire-ledger-*` directory; it is ignored by graph discovery. Brainwire
+does not automatically remove these directories or regenerate missing ledger
+metadata in an existing graph. Inspect the directory and ensure no creation is
+running before an operator removes abandoned staging data. An error after
+publication may require reopening the completed graph rather than creating it
+again. Creating this format on other operating systems is refused. Existing
+incomplete graphs from older versions are not repaired automatically. The
+process-interruption tests include a kill before parent-directory sync, but do
+not inject an error from that sync or establish power-loss guarantees.
+
 The experimental format persists an additional RocksDB column family. Ordinary offline commands without the opt-in refuse it. With an explicit
 opt-in configuration, `brainwire db check` can inspect invariants; offline
 checkpoint/backup/restore and embedded-query commands still refuse it. Supported old-binary downgrade, upgrade from an existing graph, restore and

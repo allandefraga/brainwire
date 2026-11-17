@@ -124,6 +124,22 @@ pub(super) fn node_property(
     if ctx.visibility.is_some() && !visible(ctx, id)? {
         return Err(ExecError::Forbidden("node is not readable"));
     }
+    node_property_value(ctx, id, name)
+}
+
+/// Only for an unbound pattern candidate checked visible in this same context.
+pub(super) fn node_property_after_visibility(
+    ctx: &Context<'_, '_>,
+    id: NodeId,
+    name: &str,
+) -> Result<Value, ExecError> {
+    if acl_property(name) {
+        return Ok(Value::Null);
+    }
+    node_property_value(ctx, id, name)
+}
+
+fn node_property_value(ctx: &Context<'_, '_>, id: NodeId, name: &str) -> Result<Value, ExecError> {
     let column = node_type(ctx, id)?.column(name);
     if let Some(cache) = ctx.cache {
         if let Some((cached, bytes)) = cache.0.borrow().as_ref() {

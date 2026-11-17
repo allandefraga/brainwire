@@ -114,7 +114,8 @@ fn record(bytes: &[u8], state: LedgerState) -> Result<([u8; 32], u64), StoreErro
 
 impl Database {
     /// Opt-in storage format. The path must not exist; legacy activation is refused.
-    /// The experimental server mode uses this when creating new graphs.
+    /// The parent must exist. Only a complete store is published at the path.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[doc(hidden)]
     pub fn create_with_request_ledger(
         path: &Path,
@@ -126,19 +127,78 @@ impl Database {
                 "positive entry quota and at least one record required",
             ));
         }
-        std::fs::create_dir(path)?;
-        let mut db = Self::open_config(path, resources, true, true, false)?;
+        use rustix::fs::{renameat_with, RenameFlags, CWD};
+        use std::{fs, io};
+
+        if path.file_name().is_none() {
+            return Err(LedgerError::Invalid("a fresh database path is required"));
+        }
+        match fs::symlink_metadata(path) {
+            Ok(_) => {
+                return Err(
+                    io::Error::new(io::ErrorKind::AlreadyExists, "database path exists").into(),
+                );
+            }
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.into()),
+            Err(_) => {}
+        }
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let staging = tempfile::Builder::new()
+            .prefix(".brainwire-ledger-")
+            .tempdir_in(parent)?;
+        let db = Self::open_config(staging.path(), resources, true, true, false)?;
         let state = LedgerState {
             incarnation: *uuid::Uuid::new_v4().as_bytes(),
             limits,
         };
+        #[cfg(test)]
+        creation_boundary("before_header", state.incarnation);
         let mut batch = rocksdb::WriteBatch::default();
         batch.put_cf(db.cf(FAMILY)?, HEADER, encode_header(state, 0));
         let mut options = rocksdb::WriteOptions::default();
         options.set_sync(true);
         db.db.write_opt(batch, &options).map_err(StoreError::from)?;
-        db.request_ledger = Some(state);
-        Ok(db)
+        #[cfg(test)]
+        creation_boundary("after_header", state.incarnation);
+        drop(db);
+        fs::File::open(staging.path())?.sync_all()?;
+        #[cfg(test)]
+        creation_boundary("before_publish", state.incarnation);
+        renameat_with(CWD, staging.path(), CWD, path, RenameFlags::NOREPLACE)
+            .map_err(io::Error::from)?;
+        let _ = staging.keep();
+        #[cfg(test)]
+        creation_boundary("before_parent_sync", state.incarnation);
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                StoreError::Catalog(format!(
+                    "request-ledger database was published but parent directory sync failed; reopen required: {error}"
+                ))
+            })?;
+        #[cfg(test)]
+        creation_boundary("after_publish", state.incarnation);
+        Self::open_with_request_ledger(path, resources).map_err(|error| {
+            StoreError::Catalog(format!(
+                "request-ledger database was published but could not be reopened; reopen required: {error}"
+            ))
+            .into()
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[doc(hidden)]
+    pub fn create_with_request_ledger(
+        _path: &Path,
+        _resources: &Resources,
+        _limits: LedgerLimits,
+    ) -> Result<Self, LedgerError> {
+        Err(LedgerError::Invalid(
+            "request-ledger creation requires Linux or macOS",
+        ))
     }
 
     /// Opens only an already initialized opt-in store. Missing or corrupt
@@ -292,6 +352,29 @@ impl Database {
     }
 }
 
+#[cfg(test)]
+fn creation_boundary(phase: &str, incarnation: [u8; 16]) {
+    if std::env::var("BW_LEDGER_CREATE_TEST_PHASE").as_deref() != Ok(phase) {
+        return;
+    }
+    let ready = std::path::PathBuf::from(
+        std::env::var_os("BW_LEDGER_CREATE_TEST_READY").expect("owned ready path"),
+    );
+    let temporary = ready.with_extension("tmp");
+    std::fs::write(&temporary, incarnation).unwrap();
+    std::fs::rename(temporary, ready).unwrap();
+    let release = std::env::var_os("BW_LEDGER_CREATE_TEST_RELEASE");
+    loop {
+        if release
+            .as_ref()
+            .is_some_and(|path| Path::new(path).exists())
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// The exact staged mutation fingerprint, not a query-text or user payload hash.
 pub(crate) fn fingerprint<'a>(
     writes: impl Iterator<Item = (Cf, &'a [u8], Option<&'a [u8]>)>,
@@ -330,6 +413,318 @@ mod tests {
             max_entries: entries,
             max_bytes: entries * ENTRY_BYTES,
         }
+    }
+
+    #[test]
+    #[ignore = "subprocess helper for request-ledger creation tests"]
+    fn creation_writer() {
+        let path = std::path::PathBuf::from(
+            std::env::var_os("BW_LEDGER_CREATE_TEST_PATH").expect("owned test path"),
+        );
+        let result = Database::create_with_request_ledger(&path, &resources(), limits(4));
+        if let Some(output) = std::env::var_os("BW_LEDGER_CREATE_TEST_ERROR") {
+            std::fs::write(
+                output,
+                result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            )
+            .unwrap();
+        }
+        if let Some(output) = std::env::var_os("BW_LEDGER_CREATE_TEST_OUTCOME") {
+            let bytes = match result {
+                Ok(db) => {
+                    let mut bytes = vec![1];
+                    bytes.extend_from_slice(&db.request_ledger_incarnation().unwrap());
+                    bytes
+                }
+                Err(_) => vec![0],
+            };
+            std::fs::write(output, bytes).unwrap();
+        } else {
+            result.unwrap();
+            panic!("creation did not stop at the selected boundary");
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    struct CreationChild(std::process::Child);
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    impl Drop for CreationChild {
+        fn drop(&mut self) {
+            if self.0.try_wait().ok().flatten().is_none() {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn creation_command(path: &Path, phase: &str, ready: &Path) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "db::request_ledger::tests::creation_writer",
+                "--ignored",
+            ])
+            .env("BW_LEDGER_CREATE_TEST_PATH", path)
+            .env("BW_LEDGER_CREATE_TEST_PHASE", phase)
+            .env("BW_LEDGER_CREATE_TEST_READY", ready)
+            .env_remove("BW_LEDGER_CREATE_TEST_RELEASE")
+            .env_remove("BW_LEDGER_CREATE_TEST_OUTCOME")
+            .env_remove("BW_LEDGER_CREATE_TEST_ERROR")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn await_creation(child: &mut CreationChild, ready: &Path) -> [u8; 16] {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !ready.exists() && Instant::now() < deadline {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                panic!("creation helper exited before its boundary: {status}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !ready.exists() {
+            child.0.kill().unwrap();
+            child.0.wait().unwrap();
+            panic!("creation helper did not reach its boundary");
+        }
+        std::fs::read(ready).unwrap().try_into().unwrap()
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn await_success(child: &mut CreationChild) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert!(status.success());
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "creator did not finish after release"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn creation_process_kill_publishes_a_complete_store_or_no_destination() {
+        use std::os::unix::process::ExitStatusExt;
+
+        for phase in [
+            "before_header",
+            "after_header",
+            "before_publish",
+            "before_parent_sync",
+            "after_publish",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("graph");
+            let ready = root.path().join("ready");
+            let mut child = CreationChild(creation_command(&path, phase, &ready).spawn().unwrap());
+            let original = await_creation(&mut child, &ready);
+            child.0.kill().unwrap();
+            assert_eq!(child.0.wait().unwrap().signal(), Some(9), "real SIGKILL");
+            let db = if matches!(phase, "before_parent_sync" | "after_publish") {
+                let db = Database::open_with_request_ledger(&path, &resources()).unwrap();
+                assert_eq!(db.request_ledger_incarnation(), Some(original));
+                db
+            } else {
+                assert!(
+                    !path.exists(),
+                    "partial initialization reached the final path"
+                );
+                let abandoned: Vec<_> = std::fs::read_dir(root.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap())
+                    .filter(|entry| entry.file_type().unwrap().is_dir())
+                    .collect();
+                assert_eq!(abandoned.len(), 1);
+                assert!(abandoned[0]
+                    .file_name()
+                    .to_str()
+                    .unwrap()
+                    .starts_with(".brainwire-ledger-"));
+                let db =
+                    Database::create_with_request_ledger(&path, &resources(), limits(4)).unwrap();
+                assert_ne!(db.request_ledger_incarnation(), Some(original));
+                db
+            };
+            let mut tx = db.begin();
+            tx.put(Cf::Node, b"created".to_vec(), b"value".to_vec());
+            let committed = tx.commit_identified("principal", "created").unwrap();
+            let identity = db.request_ledger_incarnation().unwrap();
+            assert_eq!(committed.incarnation, identity);
+            drop(db);
+            let db = Database::open_with_request_ledger(&path, &resources()).unwrap();
+            assert_eq!(db.request_ledger_incarnation(), Some(identity));
+            assert_eq!(
+                db.request_receipt("principal", "created").unwrap(),
+                Some(committed)
+            );
+            assert_eq!(
+                db.begin().get(Cf::Node, b"created").unwrap(),
+                Some(b"value".to_vec())
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn concurrent_creators_publish_exactly_one_store_without_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("graph");
+        let release = root.path().join("release");
+        let mut children = Vec::new();
+        let mut identities = Vec::new();
+        for index in 0..2 {
+            let ready = root.path().join(format!("ready-{index}"));
+            let output = root.path().join(format!("outcome-{index}"));
+            let mut child = CreationChild(
+                creation_command(&path, "before_publish", &ready)
+                    .env("BW_LEDGER_CREATE_TEST_RELEASE", &release)
+                    .env("BW_LEDGER_CREATE_TEST_OUTCOME", &output)
+                    .spawn()
+                    .unwrap(),
+            );
+            identities.push(await_creation(&mut child, &ready));
+            children.push((child, output));
+        }
+        assert!(!path.exists());
+        std::fs::write(release, b"release").unwrap();
+        let outcomes: Vec<_> = children
+            .into_iter()
+            .map(|(mut child, output)| {
+                await_success(&mut child);
+                std::fs::read(output).unwrap()
+            })
+            .collect();
+        let winners: Vec<_> = outcomes.iter().filter(|bytes| bytes[0] == 1).collect();
+        assert_eq!(winners.len(), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|bytes| bytes.as_slice() == [0])
+                .count(),
+            1
+        );
+        let winner: [u8; 16] = winners[0][1..].try_into().unwrap();
+        assert!(identities.contains(&winner));
+        let db = Database::open_with_request_ledger(&path, &resources()).unwrap();
+        assert_eq!(db.request_ledger_incarnation(), Some(winner));
+        assert!(db.begin().commit_identified("principal", "first").is_ok());
+        assert!(
+            !std::fs::read_dir(root.path()).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_str()
+                    .unwrap()
+                    .starts_with(".brainwire-ledger-")
+            }),
+            "the losing creator left its staging directory"
+        );
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn creation_preserves_existing_paths_and_requires_an_existing_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let res = resources();
+        for name in ["file", "empty", "data", "symlink", "dangling"] {
+            let path = root.path().join(name);
+            match name {
+                "file" => std::fs::write(&path, b"keep").unwrap(),
+                "empty" => std::fs::create_dir(&path).unwrap(),
+                "data" => {
+                    let db = Database::create_with_request_ledger(&path, &res, limits(4)).unwrap();
+                    db.begin().commit_identified("principal", "keep").unwrap();
+                }
+                "symlink" => symlink(root.path().join("data"), &path).unwrap(),
+                _ => symlink(root.path().join("absent"), &path).unwrap(),
+            }
+            assert!(Database::create_with_request_ledger(&path, &res, limits(4)).is_err());
+            assert!(std::fs::symlink_metadata(&path).is_ok());
+        }
+        assert_eq!(std::fs::read(root.path().join("file")).unwrap(), b"keep");
+        assert_eq!(
+            std::fs::read_link(root.path().join("symlink")).unwrap(),
+            root.path().join("data")
+        );
+        assert_eq!(
+            std::fs::read_link(root.path().join("dangling")).unwrap(),
+            root.path().join("absent")
+        );
+        assert_eq!(
+            std::fs::read_dir(root.path().join("empty"))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert!(
+            Database::open_with_request_ledger(&root.path().join("data"), &res)
+                .unwrap()
+                .request_receipt("principal", "keep")
+                .unwrap()
+                .is_some()
+        );
+        assert!(Database::create_with_request_ledger(
+            &root.path().join("missing/graph"),
+            &res,
+            limits(4)
+        )
+        .is_err());
+        assert!(!root.path().join("missing").exists());
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn reopen_failure_after_publication_preserves_the_complete_store() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("graph");
+        let ready = root.path().join("ready");
+        let release = root.path().join("release");
+        let outcome = root.path().join("outcome");
+        let error = root.path().join("error");
+        let mut child = CreationChild(
+            creation_command(&path, "after_publish", &ready)
+                .env("BW_LEDGER_CREATE_TEST_RELEASE", &release)
+                .env("BW_LEDGER_CREATE_TEST_OUTCOME", &outcome)
+                .env("BW_LEDGER_CREATE_TEST_ERROR", &error)
+                .spawn()
+                .unwrap(),
+        );
+        let incarnation = await_creation(&mut child, &ready);
+        let db = Database::open_with_request_ledger(&path, &resources()).unwrap();
+        assert_eq!(db.request_ledger_incarnation(), Some(incarnation));
+        std::fs::write(release, b"release").unwrap();
+        await_success(&mut child);
+        assert_eq!(std::fs::read(outcome).unwrap(), [0]);
+        assert!(std::fs::read_to_string(error)
+            .unwrap()
+            .contains("was published but could not be reopened; reopen required"));
+        assert!(db
+            .begin()
+            .commit_identified("principal", "survived")
+            .is_ok());
+        drop(db);
+        let db = Database::open_with_request_ledger(&path, &resources()).unwrap();
+        assert_eq!(db.request_ledger_incarnation(), Some(incarnation));
+        assert!(db
+            .request_receipt("principal", "survived")
+            .unwrap()
+            .is_some());
     }
 
     #[test]

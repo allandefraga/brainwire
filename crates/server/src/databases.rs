@@ -333,6 +333,29 @@ mod tests {
         assert!(!dir.path().join("escape").exists());
     }
 
+    #[test]
+    fn interrupted_ledger_staging_does_not_block_database_discovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = config(&dir.path().join("data"));
+        config.server.request_ledger = true;
+        config.server.auth_file = Some(dir.path().join("synthetic-policy.json"));
+        let staging = config.server.data_dir.join(".brainwire-ledger-orphan");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("CURRENT"), "incomplete manifest\n").unwrap();
+
+        let registry = Databases::open_all(&config).unwrap();
+        assert_eq!(registry.names(), vec!["default"]);
+        assert!(registry.get("default").is_some());
+        drop(registry);
+
+        let reopened = Databases::open_all(&config).unwrap();
+        assert_eq!(reopened.names(), vec!["default"]);
+        assert_eq!(
+            std::fs::read(staging.join("CURRENT")).unwrap(),
+            b"incomplete manifest\n"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn refuses_symlinked_database_directory() {
