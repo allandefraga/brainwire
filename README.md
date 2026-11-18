@@ -22,7 +22,7 @@ Brainwire is an open source graph database built in Rust on RocksDB. Model
 relationships between records, such as a project and the decisions behind it.
 Run Cypher against a local graph or connect an application over Bolt.
 
-> **v0.24.0-beta.6 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
+> **v0.25.0-beta.1 · experimental beta.** <!-- brainwire-release-version --> Use rebuildable data and a tested backup. [Current limits](#current-limits)
 
 <p align="center"><img src="assets/launch/brainwire-agent-memory.gif" alt="An agent recalls the decision Retry failed requests together with its source, the Release meeting. Brainwire's terminal workspace then shows the query memory reservations and the project's HAS_DECISION relationships." width="960"></p>
 
@@ -44,7 +44,7 @@ The public image includes a small example schema. Run a Cypher query that
 creates two nodes and returns the relationship it created between them.
 
 ```sh
-BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.6 # brainwire-release-version
+BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.25.0-beta.1 # brainwire-release-version
 docker run --rm --network none "$BRAINWIRE_IMAGE" cypher \
   --database /data/demo --ontology /opt/brainwire/example-schema.json \
   --query "CREATE (c:Customer {entity_id:'customer-1', name:'Ada'})-[r:IN_SEGMENT]->(s:Segment {entity_id:'segment-1', name:'beta'}) RETURN c.name AS customer, type(r) AS relationship, s.name AS segment"
@@ -80,9 +80,9 @@ Use Git and Docker with Compose. On macOS, Colima can run the Docker engine.
 With Colima running, run `export DOCKER_CONTEXT=colima` first.
 
 ```sh
-git clone --branch v0.24.0-beta.6 https://github.com/allandefraga/brainwire.git # brainwire-release-version
+git clone --branch v0.25.0-beta.1 https://github.com/allandefraga/brainwire.git # brainwire-release-version
 cd brainwire
-export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.24.0-beta.6 # brainwire-release-version
+export BRAINWIRE_IMAGE=ghcr.io/allandefraga/brainwire:v0.25.0-beta.1 # brainwire-release-version
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml up --no-build --pull always --wait --wait-timeout 900
 ```
 
@@ -166,6 +166,12 @@ An application can retrieve a project's decisions alongside their sources,
 or request a bounded view of connected records. A trusted writer can also save
 the example's decision, source and node permissions together in one transaction.
 [Agent context guide](https://allandefraga.github.io/brainwire/guides/agent-context-quickstart.html) · [Context API](https://allandefraga.github.io/brainwire/guides/context-api.html)
+
+For MCP clients, the optional Python adapter exposes bounded, read-only node,
+neighbor and evidence tools for one operator-configured graph. It uses a reader's
+existing permissions. [Connect an agent with MCP](https://allandefraga.github.io/brainwire/guides/agent-mcp.html).
+The decision example also supports cursor-based recall when a project has more
+memories than fit in one response.
 
 ## Bring your data
 

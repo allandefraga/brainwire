@@ -42,7 +42,7 @@ storage fit together.
 | Event timeline | Model events and query their connections in order. [Temporal data](temporal-data.md) |
 | Semantic metrics | Define a named, read-only calculation over a node type. [Semantic metrics example](semantic-metrics.md) |
 | Code exploration | Explore links across code symbols and files. [Code graph](code-graph.md) |
-| Agent context | Retrieve connected records and their sources for an agent. [Agent quickstart](agent-quickstart.md) · [Context and reranking](context-api.md) |
+| Agent context | Retrieve connected records and their sources for an agent. [Agent quickstart](agent-quickstart.md) · [MCP adapter](agent-mcp.md) · [MCP em português](agent-mcp.pt-BR.md) · [Context and reranking](context-api.md) |
 
 ## Operate and evaluate
 

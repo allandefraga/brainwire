@@ -1,5 +1,6 @@
 """Run the synthetic company-brain example against an owned temporary server."""
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,7 @@ from neo4j.exceptions import Neo4jError
 
 from brainwire import connect
 from examples.company_brain.demo import read_context, seed
-from examples.python.agent_memory import recall, remember
+from examples.python.agent_memory import PREFIX, recall, recall_page, remember
 from examples.python.create_service_tokens import create
 
 
@@ -49,6 +50,30 @@ def verify_memory(graph):
     graph.run_cypher("CREATE (:Project {entity_id: 'project-other'})")
     assert recall(graph, "project-other")["records"] == []
     assert graph.run_cypher("MATCH (n:Decision) RETURN count(n) AS count")[0]["count"] == 4
+    expected = recall(graph, "project-release", limit=10)["records"]
+    decision = min(row["decision_id"] for row in expected)
+    source = PREFIX + "0" * 64
+    assert all(row["source_id"] != source for row in expected)
+    graph.run_cypher(
+        "MATCH (d:Decision {entity_id:$decision}) "
+        "CREATE (s:Source {entity_id:$source,title:'Temporary source',url:'https://example.invalid/deleted'}) "
+        "CREATE (d)-[:SUPPORTED_BY]->(s)", {"decision": decision, "source": source})
+    page = recall_page(graph, "project-release", limit=1)
+    assert page["records"][0]["source_id"] == source and page["next_cursor"]
+    following = recall_page(graph, "project-release", limit=1, after=page["next_cursor"])
+    assert following["records"][0]["decision_id"] == decision
+    assert following["records"][0]["source_id"] != source
+    graph.run_cypher("MATCH (s:Source {entity_id:$source}) DETACH DELETE s", {"source": source})
+    rows, cursor = [], page["next_cursor"]
+    for _ in range(20):
+        following = recall_page(graph, "project-release", limit=1, after=cursor)
+        rows.extend(following["records"])
+        cursor = following["next_cursor"]
+        if cursor is None:
+            break
+    else:
+        raise AssertionError("memory pagination did not terminate")
+    assert rows == expected, "a deleted-source cursor skipped or repeated visible pairs"
     return first, second
 
 
@@ -145,7 +170,49 @@ def verify_memory_acl_failure(graph, record):
     graph.set_node_acl("Source", source_id, {"allow": ["reader"]})
 
 
-def run(binary):
+async def verify_mcp(uri, auth, writer_auth, first, third, *, installed=False):
+    """Exercise actual stdio tools with a visibility-filtered Bolt reader."""
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "brainwire.mcp_server", "--uri", uri, "--database", "company_demo",
+              "--auth-file", str(auth / "reader.json")],
+        cwd=tempfile.gettempdir() if installed else str(ROOT),
+        env={} if installed else {"PYTHONPATH": str(ROOT)},
+    )
+    with tempfile.TemporaryFile(mode="w+t") as errors:
+        async with stdio_client(params, errlog=errors) as (read, write):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                tools = await client.list_tools()
+                assert {tool.name for tool in tools.tools} == {
+                    "brainwire_nodes", "brainwire_neighbors", "brainwire_evidence"
+                }
+                async def visible_sources():
+                    result = await client.call_tool("brainwire_nodes", {
+                        "label": "Source", "entity_ids": [first["source_id"], third["source_id"]],
+                        "properties": ["title"],
+                    })
+                    assert not result.is_error
+                    payload = json.loads(result.content[0].text)
+                    assert payload["ok"]
+                    return {record["entity_id"] for record in payload["context"]["records"]}
+
+                assert await visible_sources() == {first["source_id"]}
+                with connect(uri, "company_demo", auth=writer_auth) as writer:
+                    writer.set_node_acl("Source", first["source_id"], {"allow": []})
+                    try:
+                        assert await visible_sources() == set(), "revoked source remained visible"
+                    finally:
+                        writer.set_node_acl("Source", first["source_id"], {"allow": ["reader"]})
+                assert await visible_sources() == {first["source_id"]}
+        errors.seek(0)
+        assert json.loads((auth / "reader.json").read_text())["credentials"] not in errors.read()
+
+
+def run(binary, *, mcp=False, mcp_installed=False):
     with tempfile.TemporaryDirectory(prefix="brainwire-company-demo-") as temporary:
         root = Path(temporary)
         auth = create(root / "auth", "company_demo", acl_writer=True)
@@ -228,12 +295,22 @@ limit = "2GiB"
                     }, "a decision with hidden evidence was returned"
                     assert "https://example.com/private" not in json.dumps(result)
                     assert not result["truncated"], "hidden evidence affected the visible result count"
+                    page = recall_page(graph, "project-release", limit=1)
+                    assert page["truncated"] and page["next_cursor"]
+                    next_page = recall_page(graph, "project-release", limit=1, after=page["next_cursor"])
+                    assert not next_page["truncated"] and next_page["next_cursor"] is None
+                    assert {row["decision_id"] for row in page["records"] + next_page["records"]} == {
+                        first["decision_id"], second["decision_id"]
+                    }
                     try:
                         remember(graph, "project-release", "Forbidden", "Test", "Notes", "https://example.com")
                     except Neo4jError as error:
                         assert error.code == "Neo.ClientError.Security.Forbidden"
                     else:
                         raise AssertionError("read-only principal could record a memory")
+                if mcp:
+                    asyncio.run(verify_mcp(uri, auth, credentials("writer"), first, third,
+                                           installed=mcp_installed))
                 cli = subprocess.run(
                     [sys.executable, "-m", "examples.company_brain.demo", "--seed",
                      "--uri", f"bolt://127.0.0.1:{port}", "--database", "company_demo"],
@@ -287,4 +364,9 @@ limit = "2GiB"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=ROOT / "target/debug/brainwire")
-    run(parser.parse_args().binary.resolve())
+    parser.add_argument("--mcp", action="store_true", help="exercise optional MCP stdio and ACL checks")
+    parser.add_argument("--mcp-installed", action="store_true", help="start MCP outside the checkout")
+    args = parser.parse_args()
+    if args.mcp_installed and not args.mcp:
+        parser.error("--mcp-installed requires --mcp")
+    run(args.binary.resolve(), mcp=args.mcp, mcp_installed=args.mcp_installed)

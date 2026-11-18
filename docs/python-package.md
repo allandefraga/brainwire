@@ -46,6 +46,7 @@ The helper uses the Python Bolt driver; it is a synchronous client.
 
 - [Write, patch, remove and stream records](python-client.md).
 - [Read bounded context and rerank candidates for agents](context-api.md).
+- [Connect an MCP client using read-only tools](agent-mcp.md).
 - [Build a graph from Python code](code-graph.md).
 - [Import application data](source-ingestion.md).
 

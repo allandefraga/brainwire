@@ -4,12 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brainwire"
-version = "0.24.0b6"
+version = "0.25.0b1"
 description = "Bounded Python graph mutations for Brainwire over Bolt"
 readme = "docs/python-package.md"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
 dependencies = ["neo4j>=5.28,<7"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.3,<3"]
+
+[project.scripts]
+brainwire-mcp = "brainwire.mcp_server:main"
 
 [project.urls]
 Repository = "https://github.com/allandefraga/brainwire"

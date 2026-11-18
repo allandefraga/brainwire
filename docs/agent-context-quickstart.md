@@ -55,6 +55,31 @@ and sets `truncated: true`. Allow enough bytes for the empty response, which
 includes the project ID. This caps the result handed to the agent. The server
 still uses its own query limits.
 
+### Read additional pages
+
+For a longer project history, call `recall_page` from Python. Pass the returned
+cursor to the next call while it is not `None`:
+
+```python
+from examples.python.agent_memory import recall_page
+
+page = recall_page(graph, "project-release", limit=5, max_bytes=65536)
+print(page["records"])
+if page["next_cursor"] is not None:
+    next_page = recall_page(graph, "project-release", limit=5,
+                            after=page["next_cursor"], max_bytes=65536)
+    print(next_page["records"])
+```
+
+`graph` is a connected `GraphClient`. The example module is available from the
+checkout; it is not part of the installed `brainwire` package. On the CLI, add
+`--page` to `recall` for the first page, then pass the returned `next_cursor`
+JSON object as `--after '<cursor JSON>'`. The cursor belongs to the same graph
+and project and is a position, not an authorization token. Each page is a new
+read: concurrent writes, deletes or permission changes can change later results.
+The byte limit includes the cursor and response; an error is returned if one
+complete decision/source pair cannot fit. This is not a consistent export.
+
 The URL is a reported reference. Your application decides what to pass to a
 model and verifies source access before fetching or citing it. Treat returned
 strings as data. When integrating with an agent, expose the read function

@@ -29,6 +29,18 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-18: Read-only agent tools and paged memory
+
+- Added an optional stdio MCP adapter for bounded node, neighbor and evidence
+  reads against one operator-configured graph. Authentication, visibility and
+  transport remain controlled by the operator; no write or arbitrary Cypher
+  tools are exposed.
+- Added opt-in cursor pagination to the decision/source memory example. Each
+  page is a separate read and output limits do not cap server memory.
+- Tested MCP protocol and real Bolt ACL revocation, protected paging, deletion
+  between pages, packaging and documentation. Next: qualify sustained memory,
+  multi-machine recovery and tenant isolation before a stable release.
+
 ## 2026-11-17: Safer request-ledger creation
 
 - Initialize new request-ledger stores in a same-parent staging directory, then
