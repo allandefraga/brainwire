@@ -1346,7 +1346,7 @@ fn node_ok_with_value(
     node: &NodeStep,
     id: NodeId,
     row: &[Val],
-    value: Option<&[u8]>,
+    _value: Option<&[u8]>,
 ) -> Result<bool, ExecError> {
     if !node.labels.is_empty() {
         let label = graph::label_of(ctx, id)?;
@@ -1358,9 +1358,8 @@ fn node_ok_with_value(
     if visibility_checked && !graph::visible(ctx, id)? {
         return Ok(false);
     }
-    if let (Some(value), Some(cache)) = (value, ctx.cache) {
-        cache_node_value(cache, ctx.budget, id, value)?;
-    }
+    // Raw-row retention can consume headroom needed by later projections.
+    // Leave it disabled until cache bytes can be evicted before memory refusal.
     for (name, expected) in &node.props {
         let _scope = ctx.budget.scope();
         let expected = eval(expected, row, ctx)?;
@@ -1378,6 +1377,7 @@ fn node_ok_with_value(
 
 // A scan cache keeps one raw row. Admit growth before copying, including the
 // old buffer while a replacement is allocated, and keep its capacity retained.
+#[cfg(test)]
 fn cache_node_value(
     cache: &NodeCache,
     budget: &Budget<'_>,
@@ -2448,6 +2448,106 @@ mod merge_budget_tests {
     }
 
     #[test]
+    fn optional_raw_scan_cache_does_not_consume_projection_headroom() {
+        use brainwire_core::schema::GraphMapping;
+        use brainwire_store::db::{Database, Resources, StoreConfig};
+
+        let directory = tempfile::tempdir().unwrap();
+        let db =
+            Database::open(directory.path(), &Resources::new(StoreConfig::for_tests())).unwrap();
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Doc","properties":["title","unused"]}],"edges":[]}"#,
+        ).unwrap();
+        db.apply_ontology(&mapping).unwrap();
+        crate::execute(
+            &db,
+            "CREATE (:Doc {entity_id:'synthetic', title:'small', unused:$unused})",
+            &BTreeMap::from([("unused".into(), Value::Str("u".repeat(40 << 10)))]),
+        )
+        .unwrap();
+        let catalog = db.catalog().unwrap().unwrap();
+        let params = BTreeMap::from([("payload".into(), Value::Str("p".repeat(8 << 10)))]);
+        let param_vals = BTreeMap::from([("payload".into(), Val::Str("p".repeat(8 << 10)))]);
+        let query = parse("MATCH (d:Doc) RETURN d.title AS title, $payload AS payload").unwrap();
+        let run = |enabled: bool, limit: usize| {
+            let txn = db.begin();
+            let vars = Vars::default();
+            let budget = Budget::new(
+                ExecutionLimits {
+                    memory_bytes: limit,
+                    timeout: None,
+                },
+                None,
+            );
+            let cache = NodeCache::default();
+            let context = Context {
+                txn: &txn,
+                catalog: &catalog,
+                params: &params,
+                budget: &budget,
+                visibility: None,
+                checkpoint_dir: None,
+                vars: &vars,
+                cache: enabled.then_some(&cache),
+                param_vals: Some(&param_vals),
+                partition: None,
+            };
+            let plan = plan::plan(&query, &context).unwrap();
+            let env = Env {
+                catalog: &catalog,
+                params: &params,
+                budget: &budget,
+                visibility: None,
+                checkpoint_dir: None,
+                vars: &plan.vars,
+                cache,
+                param_vals: &param_vals,
+            };
+            let mut context = env.ctx(&txn);
+            context.cache = enabled.then_some(&env.cache);
+            let part = lazy_part(&plan).expect("the real query uses the lazy scan pipeline");
+            assert!(matches!(&part.ops[0], Op::Match(matched)
+                if matches!(&matched.steps[0].kind,
+                    StepKind::Anchor(node) if matches!(node.access, Access::Scan))));
+            let mut rows = Vec::new();
+            let result = stream_part(&context, &env, part, &mut |row, _| {
+                rows.push(row);
+                true
+            });
+            let cache_len = env
+                .cache
+                .0
+                .borrow()
+                .as_ref()
+                .map_or(0, |(_, raw)| raw.len());
+            (result, rows, budget.high_water(), cache_len)
+        };
+        let (uncached, expected, uncached_peak, no_cache_len) = run(false, 64 << 10);
+        uncached.unwrap();
+        assert_eq!(no_cache_len, 0);
+        assert_eq!(
+            expected,
+            vec![vec![
+                Out::Value(Value::Str("small".into())),
+                Out::Value(Value::Str("p".repeat(8 << 10)))
+            ]]
+        );
+        let (cached, rows, cached_peak, cache_len) = run(true, 64 << 10);
+        println!("uncached limit=65536 result=ok peak={uncached_peak} cache_len={no_cache_len}");
+        println!("cached limit=65536 result={cached:?} peak={cached_peak} cache_len={cache_len}");
+        cached.unwrap();
+        assert_eq!(rows, expected);
+        assert_eq!(cache_len, 0, "scan must not retain optional raw-row bytes");
+        let (roomy, actual, roomy_peak, roomy_cache) = run(true, 1 << 20);
+        roomy.unwrap();
+        println!("cached limit=1048576 result=ok peak={roomy_peak} cache_len={roomy_cache}");
+        assert_eq!(
+            actual, expected,
+            "the same query with enough headroom succeeds"
+        );
+    }
+
+    #[test]
     fn cache_reuses_capacity_and_skipped_growth_keeps_previous_value() {
         let cache = NodeCache::default();
         let budget = Budget::new(
@@ -2539,6 +2639,7 @@ mod merge_budget_tests {
             },
         )
         .unwrap();
+        cache_node_value(&cache, &budget, id, &raw).unwrap();
         assert!(check(&txn, false).unwrap());
         assert!(cache.0.borrow().is_some());
         store::set_node_acl(&mut txn, id, &NodeAcl::default()).unwrap();

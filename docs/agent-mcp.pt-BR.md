@@ -49,8 +49,21 @@ confiável.
 | Ferramenta | O que faz |
 | --- | --- |
 | `brainwire_nodes` | Lê nós visíveis por label e IDs explícitos. |
+| `brainwire_search_text` | Filtra até 100 IDs explícitos por um trecho de texto em um campo, sem diferenciar maiúsculas. |
 | `brainwire_neighbors` | Lê vizinhos visíveis por um tipo de relação explícito. |
 | `brainwire_evidence` | Lê registros visíveis e campos de fonte indicados na consulta. |
+
+Por exemplo, chame `brainwire_search_text` com estes argumentos para encontrar
+uma decisão conhecida cujo título contenha "retry":
+
+```json
+{"label":"Decision","text":"retry","field":"title","entity_ids":["decision-retry"],"properties":["title"]}
+```
+
+A busca usa as mesmas permissões do leitor e limites de contexto das outras
+ferramentas. Ela só retorna correspondências dos IDs informados, mas o plano da
+consulta pode percorrer mais registros. Não ordena por relevância e não usa
+índice full-text.
 
 O adaptador não oferece Cypher arbitrário, escrita, administração, busca vetorial
 nativa ou chamadas automáticas a modelos. Por padrão, retorna até 20 registros e

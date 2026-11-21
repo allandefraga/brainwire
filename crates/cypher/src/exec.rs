@@ -330,9 +330,10 @@ impl QueryAccess {
                     }
                 }
                 Clause::Call { name, .. } => match name.as_str() {
-                    "db.schema" | "db.indexes" | "db.commitState" | "graph.project"
-                    | "graph.degree" | "graph.reachable" | "graph.shortestPath"
-                    | "graph.pagerank" | "graph.wcc" | "graph.scc" | "knowledge.rank" => {}
+                    "db.schema" | "db.indexes" | "db.showIndexes" | "db.commitState"
+                    | "graph.project" | "graph.degree" | "graph.reachable"
+                    | "graph.shortestPath" | "graph.pagerank" | "graph.wcc" | "graph.scc"
+                    | "knowledge.rank" => {}
                     "db.setNodeAcl" | "db.setNodeAcls" => {
                         if !self.write || !self.instance_admin {
                             return Err(ExecError::Forbidden(

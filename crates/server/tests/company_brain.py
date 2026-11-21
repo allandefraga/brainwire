@@ -188,7 +188,7 @@ async def verify_mcp(uri, auth, writer_auth, first, third, *, installed=False):
                 await client.initialize()
                 tools = await client.list_tools()
                 assert {tool.name for tool in tools.tools} == {
-                    "brainwire_nodes", "brainwire_neighbors", "brainwire_evidence"
+                    "brainwire_nodes", "brainwire_search_text", "brainwire_neighbors", "brainwire_evidence"
                 }
                 async def visible_sources():
                     result = await client.call_tool("brainwire_nodes", {
@@ -200,14 +200,60 @@ async def verify_mcp(uri, auth, writer_auth, first, third, *, installed=False):
                     assert payload["ok"]
                     return {record["entity_id"] for record in payload["context"]["records"]}
 
+                async def verify_source_context(visible):
+                    result = await client.call_tool("brainwire_search_text", {
+                        "label": "Source", "text": "E", "field": "title",
+                        "entity_ids": [first["source_id"], third["source_id"]],
+                        "properties": ["title"],
+                    })
+                    assert not result.is_error
+                    search = json.loads(result.content[0].text)
+                    assert search["ok"]
+                    expected_search = [{"label": "Source", "entity_id": first["source_id"],
+                                        "properties": {"title": "Engineering review"}}] if visible else []
+                    assert search["context"]["records"] == expected_search, "hidden or revoked search result"
+                    result = await client.call_tool("brainwire_neighbors", {
+                        "source_label": "Decision", "source_id": first["decision_id"],
+                        "relationship": "SUPPORTED_BY", "target_label": "Source",
+                        "properties": ["title", "url"],
+                    })
+                    assert not result.is_error
+                    neighbors = json.loads(result.content[0].text)
+                    assert neighbors["ok"]
+                    expected = [{"label": "Source", "entity_id": first["source_id"],
+                                 "properties": {"title": "Engineering review",
+                                                "url": "https://example.com/notes/retry"}}] if visible else []
+                    assert neighbors["context"]["records"] == expected
+                    result = await client.call_tool("brainwire_evidence", {
+                        "label": "Source", "entity_ids": [first["source_id"], third["source_id"]],
+                        "properties": ["title"], "source_fields": {"url": "url"},
+                    })
+                    assert not result.is_error
+                    evidence = json.loads(result.content[0].text)
+                    assert evidence["ok"]
+                    records, sources = evidence["context"]["records"], evidence["context"]["sources"]
+                    if visible:
+                        assert len(records) == len(sources) == 1
+                        assert records[0]["entity_id"] == first["source_id"]
+                        assert records[0]["properties"] == {"title": "Engineering review"}
+                        assert sources[0]["record"] == {"label": "Source", "entity_id": first["source_id"]}
+                        assert sources[0]["source"] == {"url": "https://example.com/notes/retry"}
+                        assert isinstance(records[0]["citation_id"], str) and records[0]["citation_id"].startswith("bw:")
+                        assert records[0]["citation_id"] == sources[0]["citation_id"]
+                    else:
+                        assert records == sources == [], "revoked source or citation remained visible"
+
                 assert await visible_sources() == {first["source_id"]}
+                await verify_source_context(True)
                 with connect(uri, "company_demo", auth=writer_auth) as writer:
                     writer.set_node_acl("Source", first["source_id"], {"allow": []})
                     try:
                         assert await visible_sources() == set(), "revoked source remained visible"
+                        await verify_source_context(False)
                     finally:
                         writer.set_node_acl("Source", first["source_id"], {"allow": ["reader"]})
                 assert await visible_sources() == {first["source_id"]}
+                await verify_source_context(True)
         errors.seek(0)
         assert json.loads((auth / "reader.json").read_text())["credentials"] not in errors.read()
 

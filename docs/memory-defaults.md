@@ -288,6 +288,21 @@ additional reservations even when a query returns few rows. Relationship writes
 also account for the temporary allocation before decoding an existing
 relationship payload. See [supported Cypher](local-cypher.md) for query syntax.
 
+Scans currently avoid retaining an optional copy of each raw node row in the
+query cache. This leaves more query budget available for required work, but
+reading several properties can require repeated storage reads. This is a
+temporary tradeoff while a cache with safely releasable reservations is developed.
+A matched local diagnostic with 257 synthetic nodes, one reader and unindexed
+scans measured 7–11% lower median throughput after this change. The result is
+specific to those scan conditions and does not measure all query workloads.
+It does not establish a process-wide RSS limit.
+
+A compiled regular expression can remain cached for the query and retain part
+of its budget. Under a tight limit, that optional cache can cause a later
+projection to be refused even when the same work would fit without the cache.
+If this happens, use a larger query budget where safe for your deployment. This
+does not guarantee a process-wide RSS ceiling; see the [regex contract](cypher-regex.md).
+
 ## Staged writes at commit
 
 Before a Cypher write transaction commits, it reserves a conservative estimate

@@ -71,7 +71,7 @@ class MCPToolsTests(unittest.IsolatedAsyncioTestCase):
         server = create_server(graph)
         tools = await server.list_tools()
         self.assertEqual({tool.name for tool in tools},
-                         {"brainwire_nodes", "brainwire_neighbors", "brainwire_evidence"})
+                         {"brainwire_nodes", "brainwire_search_text", "brainwire_neighbors", "brainwire_evidence"})
         for tool in tools:
             self.assertTrue(tool.annotations.read_only_hint)
             self.assertFalse(tool.annotations.destructive_hint)
@@ -86,6 +86,45 @@ class MCPToolsTests(unittest.IsolatedAsyncioTestCase):
         graph.run_cypher.assert_not_called()
         graph.driver.assert_not_called()
 
+    async def test_search_uses_explicit_candidates_and_parameterized_text(self):
+        graph = Mock(database="synthetic")
+
+        @contextmanager
+        def stream(query, parameters, **kwargs):
+            self.assertIn("n.entity_id IN $ids", query)
+            self.assertIn("toLower(n.title) CONTAINS toLower($text)", query)
+            self.assertNotIn("retry' OR true", query)
+            self.assertEqual(parameters, {"ids": ["decision-1"], "text": "retry' OR true", "limit": 20})
+            self.assertEqual(kwargs, {"fetch_size": 20})
+            yield iter([{"entity_id": "decision-1", "p0": "Retry requests"}])
+
+        graph.stream_cypher.side_effect = stream
+        response = await create_server(graph).call_tool("brainwire_search_text", {
+            "label": "Decision", "text": "retry' OR true", "field": "title",
+            "entity_ids": ["decision-1"], "properties": ["title"],
+        })
+        payload = json.loads(response.content[0].text)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["context"]["search"], {"field": "title", "mode": "case_insensitive_substring"})
+        self.assertEqual(payload["context"]["records"][0]["properties"], {"title": "Retry requests"})
+        graph.stream_cypher.assert_called_once()
+
+    async def test_search_rejects_invalid_inputs_and_empty_candidates_without_graph_access(self):
+        graph = Mock(database="synthetic")
+        server = create_server(graph)
+        base = {"label": "Decision", "text": "retry", "field": "title", "entity_ids": ["decision-1"]}
+        for change in ({"text": " "}, {"text": "é" * 2049}, {"field": "title) DELETE n"},
+                       {"entity_ids": ["x"] * 101}, {"limit": 101},
+                       {"max_bytes": 1048577}, {"properties": ["title"] * 17}):
+            with self.subTest(change=change):
+                response = await server.call_tool("brainwire_search_text", {**base, **change})
+                self.assertEqual(json.loads(response.content[0].text), {
+                    "ok": False, "error": {"code": "invalid_request", "retryable": False},
+                })
+        response = await server.call_tool("brainwire_search_text", {**base, "entity_ids": []})
+        self.assertEqual(json.loads(response.content[0].text)["context"]["records"], [])
+        graph.stream_cypher.assert_not_called()
+
     async def test_input_bounds_fail_without_graph_access(self):
         graph = Mock(database="synthetic")
         server = create_server(graph)
@@ -97,23 +136,41 @@ class MCPToolsTests(unittest.IsolatedAsyncioTestCase):
         graph.stream_cypher.assert_not_called()
 
     async def test_oversized_context_closes_the_stream_without_returning_data(self):
-        graph = Mock(database="synthetic")
-        closed = []
+        tools = {
+            "brainwire_nodes": {"label": "Doc", "entity_ids": ["first-record", "second-record"]},
+            "brainwire_search_text": {"label": "Doc", "text": "private", "field": "title",
+                                       "entity_ids": ["first-record", "second-record"]},
+            "brainwire_neighbors": {"source_label": "Project", "source_id": "project",
+                                    "relationship": "HAS_DOC", "target_label": "Doc"},
+            "brainwire_evidence": {"label": "Doc", "entity_ids": ["first-record", "second-record"],
+                                   "source_fields": {"url": "url"}},
+        }
+        for tool, arguments in tools.items():
+            with self.subTest(tool=tool):
+                graph = Mock(database="synthetic")
+                consumed, closed = [], []
 
-        @contextmanager
-        def stream(*args, **kwargs):
-            try:
-                yield iter([{"entity_id": "private-id", "p0": "private-data" * 100}])
-            finally:
-                closed.append(True)
+                def rows():
+                    for identity, title in (("first-record", "first-private-value"),
+                                            ("second-record", "second-private-value" * 150)):
+                        consumed.append(identity)
+                        yield {"entity_id": identity, "p0": title, "p1": "https://example.invalid/source"}
 
-        graph.stream_cypher.side_effect = stream
-        response = await create_server(graph).call_tool("brainwire_nodes", {
-            "label": "Doc", "entity_ids": ["private-id"], "properties": ["title"], "max_bytes": 100,
-        })
-        value = json.loads(response.content[0].text)
-        self.assertEqual(value, {"ok": False, "error": {"code": "context_limit", "retryable": False}})
-        self.assertEqual(closed, [True])
+                @contextmanager
+                def stream(*args, **kwargs):
+                    try:
+                        yield rows()
+                    finally:
+                        closed.append(True)
+
+                graph.stream_cypher.side_effect = stream
+                response = await create_server(graph).call_tool(tool, {
+                    **arguments, "properties": ["title"], "max_bytes": 700,
+                })
+                value = json.loads(response.content[0].text)
+                self.assertEqual(value, {"ok": False, "error": {"code": "context_limit", "retryable": False}})
+                self.assertEqual(consumed, ["first-record", "second-record"])
+                self.assertEqual(closed, [True])
 
     async def test_protocol_stdio_round_trip(self):
         from mcp import ClientSession
@@ -137,7 +194,7 @@ create_server(Graph()).run()
                 async with ClientSession(read, write, read_timeout_seconds=10) as client:
                     await client.initialize()
                     listed = await client.list_tools()
-                    self.assertEqual(len(listed.tools), 3)
+                    self.assertEqual(len(listed.tools), 4)
                     result = await client.call_tool("brainwire_nodes", {
                         "label": "Decision", "entity_ids": ["decision-1"], "properties": ["title"],
                     })

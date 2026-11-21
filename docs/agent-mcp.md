@@ -49,8 +49,20 @@ must itself be trusted.
 | Tool | Input and result |
 | --- | --- |
 | `brainwire_nodes` | Read visible nodes by label and explicit entity IDs. |
+| `brainwire_search_text` | Filter up to 100 explicit IDs by a case-insensitive substring in one field. |
 | `brainwire_neighbors` | Read visible outgoing neighbors for one explicit relationship type. |
 | `brainwire_evidence` | Read visible records with source fields explicitly mapped to node properties. |
+
+For example, call `brainwire_search_text` with this input to find a known
+decision whose title contains "retry":
+
+```json
+{"label":"Decision","text":"retry","field":"title","entity_ids":["decision-retry"],"properties":["title"]}
+```
+
+Search uses the same reader permissions and context limits as the other tools.
+It only returns matches from the supplied IDs, but the query plan may scan more
+records. It does not rank results or use a full-text index.
 
 The adapter does not expose arbitrary Cypher, writes, administration, native
 vector search or automatic model calls. Tools default to at most 20 records and

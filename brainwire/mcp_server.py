@@ -64,6 +64,14 @@ def create_server(graph):
                      limit=limit, max_bytes=max_bytes)
 
     @server.tool(annotations=annotations)
+    def brainwire_search_text(label: str, text: str, field: str, entity_ids: list[str],
+                              properties: list[str] = (), limit: int = 20,
+                              max_bytes: int = 65536) -> dict:
+        """Filter up to 100 explicit IDs by case-insensitive substring; no ranking or full-text index."""
+        return _read(context.search_text, label, text, field=field, entity_ids=entity_ids,
+                     properties=properties, limit=limit, max_bytes=max_bytes)
+
+    @server.tool(annotations=annotations)
     def brainwire_neighbors(source_label: str, source_id: str, relationship: str,
                             target_label: str, properties: list[str] = (),
                             limit: int = 20, max_bytes: int = 65536) -> dict:

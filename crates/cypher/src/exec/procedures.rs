@@ -27,6 +27,7 @@ pub(super) fn fields(name: &str) -> Result<&'static [&'static str], ExecError> {
             "sources",
         ]),
         "db.indexes" => Ok(&["label", "property", "state", "name", "entityType"]),
+        "db.showIndexes" => Ok(&["name", "state", "entityType", "labelsOrTypes", "properties"]),
         "db.labels" => Ok(&["label"]),
         "db.relationshipTypes" => Ok(&["relationshipType"]),
         "db.propertyKeys" => Ok(&["propertyKey"]),
@@ -211,6 +212,7 @@ pub(super) fn validate(
     } else if matches!(
         name,
         "db.indexes"
+            | "db.showIndexes"
             | "db.memory"
             | "db.schema"
             | "db.commitState"
@@ -665,7 +667,26 @@ pub(super) fn run(
         };
         return Ok(vec![bind(values)?]);
     }
-    if name == "db.indexes" {
+    if matches!(name, "db.indexes" | "db.showIndexes") {
+        let bind_index = |label: &str, property: &str, state: &str, index: &str, entity: &str| {
+            if name == "db.showIndexes" {
+                bind(vec![
+                    value(Value::Str(index.into())),
+                    value(Value::Str(state.into())),
+                    value(Value::Str(entity.to_ascii_uppercase())),
+                    value(Value::List(vec![Value::Str(label.into())])),
+                    value(Value::List(vec![Value::Str(property.into())])),
+                ])
+            } else {
+                bind(vec![
+                    value(Value::Str(label.into())),
+                    value(Value::Str(property.into())),
+                    value(Value::Str(state.into())),
+                    value(Value::Str(index.into())),
+                    value(Value::Str(entity.into())),
+                ])
+            }
+        };
         let ready = brainwire_store::graph::scalar_indexes_ready(ctx.txn)?;
         let state = |ty: &brainwire_core::schema::NodeType, field: &str| {
             if !ty.index_online(field) {
@@ -679,37 +700,32 @@ pub(super) fn run(
         let mut rows = Vec::new();
         for ty in &ctx.catalog.node_types {
             for field in &ty.indexed {
-                rows.push(bind(vec![
-                    value(Value::Str(ty.label.clone())),
-                    value(Value::Str(field.clone())),
-                    value(Value::Str(state(ty, field).into())),
-                    value(Value::Str(ty.index_name(field))),
-                    value(Value::Str("node".into())),
-                ])?);
+                rows.push(bind_index(
+                    &ty.label,
+                    field,
+                    state(ty, field),
+                    &ty.index_name(field),
+                    "node",
+                )?);
             }
         }
         for ty in &ctx.catalog.edge_types {
             for index in &ty.property_indexes {
-                rows.push(bind(vec![
-                    value(Value::Str(ty.name.clone())),
-                    value(Value::Str(index.property.clone())),
-                    value(Value::Str(
-                        match index.state {
-                            brainwire_core::schema::RelationshipIndexState::Populating => {
-                                "populating"
-                            }
-                            brainwire_core::schema::RelationshipIndexState::Ready => {
-                                "scalar_range_ready"
-                            }
-                            brainwire_core::schema::RelationshipIndexState::Failed => {
-                                "failed_value_too_large"
-                            }
+                rows.push(bind_index(
+                    &ty.name,
+                    &index.property,
+                    match index.state {
+                        brainwire_core::schema::RelationshipIndexState::Populating => "populating",
+                        brainwire_core::schema::RelationshipIndexState::Ready => {
+                            "scalar_range_ready"
                         }
-                        .into(),
-                    )),
-                    value(Value::Str(index.name.clone())),
-                    value(Value::Str("relationship".into())),
-                ])?);
+                        brainwire_core::schema::RelationshipIndexState::Failed => {
+                            "failed_value_too_large"
+                        }
+                    },
+                    &index.name,
+                    "relationship",
+                )?);
             }
         }
         return Ok(rows);

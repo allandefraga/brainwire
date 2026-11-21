@@ -137,9 +137,19 @@ query), `CREATE`, `MERGE ... ON CREATE SET / ON MATCH SET`, `SET`
 `DETACH DELETE` (nodes, relationships, paths), `CALL ... YIELD ... WHERE`, and
 `CREATE INDEX` / `DROP INDEX` (mapped to catalog procedures).
 
-`SHOW INDEXES` is a standalone alias for `CALL db.indexes()` and returns
-Brainwire's existing index columns. `SHOW INDEXES YIELD`, filtering and other
-`SHOW` variants are not implemented.
+`SHOW INDEXES` alone is an alias for `CALL db.indexes()` and keeps its existing
+columns. To filter projected metadata, use `SHOW INDEXES YIELD` followed by
+`RETURN`. The available fields are `name`, `state`, `entityType`, `labelsOrTypes`
+and `properties`; the last two are lists. States use Brainwire's own readiness
+values. For example:
+
+```cypher
+SHOW INDEXES YIELD labelsOrTypes, properties
+WHERE $label IN labelsOrTypes RETURN properties
+```
+
+`CALL db.showIndexes()` exposes the same projected fields. `YIELD *`, other
+`SHOW` variants and combining `SHOW` with other clauses are not supported.
 
 **Patterns.** Several hops in one pattern, comma-separated patterns, variable
 length `*`, `*n`, `*n..m` (bound 64), untyped relationships `-[r]->`,

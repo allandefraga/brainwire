@@ -91,6 +91,16 @@ pub fn parse(query: &str) -> Result<Query, ParseError> {
     if !p.is_eof() {
         return Err(p.error_here("unexpected token after the query"));
     }
+    if matches!(&p.toks[0].tok, Tok::Ident(name) if name.eq_ignore_ascii_case("SHOW"))
+        && (!unions.is_empty()
+            || clauses.len() > 2
+            || (clauses.len() == 2 && !matches!(&clauses[1], Clause::Return(_))))
+    {
+        return Err(p.error_at(
+            0,
+            "SHOW INDEXES cannot be combined with other query clauses",
+        ));
+    }
     Ok(Query { clauses, unions })
 }
 
@@ -350,6 +360,16 @@ impl<'a> Parser<'a> {
             }
             self.expect(Tok::RParen, "')'")?;
         }
+        let (yields, where_) = self.parse_yield()?;
+        Ok(Clause::Call {
+            name: parts.join("."),
+            args,
+            yields,
+            where_,
+        })
+    }
+
+    fn parse_yield(&mut self) -> Result<(Vec<YieldItem>, Option<Expr>), ParseError> {
         let mut yields = vec![];
         let mut where_ = None;
         if self.eat_keyword("YIELD") {
@@ -370,12 +390,7 @@ impl<'a> Parser<'a> {
                 where_ = Some(self.parse_expr()?);
             }
         }
-        Ok(Clause::Call {
-            name: parts.join("."),
-            args,
-            yields,
-            where_,
-        })
+        Ok((yields, where_))
     }
 
     fn parse_show_indexes(&mut self) -> Result<Clause, ParseError> {
@@ -384,16 +399,29 @@ impl<'a> Parser<'a> {
         }
         self.advance(); // SHOW
         self.expect_keyword("INDEXES")?;
-        if !self.is_eof() && !self.check(&Tok::Semicolon) {
-            return Err(self.error_here(
-                "only standalone SHOW INDEXES is supported; use CALL db.indexes() for projections and filters",
-            ));
+        let projected = self.check_keyword("YIELD");
+        let (yields, where_) = self.parse_yield()?;
+        if projected && !self.check_keyword("RETURN") {
+            return Err(self.error_here("SHOW INDEXES YIELD requires RETURN"));
+        }
+        if !self.is_eof()
+            && !self.check(&Tok::Semicolon)
+            && !(projected && self.check_keyword("RETURN"))
+        {
+            return Err(
+                self.error_here("SHOW INDEXES supports YIELD with an optional WHERE and RETURN")
+            );
         }
         Ok(Clause::Call {
-            name: "db.indexes".into(),
+            name: if projected {
+                "db.showIndexes"
+            } else {
+                "db.indexes"
+            }
+            .into(),
             args: Vec::new(),
-            yields: Vec::new(),
-            where_: None,
+            yields,
+            where_,
         })
     }
 

@@ -2,7 +2,25 @@
 
 ## Unreleased
 
-### Proposed 0.25.0 — unreleased
+## 0.25.0-beta.2 — experimental candidate
+
+- Support limited `SHOW INDEXES YIELD ... WHERE ... RETURN` queries with
+  `labelsOrTypes` and `properties` lists. Plain `SHOW INDEXES` and
+  `CALL db.indexes()` keep their existing output.
+- Add the read-only MCP `brainwire_search_text` tool. It filters up to 100
+  explicit candidate IDs by substring using the reader's existing permissions
+  and context limits; it does not provide full-text ranking.
+- Stop retaining optional raw node rows during scans so that the cache cannot
+  consume memory needed by a later projection. In a local synthetic scan
+  comparison this reduced throughput by 7–11%; the tradeoff is documented.
+- Extend tests for index metadata, output bounds, ACL changes and query-memory
+  refusal. Update the Cypher, MCP and memory guides and the Pages content.
+- Document a remaining regex-cache limitation: under a tight query budget,
+  retained compiled patterns can cause a later projection to be refused.
+  These changes do not establish a process-wide RSS ceiling or production
+  qualification.
+
+## 0.25.0-beta.1 — experimental candidate
 
 - Present the database around connected data, with agent context as one use case.
 - Add an optional UTF-8 JSON response budget to the agent-memory example.
