@@ -72,7 +72,7 @@ pub(crate) fn valid_name(name: &str) -> bool {
 }
 
 impl Databases {
-    pub fn open_all(config: &Config) -> Result<Self, String> {
+    fn check_standalone_config(config: &Config) -> Result<(), String> {
         if config.server.request_ledger
             && (config.server.auth_file.is_none() || config.server.checkpoint_dir.is_some())
         {
@@ -89,7 +89,37 @@ impl Databases {
                     .into(),
             );
         }
+        Ok(())
+    }
+
+    pub fn open_all(config: &Config) -> Result<Self, String> {
+        Self::check_standalone_config(config)?;
         Self::open(config, true)
+    }
+
+    /// Exclusive offline access to one initialized graph, without discovery or format activation.
+    pub(crate) fn open_existing(config: &Config, name: &str) -> Result<Database, String> {
+        if !valid_name(name) {
+            return Err(format!("invalid database name {name:?}"));
+        }
+        Self::check_standalone_config(config)?;
+        let path = config.server.data_dir.join(name);
+        let exists = fs::symlink_metadata(&path).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => format!("database {name:?} does not exist"),
+            _ => format!("cannot inspect {}: {error}", path.display()),
+        })?;
+        if !exists.is_dir() || !path.join("CURRENT").is_file() {
+            return Err(format!("{} exists but is not a database", path.display()));
+        }
+        let resources = resources(config)?;
+        if config.server.request_ledger {
+            Database::open_with_request_ledger(&path, &resources).map_err(|error| {
+                format!("cannot open experimental request-ledger database {name}: {error}")
+            })
+        } else {
+            Database::open_existing(&path, &resources)
+                .map_err(|error| format!("cannot open database {name}: {error}"))
+        }
     }
 
     pub(crate) fn open_replica(config: &Config) -> Result<Self, String> {
@@ -302,6 +332,35 @@ mod tests {
         config.memory.cache = crate::size::ByteSize(64 << 20);
         config.memory.memtables = crate::size::ByteSize(16 << 20);
         config
+    }
+
+    #[test]
+    fn targeted_open_preserves_explicit_request_ledger_guards() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = config(&dir.path().join("data"));
+        fs::create_dir(&config.server.data_dir).unwrap();
+        let path = config.server.data_dir.join("ledger");
+        drop(
+            Database::create_with_request_ledger(
+                &path,
+                &resources(&config).unwrap(),
+                brainwire_store::db::request_ledger::LedgerLimits {
+                    max_entries: 100,
+                    max_bytes: 1 << 20,
+                },
+            )
+            .unwrap(),
+        );
+        let error = Databases::open_existing(&config, "ledger").err().unwrap();
+        assert!(error.contains("request-ledger format"), "{error}");
+        config.server.request_ledger = true;
+        let error = Databases::open_existing(&config, "ledger").err().unwrap();
+        assert!(error.contains("requires authentication"), "{error}");
+        config.server.auth_file = Some(dir.path().join("operator-policy.json"));
+        drop(Databases::open_existing(&config, "ledger").unwrap());
+        config.server.checkpoint_dir = Some(dir.path().join("backups"));
+        assert!(Databases::open_existing(&config, "ledger").is_err());
+        assert!(!config.server.data_dir.join("default").exists());
     }
 
     #[test]

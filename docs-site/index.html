@@ -218,7 +218,7 @@ with connect("bolt://127.0.0.1:7687", "demo", auth=None) as graph:
     </section>
 
     <section id="operate" class="doc-section">
-      <div class="section-head"><p class="eyebrow">OPERATIONS</p><h2>Keep data. Check recovery.</h2><p>A container restart keeps the named volume. A persistent volume is only one copy, so keep a separate backup and test restoring it.</p></div>
+      <div class="section-head"><p class="eyebrow">OPERATIONS</p><h2>Keep data. Check recovery.</h2><p>A container restart keeps the named volume. A persistent volume is only one copy, so keep a separate backup and test restoring it. To audit one stopped graph, run <code>brainwire db check GRAPH --json</code>; it opens that graph exclusively and may replay its write-ahead log.</p></div>
       <div class="code-block"><div class="code-header"><span>Terminal · Docker demo</span><button type="button" data-copy="operate-code" aria-label="Copy health and stop commands">Copy</button></div><pre><code id="operate-code"># Check that the graph can serve a request
 docker compose -p brainwire-demo -f deploy/compose.demo.yaml exec -T brainwire \
   brainwire probe --mode ready

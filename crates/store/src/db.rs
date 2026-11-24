@@ -144,13 +144,35 @@ fn family_options(res: &Resources) -> Options {
 
 impl Database {
     pub fn open(path: &Path, res: &Resources) -> Result<Database, StoreError> {
+        Self::open_ordinary(path, res, true)
+    }
+
+    /// Open an initialized store without creating it or missing column families.
+    /// This still takes the ordinary exclusive RocksDB lock and may recover WAL.
+    pub fn open_existing(path: &Path, res: &Resources) -> Result<Database, StoreError> {
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+            StoreError::Catalog(format!(
+                "cannot inspect existing database {}: {error}",
+                path.display()
+            ))
+        })?;
+        if !metadata.is_dir() || !path.join("CURRENT").is_file() {
+            return Err(StoreError::Catalog(format!(
+                "{} is not an initialized database",
+                path.display()
+            )));
+        }
+        Self::open_ordinary(path, res, false)
+    }
+
+    fn open_ordinary(path: &Path, res: &Resources, create: bool) -> Result<Database, StoreError> {
         if path.join("CURRENT").is_file()
             && DB::list_cf(&Options::default(), path)
                 .is_ok_and(|families| families.iter().any(|name| name == request_ledger::FAMILY))
         {
             return Err(StoreError::Catalog("experimental request-ledger format requires explicit authenticated server opt-in; ordinary offline check/backup/restore commands refuse it".into()));
         }
-        Self::open_config(path, res, false, true, false)
+        Self::open_config(path, res, false, create, false)
     }
 
     fn open_config(
@@ -417,6 +439,45 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_open_does_not_create_a_database_or_missing_column_families() {
+        let dir = tempfile::tempdir().unwrap();
+        let resources = Resources::new(StoreConfig::for_tests());
+        let missing = dir.path().join("missing");
+        assert!(Database::open_existing(&missing, &resources).is_err());
+        assert!(!missing.exists());
+        let partial = dir.path().join("partial");
+        drop(DB::open_default(&partial).unwrap());
+        let before = DB::list_cf(&Options::default(), &partial).unwrap();
+        assert!(Database::open_existing(&partial, &resources).is_err());
+        assert_eq!(DB::list_cf(&Options::default(), &partial).unwrap(), before);
+    }
+
+    #[test]
+    fn existing_open_preserves_typed_and_relationship_index_families() {
+        let dir = tempfile::tempdir().unwrap();
+        let resources = Resources::new(StoreConfig::for_tests());
+        let mapping: GraphMapping = serde_json::from_str(
+            r#"{"version":"1","nodes":[{"label":"Page","properties":["title"],"property_types":{"title":"string"}}]}"#,
+        ).unwrap();
+        let typed = dir.path().join("typed");
+        Database::create_typed(&typed, &resources, &mapping).unwrap();
+        let before = DB::list_cf(&Options::default(), &typed).unwrap();
+        let db = Database::open_existing(&typed, &resources).unwrap();
+        assert!(db.catalog().unwrap().unwrap().has_property_types());
+        drop(db);
+        assert_eq!(DB::list_cf(&Options::default(), &typed).unwrap(), before);
+        let indexed = dir.path().join("indexed");
+        let mut db = Database::open(&indexed, &resources).unwrap();
+        db.enable_relationship_index_format(&resources).unwrap();
+        drop(db);
+        let before = DB::list_cf(&Options::default(), &indexed).unwrap();
+        let db = Database::open_existing(&indexed, &resources).unwrap();
+        assert!(db.has_relationship_index_format());
+        drop(db);
+        assert_eq!(DB::list_cf(&Options::default(), &indexed).unwrap(), before);
+    }
 
     #[test]
     fn opening_requires_both_typed_catalog_and_storage_marker() {

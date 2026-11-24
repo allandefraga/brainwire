@@ -29,6 +29,16 @@ Allan's current language.
    recovery points. Older entries below retain their original paths and commit
    IDs; standalone history has rewritten IDs after subtree extraction.
 
+## 2026-11-24: Targeted offline graph checks
+
+- Changed `db check` to open only the requested existing graph, so a damaged
+  sibling no longer prevents its audit. The check still takes an exclusive
+  RocksDB lock and may recover the write-ahead log.
+- Added tests for corrupted siblings and targets, locks, missing graphs, and
+  existing storage formats. Full workspace tests passed on the local candidate;
+  production memory and distributed recovery qualification remain open.
+- Next: qualify the release images and continue investigating one-hop reads.
+
 ## 2026-11-18: Read-only agent tools and paged memory
 
 - Added an optional stdio MCP adapter for bounded node, neighbor and evidence

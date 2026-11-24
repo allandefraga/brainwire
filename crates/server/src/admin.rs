@@ -570,10 +570,7 @@ pub fn checkpoint(name: &str, destination: &Path, config: Option<&Path>) -> Resu
 
 /// Deliberate offline audit, never part of a cheap metrics refresh.
 pub fn check(name: &str, json: bool, config: Option<&Path>) -> Result<(), String> {
-    let registry = open_registry(config)?;
-    let db = registry
-        .get(name)
-        .ok_or_else(|| format!("database {name:?} does not exist"))?;
+    let db = Databases::open_existing(&load_config(config)?, name)?;
     brainwire_store::graph::check_invariants(&db)?;
     let ready = db.scalar_indexes_ready().map_err(|e| e.to_string())?;
     let index_status = if ready {

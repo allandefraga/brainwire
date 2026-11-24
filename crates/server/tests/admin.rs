@@ -14,6 +14,108 @@ fn command(dir: &tempfile::TempDir) -> Command {
 }
 
 #[test]
+fn check_audits_only_the_named_existing_graph() {
+    use brainwire_store::db::{Database, Resources, StoreConfig};
+    let dir = tempfile::tempdir().unwrap();
+    let resources = Resources::new(StoreConfig::for_tests());
+    let target = dir.path().join("data/healthy");
+    drop(Database::open(&target, &resources).unwrap());
+    let corrupt = dir.path().join("data/broken");
+    std::fs::create_dir(&corrupt).unwrap();
+    std::fs::write(corrupt.join("CURRENT"), b"invalid manifest").unwrap();
+
+    let checked = command(&dir)
+        .args(["db", "check", "healthy", "--json"])
+        .env("BRAINWIRE_SERVER_RELATIONSHIP_INDEXES", "true")
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "{checked:?}");
+    assert!(!dir.path().join("data/default").exists());
+    assert!(!Database::open(&target, &resources)
+        .unwrap()
+        .has_relationship_index_format());
+    let startup = command(&dir).args(["db", "list"]).output().unwrap();
+    assert!(
+        !startup.status.success(),
+        "opening all graphs must still reject corruption"
+    );
+    assert!(String::from_utf8_lossy(&startup.stderr).contains("broken"));
+}
+
+#[test]
+fn check_refuses_missing_invalid_and_corrupt_targets_without_creating_graphs() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["missing", "..", "/absolute"] {
+        let checked = command(&dir)
+            .args(["db", "check", name, "--json"])
+            .output()
+            .unwrap();
+        assert!(!checked.status.success(), "{name}: {checked:?}");
+        assert!(
+            !dir.path().join("data").exists(),
+            "audit created a data directory"
+        );
+    }
+    let corrupt = dir.path().join("data/broken");
+    std::fs::create_dir_all(&corrupt).unwrap();
+    std::fs::write(corrupt.join("CURRENT"), b"invalid manifest").unwrap();
+    let checked = command(&dir)
+        .args(["db", "check", "broken", "--json"])
+        .output()
+        .unwrap();
+    assert!(!checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stderr).contains("broken"));
+    assert!(!dir.path().join("data/default").exists());
+}
+
+#[test]
+fn check_respects_target_locks_cluster_guard_and_directory_boundaries() {
+    use brainwire_store::db::{Database, Resources, StoreConfig};
+    let dir = tempfile::tempdir().unwrap();
+    let resources = Resources::new(StoreConfig::for_tests());
+    let target = dir.path().join("data/healthy");
+    drop(Database::open(&target, &resources).unwrap());
+    let busy = Database::open(&dir.path().join("data/busy"), &resources).unwrap();
+    let checked = command(&dir)
+        .args(["db", "check", "healthy"])
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "{checked:?}");
+    drop(busy);
+    let locked = Database::open(&target, &resources).unwrap();
+    let checked = command(&dir)
+        .args(["db", "check", "healthy"])
+        .output()
+        .unwrap();
+    assert!(
+        !checked.status.success(),
+        "audit must take the target's exclusive lock"
+    );
+    drop(locked);
+    std::fs::write(dir.path().join("data/.brainwire-cluster.json"), b"{}").unwrap();
+    let checked = command(&dir)
+        .args(["db", "check", "healthy"])
+        .output()
+        .unwrap();
+    assert!(!checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stderr).contains("cluster stores"));
+    std::fs::remove_file(dir.path().join("data/.brainwire-cluster.json")).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&target, dir.path().join("data/alias")).unwrap();
+        let checked = command(&dir)
+            .args(["db", "check", "alias"])
+            .output()
+            .unwrap();
+        assert!(
+            !checked.status.success(),
+            "audit must reject a graph-directory symlink"
+        );
+    }
+    assert!(!dir.path().join("data/default").exists());
+}
+
+#[test]
 fn create_list_and_apply_ontology_survive_process_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let ontology = dir.path().join("schema.json");

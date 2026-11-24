@@ -207,6 +207,9 @@ The standard deployment runs one instance. The separate
 The [backup guide](https://allandefraga.github.io/brainwire/guides/checkpoints.html) covers checkpoint copies and restore
 permissions. The [experimental object storage helper](https://allandefraga.github.io/brainwire/guides/object-storage-backup.html)
 can copy a verified checkpoint to MinIO; active data stays on local disk.
+
+To check one stopped graph, run `brainwire db check GRAPH --json`. The check
+opens that graph exclusively and can replay its write-ahead log during recovery.
 For controlled trials, the [experimental request-outcome mode](https://allandefraga.github.io/brainwire/guides/standalone-requests.html)
 initializes ledger storage before publishing a new graph path and helps reconcile identified writes.
 

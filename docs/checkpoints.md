@@ -11,6 +11,10 @@ brainwire db check research-copy --json
 brainwire cypher --database ./data/research-copy --query 'MATCH (n:Customer) RETURN count(*)'
 ```
 
+`db check` opens only the named graph, so a corrupt sibling does not prevent
+its audit. It takes an exclusive RocksDB lock and may perform normal WAL
+recovery; stop any server using that graph first. A missing graph is refused.
+
 The destination's parent must already exist. Existing destinations, including
 symlinks, are refused; a destination inside the source is refused. There is no
 `--force`. A sibling directory under `server.data_dir` becomes another named
